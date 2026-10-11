@@ -128,7 +128,7 @@ a lint to dodge the bump.
 ### Cutting the release
 
 [release-plz](https://release-plz.dev) owns every version number and the tag;
-`release.yml` still owns every publish. Three steps, all human-initiated:
+`release.yml` still owns every publish. Four steps, all human-initiated:
 
 1. **Dispatch** `release-plz.yml` from Actions, on `main`. It opens
    `chore(release): vX.Y.Z` from a `release-plz-*` branch, with the workspace
@@ -153,6 +153,9 @@ a lint to dodge the bump.
    publishes the draft, and publishes the npm packages. The crates.io and npm
    jobs each wait for an approval from the `release` environment's reviewer,
    crates.io first. The tag also starts a homebrew-core autobump.
+4. **If the dispatch's run summary listed an owed homebrew-core test update**,
+   open `pixtuoid: update test` there once the tag exists, carrying
+   packaging-build's replay as its test block.
 
 The crates.io upload happens in the `release` job on the merge push, which
 first waits for that commit's own `ci-gate`: a failure or timeout publishes
@@ -182,12 +185,11 @@ our release never builds. Two consequences:
   formula, in the same bump PR.
 - **Their `test do` block is a public contract** — see the "homebrew-core
   contract" comments at `crates/pixtuoid/src/app/sources_cli.rs`,
-  `crates/pixtuoid-core/src/source/codewhale.rs`. Change homebrew-core's `test do`
-  first, against the released version, so the next autobump stays green; the
-  packaging-build action replays the block, so it changes in the same PR. A
-  `release-plz.yml` dispatch opens no release PR while their block still calls
-  a subcommand this tree dropped, or connects a source that fails with no agent
-  CLI installed.
+  `crates/pixtuoid-core/src/source/codewhale.rs`; the packaging-build action
+  replays the block. A dispatch only warns when the block calls a subcommand
+  this tree dropped, or connects a source that fails with no agent CLI
+  installed, because the owner, sending a test update ahead of the release that
+  needed it, was told to release first (no public record); step 4 sends it.
 
 Do not try to preempt BrewTestBot: the formula is on homebrew-core's
 autobump list, so `brew bump-formula-pr pixtuoid` refuses by policy and the

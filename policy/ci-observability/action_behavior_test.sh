@@ -701,6 +701,57 @@ assert_detect false "a branch merely naming the prefix" "$(pr_heads "feat/${dete
 assert_detect false "a direct push with no PR" "$(pr_heads)"
 assert_detect error "an API failure" error
 
+# ── release-plz.yml: a homebrew-core test miss warns, once per miss, and never
+# holds the release PR ──
+brew_step="homebrew-core's test calls only what this tree can run"
+brew_script="$(workflow_step_script "$release_workflow" "$brew_step")"
+brew_dir="$test_dir/brew"
+brew_bin="$brew_dir/bin"
+mkdir -p "$brew_bin" "$brew_dir/target/debug"
+cat >"$brew_bin/curl" <<'STUB'
+#!/usr/bin/env bash
+[[ -n "${FAKE_FORMULA:-}" ]] || exit 22
+cat "$FAKE_FORMULA"
+STUB
+printf '#!/usr/bin/env bash\n' >"$brew_bin/cargo"
+# This tree dropped `gone-cmd`, and `connect needs-cli` fails over two lines.
+cat >"$brew_dir/target/debug/pixtuoid" <<'STUB'
+#!/usr/bin/env bash
+case "$1 ${2:-}" in
+"gone-cmd --help") exit 2 ;;
+"connect needs-cli") printf 'line one\nline two\n' && exit 1 ;;
+esac
+STUB
+chmod +x "$brew_bin/curl" "$brew_bin/cargo" "$brew_dir/target/debug/pixtuoid"
+assert_brew() {
+    local label="$1" formula="$2" want="$3" out lines=0 warnings=0 summary="$brew_dir/summary"
+    : >"$summary"
+    printf '%s\n' "$formula" >"$brew_dir/formula.rb"
+    out="$(cd "$brew_dir" && PATH="$brew_bin:$PATH" GITHUB_STEP_SUMMARY="$summary" \
+        FAKE_FORMULA="${formula:+$brew_dir/formula.rb}" bash -c "$brew_script" 2>&1)" ||
+        fail "the homebrew step held the release on $label: $out"
+    if [[ -n "$out" ]]; then
+        lines="$(wc -l <<<"$out" | tr -d ' ')"
+        warnings="$(grep -c '^::warning::' <<<"$out" || true)"
+    fi
+    [[ "$lines" == "$want" && "$warnings" == "$want" ]] ||
+        fail "the homebrew step on $label wanted $want one-line warnings, printed: $out"
+    if ((want == 0)); then
+        [[ ! -s "$summary" ]] || fail "the homebrew step on $label wrote a summary: $(<"$summary")"
+    else
+        [[ "$(grep -c '^### ' "$summary")" == 1 && "$(grep -c '^- ' "$summary")" == "$want" ]] ||
+            fail "the homebrew step on $label wanted one heading and $want items: $(<"$summary")"
+    fi
+}
+assert_brew "a failed fetch" "" 1
+assert_brew "a test block with no subcommand" $'  test do\n    assert_match version.to_s, shell_output("#{bin}/pixtuoid --version")\n  end' 1
+grep -q 'shape changed' "$brew_dir/summary" || fail "the homebrew step didn't name an unrecognized test block"
+assert_brew "a dropped subcommand and a failing connect" \
+    $'  test do\n    system bin/"pixtuoid", "gone-cmd", testpath/"x"\n    shell_output("#{bin}/pixtuoid connect needs-cli --json")\n    shell_output("#{bin}/pixtuoid connect works --json")\n  end' 2
+{ grep -q 'gone-cmd' "$brew_dir/summary" && grep -q 'needs-cli.*line one line two' "$brew_dir/summary"; } ||
+    fail "the homebrew step didn't name each miss with its cause: $(<"$brew_dir/summary")"
+assert_brew "a test block this tree runs" $'  test do\n    shell_output("#{bin}/pixtuoid connect works --json")\n  end' 0
+
 # ── claude-review.yml's Dependabot exemption: posts the `claude-review` status
 # only for a bump that changes Dependabot's manifests and nothing else.
 exempt_script="$(workflow_step_script .github/workflows/claude-review.yml "Exempt a Dependabot bump")"
