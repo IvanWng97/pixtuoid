@@ -3,7 +3,8 @@
 # `just capture-fixture openclaw <scenario>`: the run a failed provider ends
 # `success: true`, which the plugin's `errored` marks. No model call is billed and
 # no real config is read: the gateway, its config and the plugin `pixtuoid connect`
-# installs all live in a throwaway home beside the recorder's own sandbox.
+# installs all live in a throwaway home beside the recorder's own sandbox. At
+# 2026.10.1 `openclaw agent` fires the session pair around the run as well.
 #
 # `openclaw` is whatever is first on PATH; put the release under test there. The
 # plugin is the one THIS checkout's release build renders (`just build --release`).

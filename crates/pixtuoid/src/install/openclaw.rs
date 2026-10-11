@@ -48,7 +48,7 @@ pub(crate) const OPENCLAW_EVENTS: &[&str] = &[
 /// The hooks the plugin registers only to stamp `agent_end`'s verdict, pinned to its
 /// `VERDICT_HOOKS` and emitted into the drift surface beside [`OPENCLAW_EVENTS`].
 #[cfg(test)]
-pub(crate) const OPENCLAW_VERDICT_HOOKS: &[&str] = &["model_call_ended"];
+pub(crate) const OPENCLAW_VERDICT_EVENTS: &[&str] = &["model_call_ended"];
 
 const MANIFEST: &str = r#"{
   "id": "pixtuoid",
@@ -704,8 +704,8 @@ mod tests {
         );
         assert_eq!(
             names("VERDICT_HOOKS", "{", "};"),
-            OPENCLAW_VERDICT_HOOKS.iter().copied().collect(),
-            "plugin VERDICT_HOOKS drifted from OPENCLAW_VERDICT_HOOKS"
+            OPENCLAW_VERDICT_EVENTS.iter().copied().collect(),
+            "plugin VERDICT_HOOKS drifted from OPENCLAW_VERDICT_EVENTS"
         );
         for ev in OPENCLAW_EVENTS {
             let payload = json!({ "type": ev, "gatewayPort": 18789 });

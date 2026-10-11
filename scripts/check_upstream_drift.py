@@ -2037,7 +2037,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 if f'"{ev}"' not in text:
                     report.add_breaking(
                         f"OpenClaw hook `{ev}` (registered by the TS plugin: OPENCLAW_EVENTS "
-                        f"/ OPENCLAW_VERDICT_HOOKS) is GONE from src/plugins/hook-types.ts — "
+                        f"/ OPENCLAW_VERDICT_EVENTS) is GONE from src/plugins/hook-types.ts — "
                         f"likely renamed; the plugin registers a hook OpenClaw never fires."
                     )
             for ty, fields in OPENCLAW_DEGRADED_FIELDS.items():

@@ -25,7 +25,7 @@ const EXPECTED_HOOKS = [
   "before_agent_run",
   "agent_end",
 ];
-// Must match `OPENCLAW_VERDICT_HOOKS`: registered, never forwarded.
+// Must match `OPENCLAW_VERDICT_EVENTS`: registered, never forwarded.
 const VERDICT_HOOKS = ["model_call_ended"];
 // OpenClaw's own default — the plugin's last-resort fallback.
 const DEFAULT_GATEWAY_PORT = 18789;
