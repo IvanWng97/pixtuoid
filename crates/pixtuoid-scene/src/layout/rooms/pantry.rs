@@ -74,8 +74,8 @@ impl PantryRoom {
         bounds.y + pct(bounds.height, pantry_counter_y_pct(counter.w))
     }
 
-    /// Northmost blocked row of the padded counter — the ceiling the island body
-    /// and the snack shelf must sit clear of.
+    /// The counter sprite's top less an [`OBSTACLE_PAD_PX`] margin: the anti-merge ceiling
+    /// the island body and the snack shelf sit clear of, not a row the mask blocks.
     pub(crate) fn counter_north(bounds: Bounds, counter: Size) -> u16 {
         Self::counter_center_y(bounds, counter).saturating_sub(counter.h / 2 + OBSTACLE_PAD_PX)
     }
@@ -127,9 +127,10 @@ impl PantryRoom {
     /// negotiation needs the answer BEFORE any bounds exist.
     pub(crate) fn content_fit_h(counter: Size) -> u16 {
         let clr = WALL_THICK_H + OBSTACLE_PAD_PX;
-        let island_half_h = furniture_def(Furniture::KitchenIsland).visual.h / 2;
+        let island = furniture_def(Furniture::KitchenIsland);
+        let island_half_h = island.visual.h / 2;
         let island_need =
-            clr + 2 * (island_half_h + OBSTACLE_PAD_PX) + 1 + counter.h / 2 + OBSTACLE_PAD_PX;
+            clr + 2 * (island_half_h + island.pad) + 1 + counter.h / 2 + OBSTACLE_PAD_PX;
         (u32::from(island_need) * 100).div_ceil(u32::from(pantry_counter_y_pct(counter.w))) as u16
     }
 
@@ -223,20 +224,21 @@ pub(crate) fn place_kitchen_island(
     counter: Size,
     waypoints: &mut Vec<Waypoint>,
 ) -> Option<Point> {
-    let vis = furniture_def(Furniture::KitchenIsland).visual;
+    let island = furniture_def(Furniture::KitchenIsland);
+    let vis = island.visual;
     let (half_w, half_h) = (vis.w / 2, vis.h / 2);
     let clr = WALL_THICK_H + OBSTACLE_PAD_PX;
     // Stands flank the island 1 walkable cell beyond the body's padded footprint,
     // and must stay in-room too — so the x clamps price the stand extent, not the
     // body.
-    let stand_dx = half_w + OBSTACLE_PAD_PX + 1;
+    let stand_dx = half_w + island.pad + 1;
     let counter_north = PantryRoom::counter_north(pr, counter);
     let min_x = pr.x + clr + stand_dx;
     let max_x = (pr.x + pr.width).saturating_sub(clr + stand_dx);
     // The bartenders' approach lane — the walkable row above the body's padded
     // strip — must be in-room too.
-    let min_y = pr.y + clr + half_h + OBSTACLE_PAD_PX;
-    let max_y = counter_north.saturating_sub(half_h + OBSTACLE_PAD_PX + 1);
+    let min_y = pr.y + clr + half_h + island.pad;
+    let max_y = counter_north.saturating_sub(half_h + island.pad + 1);
     if min_x > max_x || min_y > max_y {
         return None;
     }

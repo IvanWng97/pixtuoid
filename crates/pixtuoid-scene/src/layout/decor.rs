@@ -4,7 +4,7 @@
 
 use pixtuoid_core::sprite::format::Piece;
 
-use super::{DESK_FOOT_H, DESK_H, DESK_W, OBSTACLE_PAD_PX, Pivot, Point, Size};
+use super::{DESK_FOOT_H, DESK_H, DESK_W, OBSTACLE_PAD_PX, Pivot, Point, Size, TIGHT_PAD_PX};
 
 /// Wander destinations the Idle state machine can pick — each kind controls the
 /// pose + sprite an arriving agent takes. Plants/lamps are decor, not waypoints.
@@ -136,6 +136,9 @@ pub(crate) const DESK_APPROACH: ApproachSides = ApproachSides {
 /// hitbox and render depth baseline all DERIVE from these fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FurnitureDef {
+    /// Mask pad (px) around the blocked ground, every side. Whatever measures that
+    /// ground reads this row's pad, never a sibling's.
+    pub(crate) pad: u16,
     /// Ground footprint `(w, h)` the walkable mask stamps (top-down z=0 rect), or
     /// `None` for slots that add no obstacle of their own (MeetingSofa/MeetingChair
     /// sit on furniture stamped elsewhere). NB: `Pantry` is also `None` because its
@@ -197,6 +200,20 @@ impl FurnitureDef {
     /// sweep all read.
     pub(super) fn ground_rect(&self, pivot: Pivot, pos: Point) -> Option<(Point, Size)> {
         self.footprint.map(|fp| self.ground_rect_of(pivot, pos, fp))
+    }
+
+    /// The first column the mask leaves walkable east of this piece's ground (its
+    /// [`Self::pad`] included), or `None` for a piece with no table footprint, which
+    /// the mask doesn't block.
+    pub(super) fn east_of_padded_ground(&self, pivot: Pivot, pos: Point) -> Option<u16> {
+        self.ground_rect(pivot, pos)
+            .map(|(tl, sz)| tl.x + sz.w + self.pad)
+    }
+
+    /// First clear pixel beyond a footprint half-extent: the one past the
+    /// [`Self::pad`] band the mask stamps around the furniture.
+    pub(super) const fn stand_clearance(&self) -> u16 {
+        self.pad + 1
     }
 }
 
@@ -453,6 +470,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
     // Not a wander destination: no dwell, and the approach set is unused (decor
     // never runs stand_point). `ground_y: End` suits the `..DECOR` overhang rows.
     const DECOR: FurnitureDef = FurnitureDef {
+        pad: TIGHT_PAD_PX,
         footprint: None,
         visual: Size { w: 0, h: 0 },
         occupies_pos: false,
@@ -464,6 +482,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
     };
     match kind {
         Furniture::Couch => FurnitureDef {
+            pad: TIGHT_PAD_PX,
             footprint: Some(Size { w: 8, h: 7 }),
             // One seat's box: the lounge couch's three seats overlap across
             // the `MeetingSofaBody` sprite it blits.
@@ -479,6 +498,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::Center,
         },
         Furniture::Pantry => FurnitureDef {
+            pad: TIGHT_PAD_PX,
             footprint: None,
             visual: Size { w: 0, h: 0 }, // runtime-sized: `PantryRoom::counter_size`
             occupies_pos: false,
@@ -492,6 +512,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::Center,
         },
         Furniture::PhoneBooth => FurnitureDef {
+            pad: TIGHT_PAD_PX,
             footprint: Some(Size { w: 7, h: 3 }),
             visual: Size { w: 7, h: 15 },
             occupies_pos: false,
@@ -505,6 +526,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::End,
         },
         Furniture::StandingDesk => FurnitureDef {
+            pad: TIGHT_PAD_PX,
             footprint: Some(Size { w: 8, h: 3 }),
             visual: Size { w: 8, h: 8 },
             occupies_pos: false,
@@ -518,6 +540,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::End,
         },
         Furniture::VendingMachine => FurnitureDef {
+            pad: TIGHT_PAD_PX,
             footprint: Some(Size { w: 7, h: 3 }),
             visual: Size { w: 7, h: 13 },
             occupies_pos: false,
@@ -531,6 +554,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::End,
         },
         Furniture::Printer => FurnitureDef {
+            pad: TIGHT_PAD_PX,
             footprint: Some(Size { w: 7, h: 3 }),
             visual: Size { w: 7, h: 8 },
             occupies_pos: false,
@@ -544,6 +568,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::End,
         },
         Furniture::MeetingSofa => FurnitureDef {
+            pad: TIGHT_PAD_PX,
             footprint: None,
             visual: Size { w: 0, h: 0 },
             occupies_pos: true,
@@ -557,6 +582,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::Center,
         },
         Furniture::MeetingChair => FurnitureDef {
+            pad: TIGHT_PAD_PX,
             footprint: None,
             visual: Size { w: 7, h: 7 },
             occupies_pos: true,
@@ -627,14 +653,16 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         },
         Furniture::MeetingSofaBody => {
             const VISUAL: Size = Size { w: 20, h: 7 };
+            const PAD: u16 = OBSTACLE_PAD_PX;
             FurnitureDef {
                 footprint: Some(Size {
                     // Narrower than the sprite ON PURPOSE: a full-width footprint plus
                     // pad disconnects the narrowest meeting room.
-                    w: VISUAL.w - 2 * OBSTACLE_PAD_PX,
-                    h: VISUAL.h - 2 * OBSTACLE_PAD_PX,
+                    w: VISUAL.w - 2 * PAD,
+                    h: VISUAL.h - 2 * PAD,
                 }),
                 visual: VISUAL,
+                pad: PAD,
                 ground_y: GroundAlign::Center,
                 ..DECOR
             }
@@ -642,14 +670,17 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         Furniture::MeetingTable => FurnitureDef {
             footprint: Some(Size { w: 11, h: 5 }),
             visual: Size { w: 11, h: 5 },
+            pad: OBSTACLE_PAD_PX,
             ..DECOR
         },
         Furniture::KitchenIsland => FurnitureDef {
             footprint: Some(Size { w: 20, h: 5 }),
             visual: Size { w: 20, h: 7 },
+            pad: OBSTACLE_PAD_PX,
             ..DECOR
         },
         Furniture::IslandStand => FurnitureDef {
+            pad: TIGHT_PAD_PX,
             footprint: None,
             visual: Size { w: 0, h: 0 },
             occupies_pos: true,
@@ -663,6 +694,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::Center,
         },
         Furniture::SnackShelf => FurnitureDef {
+            pad: TIGHT_PAD_PX,
             footprint: Some(Size { w: 7, h: 2 }),
             visual: Size { w: 7, h: 10 },
             occupies_pos: false,
@@ -692,6 +724,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ..DECOR
         },
         Furniture::Desk => FurnitureDef {
+            pad: OBSTACLE_PAD_PX,
             footprint: Some(Size {
                 w: DESK_W + 4,
                 h: DESK_FOOT_H,
@@ -1003,7 +1036,7 @@ pub enum PodDecor {
 
 impl PodDecor {
     /// The randomly-picked pool. Every member's GROUND footprint has to fit the
-    /// aisle width once the obstacle pad is added.
+    /// aisle width once its row's [`FurnitureDef::pad`] is added.
     pub(crate) const ALL: &'static [PodDecor] = &[
         PodDecor::PlantTall,
         PodDecor::Whiteboard,

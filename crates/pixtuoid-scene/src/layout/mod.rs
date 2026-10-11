@@ -335,20 +335,14 @@ pub(crate) const fn pct(v: u16, n: u16) -> u16 {
     ((v as u32 * n as u32) / 100) as u16
 }
 
-/// Padding (px) around every obstacle in the walkable mask, so characters
-/// route AROUND furniture rather than scraping along its edge.
+/// The wider mask pad (px), around the solid pieces characters route AROUND rather
+/// than scrape along.
 pub(crate) const OBSTACLE_PAD_PX: u16 = 2;
 
-/// The SMALLER mask pad the waypoint (seat/appliance) stamp uses — a walkable
-/// seat sits IN the open floor and needs no routing buffer. THE single source,
-/// read by `mask.rs`'s waypoint stamp AND the #566 couch↔door clearance gate,
-/// so the gate can never assume a different pad than the mask actually stamps.
-pub(super) const WAYPOINT_STAMP_PAD_PX: u16 = 1;
-
-/// The mask pad around wall decor's ground: these pieces overhang nothing solid,
-/// and an [`OBSTACLE_PAD_PX`] band every side inflated the blocked rect back to
-/// the full sprite width.
-pub(super) const WALL_DECOR_STAMP_PAD_PX: u16 = 1;
+/// The SMALLER mask pad of a piece that needs no routing buffer: a seat or appliance,
+/// which paints over a visitor behind it; wall decor (an [`OBSTACLE_PAD_PX`] band would
+/// inflate its blocked rect back to the full sprite width); a plant in a tight aisle.
+const TIGHT_PAD_PX: u16 = 1;
 
 /// The north wall+window band's visual bottom sits this many px ABOVE
 /// `top_margin`; the rows in between render as carpet apron, not wall, so the

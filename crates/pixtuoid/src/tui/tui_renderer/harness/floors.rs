@@ -190,49 +190,6 @@ fn per_floor_layout_seeds_differ() {
     );
 }
 
-// Pinned directly: the resize that fires it through `follow_resize` also re-lays
-// the floor out, which can clear the cache on its own.
-#[test]
-fn invalidate_routes_clears_every_floor_router_cache() {
-    // A fresh agent bootstraps Seated@now then sits 15-30s before its first walk-out,
-    // so several agents + a multi-second timeline are needed to guarantee one walk leg
-    // (only a walk populates the router's (from,to) cache).
-    let agents = (0..8)
-        .map(|i| {
-            idle(
-                &format!("/inv/{i}.jsonl"),
-                i,
-                t0() - Duration::from_secs(120),
-            )
-        })
-        .collect();
-    let scene = scene_with(agents, 16);
-    let mut r = build(120, 60, vec![]);
-    let mut now = t0();
-    for _ in 0..120 {
-        r.render(&scene, pack(), now).expect("render");
-        if !r.session.floor(0).expect("a floor").ctx.router.is_empty() {
-            break;
-        }
-        now += Duration::from_millis(500);
-    }
-    assert!(
-        !r.session.floor(0).expect("a floor").ctx.router.is_empty(),
-        "a warmed-up wandering agent should have populated the A* path cache"
-    );
-
-    r.invalidate_routes();
-    assert!(
-        r.session.floor(0).expect("a floor").ctx.router.is_empty(),
-        "invalidate_routes must drop every floor's cached A* paths"
-    );
-    assert_eq!(
-        r.session.floor(0).expect("a floor").ctx.router.len(),
-        0,
-        "cache is empty after invalidate"
-    );
-}
-
 #[test]
 fn transition_at_narrow_terminal_paints_no_agents_no_panic() {
     let cap = 16;

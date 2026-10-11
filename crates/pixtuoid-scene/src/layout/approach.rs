@@ -13,13 +13,10 @@
 
 use super::decor::{Facing, Furniture, WaypointKind, furniture_def};
 use super::reach::ReachSet;
-use super::{Point, Size, WAYPOINT_STAMP_PAD_PX};
+use super::{Point, Size};
 use pixtuoid_core::walkable::WalkableMask;
 
-/// First clear pixel beyond a footprint half-extent: the one past the
-/// [`WAYPOINT_STAMP_PAD_PX`] band the mask stamps around waypoint furniture.
-const STAND_CLEARANCE: u16 = WAYPOINT_STAMP_PAD_PX + 1;
-/// How far past `half + STAND_CLEARANCE` to keep probing for a walkable
+/// How far past `half + def.stand_clearance()` to keep probing for a walkable
 /// cell before giving up on a side.
 const STAND_SCAN: i32 = 4;
 
@@ -188,7 +185,7 @@ pub(crate) fn approach_point(
             }
             let half = if dx != 0 { hx } else { hy };
             for step in 0..=STAND_SCAN {
-                let dist = half + i32::from(STAND_CLEARANCE) + step;
+                let dist = half + i32::from(def.stand_clearance()) + step;
                 let cx = i32::from(pos.x) + dx * dist;
                 let cy = i32::from(pos.y) + dy * dist;
                 if cx < 0 || cy < 0 {
@@ -236,8 +233,8 @@ mod tests {
         assert_eq!(ext.h, furniture_def(Furniture::StandingDesk).visual.h);
     }
 
-    /// Build an open mask with a centred obstacle stamped exactly like
-    /// `mask.rs` does for a waypoint.
+    /// Build an open mask with a centred obstacle stamped with the pad `mask.rs`
+    /// gives a waypoint.
     fn mask_with_obstacle(w: u16, h: u16, pos: Point, fw: u16, fh: u16) -> WalkableMask {
         let mut m = WalkableMask::new_open(w, h);
         m.mark_blocked(
@@ -245,7 +242,7 @@ mod tests {
             pos.y - fh / 2,
             fw,
             fh,
-            WAYPOINT_STAMP_PAD_PX,
+            furniture_def(Furniture::Pantry).pad,
         );
         m
     }
@@ -450,10 +447,11 @@ mod tests {
                             (i32::from(visual.h) / 2, dy.abs())
                         };
                         assert!(
-                            off >= half + i32::from(STAND_CLEARANCE),
+                            off >= half + i32::from(def.stand_clearance()),
                             "{bw}x{bh} seed {seed}: {:?} stand {s:?} sits INSIDE its visual \
-                             (off {off} < half {half} + clearance {STAND_CLEARANCE})",
-                            wp.kind
+                             (off {off} < half {half} + clearance {})",
+                            wp.kind,
+                            def.stand_clearance()
                         );
                     }
                 }
