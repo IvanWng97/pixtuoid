@@ -582,21 +582,27 @@ mod tests {
     }
 
     /// The window's frame report says what its frame repainted and was drawn
-    /// under, as the terminal's does: `pace-check --floating` reads both.
+    /// under, as the terminal's does: `pace-check --floating` reads both. The
+    /// first frame repaints whole, the same one again nothing.
     #[test]
     fn the_windows_frame_report_says_what_its_frame_was_drawn_under() {
         let strike = crate::test_flash::storm_strike();
         let mut window = Window::new(strike.weather);
-        window.present(strike.start);
-        let logged = crate::test_capture::capture(|| {
-            let mut jank = crate::jank::Jank::new();
-            let slow = Duration::from_secs(1);
-            window
-                .renderer
-                .record(&mut jank, slow, Duration::ZERO, std::time::Instant::now());
-        });
-        assert!(logged.contains("strike=true"), "{logged}");
-        assert!(logged.contains("dirty=\"all\""), "{logged}");
+        let report = |window: &mut Window| {
+            window.present(strike.start);
+            crate::test_capture::capture(|| {
+                let mut jank = crate::jank::Jank::new();
+                let slow = Duration::from_secs(1);
+                window
+                    .renderer
+                    .record(&mut jank, slow, Duration::ZERO, std::time::Instant::now());
+            })
+        };
+        let first = report(&mut window);
+        assert!(first.contains("strike=true"), "{first}");
+        assert!(first.contains("dirty=\"all\""), "{first}");
+        let again = report(&mut window);
+        assert!(again.contains("dirty=\"unchanged\""), "{again}");
     }
 
     /// A window resized under a hold gets its frame at once: a screen of a new
