@@ -2303,52 +2303,6 @@ fn route_walking_pose_coincident_path_returns_input_pose() {
 }
 
 #[test]
-fn route_walking_pose_records_at_waypoint_and_aimless_history() {
-    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let l = layout();
-    assert!(!l.waypoints.is_empty(), "layout must have waypoints");
-    let slot = unit_slot(now);
-
-    let mut rig = RouteRig::new(StubRouter::straight());
-
-    let wp0 = l.waypoints[0];
-    let out = route_walking_pose(
-        &slot,
-        now,
-        &l,
-        &mut rig.rctx(),
-        Pose::AtWaypoint {
-            wp: 0,
-            kind: wp0.kind,
-        },
-        Settle::None,
-    );
-    assert!(matches!(out, Some(Pose::AtWaypoint { wp: 0, .. })));
-    assert_eq!(
-        rig.history.recent(slot.agent_id, 1_000, now),
-        Some(wp0.pos),
-        "AtWaypoint must record the waypoint pos to history"
-    );
-
-    let dest = Point { x: 55, y: 60 };
-    let later = now + Duration::from_millis(10);
-    let out2 = route_walking_pose(
-        &slot,
-        later,
-        &l,
-        &mut rig.rctx(),
-        Pose::AimlessAt { dest },
-        Settle::None,
-    );
-    assert!(matches!(out2, Some(Pose::AimlessAt { .. })));
-    assert_eq!(
-        rig.history.recent(slot.agent_id, 1_000, later),
-        Some(dest),
-        "AimlessAt must record its dest to history"
-    );
-}
-
-#[test]
 fn snap_back_profile_length_measures_the_routed_polyline() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();

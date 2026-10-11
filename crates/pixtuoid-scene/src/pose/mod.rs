@@ -650,16 +650,6 @@ fn route_walking_pose(
         if let Some(walk) = walks.get_mut(&slot.agent_id) {
             walk.walk_path = None;
         }
-        // AtWaypoint / AimlessAt positions are a valid "previous position" for a
-        // subsequent snap-back walk, so record them too.
-        let pt = match &pose {
-            Pose::AtWaypoint { wp, .. } => layout.waypoints.get(*wp).map(|w| w.pos),
-            Pose::AimlessAt { dest } => Some(*dest),
-            _ => None,
-        };
-        if let Some(p) = pt {
-            history.record(slot.agent_id, p, now);
-        }
         return Some(pose);
     };
 
