@@ -1,5 +1,5 @@
 use super::*;
-use crate::install::target::{CLAUDE, CODEX, MergeOutcome, OPENCLAW, Primary, Target};
+use crate::install::target::{CLAUDE, CODEX, MergeOutcome, OPENCLAW, Primary, REASONIX, Target};
 
 /// Claude's owned hooks file without its plugin registration or presence probe,
 /// for the tests of the primary-write path itself.
@@ -1267,7 +1267,8 @@ fn with_fake_hosts_failing<R>(fail: Option<&str>, f: impl FnOnce(&std::path::Pat
     .unwrap();
     let claude = dir.path().join("claude-config");
     let codex = dir.path().join("codex-home");
-    for home in [&claude, &codex] {
+    let reasonix = dir.path().join("reasonix-home");
+    for home in [&claude, &codex, &reasonix] {
         std::fs::create_dir_all(home).unwrap();
     }
     temp_env::with_vars(
@@ -1275,6 +1276,7 @@ fn with_fake_hosts_failing<R>(fail: Option<&str>, f: impl FnOnce(&std::path::Pat
             ("PATH", Some(path.as_os_str())),
             ("CLAUDE_CONFIG_DIR", Some(claude.as_os_str())),
             ("CODEX_HOME", Some(codex.as_os_str())),
+            ("REASONIX_HOME", Some(reasonix.as_os_str())),
             ("FAKE_HOST_FAIL", fail.map(std::ffi::OsStr::new)),
         ],
         || f(dir.path()),
@@ -1285,6 +1287,7 @@ fn with_fake_hosts_failing<R>(fail: Option<&str>, f: impl FnOnce(&std::path::Pat
 const FAKE_HOSTS: &[(&str, &str, &str)] = &[
     ("claude", FAKE_CLAUDE_SH, FAKE_CLAUDE_CMD),
     ("codex", FAKE_CODEX_SH, FAKE_CODEX_CMD),
+    ("reasonix", FAKE_REASONIX_SH, FAKE_REASONIX_CMD),
 ];
 
 const FAKE_CLAUDE_SH: &str = r#"#!/bin/sh
@@ -1335,6 +1338,35 @@ if \"%1 %2\"==\"plugin add\" ((findstr /l /x /c:\"[plugins.'pixtuoid@pixtuoid']\
 if \"%1 %2\"==\"plugin remove\" ((findstr /l /v /x /c:\"[plugins.'pixtuoid@pixtuoid']\" /c:\"enabled = true\" \"%c%\" >\"%c%.tmp\"& move /y \"%c%.tmp\" \"%c%\" >nul)& exit /b 0)\r
 exit /b 0\r
 ";
+
+/// Reasonix records an install in its plugin-packages.json, which
+/// [`reasonix_packages`] reads.
+const FAKE_REASONIX_SH: &str = r#"#!/bin/sh
+d=$(dirname "$0")
+s="$REASONIX_HOME/plugin-packages.json"
+echo "reasonix $*" >> "$d/calls.log"
+[ "reasonix $*" = "${FAKE_HOST_FAIL-}" ] && exit 1
+case "$*" in
+"plugin install "*" --link --replace --yes") echo '{"version":1,"plugins":[{"name":"pixtuoid","root":"linked","enabled":true}]}' > "$s" ;;
+"plugin remove pixtuoid --yes") echo '{"version":1,"plugins":[]}' > "$s" ;;
+esac
+"#;
+
+const FAKE_REASONIX_CMD: &str = "@echo off\r
+set \"d=%~dp0\"\r
+set \"s=%REASONIX_HOME%\\plugin-packages.json\"\r
+>>\"%d%calls.log\" echo reasonix %~1 %~2 %~3 %~4 %~5 %~6\r
+if defined FAKE_HOST_FAIL if \"reasonix %*\"==\"%FAKE_HOST_FAIL%\" exit /b 1\r
+if \"%1 %2\"==\"plugin install\" (>\"%s%\" echo {\"version\":1,\"plugins\":[{\"name\":\"pixtuoid\",\"root\":\"linked\",\"enabled\":true}]}& exit /b 0)\r
+if \"%1 %2\"==\"plugin remove\" (>\"%s%\" echo {\"version\":1,\"plugins\":[]}& exit /b 0)\r
+exit /b 0\r
+";
+
+/// The plugin-packages.json Reasonix keeps, under the fake's `REASONIX_HOME`.
+fn reasonix_packages() -> PathBuf {
+    PathBuf::from(std::env::var_os("REASONIX_HOME").expect("inside with_fake_hosts"))
+        .join("plugin-packages.json")
+}
 
 /// The config.toml Codex reads, under the fake's `CODEX_HOME`.
 fn codex_config() -> PathBuf {
@@ -1768,6 +1800,157 @@ fn codex_connect_fails_when_adding_the_plugin_fails_and_leaves_no_hooks() {
         let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
         assert!(install_target_from(&CODEX, Some(hooks.clone()), hook).is_err());
         assert!(!has_hooks(&CODEX, Some(hooks)));
+    });
+}
+
+/// `<root>/pixtuoid/reasonix-plugin.json` inside `tmp`.
+fn reasonix_manifest_path(tmp: &std::path::Path) -> PathBuf {
+    tmp.join("root")
+        .join("pixtuoid")
+        .join("reasonix-plugin.json")
+}
+
+fn reasonix_settings() -> PathBuf {
+    reasonix_packages().with_file_name("settings.json")
+}
+
+#[test]
+fn reasonix_connect_links_the_plugin_and_strips_the_hooks_an_older_pixtuoid_merged() {
+    with_fake_hosts(|fake| {
+        let user = serde_json::json!({ "command": "notify-send done" });
+        let legacy = serde_json::json!({ SENTINEL_KEY: true, "command": "PIXTUOID_SOURCE=reasonix '/old/pixtuoid-hook'" });
+        std::fs::write(
+            reasonix_settings(),
+            serde_json::json!({ "hooks": { "Stop": [user, legacy] } }).to_string(),
+        )
+        .unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let manifest = reasonix_manifest_path(tmp.path());
+        let hook = Some(std::env::current_exe().unwrap());
+        let r = install_target_from(&REASONIX, Some(manifest.clone()), hook.clone()).unwrap();
+        assert!(matches!(r.outcome, InstallOutcome::Installed));
+
+        let calls = std::fs::read_to_string(fake.join("calls.log")).unwrap();
+        assert!(
+            calls.contains(&format!(
+                "reasonix plugin install {} --link --replace --yes",
+                manifest.parent().unwrap().display()
+            )),
+            "calls: {calls}"
+        );
+        let settings: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(reasonix_settings()).unwrap()).unwrap();
+        assert_eq!(settings["hooks"]["Stop"], serde_json::json!([user]));
+        assert!(has_hooks(&REASONIX, Some(manifest.clone())));
+        let v = verify_target(&REASONIX, Some(manifest.clone()));
+        assert!(v.is_sound(), "{:?}", v.issues);
+
+        let r2 = install_target_from(&REASONIX, Some(manifest), hook).unwrap();
+        assert!(matches!(r2.outcome, InstallOutcome::AlreadyUpToDate));
+    });
+}
+
+#[test]
+fn reasonix_verify_flags_a_disabled_plugin() {
+    with_fake_hosts(|_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let manifest = reasonix_manifest_path(tmp.path());
+        install_target_from(
+            &REASONIX,
+            Some(manifest.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        let state = std::fs::read_to_string(reasonix_packages()).unwrap();
+        std::fs::write(
+            reasonix_packages(),
+            state.replace("\"enabled\":true", "\"enabled\":false"),
+        )
+        .unwrap();
+        let v = verify_target(&REASONIX, Some(manifest));
+        assert!(
+            v.issues
+                .iter()
+                .any(|i| i.contains("not installed and enabled")),
+            "{:?}",
+            v.issues
+        );
+    });
+}
+
+#[test]
+fn reasonix_disconnect_removes_the_plugin_through_reasonix_and_deletes_its_dir() {
+    with_fake_hosts(|fake| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let manifest = reasonix_manifest_path(tmp.path());
+        install_target_from(
+            &REASONIX,
+            Some(manifest.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        let u = uninstall_target(&REASONIX, Some(manifest.clone())).unwrap();
+        assert!(matches!(u.outcome, UninstallOutcome::Removed));
+        assert!(!tmp.path().join("root").exists());
+        let removes = || {
+            std::fs::read_to_string(fake.join("calls.log"))
+                .unwrap()
+                .matches("reasonix plugin remove pixtuoid --yes")
+                .count()
+        };
+        assert_eq!(removes(), 1);
+
+        let u2 = uninstall_target(&REASONIX, Some(manifest)).unwrap();
+        assert!(matches!(u2.outcome, UninstallOutcome::NothingToRemove));
+        assert_eq!(removes(), 1, "nothing registered starts no CLI");
+    });
+}
+
+#[test]
+fn reasonix_disconnect_without_reasonix_on_path_leaves_a_registered_plugin_loadable() {
+    with_fake_hosts(|fake| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let manifest = reasonix_manifest_path(tmp.path());
+        install_target_from(
+            &REASONIX,
+            Some(manifest.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        std::fs::remove_file(fake.join(if cfg!(windows) {
+            "reasonix.cmd"
+        } else {
+            "reasonix"
+        }))
+        .unwrap();
+        let u = temp_env::with_var("PATH", Some(fake), || {
+            uninstall_target(&REASONIX, Some(manifest.clone())).unwrap()
+        });
+        assert!(u.plugin_left_registered);
+        let left =
+            crate::install::reasonix::verify_schema(&std::fs::read_to_string(&manifest).unwrap());
+        assert_eq!(
+            left.shim,
+            verify::ShimRef::Unknown,
+            "the linked manifest stays, with no hooks"
+        );
+    });
+}
+
+#[test]
+fn reasonix_connect_fails_when_linking_fails_and_leaves_no_hooks() {
+    with_fake_hosts(|_| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let manifest = reasonix_manifest_path(tmp.path());
+        let fail = format!(
+            "reasonix plugin install {} --link --replace --yes",
+            manifest.parent().unwrap().display()
+        );
+        temp_env::with_var("FAKE_HOST_FAIL", Some(&fail), || {
+            let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
+            assert!(install_target_from(&REASONIX, Some(manifest.clone()), hook).is_err());
+        });
+        assert!(!has_hooks(&REASONIX, Some(manifest)));
     });
 }
 

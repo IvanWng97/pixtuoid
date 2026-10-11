@@ -1,9 +1,9 @@
 //! Reasonix source — HOOK-ONLY (no JSONL watcher).
 //!
 //! Reasonix (github.com/esengine/DeepSeek-Reasonix) ships a CC-style hook
-//! system; connecting it registers the shim in the GLOBAL
-//! `~/.reasonix/settings.json` — project-scope hooks are trust-gated and would
-//! silently not fire. Payloads arrive on the shared hook socket stamped
+//! system; connecting it links a GLOBAL plugin whose hooks run the shim —
+//! project-scope hooks are trust-gated and would silently not fire. Payloads
+//! arrive on the shared hook socket stamped
 //! `_pixtuoid_source: "reasonix"` in Reasonix's own envelope, NOT the CC shape:
 //!
 //! ```json

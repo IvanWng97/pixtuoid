@@ -119,7 +119,7 @@ pub(crate) fn isolated(args: &[&str], home: &std::path::Path) -> std::process::C
     use std::os::unix::fs::PermissionsExt;
     let bin = home.join(".fake-bin");
     std::fs::create_dir_all(&bin).expect("fake bin dir");
-    for cli in ["claude", "codex"] {
+    for cli in ["claude", "codex", "reasonix"] {
         let fake = bin.join(cli);
         std::fs::write(
             &fake,

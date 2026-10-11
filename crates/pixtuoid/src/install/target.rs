@@ -255,16 +255,16 @@ pub(crate) const REASONIX: Target = Target {
     display_name: "Reasonix",
     default_config_path: crate::install::reasonix::default_config_path,
     hook_command: crate::install::reasonix::hook_command,
-    primary: Primary::Config {
-        merge_install: crate::install::reasonix::merge_install,
-        merge_uninstall: crate::install::reasonix::merge_uninstall,
+    primary: Primary::Owned {
+        render: crate::install::reasonix::render_manifest,
+        installed_shim: crate::install::reasonix::installed_shim,
+        uninstall: crate::install::reasonix::uninstall,
         verify_schema: crate::install::reasonix::verify_schema,
-        beside: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: crate::install::reasonix::detect_installed,
     post_install_hint: None,
-    host: None,
+    host: Some(&crate::install::reasonix::HOST),
 };
 
 pub(crate) const CODEWHALE: Target = Target {

@@ -48,7 +48,7 @@
     "name": "DeepSeek-Reasonix",
     "url": "https://github.com/esengine/DeepSeek-Reasonix",
     "status": "supported",
-    "transport": "hooks only (global ~/.reasonix/settings.json)",
+    "transport": "hooks only (a global Reasonix plugin)",
     "platforms": {
       "macos": "yes",
       "linux": "yes",

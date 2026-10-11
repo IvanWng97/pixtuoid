@@ -309,9 +309,9 @@ fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> 
 }
 
 /// The Codex home dir — honors `CODEX_HOME` when it points at an existing dir,
-/// else `~/.codex` (codex's own precedence). The installer routes its
-/// `config.toml` path through here too, so the watched sessions root and the
-/// installed-hook config can never disagree.
+/// else `~/.codex` (codex's own precedence). The installer reads Codex's
+/// `config.toml` through here too, so the watched sessions root and the plugin
+/// state it reads can never disagree.
 pub fn codex_home() -> PathBuf {
     crate::platform::codex_home()
 }
