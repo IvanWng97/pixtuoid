@@ -246,11 +246,25 @@ fn converge_owned_with(
         for (path, error) in &done.failed {
             tracing::warn!(cli = t.name, path = ?path, error = ?error, "could not refresh a plugin file to this build");
         }
-        if !done.rewritten.is_empty() {
-            refreshed.push(t);
+        if done.rewritten.is_empty() {
+            continue;
         }
+        if let Ok(primary) = (t.default_config_path)()
+            && let Some(Err(e)) = reload_copied_plugin(t, &primary)
+        {
+            tracing::warn!(cli = t.name, error = ?e, "could not re-copy the refreshed plugin");
+        }
+        refreshed.push(t);
     }
     refreshed
+}
+
+/// Re-copy a plugin whose files the launch rewrote, for a host that runs a copy,
+/// and only while the user has it enabled: the re-add re-enables a disabled one.
+fn reload_copied_plugin(t: &Target, primary: &Path) -> Option<Result<()>> {
+    let host = t.host?;
+    let reload = host.reload?;
+    matches!((host.is_registered)(), Ok(true)).then(|| reload(primary))
 }
 
 /// The line a launch prints for a plugin [`converge_owned`] rewrote.
@@ -574,6 +588,46 @@ mod tests {
 
     fn set(ids: &[&str]) -> HashSet<String> {
         ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    static RELOADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    /// A host that copies its plugin, with an enabled state the test sets.
+    static COPYING_HOST: crate::install::target::HostRegistration =
+        crate::install::target::HostRegistration {
+            register: |_| Ok(()),
+            unregister: |_| Ok(crate::install::target::Unregistered::Absent),
+            is_registered: || Ok(ENABLED.load(std::sync::atomic::Ordering::SeqCst)),
+            reload: Some(|_| {
+                RELOADS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }),
+        };
+
+    /// A copied plugin is re-added after its files changed only while the user has
+    /// it enabled: a re-add re-enables a disabled one. An in-place host is never
+    /// asked.
+    #[test]
+    fn a_copied_plugin_reloads_only_while_enabled() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let copying = Target {
+            host: Some(&COPYING_HOST),
+            ..crate::install::target::CLAUDE
+        };
+        RELOADS.store(0, SeqCst);
+        ENABLED.store(false, SeqCst);
+        assert!(reload_copied_plugin(&copying, Path::new("/x")).is_none());
+        ENABLED.store(true, SeqCst);
+        assert!(matches!(
+            reload_copied_plugin(&copying, Path::new("/x")),
+            Some(Ok(()))
+        ));
+        assert_eq!(RELOADS.load(SeqCst), 1);
+        assert!(
+            reload_copied_plugin(&crate::install::target::CLAUDE, Path::new("/x")).is_none(),
+            "Claude loads its plugin in place"
+        );
     }
 
     #[test]

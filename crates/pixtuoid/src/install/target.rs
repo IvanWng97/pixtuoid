@@ -181,6 +181,9 @@ pub struct HostRegistration {
     pub unregister: fn(config: &Path) -> Result<Unregistered>,
     /// Whether the CLI reports the plugin installed and enabled.
     pub is_registered: fn() -> Result<bool>,
+    /// Re-copy the plugin after its files changed, for a CLI that runs a copy;
+    /// `None` when the CLI loads the files in place.
+    pub reload: Option<fn(config: &Path) -> Result<()>>,
 }
 
 /// What [`HostRegistration::unregister`] found.

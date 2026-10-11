@@ -36,6 +36,8 @@ pub(crate) const HOST: HostRegistration = HostRegistration {
     register,
     unregister,
     is_registered,
+    // A local-path marketplace loads in place.
+    reload: None,
 };
 
 /// `<marketplace>/<plugin>/hooks/hooks.json`, under pixtuoid's own config dir.
