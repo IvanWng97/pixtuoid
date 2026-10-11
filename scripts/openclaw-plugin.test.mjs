@@ -25,6 +25,8 @@ const EXPECTED_HOOKS = [
   "before_agent_run",
   "agent_end",
 ];
+// Must match `OPENCLAW_VERDICT_EVENTS`: registered, never forwarded.
+const VERDICT_HOOKS = ["model_call_ended"];
 // OpenClaw's own default — the plugin's last-resort fallback.
 const DEFAULT_GATEWAY_PORT = 18789;
 
@@ -94,9 +96,9 @@ async function recorded(outFile, n) {
   }
 }
 
-test("registers exactly the six presence hooks", async (t) => {
+test("registers exactly the six presence hooks and the verdict ones", async (t) => {
   const { plugin } = await renderPlugin(t);
-  assert.deepEqual([...register(plugin).keys()], EXPECTED_HOOKS);
+  assert.deepEqual([...register(plugin).keys()], [...EXPECTED_HOOKS, ...VERDICT_HOOKS]);
 });
 
 test("the decision hook passes EXPLICITLY and the observers are void", async (t) => {
@@ -113,6 +115,9 @@ test("the decision hook passes EXPLICITLY and the observers are void", async (t)
   assert.deepEqual(Object.keys(next), ["outcome"], "each decision must be a fresh object");
   for (const hook of EXPECTED_HOOKS.filter((h) => h !== "before_agent_run")) {
     assert.equal(handlers.get(hook)({}, {}), undefined, `${hook} must be a void observer`);
+  }
+  for (const hook of VERDICT_HOOKS) {
+    assert.equal(handlers.get(hook)({}, {}), undefined, `${hook} must return nothing`);
   }
 });
 
@@ -170,7 +175,6 @@ test("forwards ONLY the allowlist plus identity, never content", { skip: !POSIX 
     type: "agent_end",
     runId: "event-run",
     sessionId: "event-session",
-    success: false,
     errored: true,
     gatewayPort: 19789,
     _pid: process.pid,
@@ -273,15 +277,15 @@ for (const [raw, want, why] of [
   });
 }
 
-test("agent_end forwards the errored discriminator, never the error string", { skip: !POSIX }, async (t) => {
+test("agent_end forwards the errored verdict, never the error string", { skip: !POSIX }, async (t) => {
   // Upstream builds `success` as `!aborted && !promptError`, so success:false alone
-  // cannot tell a user CANCELLING a turn from a provider outage. Only a prompt error
+  // cannot tell a user CANCELLING a turn from a prompt error. Only a prompt error
   // carries `error`, so its PRESENCE is the signal; the string can embed prompt
   // content and must never leave the gateway.
   const { outFile, plugin } = await renderPlugin(t);
   const handlers = register(plugin, { config: { gateway: { port: 18789 } } });
   handlers.get("agent_end")(
-    { runId: "r1", sessionId: "s1", success: false, error: "Provider 500: upstream down" },
+    { runId: "r1", sessionId: "s1", success: false, error: "context overflow: my secret prompt" },
     {},
   );
   handlers.get("agent_end")({ runId: "r2", sessionId: "s1", success: false }, {});
@@ -291,15 +295,12 @@ test("agent_end forwards the errored discriminator, never the error string", { s
 
   assert.equal(byRun.get("r1").errored, true, "a prompt error is a real failure");
   assert.equal(byRun.get("r2").errored, false, "an abort carries no error → not degraded");
-  assert.equal(
-    byRun.get("r3").errored,
-    undefined,
-    "success:true needs no discriminator at all",
-  );
+  assert.equal(byRun.get("r3").errored, false, "a clean run is no failure");
   for (const row of rows) {
+    assert.ok(!("success" in row), `the ambiguous success stays in the gateway: ${JSON.stringify(row)}`);
     assert.equal(row.error, undefined, "the error STRING must never be forwarded");
     assert.ok(
-      !JSON.stringify(row).includes("upstream down"),
+      !JSON.stringify(row).includes("my secret prompt"),
       `no error text may leak: ${JSON.stringify(row)}`,
     );
   }
@@ -327,7 +328,76 @@ test("the shim is spawned with the source-attribution flag", { skip: !POSIX }, a
   register(plugin).get("gateway_stop")({ reason: "shutdown" }, {});
   const [stop] = await recorded(outFile, 1);
   assert.equal(stop.type, "gateway_stop");
-  assert.equal(stop.reason, "shutdown");
   const argv = (await readFile(argvFile, "utf8")).trim().split("\n");
   assert.deepEqual(argv, ["--source openclaw"], "the shim must be told which source it speaks for");
+});
+
+// A failed provider's `agent_end` carries no `error` — it is no prompt error — so the
+// run's LAST model call decides: a provider failure degrades, a later call in the run
+// that completes clears it, and the user's own abort is none.
+test("a run's last model call decides errored, and the call itself is never forwarded", { skip: !POSIX }, async (t) => {
+  const { outFile, plugin } = await renderPlugin(t);
+  const handlers = register(plugin, { config: { gateway: { port: 18789 } } });
+  const call = (runId, outcome, failureKind) =>
+    handlers.get("model_call_ended")({ runId, callId: "c", outcome, failureKind }, {});
+  call("down", "error");
+  call("down", "error", "connection_reset");
+  call("retried", "error");
+  call("retried", "completed");
+  call("aborted", "error", "aborted");
+  call("clean", "completed");
+  for (const runId of ["down", "retried", "aborted", "clean", "no-calls"]) {
+    handlers.get("agent_end")({ runId, sessionId: "s", success: true }, {});
+  }
+  const rows = await recorded(outFile, 5);
+  assert.deepEqual(
+    rows.map((r) => r.type),
+    Array(5).fill("agent_end"),
+    "model_call_ended must never reach the shim",
+  );
+  const errored = Object.fromEntries(rows.map((r) => [r.runId, r.errored]));
+  assert.deepEqual(errored, {
+    down: true,
+    retried: false,
+    aborted: false,
+    clean: false,
+    "no-calls": false,
+  });
+});
+
+test("a run's failure is its own, and agent_end forgets it", { skip: !POSIX }, async (t) => {
+  const { outFile, plugin } = await renderPlugin(t);
+  const handlers = register(plugin, { config: { gateway: { port: 18789 } } });
+  handlers.get("model_call_ended")({ runId: "a", outcome: "error" }, {});
+  // Shims finish in any order, so each end is told apart by its sessionId.
+  handlers.get("agent_end")({ runId: "b", sessionId: "b", success: true }, {});
+  handlers.get("agent_end")({ runId: "a", sessionId: "a-first", success: true }, {});
+  handlers.get("agent_end")({ runId: "a", sessionId: "a-again", success: true }, {});
+  const rows = await recorded(outFile, 3);
+  assert.deepEqual(Object.fromEntries(rows.map((r) => [r.sessionId, r.errored])), {
+    b: false,
+    "a-first": true,
+    "a-again": false,
+  });
+});
+
+test("the failed-call ledger is bounded, the least recently called run first", { skip: !POSIX }, async (t) => {
+  // A run upstream ends without `agent_end` never clears its entry.
+  const { module, outFile, plugin } = await renderPlugin(t);
+  const handlers = register(plugin, { config: { gateway: { port: 18789 } } });
+  const cap = module.MAX_TRACKED_RUNS;
+  assert.ok(Number.isInteger(cap) && cap > 0);
+  const failed = (runId) => handlers.get("model_call_ended")({ runId, outcome: "error" }, {});
+  for (let i = 0; i < cap; i++) failed(`r${i}`);
+  failed("r0"); // still calling: now the most recent
+  failed(`r${cap}`);
+  for (const runId of ["r0", "r1", "r2"]) {
+    handlers.get("agent_end")({ runId, success: true }, {});
+  }
+  const rows = await recorded(outFile, 3);
+  assert.deepEqual(
+    Object.fromEntries(rows.map((r) => [r.runId, r.errored])),
+    { r0: true, r1: false, r2: true },
+    "one past the cap evicts only the run whose last call is oldest",
+  );
 });

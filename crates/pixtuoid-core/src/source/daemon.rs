@@ -52,13 +52,14 @@ pub enum DaemonPresenceUpdate {
         /// Correlates this turn with its later `RunEnded`/`RunFailed`.
         run_key: String,
     },
-    /// `agent_end` with `success: true` — a turn completed OK.
+    /// A turn ended without a backend failure — completed, or cancelled by the
+    /// user.
     RunEnded {
         /// The completed turn's correlation key (matches its `RunStarted`).
         run_key: String,
     },
-    /// `agent_end` with `success: false` — a turn FAILED (the model backend is
-    /// broken: auth revoked, provider down). Drives `Degraded`.
+    /// A turn failed on the daemon's model backend (auth revoked, provider down).
+    /// Drives `Degraded`.
     RunFailed {
         /// The failed turn's correlation key (matches its `RunStarted`).
         run_key: String,
@@ -567,7 +568,7 @@ mod tests {
             assert_eq!(
                 st(&s, src),
                 DaemonState::Degraded,
-                "agent_end.success:false ⇒ degraded"
+                "a failed run ⇒ degraded"
             );
             assert!(
                 p(&s, src).in_flight_runs.is_empty(),
