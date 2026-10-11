@@ -689,13 +689,17 @@ fn agent_matching(pred: impl Fn(AgentId) -> bool) -> AgentId {
         .expect("id space should contain a matching agent")
 }
 
-/// Build an Idle slot whose SeatedThinking gate releases `hold_ms` into the
-/// Idle period.
-fn thinking_slot(id: AgentId, hold_ms: u64) -> AgentSlot {
+/// How long before its Idle period an agent's last event landed.
+const SETTLE_LAG_MS: u64 = 2_000;
+/// How far into the Idle period [`thinking_slot`]'s SeatedThinking gate releases.
+const RELEASE_MS: u64 = THINKING_WINDOW_SECS * 1000 - SETTLE_LAG_MS;
+
+/// Build an Idle slot whose SeatedThinking gate releases [`RELEASE_MS`] into
+/// the Idle period.
+fn thinking_slot(id: AgentId) -> AgentSlot {
     let (mut s, _) = slot(ActivityState::Idle, 0);
     s.agent_id = id;
-    s.last_event_at =
-        s.state_started_at - Duration::from_millis(THINKING_WINDOW_SECS * 1000 - hold_ms);
+    s.last_event_at = s.state_started_at - Duration::from_millis(SETTLE_LAG_MS);
     s
 }
 
@@ -705,15 +709,13 @@ fn thinking_gate_release_is_continuous_with_seated_thinking() {
     // landing PAST the cycle's seated phase would pop the agent straight from
     // SeatedThinking at the desk to mid-Walking in the corridor.
     let l = layout();
-    // Settle lag 2s → gate releases 18s into the Idle period.
-    let hold_ms = THINKING_WINDOW_SECS * 1000 - 2_000;
-    let id = agent_matching(|id| takes_trip(id, 0) && seated_dwell_ms(id) + 500 < hold_ms);
-    let s = thinking_slot(id, hold_ms);
+    let id = agent_matching(|id| takes_trip(id, 0) && seated_dwell_ms(id) + 500 < RELEASE_MS);
+    let s = thinking_slot(id);
 
-    let before = s.state_started_at + Duration::from_millis(hold_ms - 100);
+    let before = s.state_started_at + Duration::from_millis(RELEASE_MS - 100);
     assert_eq!(derive(&s, before, &l), Some(Pose::SeatedThinking));
 
-    let after = s.state_started_at + Duration::from_millis(hold_ms + 200);
+    let after = s.state_started_at + Duration::from_millis(RELEASE_MS + 200);
     assert_eq!(
         derive(&s, after, &l),
         Some(Pose::SeatedIdle),
@@ -726,9 +728,8 @@ fn walk_out_intact_when_gate_releases_during_the_seated_phase() {
     // A release inside the seated phase masked nothing, so the continuity guard
     // must not suppress this cycle's walk-out.
     let l = layout();
-    let hold_ms = THINKING_WINDOW_SECS * 1000 - 2_000;
-    let id = agent_matching(|id| takes_trip(id, 0) && seated_dwell_ms(id) > hold_ms + 1_000);
-    let s = thinking_slot(id, hold_ms);
+    let id = agent_matching(|id| takes_trip(id, 0) && seated_dwell_ms(id) > RELEASE_MS + 1_000);
+    let s = thinking_slot(id);
     let desk = l.home_desks[0];
 
     let mid_walk_out = seated_dwell_ms(id) + WANDER_WALK_EST_MS / 2;
@@ -745,11 +746,10 @@ fn walk_out_intact_when_gate_releases_during_the_seated_phase() {
 #[test]
 fn cycle_after_a_suppressed_release_walks_out_from_its_beginning() {
     let l = layout();
-    let hold_ms = THINKING_WINDOW_SECS * 1000 - 2_000;
     let id = agent_matching(|id| {
-        takes_trip(id, 0) && takes_trip(id, 1) && seated_dwell_ms(id) + 500 < hold_ms
+        takes_trip(id, 0) && takes_trip(id, 1) && seated_dwell_ms(id) + 500 < RELEASE_MS
     });
-    let s = thinking_slot(id, hold_ms);
+    let s = thinking_slot(id);
     let desk = l.home_desks[0];
 
     let cycle = est_wander_cycle_ms(id);
