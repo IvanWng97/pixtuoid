@@ -350,8 +350,8 @@ mod tests {
         assert!(!read(7, b"\x1b[0n").0.kitty);
     }
 
-    /// Typing and stray escapes around the replies are skipped (upstream's
-    /// garbage cases, ratatui-image 11.1.0 `cap_parser.rs:329-348`).
+    /// Typing and stray escapes around the replies are skipped (ratatui-image
+    /// 11.1.0's garbage cases, `cap_parser.rs:329-348`).
     #[test]
     fn garbage_around_the_replies_is_skipped() {
         assert_eq!(
@@ -414,53 +414,5 @@ mod tests {
                 assert!(!reader.feed(&[byte, byte]), "{prefix:?} {byte}");
             }
         }
-    }
-
-    /// Against upstream's parser over the replies above: the same answer,
-    /// except the cell-size reply led by another number, which upstream takes.
-    #[test]
-    fn reads_what_upstream_s_parser_reads() {
-        use ratatui_image::picker::cap_parser::{Parser, Response};
-        let upstream = |reply: &[u8]| {
-            let mut parser = Parser::new();
-            let mut answer = Answer::default();
-            for &byte in reply {
-                for response in parser.push(char::from(byte)) {
-                    match response {
-                        Response::Status => return (answer, true),
-                        Response::Kitty => answer.kitty = true,
-                        Response::Sixel => answer.sixel = true,
-                        Response::CellSize(Some((w, h))) => {
-                            answer.cell = answer.cell.or(Some(CellSize { w, h }));
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            (answer, false)
-        };
-        let replies: [&[u8]; 11] = [
-            KITTY_SIXEL_REPLY,
-            b"\x1b_Gi=31;OK\x1b\\\x1b[?64;4c\x1b[6;7;14t\x1b[6;6R\x1b[0n",
-            b"\x1bhonkey\x1btonkey\x1b[42\x1b\\",
-            b"\x1bgarbage...\x1b[?64;5c\x1b[0n",
-            b"\x1b[6;7;14t\x1bgarbage...\x1b[?64;5c\x1b[0n",
-            b"\x1b_Gi=31;EINVAL:bad\x1b\\\x1b[0n",
-            b"\x1b_Gi=7;OK\x1b\\\x1b[0n",
-            b"\x1b[?64;1;2;4;6;17;18;21;22;52c\x1b_Gi=31;OK\x1b\\\x1b[0n",
-            b"\x1b[6;0;17t\x1b[0n",
-            b"\x1b[0n\x1b[?62;4c",
-            b"",
-        ];
-        for reply in replies {
-            assert_eq!(read(31, reply), upstream(reply), "{reply:?}");
-        }
-        let window = b"\x1b[4;800;1200t\x1b[0n";
-        assert_eq!(read(31, window).0.cell, None);
-        assert_eq!(
-            upstream(window).0.cell,
-            Some(CellSize { w: 1200, h: 800 }),
-            "the one divergence"
-        );
     }
 }

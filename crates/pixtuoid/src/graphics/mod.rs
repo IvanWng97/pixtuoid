@@ -55,8 +55,8 @@ pub(crate) struct TileShape {
 /// How long each wait of the capability probe may take: the query start to
 /// finish, and, inside tmux, the `allow-passthrough` read before it.
 ///
-/// The query ends with a device-status request (ratatui-image 11.1.0
-/// `cap_parser.rs:157-159`), so a terminal that answers ends the wait the
+/// The query ends with a device-status request ([`wire::ask`]), so a
+/// terminal that answers ends the wait the
 /// moment its reply is complete; the budget is only spent where no reply comes
 /// (a hidden tmux pane refusing passthrough), which is why it can outlast
 /// [`crate::term::TRUECOLOR_PROBE_TIMEOUT`], whose query has no such
@@ -288,8 +288,8 @@ pub(crate) enum ClassicReason {
     NoCellSize,
     /// Inside tmux, with a protocol other than kitty.
     ///
-    /// SIXEL and iTerm2, as ratatui-image sends them inside tmux, ride tmux's
-    /// passthrough (tmux(1), `allow-passthrough`), which bypasses tmux: tmux
+    /// SIXEL and iTerm2 reach the terminal from inside tmux only through
+    /// tmux's passthrough (tmux(1), `allow-passthrough`), which bypasses tmux: tmux
     /// never holds the image, so a pane or window switch redraws the pane
     /// without it. kitty's Unicode placeholders are ordinary cells tmux stores
     /// and redraws.
@@ -381,8 +381,8 @@ impl TermEnv {
     }
 
     /// Inside tmux: a tmux client (`$TMUX`), or the `TERM`/`TERM_PROGRAM` test
-    /// upstream wraps every image on (ratatui-image 11.1.0
-    /// `picker.rs:341-347`, which a tmux `TERM` carried over ssh also passes).
+    /// ratatui-image 11.1.0 wraps every image on (`picker.rs:341-347`), which
+    /// a tmux `TERM` carried over ssh also passes.
     fn tmux(&self) -> bool {
         self.tmux_client
             || self.term.as_deref().is_some_and(|t| t.starts_with("tmux"))
@@ -464,7 +464,7 @@ pub(crate) struct Detected {
 pub(crate) enum Probe {
     /// What the terminal's reply and the environment established — the
     /// environment alone where the reply never completed but the environment
-    /// names a protocol, as upstream falls back (see [`probe()`]).
+    /// names a protocol, as ratatui-image falls back (see [`probe()`]).
     #[cfg_attr(
         all(not(all(feature = "graphics", unix)), not(test)),
         expect(dead_code, reason = "only the Unix graphics probe returns it")
@@ -678,9 +678,8 @@ pub(crate) fn terminal_cells() -> TermSize {
         .unwrap_or_default()
 }
 
-/// Without the `graphics` feature there is no probe, and off Unix the only one
-/// is upstream's, whose detached reader outlives its timeout and would steal
-/// the TUI's keys (ratatui-image 11.1.0 `picker.rs:606-643`), so nothing asks.
+/// Without the `graphics` feature, or off Unix, where
+/// [`crate::term::query_tty`] has no counterpart, nothing asks.
 #[cfg(not(all(feature = "graphics", unix)))]
 pub(crate) fn probe(_ask: bool) -> Probe {
     Probe::Unsupported

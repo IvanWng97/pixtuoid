@@ -24,25 +24,16 @@ pixtuoid-core  = { path = "../pixtuoid-core", version = "0.19.0" }
 pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.19.0" }
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
 ratatui            = { workspace = true }
-# Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway profile — only its
-# terminal query (`picker::cap_parser` and the `picker::ProtocolType` it
-# filters by): the capability and cell-size query, the reply parser, and tmux's
-# passthrough wrapping; the encoders are ours (`src/graphics/`). In the ratatui
-# org, so it tracks ratatui's own releases. `default-features = false` is
-# LOAD-BEARING: the default set turns on `chafa-dyn`, which dynamically links
-# libchafa.so and needs it at RUNTIME too — that would break the musl/cross
-# Linux prebuilds exactly the way ALSA already does (see the `audio` feature).
-# Its sixel backend is `icy_sixel`, pure Rust, so the trimmed set has no C dep.
-ratatui-image      = { version = "11", default-features = false, features = ["crossterm"], optional = true }
-# The kitty encoder's base64: ratatui-image's own, so no second crate.
+# The base64 of kitty's transmits and of the probe's shm query.
 base64-simd        = { version = "0.8", optional = true }
-# iTerm2's PNG and kitty's zlib: what ratatui-image's `image` already builds.
+# iTerm2's PNG.
 png                = { version = "0.18", optional = true }
 # SIXEL's per-tile palette map, hot in its encode.
 foldhash           = { workspace = true, optional = true }
 # SIXEL's numbers, written a run at a time without `core::fmt`'s machinery.
 # Already in the graph through ratatui-core's compact_str.
 itoa               = { version = "1", optional = true }
+# kitty's zlib: png's own copy, so no second crate.
 miniz_oxide        = { version = "0.8", optional = true }
 # `event-stream`: the TUI loop awaits input beside its frame clock and signals.
 crossterm          = { workspace = true, features = ["event-stream"] }
@@ -115,7 +106,7 @@ audio = ["dep:rodio"]
 # transitive crates reaches `cargo install` and homebrew-core's from-source
 # build. Off is a build whose `doctor` says it cannot ask
 # (`ClassicReason::Unsupported`) and whose runs paint classic.
-graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide", "dep:foldhash", "dep:itoa", "dep:rustix"]
+graphics = ["dep:base64-simd", "dep:png", "dep:miniz_oxide", "dep:foldhash", "dep:itoa", "dep:rustix"]
 
 # termios/select for `term::query_tty` (the truecolor and graphics probes),
 # O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs.

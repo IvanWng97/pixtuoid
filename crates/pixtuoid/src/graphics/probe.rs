@@ -239,8 +239,8 @@ fn detected(answer: &Answer, hints: &EnvHints, window_cell: Option<CellSize>) ->
 }
 
 /// A terminal whose reply never completed is still the protocol the
-/// environment names, as upstream falls back when its query goes unanswered
-/// (ratatui-image 11.1.0 `picker.rs:156-166`); with nothing named, it is
+/// environment names, as ratatui-image 11.1.0 falls back when its query goes
+/// unanswered (`picker.rs:156-166`); with nothing named, it is
 /// [`Probe::NoAnswer`].
 fn unanswered(hints: &EnvHints, window_cell: Option<CellSize>) -> Probe {
     let d = detected(&Answer::default(), hints, window_cell);
@@ -412,49 +412,29 @@ mod tests {
         assert_eq!((d.protocol, d.cell), (Some(ImageProtocol::Sixel), window));
     }
 
-    /// Against upstream's query for every terminal row, in and out of tmux.
+    /// Each terminal is asked for what it animates with: kitty's query, the
+    /// attributes that list SIXEL, both, or neither.
     #[test]
-    fn the_query_is_upstream_s() {
-        use ratatui_image::picker::ProtocolType;
-        use ratatui_image::picker::cap_parser::{Parser, QueryStdioOptions};
-        let upstream = |hints: &EnvHints| {
-            let animates = hints.terminal().animates();
-            let asked = |t: ProtocolType| {
-                animates.iter().any(|p| {
-                    p.asks()
-                        == Some(match t {
-                            ProtocolType::Kitty => KITTY_QUERY,
-                            _ => Question::Attributes,
-                        })
-                })
-            };
-            Parser::query(
-                hints.env.tmux(),
-                QueryStdioOptions {
-                    blacklist_protocols: [ProtocolType::Kitty, ProtocolType::Sixel]
-                        .into_iter()
-                        .filter(|t| !asked(*t))
-                        .collect(),
-                    ..QueryStdioOptions::default()
-                },
-            )
+    fn each_terminal_is_asked_for_what_it_animates_with() {
+        let asks = |h: &EnvHints| {
+            let query = h.query();
+            (query.contains("_Gi="), query.contains("[c"))
         };
-        let rows = [
-            hints("xterm-kitty", ""),
-            hints("xterm-256color", "iTerm.app"),
-            hints("xterm-256color", "WarpTerminal"),
-            hints("xterm-256color", "WezTerm"),
-            EnvHints {
-                konsole: true,
-                ..hints("xterm-256color", "")
-            },
-            hints("xterm-256color", "vscode"),
-            hints("xterm-256color", "mintty"),
-        ];
-        for row in rows {
-            assert_eq!(row.query(), upstream(&row), "{row:?}");
-            let tmux = client(row);
-            assert_eq!(tmux.query(), upstream(&tmux), "{tmux:?}");
+        let konsole = EnvHints {
+            konsole: true,
+            ..hints("xterm-256color", "")
+        };
+        for (row, want) in [
+            (hints("xterm-kitty", ""), (true, true)),
+            (hints("xterm-256color", "iTerm.app"), (true, true)),
+            (hints("xterm-256color", "mintty"), (true, true)),
+            (hints("xterm-256color", "vscode"), (false, true)),
+            (hints("xterm-256color", "WarpTerminal"), (false, false)),
+            (hints("xterm-256color", "WezTerm"), (false, false)),
+            (konsole, (false, false)),
+        ] {
+            assert_eq!(asks(&row), want, "{row:?}");
+            assert_eq!(asks(&client(row.clone())), want, "{row:?} in tmux");
         }
     }
 
