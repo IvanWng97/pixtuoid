@@ -52,7 +52,9 @@ jobs:
           tool: cargo-deny
       - uses: ./.github/actions/setup-just
       - run: just deny
-      - run: just arch
+      # Both verdicts show: a red deny must not hide arch.
+      - if: ${{ !cancelled() }}
+        run: just arch
       - uses: ./.github/actions/path-changed
         id: lockfile
         with:

@@ -1,15 +1,16 @@
 # Architecture invariant #1 (AGENTS.md): pixtuoid-core and pixtuoid-scene
-# depend only on the crates below, so a terminal, window or audio-device
-# crate fails until someone adds it here, with its reason in the PR. `just arch`
-# runs this against those two crates alone: `exclude` drops the rest of the
-# workspace, and `all-features` plus every target holds each dep any feature or
+# depend only on the crates below: any other crate fails until a PR lists it
+# here with its reason, and a terminal, window or audio-device crate is never
+# listed. `just arch` runs this against those two crates alone: `exclude` drops
+# the binary and the web painter, which depend on scene (an edge back would be
+# a cycle cargo refuses), and `all-features` plus every target holds each dep any feature or
 # platform can pull. An entry nothing uses is not reported, so the list can
 # outgrow the set.
 
 [graph]
 all-features = true
 exclude-dev = true
-exclude = ["pixtuoid", "pixtuoid-hook", "pixtuoid-web"]
+exclude = ["pixtuoid", "pixtuoid-web"]
 
 [bans]
 multiple-versions = "allow"
@@ -114,7 +115,7 @@ allow = [
     "windows_x86_64_msvc",
     "winnow",
     "zmij",
-    # Build time only: cargo-deny cannot tell a build edge from a normal one.
+    # Build time only: `[graph]` drops dev edges but not build ones.
     "autocfg",
     "cc",
     "find-msvc-tools",

@@ -250,7 +250,7 @@ deny-advisories:
     cargo deny check advisories
 
 # Architecture invariant #1, mechanized: pixtuoid-core + pixtuoid-scene depend
-# on exactly the crates deny-arch.toml lists.
+# on only the crates deny-arch.toml lists.
 [group('rust')]
 arch:
     #!/usr/bin/env bash
@@ -261,9 +261,8 @@ arch:
     # unseen, as a denylist's omission does. deny-arch.toml says how it sees
     # every feature and target, the point a bare `cargo tree` misses.
     cargo deny --config deny-arch.toml check bans
-    # A gate that cannot fail is no gate (an empty `allow` permits everything),
-    # and windows-sys, core's cfg(windows) dependency, proves the graph spans
-    # targets: the same list minus it must fail.
+    # An empty `allow` permits everything, and windows-sys, core's cfg(windows)
+    # dependency, proves the graph spans targets: the same list minus it must fail.
     trimmed="$(mktemp)"
     trap 'rm -f "$trimmed"' EXIT
     grep -v '^    "windows-sys",$' deny-arch.toml >"$trimmed"
