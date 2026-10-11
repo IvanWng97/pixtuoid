@@ -423,9 +423,10 @@ step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
    `cargo insta review`.
 7. **Wire it into `runtime/driver.rs::build_source_set`** (the one
    construction site; the registry drives the guard test, not the spawning).
-8. **If the CLI has hooks**, add an `install/` target (a `Target` row +
-   `merge_install`/`merge_uninstall` + a `verify_schema` fn mirroring the
-   target's own config format + the registered-events↔decoder-arms guard).
+8. **If the CLI has hooks**, add an `install/` target: a `Target` row whose
+   `Primary` is either the CLI's config (`merge_install`/`merge_uninstall` + a
+   `verify_schema` fn mirroring its format) or a plugin file pixtuoid owns
+   whole, plus the registered-events↔decoder-arms guard.
 9. **Add a row to `site/src/sources.json`** (`status`, per-OS `platforms`), then `just gen-readme`. Pinned to `registered_source_names()`
    by `supported_sources_manifest.rs`.
 10. **Add the per-source badge hue** — a `SourceColors` field + value in EVERY

@@ -1,8 +1,8 @@
 use super::*;
-use crate::install::target::{CLAUDE, CODEX, MergeOutcome, OPENCLAW, Target};
+use crate::install::target::{CLAUDE, CODEX, MergeOutcome, OPENCLAW, Primary, Target};
 
-/// Claude's hooks-file merge without its plugin registration or presence probe,
-/// for the tests of the config-write path itself.
+/// Claude's owned hooks file without its plugin registration or presence probe,
+/// for the tests of the primary-write path itself.
 const CLAUDE_FILE: Target = Target {
     host: None,
     presence_probe: None,
@@ -15,22 +15,24 @@ static FAKE: Target = Target {
     display_name: "Fake",
     default_config_path: || Ok(std::path::PathBuf::from("/nonexistent/fake")),
     hook_command: |_, _| Ok("x".into()),
-    merge_install: |c, _| {
-        Ok(MergeOutcome {
-            content: c.to_string(),
-            changed: false,
-        })
+    primary: Primary::Config {
+        merge_install: |c, _| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        merge_uninstall: |c| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
+        beside: None,
     },
-    merge_uninstall: |c| {
-        Ok(MergeOutcome {
-            content: c.to_string(),
-            changed: false,
-        })
-    },
-    verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
-    extra_artifacts: None,
     post_install_hint: None,
     host: None,
 };
@@ -53,22 +55,24 @@ static FAKE2: Target = Target {
     display_name: "Fake2",
     default_config_path: || Ok(fake2_config_path()),
     hook_command: |_, _| Ok("x".into()),
-    merge_install: |c, _| {
-        Ok(MergeOutcome {
-            content: c.to_string(),
-            changed: false,
-        })
+    primary: Primary::Config {
+        merge_install: |c, _| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        merge_uninstall: |c| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: !c.trim().is_empty(),
+            })
+        },
+        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
+        beside: None,
     },
-    merge_uninstall: |c| {
-        Ok(MergeOutcome {
-            content: c.to_string(),
-            changed: !c.trim().is_empty(),
-        })
-    },
-    verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
-    extra_artifacts: None,
     post_install_hint: None,
     host: None,
 };
@@ -80,22 +84,24 @@ static FAKE_DIR: Target = Target {
     display_name: "FakeDir",
     default_config_path: || Ok(fake_dir_config_path()),
     hook_command: |_, _| Ok("x".into()),
-    merge_install: |c, _| {
-        Ok(MergeOutcome {
-            content: c.to_string(),
-            changed: false,
-        })
+    primary: Primary::Config {
+        merge_install: |c, _| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        merge_uninstall: |c| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
+        beside: None,
     },
-    merge_uninstall: |c| {
-        Ok(MergeOutcome {
-            content: c.to_string(),
-            changed: false,
-        })
-    },
-    verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
-    extra_artifacts: None,
     post_install_hint: None,
     host: None,
 };
@@ -107,25 +113,35 @@ static FAKE_NO_HOME: Target = Target {
     display_name: "FakeNoHome",
     default_config_path: || Err(anyhow::anyhow!("no home dir")),
     hook_command: |_, _| Ok("x".into()),
-    merge_install: |c, _| {
-        Ok(MergeOutcome {
-            content: c.to_string(),
-            changed: false,
-        })
+    primary: Primary::Config {
+        merge_install: |c, _| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        merge_uninstall: |c| {
+            Ok(MergeOutcome {
+                content: c.to_string(),
+                changed: false,
+            })
+        },
+        verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
+        beside: None,
     },
-    merge_uninstall: |c| {
-        Ok(MergeOutcome {
-            content: c.to_string(),
-            changed: false,
-        })
-    },
-    verify_schema: |_| crate::install::verify::SchemaParse::broken("test fake"),
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: None,
-    extra_artifacts: None,
     post_install_hint: None,
     host: None,
 };
+
+/// The files a target owns beside its config, `None` for every other target.
+fn beside_of(t: &Target) -> Option<target::RenderBeside> {
+    match t.primary {
+        Primary::Config { beside, .. } => beside,
+        Primary::Owned { .. } => None,
+    }
+}
 
 /// `/x/hook` is DRIVE-RELATIVE on Windows, where the absolutization rewrites it.
 fn abs_fixture(unix: &str, windows: &str) -> PathBuf {
@@ -380,16 +396,24 @@ fn install_target_reports_installed_then_up_to_date() {
     )
     .unwrap();
     assert!(matches!(r2.outcome, InstallOutcome::AlreadyUpToDate));
-    // A semantic no-op never rewrites: a hand-formatted file keeps its bytes.
-    let formatted = std::fs::read_to_string(&cfg).unwrap().replace("\n", "\n\n");
-    std::fs::write(&cfg, &formatted).unwrap();
-    install_target_from(
-        &CLAUDE_FILE,
-        Some(cfg.clone()),
-        Some(PathBuf::from("/fake/pixtuoid-hook")),
-    )
-    .unwrap();
-    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), formatted);
+    // A semantic no-op never rewrites a merged config: a hand-formatted file keeps
+    // its bytes. An owned primary is ours whole, so the property is a merge's.
+    let merged = tmp.path().join("hooks.json");
+    let cursor = || {
+        install_target_from(
+            &crate::install::target::CURSOR,
+            Some(merged.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap()
+    };
+    cursor();
+    let formatted = std::fs::read_to_string(&merged)
+        .unwrap()
+        .replace("\n", "\n\n");
+    std::fs::write(&merged, &formatted).unwrap();
+    cursor();
+    assert_eq!(std::fs::read_to_string(&merged).unwrap(), formatted);
 }
 
 #[test]
@@ -608,8 +632,8 @@ fn install_on_a_malformed_config_errors_without_rewriting() {
 }
 
 #[test]
-fn install_on_a_malformed_config_leaves_no_orphan_extra_artifacts() {
-    // A present-but-malformed config must bail BEFORE the extra artifacts are
+fn install_on_a_malformed_config_leaves_no_orphan_beside_files() {
+    // A present-but-malformed config must bail BEFORE the files beside it are
     // written, else a partial install strands orphan plugin files.
     let oc_home = tempfile::TempDir::new().unwrap();
     let dsh_home = tempfile::TempDir::new().unwrap();
@@ -744,11 +768,11 @@ fn verify_target_flags_a_non_executable_shim() {
 
 // INVARIANT (#387): a config can verify clean while the plugin FILES the runtime
 // actually loads are missing or clobbered — the silent-dead class doctor exists
-// to catch. Loops EVERY `extra_artifacts` target, and deletes the artifacts each
-// target itself declares, so a new code-shipping path in `install_target` with
+// to catch. Loops EVERY target with files `beside` its config and deletes each
+// one, so a new code-shipping path in `install_target` with
 // no matching check in `verify_target` fails here.
 #[test]
-fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_target() {
+fn verify_target_hard_flags_a_missing_beside_file_for_every_beside_target() {
     let oc_home = tempfile::TempDir::new().unwrap();
     let dsh_home = tempfile::TempDir::new().unwrap();
     temp_env::with_vars(
@@ -760,7 +784,7 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
             let exe = std::env::current_exe().unwrap();
             let mut covered = 0;
             for &t in target::TARGETS {
-                let Some(make) = t.extra_artifacts else {
+                let Some(make) = beside_of(t) else {
                     continue;
                 };
                 let tmp = tempfile::TempDir::new().unwrap();
@@ -771,7 +795,7 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
                     "{}: a fresh install must verify sound",
                     t.name
                 );
-                for (p, _) in make(&exe).unwrap() {
+                for (p, _) in make(exe.to_str().unwrap()).unwrap() {
                     let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
                 }
                 let v = verify_target(t, Some(cfg));
@@ -791,7 +815,7 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
             }
             assert!(
                 covered >= 1,
-                "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
+                "expected at least one target with files `beside` its config (OpenClaw, dsh) — did the registry change?"
             );
         },
     );
@@ -802,7 +826,7 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
 /// `package.json` predated the upgrade got existence-only checking and a green
 /// doctor — the silent-dead class, one artifact short of the invariant.
 #[test]
-fn verify_target_flags_code_drift_and_not_comment_drift_in_every_extra_artifacts_target() {
+fn verify_target_flags_code_drift_and_not_comment_drift_in_every_beside_target() {
     let oc_home = tempfile::TempDir::new().unwrap();
     let dsh_home = tempfile::TempDir::new().unwrap();
     temp_env::with_vars(
@@ -814,14 +838,14 @@ fn verify_target_flags_code_drift_and_not_comment_drift_in_every_extra_artifacts
             let exe = std::env::current_exe().unwrap();
             let mut covered = 0;
             for &t in target::TARGETS {
-                let Some(make) = t.extra_artifacts else {
+                let Some(make) = beside_of(t) else {
                     continue;
                 };
-                for (idx, _) in make(&exe).unwrap().iter().enumerate() {
+                for (idx, _) in make(exe.to_str().unwrap()).unwrap().iter().enumerate() {
                     let tmp = tempfile::TempDir::new().unwrap();
                     let cfg = tmp.path().join("config");
                     install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
-                    let (p, _) = make(&exe).unwrap().swap_remove(idx);
+                    let (p, _) = make(exe.to_str().unwrap()).unwrap().swap_remove(idx);
                     let body = std::fs::read_to_string(&p).unwrap();
                     std::fs::write(&p, comment_only_edit(&body)).unwrap();
                     let v = verify_target(t, Some(cfg.clone()));
@@ -988,7 +1012,7 @@ fn same_dir_artifact_misses_collapse_to_one_short_line_scattered_ones_do_not() {
 #[test]
 fn no_targets_uninstall_merge_claims_a_change_on_an_empty_config() {
     for t in crate::install::target::TARGETS {
-        let changed = (t.merge_uninstall)("").map(|o| o.changed);
+        let changed = (t.primary.uninstall())("").map(|o| o.changed);
         assert!(
             matches!(changed, Ok(false)),
             "{}: an empty config bears no hooks to remove — got {changed:?}",
@@ -1002,7 +1026,7 @@ fn no_targets_uninstall_merge_claims_a_change_on_an_empty_config() {
 // points at a binary that moved. The plugin swallows spawn errors by design, so
 // the mascot never appears while doctor reports the source healthy.
 #[test]
-fn verify_target_hard_flags_a_moved_baked_shim_for_every_extra_artifacts_target() {
+fn verify_target_hard_flags_a_moved_baked_shim_for_every_beside_target() {
     let oc_home = tempfile::TempDir::new().unwrap();
     let dsh_home = tempfile::TempDir::new().unwrap();
     temp_env::with_vars(
@@ -1013,7 +1037,7 @@ fn verify_target_hard_flags_a_moved_baked_shim_for_every_extra_artifacts_target(
         || {
             let mut covered = 0;
             for &t in target::TARGETS {
-                if t.extra_artifacts.is_none() {
+                if beside_of(t).is_none() {
                     continue;
                 }
                 let shim_dir = tempfile::TempDir::new().unwrap();
@@ -1040,14 +1064,14 @@ fn verify_target_hard_flags_a_moved_baked_shim_for_every_extra_artifacts_target(
             }
             assert!(
                 covered >= 1,
-                "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
+                "expected at least one target with files `beside` its config (OpenClaw, dsh) — did the registry change?"
             );
         },
     );
 }
 
 #[test]
-fn reinstall_heals_a_deleted_extra_artifact_even_on_a_config_no_op() {
+fn reinstall_heals_a_deleted_beside_file_even_on_a_config_no_op() {
     let oc_home = tempfile::TempDir::new().unwrap();
     let dsh_home = tempfile::TempDir::new().unwrap();
     temp_env::with_vars(
@@ -1059,14 +1083,18 @@ fn reinstall_heals_a_deleted_extra_artifact_even_on_a_config_no_op() {
             let exe = std::env::current_exe().unwrap();
             let mut covered = 0;
             for &t in target::TARGETS {
-                let Some(make) = t.extra_artifacts else {
+                let Some(make) = beside_of(t) else {
                     continue;
                 };
                 let tmp = tempfile::TempDir::new().unwrap();
                 let cfg = tmp.path().join("config");
                 install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
 
-                let (victim, want) = make(&exe).unwrap().into_iter().next().unwrap();
+                let (victim, want) = make(exe.to_str().unwrap())
+                    .unwrap()
+                    .into_iter()
+                    .next()
+                    .unwrap();
                 std::fs::remove_file(&victim).unwrap();
                 assert!(
                     !victim.exists(),
@@ -1074,14 +1102,14 @@ fn reinstall_heals_a_deleted_extra_artifact_even_on_a_config_no_op() {
                     t.name
                 );
 
-                let r = install_target_from(t, Some(cfg), Some(exe.clone())).unwrap();
+                let r = install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
                 assert!(
                     matches!(r.outcome, InstallOutcome::AlreadyUpToDate),
                     "{}: config already current — the heal must fire despite the no-op",
                     t.name
                 );
-                // The artifact write runs BEFORE the `!changed` early-return; moving it
-                // after would leave the deleted file gone.
+                // `write_beside` is not gated on the primary's `changed`; gating it would
+                // leave a deleted file gone on a no-op re-install.
                 assert!(
                     victim.exists(),
                     "{}: a no-op re-install must re-create the deleted plugin file",
@@ -1093,11 +1121,28 @@ fn reinstall_heals_a_deleted_extra_artifact_even_on_a_config_no_op() {
                     "{}: the healed artifact must carry the correct baked content",
                     t.name
                 );
+
+                std::fs::write(&victim, format!("{want}\n")).unwrap();
+                install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+                assert_eq!(
+                    std::fs::read_to_string(&victim).unwrap(),
+                    want,
+                    "{}: a re-install must refresh a drifted plugin file",
+                    t.name
+                );
+                let stamp = write_stamp(&victim);
+                install_target_from(t, Some(cfg), Some(exe.clone())).unwrap();
+                assert_eq!(
+                    write_stamp(&victim),
+                    stamp,
+                    "{}: a re-install must not rewrite an identical plugin file",
+                    t.name
+                );
                 covered += 1;
             }
             assert!(
                 covered >= 1,
-                "expected at least one extra_artifacts target (OpenClaw) — did the registry change?"
+                "expected at least one target with files `beside` its config (OpenClaw, dsh) — did the registry change?"
             );
         },
     );
@@ -1135,7 +1180,7 @@ fn a_disconnected_source_is_gated_out_of_the_broken_check() {
     uninstall_target(&CLAUDE_FILE, Some(cfg.clone())).unwrap();
     let content = io::read_config(&cfg).unwrap();
     assert!(
-        !(CLAUDE.merge_uninstall)(&content).unwrap().changed,
+        !(CLAUDE.primary.uninstall())(&content).unwrap().changed,
         "uninstalled config must report no managed hooks (the has_hooks gate)"
     );
     assert!(
@@ -1169,7 +1214,7 @@ fn verify_target_flags_codewhale_disabled() {
 fn json_value_equality_ignores_key_order_under_preserve_order() {
     // `preserve_order` swaps serde_json's `Map` to IndexMap so a merge re-emits the
     // user's key order. `Value: PartialEq` must therefore stay order-INDEPENDENT:
-    // every target's `changed` flag is a semantic diff, so order-SENSITIVE equality
+    // every Config target's `changed` flag is a semantic diff, so order-SENSITIVE equality
     // would report `changed` for a mere re-order — rewriting the file and
     // flipping `has_hooks` on every single connect.
     let a: serde_json::Value = serde_json::from_str(r#"{"b":1,"a":{"y":2,"x":3}}"#).unwrap();
@@ -1606,5 +1651,69 @@ fn claude_uninstall_leaves_no_live_hooks_when_deregistering_fails() {
         install_target_from(&CLAUDE, Some(hooks.clone()), hook).unwrap();
         assert!(uninstall_target(&CLAUDE, Some(hooks.clone())).is_err());
         assert!(!has_hooks(&CLAUDE, Some(hooks)), "the plugin is left inert");
+    });
+}
+
+/// `(inode, mtime)` on Unix, `mtime` elsewhere: what a rewrite always changes.
+fn write_stamp(p: &std::path::Path) -> (u64, std::time::SystemTime) {
+    let m = std::fs::metadata(p).unwrap();
+    #[cfg(unix)]
+    let ino = std::os::unix::fs::MetadataExt::ino(&m);
+    #[cfg(not(unix))]
+    let ino = 0;
+    (ino, m.modified().unwrap())
+}
+
+/// An older pixtuoid's hooks.json, two registrations short, is rewritten whole by a
+/// re-install: the owned primary is compared with this binary's render, not merged.
+#[test]
+fn reinstall_adds_newly_registered_events_to_an_older_claude_hooks_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cfg = tmp.path().join("hooks.json");
+    let hook = || Some(PathBuf::from("/fake/pixtuoid-hook"));
+    install_target_from(&CLAUDE_FILE, Some(cfg.clone()), hook()).unwrap();
+    let mut older: serde_json::Value =
+        serde_json::from_str(&io::read_config(&cfg).unwrap()).unwrap();
+    for ev in ["SubagentStart", "SubagentStop"] {
+        older["hooks"].as_object_mut().unwrap().remove(ev);
+    }
+    std::fs::write(&cfg, serde_json::to_string_pretty(&older).unwrap()).unwrap();
+
+    let r = install_target_from(&CLAUDE_FILE, Some(cfg.clone()), hook()).unwrap();
+    assert!(matches!(r.outcome, InstallOutcome::Installed));
+    let v: serde_json::Value = serde_json::from_str(&io::read_config(&cfg).unwrap()).unwrap();
+    for ev in crate::install::claude::EVENTS {
+        assert!(
+            v["hooks"][*ev][0]["hooks"][0]["command"].is_string(),
+            "event {ev} must be installed after the upgrade re-run"
+        );
+    }
+}
+
+/// A moved shim is re-baked into every owned primary: its re-install compares the
+/// file with this binary's render at the new path, never a sentinel.
+#[test]
+fn reinstall_re_bakes_a_moved_shim_into_every_owned_primary() {
+    with_fake_claude(|_| {
+        let mut covered = 0;
+        for &t in target::TARGETS {
+            let Primary::Owned { render, .. } = t.primary else {
+                continue;
+            };
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = plugin_hooks_path(tmp.path());
+            let moved = abs_fixture("/opt/b/pixtuoid-hook", r"C:\b\pixtuoid-hook.exe");
+            let first = abs_fixture("/opt/a/pixtuoid-hook", r"C:\a\pixtuoid-hook.exe");
+            install_target_from(t, Some(cfg.clone()), Some(first)).unwrap();
+            let r = install_target_from(t, Some(cfg.clone()), Some(moved.clone())).unwrap();
+            assert!(matches!(r.outcome, InstallOutcome::Installed), "{}", t.name);
+            let want = render(&(t.hook_command)(&moved, true).unwrap()).unwrap();
+            assert_eq!(io::read_config(&cfg).unwrap(), want, "{}", t.name);
+            covered += 1;
+        }
+        assert!(
+            covered > 0,
+            "no target owns its primary — did the registry change?"
+        );
     });
 }

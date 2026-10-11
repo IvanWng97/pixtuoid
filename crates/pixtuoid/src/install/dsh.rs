@@ -71,12 +71,9 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::merge::hook_path_str(resolved).map(str::to_string)
 }
 
-/// The `extra_artifacts` hook: the plugin file, shim path baked, rewritten
-/// verbatim on every (re)install.
-pub(crate) fn plugin_artifacts(hook_path: &Path) -> Result<Vec<(PathBuf, String)>> {
-    let hook = crate::install::merge::hook_path_str(hook_path)?;
+pub(crate) fn plugin_artifacts(hook_path: &str) -> Result<Vec<(PathBuf, String)>> {
     let rendered =
-        crate::install::merge::bake_hook_path(PLUGIN_TEMPLATE, HOOK_PLACEHOLDER, hook, "dsh")?;
+        crate::install::merge::bake_hook_path(PLUGIN_TEMPLATE, HOOK_PLACEHOLDER, hook_path, "dsh")?;
     Ok(vec![(plugin_path()?, rendered)])
 }
 
@@ -274,7 +271,7 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 
 /// The patch file carries the MOUNT, not the shim (that is baked inside the
 /// plugin file) — so `shim` stays `Unknown` here; a missing plugin file is
-/// `verify_extra_artifacts`' existence check and a stale one its code compare
+/// `verify_beside`'s existence check and a stale one its code compare
 /// (`plugin_code_differs`; nothing re-installs on a pixtuoid upgrade). The schema's own,
 /// stat-free half is the row-vs-home path match below.
 pub(crate) fn verify_schema(content: &str) -> SchemaParse {
@@ -310,9 +307,9 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
             });
             match name {
                 // PURE over the content (`target.rs` schema contract): file
-                // existence/staleness is `verify_extra_artifacts`' stat +
+                // existence/staleness is `verify_beside`'s stat +
                 // code compare, never checked here. The HOME match is
-                // this check's own: the artifact loop stats only the path
+                // this check's own: `verify_beside` stats only the path
                 // derived from the current `$DSH_HOME`, so a row carried
                 // over from a relocated home would verify green while dsh
                 // imports a path that is gone.
@@ -591,8 +588,8 @@ mod tests {
 
             // The plugin file does not exist on disk, yet the schema reads
             // clean: verify_schema is PURE over the content — a missing file is
-            // `verify_extra_artifacts`' finding, pinned by the shared
-            // missing-code-artifact test in `install/tests.rs`.
+            // `verify_beside`'s finding, pinned by the shared
+            // missing-beside-file test in `install/tests.rs`.
             let merged = merge_install("", "/unused").unwrap();
             let ok = verify_schema(&merged.content);
             assert!(ok.issues.is_empty(), "{ok:?}");
@@ -656,7 +653,7 @@ mod tests {
     fn plugin_artifacts_bake_the_hook_path_and_carry_the_sentinel() {
         let home = tempfile::tempdir().unwrap();
         temp_env::with_var("DSH_HOME", Some(home.path()), || {
-            let arts = plugin_artifacts(Path::new("/opt/bin/pixtuoid-hook")).unwrap();
+            let arts = plugin_artifacts("/opt/bin/pixtuoid-hook").unwrap();
             assert_eq!(arts.len(), 1);
             let (path, content) = &arts[0];
             assert!(path.starts_with(home.path()));

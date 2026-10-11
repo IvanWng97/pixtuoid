@@ -22,7 +22,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 
-use target::{BinaryStrategy, Target};
+use target::{BinaryStrategy, Primary, Target};
 
 /// The idempotency sentinel stamped on every hook entry pixtuoid merges into a
 /// shared config — those targets key install/uninstall/detect on this, not the
@@ -45,8 +45,8 @@ pub(crate) fn has_hooks(t: &'static Target, config: Option<PathBuf>) -> bool {
     };
     match io::read_config(&path) {
         Ok(c) if c.trim().is_empty() => false,
-        // A merge that ERRS means "we could not tell" — never "installed".
-        Ok(c) => (t.merge_uninstall)(&c)
+        // An uninstall that ERRS means "we could not tell" — never "installed".
+        Ok(c) => (t.primary.uninstall())(&c)
             .map(|o| o.changed)
             .unwrap_or_else(|_| config_mentions_us(&c)),
         Err(_) => true,
@@ -66,7 +66,7 @@ fn config_mentions_us(content: &str) -> bool {
 
 /// Verify a target's installed config is structurally SOUND (the silent-dead check) —
 /// read-only, false-positive-free. Call only when hooks are claimed installed
-/// (`has_hooks(t, config)`, same `config`). Returns the per-source `verify_schema`
+/// (`has_hooks(t, config)`, same `config`). Returns the primary's per-source verify
 /// verdict PLUS the shim-on-disk checks this (the only I/O) layer adds. `config`
 /// overrides the default path; `None` = the target's default.
 pub(crate) fn verify_target(
@@ -98,7 +98,7 @@ pub(crate) fn verify_target(
             };
         }
     };
-    let parse = (t.verify_schema)(&content);
+    let parse = (t.primary.verify())(&content);
     let mut issues = parse.issues;
     let mut notes = parse.notes;
     match parse.shim {
@@ -114,11 +114,17 @@ pub(crate) fn verify_target(
         }
         ShimRef::Unknown => {
             // SOFT, not hard: a novel-but-valid command shape lands here, and the
-            // genuine no-hooks case is already a HARD issue from `verify_schema`.
+            // genuine no-hooks case is already a HARD issue from the primary's verify.
             notes.push("could not read the shim path from the managed hook command".into());
         }
     }
-    verify_extra_artifacts(t, &mut issues, &mut notes);
+    if let Primary::Config {
+        beside: Some(render),
+        ..
+    } = t.primary
+    {
+        verify_beside(render, &mut issues, &mut notes);
+    }
     if let Some(host) = t.host {
         match (host.is_registered)() {
             Ok(true) => {}
@@ -136,18 +142,14 @@ pub(crate) fn verify_target(
 }
 
 /// The silent-dead class `verify_schema` is blind to — the config merge reads clean while
-/// the plugin FILES the gateway loads (the OpenClaw plugin DIR) are missing. INVARIANT
+/// the plugin FILES beside it that the gateway loads (the OpenClaw plugin DIR) are missing. INVARIANT
 /// (#387): a NEW code-shipping path in `install_target` MUST gain a check here, UNLESS the
-/// artifact IS that target's own config — with no `extra_artifacts` to ride this loop it
-/// belongs in that target's `verify_schema` instead (the opencode plugin and the omp
-/// bridge extension are that shape).
-fn verify_extra_artifacts(t: &Target, issues: &mut Vec<String>, notes: &mut Vec<String>) {
-    let Some(make) = t.extra_artifacts else {
-        return;
-    };
+/// file IS that target's owned primary — its `verify` covers it instead (the opencode
+/// plugin and the omp bridge extension are that shape).
+fn verify_beside(render: target::RenderBeside, issues: &mut Vec<String>, notes: &mut Vec<String>) {
     // A placeholder hook arg yields the real install locations WITHOUT resolving the
     // binary: a read-only check must not hard-error just because it isn't locatable.
-    let arts = match make(std::path::Path::new("pixtuoid-hook")) {
+    let arts = match render("pixtuoid-hook") {
         Ok(arts) => arts,
         Err(e) => {
             notes.push(format!("could not resolve plugin artifact paths: {e}"));
@@ -155,8 +157,7 @@ fn verify_extra_artifacts(t: &Target, issues: &mut Vec<String>, notes: &mut Vec<
         }
     };
     let mut missing: Vec<PathBuf> = Vec::new();
-    // Pinned by
-    // `verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_target`.
+    // Pinned by `verify_target_hard_flags_a_missing_beside_file_for_every_beside_target`.
     for (p, intended) in arts {
         if !p.exists() {
             missing.push(p);
@@ -391,11 +392,31 @@ fn install_target_from(
     let lock = io::lock_config(&path)?;
     let content = lock.read()?;
     let prior = target::config_present(&path).then(|| content.clone());
-    // Merge FIRST so a present-but-malformed config bails BEFORE we touch the filesystem —
-    // else the extra artifacts land on disk as orphans registered nowhere (partial install).
-    let outcome = (t.merge_install)(&content, &hook_cmd)
-        .with_context(|| format!("processing {}", path.display()))?;
-    write_extra_artifacts(t, &binary)?;
+    let (outcome, beside) = match t.primary {
+        Primary::Config {
+            merge_install,
+            beside,
+            ..
+        } => {
+            // Merge FIRST so a present-but-malformed config bails BEFORE we touch the
+            // filesystem — else the owned files land on disk as orphans registered
+            // nowhere (partial install).
+            let outcome = merge_install(&content, &hook_cmd)
+                .with_context(|| format!("processing {}", path.display()))?;
+            let files = beside.map(|r| r(&hook_cmd)).transpose()?;
+            (outcome, files.unwrap_or_default())
+        }
+        Primary::Owned { render, .. } => {
+            let rendered =
+                render(&hook_cmd).with_context(|| format!("processing {}", path.display()))?;
+            let outcome = target::MergeOutcome {
+                changed: content != rendered,
+                content: rendered,
+            };
+            (outcome, Vec::new())
+        }
+    };
+    write_beside(&beside)?;
     // Independent of whether the content changed — a no-op re-install on a box without
     // pixtuoid-hook on PATH would otherwise warn nothing. Skipped for an embedded path.
     let path_warning = t.binary_strategy == BinaryStrategy::BareNameOnPath
@@ -459,16 +480,13 @@ fn strip_managed(
     Ok(true)
 }
 
-/// Render the wholly-owned artifacts a target ships beside its config. Called before the
-/// config WRITE so a re-install refreshes them even when the merge is a no-op, which heals
-/// a deleted plugin file. Each artifact is its own lock target, disjoint from the config
-/// lock the caller holds and taken in a consistent config→artifact order, so no
+/// Write each of `files` that differs on disk. Called before the primary's
+/// WRITE so a re-install refreshes them even when the merge is a no-op, which heals a
+/// deleted or tampered plugin file. Each file is its own lock target, disjoint from the primary's
+/// lock the caller holds and taken in a consistent primary→file order, so no
 /// self-deadlock.
-fn write_extra_artifacts(t: &Target, binary: &std::path::Path) -> Result<()> {
-    let Some(make) = t.extra_artifacts else {
-        return Ok(());
-    };
-    for (p, c) in make(binary)? {
+fn write_beside(files: &[(PathBuf, String)]) -> Result<()> {
+    for (p, c) in files {
         // A real write here would be invisible: CI has no such dir, and the shim exits
         // 0 by invariant #5, so nothing downstream would report it.
         #[cfg(test)]
@@ -478,13 +496,16 @@ fn write_extra_artifacts(t: &Target, binary: &std::path::Path) -> Result<()> {
              own state resolver (OpenClaw: OPENCLAW_STATE_DIR) at a TempDir first",
             p.display()
         );
+        if io::read_config(p).is_ok_and(|on_disk| on_disk == *c) {
+            continue;
+        }
         if let Some(dir) = p.parent() {
             std::fs::create_dir_all(dir)
                 .with_context(|| format!("creating plugin dir {}", dir.display()))?;
         }
         // Atomic (temp-in-dir → fsync → rename), NOT a plain `fs::write`: a torn write
         // leaves a half-rendered plugin the gateway then fails to load.
-        io::write_config_atomic(&p, &c).with_context(|| format!("writing {}", p.display()))?;
+        io::write_config_atomic(p, c).with_context(|| format!("writing {}", p.display()))?;
     }
     Ok(())
 }
@@ -509,7 +530,7 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
-    let mut removed = strip_managed(t.merge_uninstall, &path)?;
+    let mut removed = strip_managed(t.primary.uninstall(), &path)?;
     // Last, since the strip needs no CLI: a failing deregister leaves a
     // registered plugin with no hooks, never hooks that still fire.
     let plugin_left_registered = match t.host {
