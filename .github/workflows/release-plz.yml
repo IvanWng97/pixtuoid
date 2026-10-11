@@ -69,9 +69,9 @@ jobs:
         with:
           enable-cache: 'false'
       # homebrew-core's `test do` runs against every release on its autobump,
-      # and an update sent ahead of that release was turned away
+      # and the owner was told to release before updating it
       # (CONTRIBUTING.md#releasing), so a miss can't hold the release: it names
-      # the update owed there right after the tag.
+      # the update that step 4 there sends after the tag.
       - name: homebrew-core's test calls only what this tree can run
         run: |
           set -euo pipefail
