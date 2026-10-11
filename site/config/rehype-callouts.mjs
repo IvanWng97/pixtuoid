@@ -2,25 +2,20 @@
 // rendered doc becomes a small terminal window — "~ note" by default, a red-dot
 // "~ warning" when the quote OPENS with an imperative-warning strong.
 // The red dot reuses global.css's .terminal__dot--r — no second red literal.
+import { toText } from 'hast-util-to-text';
+import { EXIT, SKIP, visit } from 'unist-util-visit';
 
 const WARN_RE = /^(don'?t|never|warning|danger|caution)\b/i;
-
-function textOf(node) {
-  if (!node) return '';
-  if (node.type === 'text') return node.value;
-  return (node.children || []).map(textOf).join('');
-}
 
 // The FIRST <strong> in document order — the docs' "**Don't …**" idiom
 // puts the imperative there; a plain editorial quote has none → note.
 function firstStrongText(node) {
-  if (node.type === 'element' && node.tagName === 'strong') return textOf(node);
-  for (const c of node.children || []) {
-    if (c.type !== 'element') continue;
-    const t = firstStrongText(c);
-    if (t) return t;
-  }
-  return '';
+  let text = '';
+  visit(node, { type: 'element', tagName: 'strong' }, (strong) => {
+    text = toText(strong);
+    return text ? EXIT : SKIP;
+  });
+  return text;
 }
 
 function calloutFor(blockquote) {
@@ -65,18 +60,11 @@ function calloutFor(blockquote) {
 
 export default function rehypeCallouts() {
   return function transform(tree) {
-    (function walk(node) {
-      const kids = node.children || [];
-      for (let i = 0; i < kids.length; i++) {
-        const c = kids[i];
-        if (c.type !== 'element') continue;
-        if (c.tagName === 'blockquote') {
-          // wrap and DON'T descend — a nested quote stays a plain quote
-          kids[i] = calloutFor(c);
-          continue;
-        }
-        walk(c);
-      }
-    })(tree);
+    visit(tree, 'element', (node, i, parent) => {
+      if (node.tagName !== 'blockquote' || !parent) return;
+      // wrap and DON'T descend — a nested quote stays a plain quote
+      parent.children[i] = calloutFor(node);
+      return SKIP;
+    });
   };
 }
