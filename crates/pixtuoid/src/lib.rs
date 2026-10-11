@@ -45,7 +45,7 @@ pub mod dev {
     pub use crate::doctor::footer_warning;
     /// The upstream drift watch, apart from [`crate::run`], the program.
     #[cfg(any(test, feature = "upstream"))]
-    pub mod drift {
+    pub mod drift_watch {
         pub use crate::drift_watch::{Report, run, run_legacy};
     }
     pub use crate::floating::compose::{Change, XrgbSurface, composite, composition};

@@ -23,6 +23,8 @@ use serde_json::Value;
 
 use crate::AgentId;
 use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
+#[cfg(any(test, feature = "upstream"))]
+use crate::source::upstream::{At, Doc, Read, Upstream, Watch};
 use crate::source::{AgentEvent, ToolDetail};
 
 #[cfg(feature = "native")]
@@ -94,14 +96,13 @@ const SUBAGENT_FAILED: &str = "subagent.failed";
 const SESSION_TASK_COMPLETE: &str = "session.task_complete";
 const SESSION_SHUTDOWN: &str = "session.shutdown";
 
-/// The `kind` values this decoder turns into events — this module's row in the
-/// drift surface. Pinned to the arms by
+/// The `kind` values this decoder turns into events. Pinned to the arms by
 /// `the_decoded_kind_set_is_exactly_what_the_arms_match`.
 ///
-/// Test-gated because the surface emitter is its only reader: the ARMS are what
+/// Off shipped builds: only the drift watch and tests read it. The ARMS are what
 /// production dispatches on, and a second copy of the vocabulary must not be
 /// something the shipped crate can read and drift against.
-#[cfg(test)]
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_KINDS: &[&str] = &[
     SESSION_START,
     TOOL_EXECUTION_START,
@@ -115,8 +116,7 @@ pub(crate) const DECODED_KINDS: &[&str] = &[
     SESSION_SHUTDOWN,
 ];
 
-/// The payload fields `decode_copilot_line` / `extract_copilot_cwd` read — this
-/// module's second row in the drift surface, alongside the `kind` set.
+/// The payload fields `decode_copilot_line` / `extract_copilot_cwd` read.
 ///
 /// `type` is excluded: it is the discriminator, watched as `DECODED_KINDS`.
 /// Pinned to the decoder's ACTUAL reads by
@@ -125,8 +125,8 @@ pub(crate) const DECODED_KINDS: &[&str] = &[
 /// watches — which is how `tokenCount` and `tokenDetails` came to be read and
 /// unwatched.
 ///
-/// Test-gated: the surface emitter is the only reader.
-#[cfg(test)]
+/// Off shipped builds: only the drift watch and tests read it.
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_FIELDS: &[&str] = &[
     "agentDisplayName",
     "agentId",
@@ -144,6 +144,49 @@ pub(crate) const DECODED_FIELDS: &[&str] = &[
     "toolCallId",
     "toolName",
 ];
+
+/// Since 1.0.85 the npm packages carry no schema; the release's platform
+/// tarball does, which is where github/copilot-sdk's codegen reads it
+/// (`java/scripts/codegen/fetch-schemas.mjs`).
+#[cfg(any(test, feature = "upstream"))]
+const SESSION_EVENTS_SCHEMA: &[Doc] = &[Doc {
+    at: At::ReleaseAsset {
+        asset: "github-copilot-{version}-linux-x64.tgz",
+        member: "package/schemas/session-events.schema.json",
+        sums: "SHA256SUMS.txt",
+    },
+    anchor: r#""SessionEvent"\s*:"#,
+    owns: "the `SessionEvent` union",
+}];
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: Upstream = Upstream {
+    repo: "github/copilot-cli",
+    watches: &[
+        Watch {
+            id: "copilot.kinds",
+            ours: || DECODED_KINDS.to_vec(),
+            docs: SESSION_EVENTS_SCHEMA,
+            read: Read::JsonUnion {
+                def: "SessionEvent",
+                prop: Some("type"),
+            },
+            vanish: "the transcript still carries it, but the decoder maps it to nothing \
+                 (no sprite, no activity)",
+            // `session.*` is a product-wide bus a sibling ledger would just mirror.
+            siblings: None,
+        },
+        Watch {
+            id: "copilot.payload_fields",
+            ours: || DECODED_FIELDS.to_vec(),
+            docs: SESSION_EVENTS_SCHEMA,
+            read: Read::JsonKeys,
+            vanish: "the decoder reads None: a wrong register, no parent link, no tool \
+                 label, or a permission that never gates",
+            siblings: None,
+        },
+    ],
+};
 
 /// Decode one `events.jsonl` line into zero or more `AgentEvent`s. Unknown,
 /// ephemeral, or malformed shapes return `vec![]` and never panic — real files

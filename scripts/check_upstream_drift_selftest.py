@@ -9,13 +9,11 @@ from __future__ import annotations
 
 import ast
 import contextlib
-import hashlib
 import io
 import json
 import pathlib
 import re
 import sys
-import tarfile
 import traceback
 import urllib.error
 
@@ -159,7 +157,6 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.CC_HOOKS_URL: "\n# Hooks reference\n",
     d.REASONIX_HOOK_URL: 'const (\n    SessionStart Event = "SessionStart"\n)\n',
     d.CODEWHALE_HOOK_URL: "pub enum HookEvent {\n    SessionStart,\n}\n",
-    d.CODEWHALE_SUBAGENT_URL: "fn parse_agent_tool_action(input: &Value) {\n}\n",
     d.CODEX_PROTOCOL_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
     d.HERMES_PLUGINS_URL: 'VALID_HOOKS: set[str] = {\n    "on_session_start",\n}\n',
     d.HERMES_SHELL_HOOK_URL: '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n',
@@ -198,9 +195,6 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.GROK_SESSION_STORAGE_URL: 'const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";\n',
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "agent_end"\n',
     d.OPENCLAW_PATHS_URL: "export const DEFAULT_GATEWAY_PORT = 18789;\n",
-    d.OPENCODE_EVENT_URLS[0]: 'export const Event = {\n  Created: "session.created",\n}\n',
-    d.OPENCODE_EVENT_URLS[1]: 'export const Event = { Asked, Replied }\n',
-    d.OPENCODE_EVENT_URLS[2]: 'export const Event = {\n  Asked: "permission.v2.asked",\n}\n',
 }
 
 # A document that satisfies NO anchor — the "upstream reorganized this file"
@@ -531,18 +525,8 @@ def test_the_openclaw_degraded_watch_tells_a_vanished_field_from_a_missing_type(
 
 
 def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
-    """Two one-line edits reopen the gate with every other test still green:
-    dropping `also=` makes the half-anchor check SKIP rather than fail, and
-    `UNANCHORED_BY_DESIGN` membership IS the exemption."""
-    # The Copilot schema, and its release record, are parsed STRUCTURALLY, so a
-    # failed parse already says what a text anchor would; nothing else may join
-    # them without saying why.
-    check(
-        d.UNANCHORED_BY_DESIGN
-        == frozenset({d.COPILOT_SCHEMA_SOURCE, d.COPILOT_RELEASE_URL}),
-        f"the anchor requirement is waived only for the JSON Schema, got "
-        f"{sorted(d.UNANCHORED_BY_DESIGN)}",
-    )
+    """A one-line edit reopens the gate with every other test still green:
+    dropping `also=` makes the half-anchor check SKIP rather than fail."""
     # Pinned BY URL: with `also` gone the loop in the anchor test just skips, which
     # is indistinguishable from an anchor that never needed a second half.
     # `\s+`, not `\s*`: indentation is the only nesting signal a both-present
@@ -1148,10 +1132,10 @@ def test_every_believability_gate_can_name_the_document_it_doubts() -> None:
 
 
 def test_every_swept_url_declares_an_anchor() -> None:
-    """A document is either anchored or deliberately exempt — never neither. The
-    anchor gate is #793's fix: a pin that 200s as a facade reads as mass drift
-    without it. A new sweep declaring neither would skip that gate silently — hence
-    a classification test over every `*_URL`, not a floor on ANCHORS."""
+    """Every swept document declares an anchor. The anchor gate is #793's fix: a
+    pin that 200s as a facade reads as mass drift without it. A new sweep declaring
+    none would skip that gate silently — hence a census over every `*_URL`, not a
+    floor on ANCHORS."""
     import re as _re
 
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
@@ -1161,12 +1145,12 @@ def test_every_swept_url_declares_an_anchor() -> None:
     for name in urls:
         value = getattr(d, name)
         for one in value if isinstance(value, tuple) else [value]:
-            if one not in d.ANCHORS and one not in d.UNANCHORED_BY_DESIGN:
+            if one not in d.ANCHORS:
                 unclassified.append(name)
     check(
         not unclassified,
-        f"{unclassified} declare neither an anchor nor structural parsing, so the "
-        f"#793 stale-pin gate does not cover them.",
+        f"{unclassified} declare no anchor, so the #793 stale-pin gate does not "
+        f"cover them.",
     )
 
 
@@ -1204,15 +1188,15 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         full = {rel: real(rel) for rel in (d.CORE_LIB_FRAGMENT, d.CORE_BIN_FRAGMENT)}
 
         holed = {rel: json.loads(json.dumps(f)) for rel, f in full.items()}
-        del holed[d.CORE_LIB_FRAGMENT]["decoded"]["copilot.kinds"]
+        del holed[d.CORE_LIB_FRAGMENT]["decoded"]["omp.entry_types"]
         d.load_fragment = lambda rel: holed[rel]
         rep = d.Report()
         ours = d.read_our_names(rep)
-        check(ours.copilot is None, f"the holed field is dark, got {ours.copilot!r}")
+        check(ours.omp is None, f"the holed field is dark, got {ours.omp!r}")
         for other in ("cc", "cursor", "kimi", "grok_xai_tags", "dispatch_names"):
             check(getattr(ours, other), f"{other} must survive a sibling's gap")
-        named = [b for b in rep.blind if "copilot" in b]
-        check(len(named) == 1, f"exactly one probe-health line names copilot: {rep.blind}")
+        named = [b for b in rep.blind if "`omp`" in b]
+        check(len(named) == 1, f"exactly one probe-health line names omp: {rep.blind}")
 
         # A fragment that does not load at all darkens only what IT feeds.
         def half(rel):
@@ -1224,7 +1208,7 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         rep2 = d.Report()
         ours2 = d.read_our_names(rep2)
         check(ours2.cc is None, "a registration field is dark when its fragment is gone")
-        check(bool(ours2.copilot), "a DECODE field survives the other fragment going missing")
+        check(bool(ours2.omp), "a DECODE field survives the other fragment going missing")
     finally:
         d.load_fragment = real
 
@@ -1252,11 +1236,10 @@ def test_codex_enum_reader_drops_field_types_and_keeps_renames() -> None:
           f"a field TYPE is not a variant: {sorted(got)}")
 
 
-def test_the_surviving_upstream_parsers_extract_from_a_snippet() -> None:
-    """Each parser, against a hand-made document of the shape it reads. They fail
+def test_the_cc_hook_table_parser_extracts_from_a_snippet() -> None:
+    """The parser, against a hand-made document of the shape it reads. It fails
     SAFE (an empty parse becomes probe health, not a ⛔), but a regex-parser
-    regression is a silent monitor death, and these four are what the whole
-    remaining watch stands on."""
+    regression is a silent monitor death."""
     cc = d.upstream_cc_hook_events(
         "# Hooks reference\n\n"
         "| Event | When it fires |\n|---|---|\n"
@@ -1269,30 +1252,6 @@ def test_the_surviving_upstream_parsers_extract_from_a_snippet() -> None:
         "a table-less page must not read as a full parse",
     )
 
-    schema = (
-        '{"definitions": {"SessionEvent": {"anyOf": ['
-        '{"$ref": "#/definitions/Start"}, {"$ref": "#/definitions/Stop"}]},'
-        '"Start": {"properties": {"type": {"const": "session.start"},'
-        '"sessionId": {"type": "string"}}},'
-        '"Stop": {"properties": {"type": {"const": "tool.execution_complete"},'
-        '"toolCallId": {"type": "string"}}}}}'
-    )
-    evs = d.upstream_copilot_events(schema)
-    check(evs is not None and {"session.start", "tool.execution_complete"} <= evs, f"kinds: {evs}")
-    ns = d.upstream_copilot_namespaces(schema)
-    check(ns is not None and {"session", "tool"} <= ns, f"namespaces: {ns}")
-    fields = d.upstream_copilot_field_names(schema)
-    check(fields is not None and {"sessionId", "toolCallId"} <= fields, f"fields: {fields}")
-
-    # An unrecognised document must not parse to a NON-EMPTY set — that reports
-    # every name as GONE. Empty or None are both safe, so this asserts falsiness.
-    for name, fn in (
-        ("events", d.upstream_copilot_events),
-        ("namespaces", d.upstream_copilot_namespaces),
-        ("fields", d.upstream_copilot_field_names),
-    ):
-        got = fn('{"definitions": {"Unrelated": {}}}')
-        check(not got, f"copilot {name}: an unrecognised schema must not parse to a set, got {got}")
 
 
 def test_omp_approved_optionality_is_watched() -> None:
@@ -1449,14 +1408,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             )
             return f"pub enum {enum} {{\n{rows}}}\n"
 
-        def copilot_schema(events: list[str], fields: list[str]) -> str:
-            defs: dict = {f"E{i}": {"properties": {"type": {"const": e}}}
-                          for i, e in enumerate(events)}
-            defs["SessionEvent"] = {"anyOf": [
-                {"$ref": f"#/definitions/E{i}"} for i in range(len(events))]}
-            defs["Payload"] = {"properties": dict.fromkeys(fields, {})}
-            return json.dumps({"definitions": defs})
-
         def omp_session_entries(entry_types: list[str], title_fields: list[str]) -> str:
             return (
                 "export type SessionEntry =\n"
@@ -1473,19 +1424,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 + "  type: typeof TITLE_CHANGE_ENTRY_TYPE;\n"
                 + "".join(f"  {name}: string;\n" for name in title_fields)
                 + "}\n"
-            )
-
-        def codewhale_agent(tool: str, actions: list[str]) -> str:
-            """The `agent` tool's name and its action parser, with a non-delegating
-            arm a matcher must not take for Start/Wait."""
-            return (
-                "impl ToolSpec for AgentTool {\n"
-                f'    fn name(&self) -> &\'static str {{\n        "{tool}"\n    }}\n}}\n'
-                "fn parse_agent_tool_action(input: &Value) -> Result<AgentToolAction, ToolError> {\n"
-                "    match action {\n"
-                + "".join(f'        "{a}" => Ok(AgentToolAction::Start),\n' for a in actions)
-                + '        "status" | "list" => Ok(AgentToolAction::Status),\n'
-                "    }\n}\n"
             )
 
         def omp_extension_docs(events: list[str], reads: list[str]) -> dict[str, str]:
@@ -1559,10 +1497,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                     "const (\n" + "".join(f'    {n} Event = "{n}"\n' for n in ns) + ")\n"}),
             ("codewhale", pascal, lambda ns: {
                 d.CODEWHALE_HOOK_URL: bare_enum("HookEvent", ns)}),
-            ("codewhale_subagent_tool", str, lambda ns: {
-                d.CODEWHALE_SUBAGENT_URL: codewhale_agent(ns[0], full["codewhale_delegating_actions"])}),
-            ("codewhale_delegating_actions", str, lambda ns: {
-                d.CODEWHALE_SUBAGENT_URL: codewhale_agent(full["codewhale_subagent_tool"][0], ns)}),
             ("codex", str, lambda ns: {
                 d.CODEX_PROTOCOL_URL: bare_enum("HookEventName", ns)
                 + tagged_enum("EventMsg", full["codex_event_msg"])}),
@@ -1598,20 +1532,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             ("openclaw", str, lambda ns: {
                 d.OPENCLAW_HOOK_TYPES_URL:
                     "export type PluginHookName =\n" + "".join(f'  | "{n}"\n' for n in ns)}),
-            ("opencode", str, lambda ns: dict.fromkeys(
-                d.OPENCODE_EVENT_URLS,
-                "export const Event = {\n"
-                + "".join(f'  Pxe{i}: {{ type: "{n}" }},\n' for i, n in enumerate(ns))
-                + "}\n"
-                + "".join(f'const S{i} = Schema.Literal("{st}");\n'
-                          for i, st in enumerate(full["opencode_part_statuses"])))),
-            ("opencode_part_statuses", str, lambda ns: dict.fromkeys(
-                d.OPENCODE_EVENT_URLS,
-                "export const Event = {\n"
-                + "".join(f'  Pxe{i}: {{ type: "{n}" }},\n'
-                          for i, n in enumerate(full["opencode"]))
-                + "}\n"
-                + "".join(f'const S{i} = Schema.Literal("{st}");\n' for i, st in enumerate(ns)))),
             ("grok_xai_method", str, lambda ns: {
                 d.GROK_SESSION_STORAGE_URL:
                     f'const XAI_SESSION_UPDATE_METHOD: &\'static str = "{ns[0]}";\n'}),
@@ -1668,10 +1588,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 d.DSH_SESSION_INDEX_URL:
                     "declare module '@deepseek-ai/cordis' {\n  interface Context {\n  }\n"
                     "  interface Events {\n"}),
-            ("copilot", str, lambda ns: {
-                d.COPILOT_SCHEMA_SOURCE: copilot_schema(ns, full["copilot_fields"])}),
-            ("copilot_fields", str, lambda ns: {
-                d.COPILOT_SCHEMA_SOURCE: copilot_schema(full["copilot"], ns)}),
         ]
         covered = {c[0] for c in cases}
         rows = {f for f, *_ in d.SURFACE_ROWS}
@@ -1725,102 +1641,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                   f"(skipped as probe health? {rep.blind})")
     finally:
         d.fetch = real
-
-
-def _copilot_release(schema: bytes, member: str) -> dict[str, bytes]:
-    """The three documents a Copilot release serves the watcher, its tarball
-    holding `schema` at `member`."""
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
-        for name, body in [("package/README.md", b"readme"), (member, schema)]:
-            info = tarfile.TarInfo(name)
-            info.size = len(body)
-            tf.addfile(info, io.BytesIO(body))
-    asset = buf.getvalue()
-    base = "https://github.com/github/copilot-cli/releases/download/v9.9.9/"
-    name = "github-copilot-9.9.9-linux-x64.tgz"
-    return {
-        d.COPILOT_RELEASE_URL: json.dumps({"tag_name": "v9.9.9"}).encode(),
-        base + name: asset,
-        base + "SHA256SUMS.txt": f"{hashlib.sha256(asset).hexdigest()}  {name}\n".encode(),
-    }
-
-
-def test_copilot_schema_is_read_from_the_verified_release_asset() -> None:
-    """Since 1.0.85 the schema ships only in the release's platform tarball."""
-    real = d.fetch_raw
-    try:
-        served = _copilot_release(b'{"ok": 1}', d.COPILOT_SCHEMA_MEMBER)
-        d.fetch_raw = lambda u, *_t, _m=served: _m[u]
-        check(d.fetch(d.COPILOT_SCHEMA_SOURCE) == '{"ok": 1}', "the asset's schema is read")
-
-        bad = dict(served)
-        sums = next(u for u in bad if u.endswith("SHA256SUMS.txt"))
-        bad[sums] = b"0" * 64 + b"  github-copilot-9.9.9-linux-x64.tgz\n"
-        d.fetch_raw = lambda u, *_t, _m=bad: _m[u]
-        rep = d.Report()
-        check(d.try_fetch(d.COPILOT_SCHEMA_SOURCE, "Copilot schema", rep) is None,
-              "a tarball its release's SHA256SUMS does not vouch for is not read")
-        check(bool(rep.errors) and not rep.blind, "a checksum miss is an error, not a pin move")
-
-        moved = _copilot_release(b"{}", "package/elsewhere.json")
-        d.fetch_raw = lambda u, *_t, _m=moved: _m[u]
-        rep = d.Report()
-        check(d.try_fetch(d.COPILOT_SCHEMA_SOURCE, "Copilot schema", rep) is None,
-              "a tarball without the schema member yields nothing")
-        check(bool(rep.blind), "a moved schema member is our pin going dark")
-
-        tagless = dict(served)
-        tagless[d.COPILOT_RELEASE_URL] = b"{}"
-        d.fetch_raw = lambda u, *_t, _m=tagless: _m[u]
-        rep = d.Report()
-        check(d.try_fetch(d.COPILOT_SCHEMA_SOURCE, "Copilot schema", rep) is None,
-              "a release reply naming no tag yields nothing")
-        check(bool(rep.errors) and not rep.blind, "a tagless reply is an error, not a pin move")
-    finally:
-        d.fetch_raw = real
-
-
-def test_only_the_copilot_tarball_gets_the_long_timeout() -> None:
-    """One stalled host must not hold a ~60-document sweep at the tarball's bound."""
-    real = d.urllib.request.urlopen
-    seen: dict[str, float] = {}
-
-    class Resp(io.BytesIO):
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            return False
-
-    def stub(req, timeout):
-        seen[req.full_url] = timeout
-        body = b"x"
-        if req.full_url == d.COPILOT_RELEASE_URL:
-            body = json.dumps({"tag_name": "v9.9.9"}).encode()
-        return Resp(body)
-
-    try:
-        d.urllib.request.urlopen = stub
-        d.fetch_raw("https://example.invalid/doc.md")
-        try:
-            d.fetch_copilot_schema()
-        except OSError:
-            pass  # the stub serves no real tarball; only the bounds matter here
-        asset = next(u for u in seen if u.endswith("-linux-x64.tgz"))
-        check(seen["https://example.invalid/doc.md"] == d.FETCH_TIMEOUT_S, f"a document: {seen}")
-        check(seen[asset] == d.COPILOT_ASSET_TIMEOUT_S, f"the tarball: {seen}")
-        check(d.FETCH_TIMEOUT_S < d.COPILOT_ASSET_TIMEOUT_S, "the tarball's bound is the long one")
-    finally:
-        d.urllib.request.urlopen = real
-
-
-def test_opencode_watches_the_live_v1_permission_declaration() -> None:
-    """The CLI publishes v1 `permission.asked` (packages/opencode/src/permission),
-    so its declaring file is watched and nothing is tolerated unseen."""
-    check(any(u.endswith("/packages/schema/src/v1/permission.ts")
-              for u in d.OPENCODE_EVENT_URLS), "the v1 permission file is watched")
-    check(not hasattr(d, "OPENCODE_TOLERATED"), "no opencode name is exempt from the watch")
 
 
 def test_grok_turn_usage_is_a_known_omission() -> None:

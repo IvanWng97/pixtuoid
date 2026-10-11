@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 
 use crate::AgentId;
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{Doc, Read, Siblings, Upstream, Watch};
+use crate::source::upstream::{At, Doc, Family, Read, Siblings, Upstream, Watch};
 use crate::source::{AgentEvent, ToolDetail};
 
 const TOOL_CALL: &str = "tool_call";
@@ -45,14 +45,21 @@ pub(crate) const SESSION_UPDATE_METHOD: &str = "session/update";
 /// unstable; v2 is a separate line grok does not speak.
 #[cfg(any(test, feature = "upstream"))]
 const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
+    const BRANCH: &str = "main";
     [
         Doc {
-            path: "schema/v1/schema.json",
+            at: At::Path {
+                path: "schema/v1/schema.json",
+                branch: BRANCH,
+            },
             anchor,
             owns,
         },
         Doc {
-            path: "schema/v1/schema.unstable.json",
+            at: At::Path {
+                path: "schema/v1/schema.unstable.json",
+                branch: BRANCH,
+            },
             anchor,
             owns,
         },
@@ -62,7 +69,6 @@ const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const UPSTREAM: Upstream = Upstream {
     repo: "agentclientprotocol/agent-client-protocol",
-    branch: "main",
     watches: &[
         Watch {
             id: "acp.method",
@@ -85,7 +91,7 @@ pub(crate) const UPSTREAM: Upstream = Upstream {
             },
             vanish: "every ACP-speaking source loses that half of its activity decode",
             siblings: Some(Siblings {
-                prefix: TOOL_CALL,
+                family: Family::Prefix(TOOL_CALL),
                 ignored: &[],
             }),
         },

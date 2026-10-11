@@ -2,19 +2,18 @@
 //! documents that declare those names, how to read them, and what a user loses
 //! when one goes. pixtuoid's `drift_watch` checks them against upstream.
 
-/// One public repository a source reads names from, which every
-/// [`Doc::path`] resolves against.
+/// One public repository a source reads names from, which every [`At`]
+/// resolves against.
 #[derive(Debug)]
 pub struct Upstream {
     pub repo: &'static str,
-    pub branch: &'static str,
     pub watches: &'static [Watch],
 }
 
 /// A document upstream declares names in.
 #[derive(Debug)]
 pub struct Doc {
-    pub path: &'static str,
+    pub at: At,
     /// Matches the declaration that OWNS the names, never one of them: a name
     /// as its own anchor passes vacuously, and a fetch landing on a re-export
     /// facade then reads as a rename (#793).
@@ -23,18 +22,46 @@ pub struct Doc {
     pub owns: &'static str,
 }
 
+/// Where a [`Doc`] is fetched from.
+#[derive(Debug)]
+pub enum At {
+    /// A file of the tree at `branch`.
+    Path {
+        path: &'static str,
+        branch: &'static str,
+    },
+    /// `member` of the latest release's tarball `asset` (`{version}` = its
+    /// tag, `v`-stripped), admitted only when the release's `sums` file vouches
+    /// for it.
+    ReleaseAsset {
+        asset: &'static str,
+        member: &'static str,
+        sums: &'static str,
+    },
+}
+
 /// How a document yields upstream's names.
 #[derive(Debug)]
 pub enum Read {
     /// Each name must match `pattern`, where `{name}` stands for the name,
     /// regex-escaped.
     Each { pattern: &'static str },
+    /// The first group of the ONE match of `pattern`: a second declaration
+    /// (a `#[cfg(test)]` twin, a macro body) is as unreadable as none.
+    Sole { pattern: &'static str },
+    /// The string patterns of `fn name`'s match arms whose result matches `arm`.
+    RustArms {
+        name: &'static str,
+        arm: &'static str,
+    },
     /// JSON Schema: each member of `def`'s `oneOf`/`anyOf` union, as the
     /// const of its `prop` property, or its own const when `prop` is `None`.
     JsonUnion {
         def: &'static str,
         prop: Option<&'static str>,
     },
+    /// JSON Schema: every `properties` key, at any depth.
+    JsonKeys,
 }
 
 /// Names we READ that upstream must keep declaring.
@@ -58,11 +85,19 @@ pub struct Watch {
 /// a missed decode hides, while mere growth is not.
 #[derive(Debug)]
 pub struct Siblings {
-    /// What a sibling's name starts with.
-    pub prefix: &'static str,
+    pub family: Family,
     /// Siblings deliberately not decoded, each with its reason. A row whose
     /// name upstream dropped is reported: it would silently exempt a reuse.
     pub ignored: &'static [(&'static str, &'static str)],
+}
+
+/// Which of upstream's names are siblings of ours.
+#[derive(Debug)]
+pub enum Family {
+    /// Starts with this.
+    Prefix(&'static str),
+    /// Every name the reader yields: it reads only the family already.
+    All,
 }
 
 #[cfg(test)]
@@ -71,8 +106,9 @@ mod tests {
     use crate::source::registry::REGISTRY;
 
     /// Every watch is one a checker can run: a blank name, or an `Each` pattern
-    /// without `{name}`, matches whatever upstream says, and a sibling sweep
-    /// needs a reader that yields upstream's names rather than testing ours.
+    /// without `{name}`, matches whatever upstream says, a `Sole` read yields
+    /// one name, and a sibling sweep needs a reader that yields upstream's
+    /// names rather than testing ours.
     #[test]
     fn every_watch_is_one_a_checker_can_run() {
         let mut ids = std::collections::BTreeSet::new();
@@ -94,7 +130,14 @@ mod tests {
                     );
                 }
                 assert!(
-                    w.siblings.is_none() || !matches!(w.read, Read::Each { .. }),
+                    !matches!(w.read, Read::Sole { .. }) || ours.len() == 1,
+                    "{} reads one name off upstream but watches {}",
+                    w.id,
+                    ours.len()
+                );
+                assert!(
+                    w.siblings.is_none()
+                        || !matches!(w.read, Read::Each { .. } | Read::Sole { .. }),
                     "{} sweeps siblings off a reader that yields none",
                     w.id
                 );

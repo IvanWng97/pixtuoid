@@ -37,6 +37,8 @@ use serde_json::Value;
 
 use crate::AgentId;
 use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
+#[cfg(any(test, feature = "upstream"))]
+use crate::source::upstream::{At, Doc, Read, Upstream, Watch};
 use crate::source::{AgentEvent, ToolDetail};
 
 /// The opencode CLI source's registry name (its `SourceDescriptor.name`).
@@ -52,7 +54,7 @@ const SUBAGENT_TOOLS: &[&str] = &["task"];
 ///
 /// An unmapped `type` is a benign skip (`Ok(vec![])`), not an error: the
 /// plugin's forward filter lives in JS, so the Rust decoder can't assert 1:1.
-/// Upstream drift is caught by `check_upstream_drift.py`, not a bail here.
+/// Upstream drift is caught by `UPSTREAM`, not a bail here.
 ///
 /// # Errors
 ///
@@ -91,20 +93,18 @@ const STATUS_RUNNING: &str = "running";
 const STATUS_COMPLETED: &str = "completed";
 const STATUS_ERROR: &str = "error";
 
-/// The part-state statuses that drive activity. Exported because the dispatch
-/// below ends `_ => Ok(vec![])`: rename `running` upstream and every opencode
-/// tool activity silently stops. Pinned by the tool-part decode tests.
-#[cfg(test)]
+/// The part-state statuses that drive activity. Pinned to the `match status`
+/// arms by `every_exported_set_is_exactly_its_dispatch_arms`.
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_PART_STATUSES: &[&str] = &[STATUS_RUNNING, STATUS_COMPLETED, STATUS_ERROR];
 
-/// The hook event types this decoder turns into events — this module's row in
-/// the drift surface. Pinned to the arms above by
-/// `the_decoded_event_set_is_exactly_what_the_arms_match`.
+/// The hook event types this decoder turns into events. Pinned to the arms
+/// above by `the_decoded_event_set_is_exactly_what_the_arms_match`.
 ///
-/// Test-gated because the surface emitter is its only reader: the ARMS are what
+/// Off shipped builds: only the drift watch and tests read it. The ARMS are what
 /// production dispatches on, and a second copy of the vocabulary must not be
 /// something the shipped crate can read and drift against.
-#[cfg(test)]
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_EVENTS: &[&str] = &[
     SESSION_CREATED,
     SESSION_DELETED,
@@ -112,6 +112,60 @@ pub(crate) const DECODED_EVENTS: &[&str] = &[
     PERMISSION_ASKED,
     PERMISSION_V2_ASKED,
 ];
+
+/// The inventory is SPLIT — the CLI's v1 `permission.asked` is declared in
+/// `v1/permission.ts`, core's v2 `permission.v2.asked` in `permission.ts` — so
+/// the union is the document. No sibling sweep: the plugin forwards exactly
+/// what the decoder reads (`install/opencode.rs`,
+/// `the_plugin_forwards_exactly_what_the_decoder_reads`).
+#[cfg(any(test, feature = "upstream"))]
+const EVENT_INVENTORY: &[Doc] = &[
+    inventory("packages/schema/src/v1/session.ts"),
+    inventory("packages/schema/src/v1/permission.ts"),
+    inventory("packages/schema/src/permission.ts"),
+];
+
+#[cfg(any(test, feature = "upstream"))]
+const fn inventory(path: &'static str) -> Doc {
+    Doc {
+        at: At::Path {
+            path,
+            branch: "dev",
+        },
+        anchor: r"(?m)^export const Event = \{",
+        owns: "the `Event` inventory",
+    }
+}
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: Upstream = Upstream {
+    repo: "anomalyco/opencode",
+    watches: &[
+        Watch {
+            id: "opencode.hook_events",
+            ours: || DECODED_EVENTS.to_vec(),
+            docs: EVENT_INVENTORY,
+            read: Read::Each {
+                pattern: r#""{name}""#,
+            },
+            vanish: "the plugin subscribes to an event opencode never fires (no sprite)",
+            siblings: None,
+        },
+        Watch {
+            id: "opencode.part_statuses",
+            ours: || DECODED_PART_STATUSES.to_vec(),
+            docs: EVENT_INVENTORY,
+            // The declaration form: a bare `"error"` also matches unrelated
+            // `Omit<…, "error">` sites, which would mask a rename.
+            read: Read::Each {
+                pattern: r#"Schema\.Literal\("{name}"\)"#,
+            },
+            vanish: "tool activity decodes to nothing: sprites never go Active, or never \
+                 come back",
+            siblings: None,
+        },
+    ],
+};
 
 /// `session.created` / `session.deleted` → `{sessionID, info: SessionInfo}`,
 /// where `info.id` is the stable `ses_*` key, `info.directory` the cwd, and

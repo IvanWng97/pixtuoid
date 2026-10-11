@@ -1,17 +1,5 @@
 {
   "decoded": {
-    "codewhale.delegating_actions": [
-      "start",
-      "spawn",
-      "run",
-      "wait",
-      "join",
-      "await",
-      "block"
-    ],
-    "codewhale.subagent_tool": [
-      "agent"
-    ],
     "codex.escalation": [
       "require_escalated",
       "sandbox_permissions"
@@ -39,35 +27,6 @@
       "event_msg",
       "response_item",
       "turn_context"
-    ],
-    "copilot.kinds": [
-      "session.start",
-      "tool.execution_start",
-      "tool.execution_complete",
-      "permission.requested",
-      "permission.completed",
-      "subagent.started",
-      "subagent.completed",
-      "subagent.failed",
-      "session.task_complete",
-      "session.shutdown"
-    ],
-    "copilot.payload_fields": [
-      "agentDisplayName",
-      "agentId",
-      "arguments",
-      "context",
-      "cwd",
-      "data",
-      "kind",
-      "model",
-      "permissionRequest",
-      "result",
-      "sessionId",
-      "tokenCount",
-      "tokenDetails",
-      "toolCallId",
-      "toolName"
     ],
     "decoder.dispatch_names": [
       "Agent"
@@ -110,18 +69,6 @@
     ],
     "omp.title_fields": [
       "title"
-    ],
-    "opencode.hook_events": [
-      "session.created",
-      "session.deleted",
-      "message.part.updated",
-      "permission.asked",
-      "permission.v2.asked"
-    ],
-    "opencode.part_statuses": [
-      "running",
-      "completed",
-      "error"
     ]
   },
   "shipped": {
