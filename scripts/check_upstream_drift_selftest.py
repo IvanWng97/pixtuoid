@@ -90,13 +90,53 @@ def test_cc_doc_marker_detection_fires_both_directions() -> None:
     check(len(got) == 1 and "ultra_effort_exit" in got[0], f"appearance fires: {got!r}")
 
 
-def test_cc_plugin_markers_fire_on_vanish() -> None:
-    for url, markers in d.CC_PLUGIN_DOC_MARKERS.items():
-        full = "\n".join(markers)
-        check(d.cc_plugin_marker_findings(url, full) == [], f"{url}: quiet doc -> none")
-        first = sorted(markers)[0]
-        got = d.cc_plugin_marker_findings(url, "\n".join(m for m in markers if m != first))
-        check(len(got) == 1 and first in got[0], f"{url}: vanish fires: {got!r}")
+def test_plugin_doc_markers_fire_on_vanish() -> None:
+    for url, entry in d.PLUGIN_DOC_MARKERS.items():
+        full = "\n".join(entry.markers)
+        check(d.plugin_marker_findings(url, full) == [], f"{url}: quiet doc -> none")
+        first = sorted(entry.markers)[0]
+        got = d.plugin_marker_findings(url, "\n".join(m for m in entry.markers if m != first))
+        installer = d.PLUGIN_HOST_INSTALLERS[entry.cli]
+        check(
+            len(got) == 1 and first in got[0] and installer in got[0],
+            f"{url}: vanish fires: {got!r}",
+        )
+
+
+def test_plugin_contract_findings_reach_review_only_for_registered_hosts() -> None:
+    """A host's plugin documents are fetched only while we register its events, and
+    a vanished marker files a review naming that host's installer."""
+    real = d.fetch
+    try:
+        url = d.CODEX_PLUGIN_CMD_URL
+        entry = d.PLUGIN_DOC_MARKERS[url]
+        first = sorted(entry.markers)[0]
+        maimed = ANCHOR_SAMPLES[url] + "\n".join(m for m in entry.markers if m != first)
+        served: list[str] = []
+
+        def stub(u: str) -> str:
+            served.append(u)
+            if u == url:
+                return maimed
+            raise urllib.error.URLError("offline: not this case's document")
+
+        d.fetch = stub
+        rep = d.Report()
+        d.run_checks(d.OurNames(codex={"SessionStart"}), report=rep)
+        check(
+            any(first in r and "install/codex.rs" in r for r in rep.review),
+            f"a vanished Codex plugin marker files a review: {rep.review!r}",
+        )
+
+        served.clear()
+        d.run_checks(d.OurNames(cc={"SessionStart"}), report=d.Report())
+        codex_docs = {u for u, e in d.PLUGIN_DOC_MARKERS.items() if e.cli == "Codex"}
+        check(
+            not codex_docs & set(served),
+            f"an unregistered host's plugin documents are not fetched: {sorted(served)}",
+        )
+    finally:
+        d.fetch = real
 
 
 # One snippet per anchored document; a new ANCHORS entry with no sample here
@@ -105,6 +145,13 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.CC_PLUGIN_COMPONENTS_URL: "# Add components to a plugin\n",
     d.CC_PLUGIN_INSTALL_URL: "# Install and manage plugins\n",
     d.CC_PLUGIN_LOADING_URL: "# Plugin loading reference\n",
+    d.CODEX_PLUGIN_CMD_URL: "pub enum PluginSubcommand {\n    Add(AddPluginArgs),\n}\n",
+    d.CODEX_MARKETPLACE_CMD_URL: "enum MarketplaceSubcommand {\n    Add(AddMarketplaceArgs),\n}\n",
+    d.CODEX_MARKETPLACE_URL: "const MARKETPLACE_MANIFEST_RELATIVE_PATHS: &[&str] = &[];\n",
+    d.CODEX_PLUGIN_EDIT_URL: "fn set_plugin_enabled(doc: &mut DocumentMut) -> bool {\n}\n",
+    d.CODEX_MARKETPLACE_RECORD_URL: "pub(super) fn record_added_marketplace_entry(\n) {\n}\n",
+    d.CODEX_MARKETPLACE_SOURCE_URL: "fn resolve_local_source_path(source: &str) {\n}\n",
+    d.REASONIX_PLUGIN_DOC_URL: "\n## CLI Mode\n",
     d.CURSOR_HOOKS_URL: "\n### Hook events\n\n#### preToolUse\n",
     d.KIMI_HOOKS_URL: '"hook_event_name": "PreToolUse"',
     d.CC_TOOLS_URL: "\n# Tools reference\n",

@@ -14,7 +14,7 @@ use pixtuoid_core::source::registry;
 use crate::config;
 use crate::install::{
     self, InstallReport, UninstallReport,
-    target::{Target, by_source, is_present},
+    target::{HostRegistration, PluginCopy, Target, by_source},
 };
 
 /// The wire-facing outcome token — a CLOSED set, published in the JSON schema
@@ -118,7 +118,7 @@ pub(crate) struct OutcomeRow {
 impl OutcomeRow {
     /// The message is control-char-stripped HERE, where the untrusted value
     /// enters the row: it folds another CLI's config content verbatim (a failed
-    /// `connect codex` embeds the RAW offending source line) and
+    /// `connect codewhale` embeds the RAW offending source line) and
     /// `sources_cli::text_line` prints it to a real terminal (R0615-06).
     pub(crate) fn new(id: String, outcome: &ChangeOutcome) -> Self {
         OutcomeRow {
@@ -142,8 +142,7 @@ pub(crate) struct SourceStatus {
     pub connected: bool,
     pub cli_present: bool,
     /// The source's worst issue as one line, or `null` if none was found: a broken
-    /// install or decode drift (connected sources only), or hooks an older release
-    /// left that still fire.
+    /// install or decode drift, for connected sources only.
     // Generates `health?: string | null`. Do NOT add `schemars(required)` to force
     // it required: that STRIPS the `| null` → the WRONG `health: string`, and the
     // wire CAN be null. Optional is a harmless superset; nullable is load-bearing.
@@ -216,20 +215,22 @@ fn is_on(app: &config::AppConfig, sid: &str, hooked: impl Fn(&str) -> Option<boo
 }
 
 /// Bring every connected source's owned plugin files to this build
-/// ([`install::converge`]), and return the targets it rewrote: each CLI loads the
-/// new plugin only at its next start. A failure leaves the install for the boot
-/// warning and doctor to report.
+/// ([`install::converge`]), and the copy a CLI runs to those files, and return the
+/// targets whose CLI now has a newer plugin to load at its next start. A failure
+/// leaves the install for the boot warning and doctor to report, and the next
+/// launch retries it.
 pub(crate) fn converge_owned(connected: &HashSet<String>) -> Vec<&'static Target> {
-    converge_owned_with(connected, |t| install::converge(t, None))
+    converge_owned_with(install::TARGETS, connected, |t| install::converge(t, None))
 }
 
-/// [`converge_owned`] with the convergence injected.
+/// [`converge_owned`] over `targets`, with the convergence injected.
 fn converge_owned_with(
+    targets: &[&'static Target],
     connected: &HashSet<String>,
     converge: impl Fn(&'static Target) -> Result<install::Converged>,
 ) -> Vec<&'static Target> {
     let mut refreshed = Vec::new();
-    for t in install::TARGETS.iter().copied() {
+    for t in targets.iter().copied() {
         if !connected.contains(t.core_source) {
             continue;
         }
@@ -246,14 +247,32 @@ fn converge_owned_with(
         for (path, error) in &done.failed {
             tracing::warn!(cli = t.name, path = ?path, error = ?error, "could not refresh a plugin file to this build");
         }
-        if !done.rewritten.is_empty() {
+        let loads_new = match t.host.and_then(|h| h.copy.as_ref().map(|c| (h, c))) {
+            Some((host, copy)) => recopy(host, copy, t).unwrap_or_else(|e| {
+                tracing::warn!(cli = t.name, error = ?e, "could not re-copy the plugin to this build");
+                false
+            }),
+            None => !done.rewritten.is_empty(),
+        };
+        if loads_new {
             refreshed.push(t);
         }
     }
     refreshed
 }
 
-/// The line a launch prints for a plugin [`converge_owned`] rewrote.
+/// Re-copy `t`'s plugin when the copy its CLI runs differs from the owned files, and
+/// say whether it did. A disabled plugin stays as the user left it.
+fn recopy(host: &HostRegistration, copy: &PluginCopy, t: &Target) -> Result<bool> {
+    if !(host.is_registered)()? || !(copy.stale)(&(t.default_config_path)()?)? {
+        return Ok(false);
+    }
+    (copy.refresh)()?;
+    Ok(true)
+}
+
+/// The line a launch prints for a target [`converge_owned`] returned: its CLI now
+/// has a newer plugin to load.
 pub(crate) fn refreshed_notice(t: &Target) -> String {
     let step = t.post_install_hint.map_or_else(
         || format!("restart {} to load it", t.display_name),
@@ -293,7 +312,9 @@ fn write_flags(cfg: &Path, change: Option<(&str, bool)>) -> Result<()> {
 /// **Honors the explicit id — it does NOT gate on CLI presence.** Unlike the
 /// in-TUI panel (which renders an absent CLI as `NoCli` and refuses the toggle),
 /// this installs for any registered id even if that CLI isn't installed yet —
-/// pre-provisioning for automation/onboarding where the caller stated intent.
+/// pre-provisioning for automation/onboarding where the caller stated intent. A
+/// plugin-host source is the exception: it registers through its CLI, which must
+/// be on PATH.
 ///
 /// # Errors
 ///
@@ -405,10 +426,11 @@ fn apply_want(cfg: &Path, sid: &'static str, want: bool) -> AppliedChange {
     done.unwrap_or_else(|e| AppliedChange::Failed(format!("{e:#}")))
 }
 
-/// How both presenters word a disconnect that couldn't reach `claude` to
-/// deregister the plugin, which keeps it registered with no hooks.
-pub(crate) const PLUGIN_LEFT_REGISTERED_PHRASE: &str =
-    "plugin left registered (claude not on PATH)";
+/// How both presenters word a disconnect that couldn't reach `cli` to deregister
+/// the plugin, which stays registered with the CLI.
+pub(crate) fn plugin_left_registered(cli: install::io::HostCli) -> String {
+    format!("plugin left registered ({} not on PATH)", cli.command)
+}
 
 /// Connect each of `ids` — onboarding's confirm and `setup --yes`. Nothing is
 /// connected on a first run, so an id left out needs no change.
@@ -444,8 +466,7 @@ pub struct ConnectionRow {
     pub config_path: Option<PathBuf>,
     /// `None` ⇒ connect/disconnect is a flag-only flip (no hooks to write).
     pub target: Option<&'static Target>,
-    /// Cached health summary: a CONNECTED row's worst issue, a disconnected
-    /// one's hooks that fire anyway.
+    /// Cached health summary: a CONNECTED row's worst issue; `None` for any other.
     pub health: Option<String>,
 }
 
@@ -518,7 +539,7 @@ pub(crate) fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<Connecti
             // target is "claude" but its source is "claude-code".
             let target = by_source(d.name);
             let facts = target.map(|t| RowFacts {
-                present: is_present(t),
+                present: (t.presence_probe)(),
                 config_path: (t.default_config_path)().ok(),
             });
             let connected = connected.contains(d.name);
@@ -528,11 +549,9 @@ pub(crate) fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<Connecti
                 target,
                 facts,
                 connected,
-                health: if connected {
-                    crate::doctor::diagnose(d.name, log, None).summary()
-                } else {
-                    crate::doctor::leftover_hooks_health(d.name)
-                },
+                health: connected
+                    .then(|| crate::doctor::diagnose(d.name, log, None).summary())
+                    .flatten(),
             }
         })
         .collect();
@@ -565,7 +584,7 @@ pub(crate) fn status(cfg: &Path, log: &str) -> Vec<SourceStatus> {
 /// present) — the "offer to connect these" set for first-run onboarding.
 pub(crate) fn detect() -> Vec<&'static str> {
     registry::registered_source_names()
-        .filter(|sid| by_source(sid).is_some_and(is_present))
+        .filter(|sid| by_source(sid).is_some_and(|t| (t.presence_probe)()))
         .collect()
 }
 
@@ -578,12 +597,103 @@ mod tests {
         ids.iter().map(|s| s.to_string()).collect()
     }
 
+    static REFRESHES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static STALE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static STALE_ERRS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    /// A host that runs a copy, with the enabled and stale states the test sets.
+    static COPYING_HOST: HostRegistration = HostRegistration {
+        cli: crate::install::target::CLAUDE.host.unwrap().cli,
+        register: |_| Ok(()),
+        unregister: |_| Ok(crate::install::target::Unregistered::Absent),
+        is_registered: || Ok(ENABLED.load(std::sync::atomic::Ordering::SeqCst)),
+        copy: Some(PluginCopy {
+            stale: |_| {
+                use std::sync::atomic::Ordering::SeqCst;
+                if STALE_ERRS.load(SeqCst) {
+                    anyhow::bail!("the copy could not be read");
+                }
+                Ok(STALE.load(SeqCst))
+            },
+            refresh: || {
+                REFRESHES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            },
+        }),
+        legacy: None,
+    };
+
+    /// Each launch re-copies a stale copy, so a re-copy that failed, or waited for the
+    /// user to re-enable the plugin, lands later.
+    #[test]
+    fn a_launch_re_copies_a_stale_copy_only_while_enabled() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let t = Target {
+            host: Some(&COPYING_HOST),
+            ..crate::install::target::CLAUDE
+        };
+        let copy = COPYING_HOST.copy.as_ref().unwrap();
+        REFRESHES.store(0, SeqCst);
+        for (enabled, stale, recopied) in [
+            (false, true, false),
+            (true, false, false),
+            (true, true, true),
+        ] {
+            ENABLED.store(enabled, SeqCst);
+            STALE.store(stale, SeqCst);
+            assert_eq!(
+                recopy(&COPYING_HOST, copy, &t).unwrap(),
+                recopied,
+                "enabled {enabled}, stale {stale}"
+            );
+        }
+        assert_eq!(REFRESHES.load(SeqCst), 1);
+    }
+
+    static COPYING: Target = Target {
+        host: Some(&COPYING_HOST),
+        ..crate::install::target::CLAUDE
+    };
+
+    /// A host that runs a copy is announced only when a launch re-copied it: a
+    /// rewrite of a disabled plugin's files, or a re-copy that failed, has nothing
+    /// new for the CLI to load.
+    #[test]
+    fn a_launch_announces_a_copying_host_only_when_it_re_copied() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let connected = set(&["claude-code"]);
+        let rewrote = || {
+            Ok(install::Converged {
+                rewritten: vec![PathBuf::from("/x/hooks.json")],
+                failed: Vec::new(),
+            })
+        };
+        for (enabled, stale, errs, announced) in [
+            (false, true, false, false),
+            (true, true, false, true),
+            (true, false, false, false),
+            (true, true, true, false),
+        ] {
+            ENABLED.store(enabled, SeqCst);
+            STALE.store(stale, SeqCst);
+            STALE_ERRS.store(errs, SeqCst);
+            let refreshed = converge_owned_with(&[&COPYING], &connected, |_| rewrote());
+            assert_eq!(
+                !refreshed.is_empty(),
+                announced,
+                "enabled {enabled}, stale {stale}, errs {errs}"
+            );
+        }
+    }
+
     #[test]
     fn converge_owned_reaches_only_connected_targets_and_survives_a_failure() {
         // TARGETS order: claude fails first, so a stop-at-first-error loop would never
         // reach opencode; omp only fails files, so it rewrote nothing to announce.
         let seen = std::cell::RefCell::new(Vec::new());
-        let refreshed = converge_owned_with(&set(&["opencode", "omp", "claude-code"]), |t| {
+        let connected = set(&["opencode", "omp", "claude-code"]);
+        let refreshed = converge_owned_with(install::TARGETS, &connected, |t| {
             seen.borrow_mut().push(t.name);
             match t.name {
                 "claude" => Err(anyhow::anyhow!("no home")),
@@ -640,8 +750,14 @@ mod tests {
             "non-web profiles compose patches once at boot; web hot-reloads — got {hint:?}"
         );
 
+        let hint = post_install_hint("codex").expect("codex needs a trust step");
+        assert!(
+            hint.contains("Hooks need review"),
+            "untrusted hooks never run, so the step names Codex's own prompt — got {hint:?}"
+        );
+
         for id in pixtuoid_core::source::registry::registered_source_names() {
-            if id == "openclaw" || id == "omp" || id == "dsh" {
+            if id == "codex" || id == "openclaw" || id == "omp" || id == "dsh" {
                 continue;
             }
             assert!(
@@ -856,7 +972,7 @@ mod tests {
             beside: None,
         },
         binary_strategy: crate::install::target::BinaryStrategy::EmbedAbsolute,
-        presence_probe: None,
+        presence_probe: || false,
         post_install_hint: None,
         host: None,
     };

@@ -160,6 +160,14 @@ pub(crate) fn flat_json_merge_outcome_install(
     })
 }
 
+/// [`flat_json_merge_outcome_uninstall`] of the [`crate::install::SENTINEL_KEY`]
+/// entries: the strip every flat-JSON config pixtuoid merged into shares.
+pub(crate) fn flat_json_uninstall(content: &str) -> anyhow::Result<MergeOutcome> {
+    flat_json_merge_outcome_uninstall(content, |doc| {
+        flat_json_merge_uninstall(doc, crate::install::SENTINEL_KEY)
+    })
+}
+
 /// The uninstall twin, deliberately UNGUARDED on a non-object root — uninstall
 /// must stay a clean no-op on a foreign non-object document, never error.
 pub(crate) fn flat_json_merge_outcome_uninstall(
@@ -344,15 +352,14 @@ mod tests {
     /// and the next reinstall finds nothing to do.
     #[test]
     fn a_reinstall_after_an_owner_hook_settles() {
-        let cmd = "PIXTUOID_SOURCE=codex /opt/bin/pixtuoid-hook";
-        let ours = crate::install::codex::merge_install("", cmd)
-            .unwrap()
-            .content;
-        let owner = format!(
-            "{ours}\n[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"notify-send done\"\n"
-        );
-        let moved = crate::install::codex::merge_install(&owner, cmd).unwrap();
-        let again = crate::install::codex::merge_install(&moved.content, cmd).unwrap();
+        use crate::install::codewhale::merge_install;
+        let cmd = "PIXTUOID_SOURCE=codewhale /opt/bin/pixtuoid-hook";
+        let ours = merge_install("", cmd).unwrap().content;
+        let owner =
+            format!("{ours}\n[[hooks.hooks]]\nevent = \"Stop\"\ncommand = \"notify-send done\"\n");
+        let moved = merge_install(&owner, cmd).unwrap();
+        assert!(moved.changed, "{}", moved.content);
+        let again = merge_install(&moved.content, cmd).unwrap();
         assert!(!again.changed, "{}", moved.content);
         assert_eq!(again.content, moved.content);
     }

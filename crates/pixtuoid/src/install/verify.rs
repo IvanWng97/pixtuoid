@@ -107,9 +107,8 @@ pub(crate) fn assemble(
     }
 }
 
-/// Verify a FLAT-JSON hook config (Reasonix, Cursor): `hooks.<event>` is an
-/// array of `{_pixtuoid: true, command, …}` entries. Each target passes its own
-/// `events` + `sentinel`, so this is shape-sharing, not a shared decoder.
+/// Verify Cursor's flat-JSON hook config: `hooks.<event>` is an array of
+/// `{_pixtuoid: true, command, …}` entries.
 pub(crate) fn flat_json_verify(content: &str, events: &[&str], sentinel: &str) -> SchemaParse {
     let Ok(doc) = serde_json::from_str::<serde_json::Value>(content) else {
         return SchemaParse::broken("hooks config no longer parses as JSON");

@@ -1,28 +1,28 @@
-//! Reasonix hook install target.
-//!
-//! Writes the GLOBAL `<reasonix-home>/settings.json`: project-scope
-//! (`<repo>/.reasonix/settings.json`) hooks only load after the user runs
-//! `/hooks trust`, so a project-scope install would silently never fire. The
-//! schema is Reasonix's own FLAT shape — per-event arrays of
-//! `{match, command, description, timeout, cwd}` entries, NOT Claude's nested
-//! `{matcher, hooks: [{type, command}]}` groups.
+//! Reasonix hook install target: a plugin `reasonix plugin install --link` loads in
+//! place from pixtuoid's config dir, through its native `reasonix-plugin.json`
+//! (`docs/PLUGIN_PACKAGES.md` @ v2.35.0). A global plugin's hooks need no
+//! `/hooks trust`, which project-scope hooks do.
 //!
 //! - `match` is OMITTED: empty = every tool. Any other value is an ANCHORED
 //!   regex, and a malformed one never fires.
 //! - `timeout` is in MILLISECONDS, and on the gating PreToolUse a TIMEOUT BLOCKS
 //!   the user's tool call.
-//! - `_pixtuoid` is the managed-entry sentinel; Go's `json.Unmarshal` ignores
-//!   unknown fields, so Reasonix never sees it.
+//! - EXEC form (`args` present): a command with neither `args` nor `shellCommand`
+//!   that is not an absolute path resolves inside the plugin root
+//!   (`internal/ext/hook/windows_posix_script.go` @ v2.35.0), so a shell-form
+//!   `PIXTUOID_SOURCE=reasonix '<shim>'` would never run.
+//! - No `_pixtuoid` sentinel: a v2 manifest rejects unknown fields.
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use crate::install::SENTINEL_KEY;
+use crate::install::host_plugin::{self, NAME};
 use crate::install::io;
 use crate::install::merge;
-use crate::install::target::MergeOutcome;
+use crate::install::target::{HostRegistration, LegacyConfig, MergeOutcome, Unregistered};
+use crate::install::verify::{SchemaParse, ShimRef};
 
 /// Events we register == events we decode, enforced by
 /// `every_registered_reasonix_event_decodes` below. PostToolUseFailure /
@@ -41,19 +41,52 @@ pub(crate) const REASONIX_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-/// The GLOBAL `settings.json` Reasonix actually reads. Reasonix's home is
-/// platform-ASYMMETRIC: `REASONIX_HOME` (verbatim) wins; else macOS/Linux =
-/// `~/.reasonix`, but **Windows = `%APPDATA%\reasonix`**, NOT
-/// `%USERPROFILE%\.reasonix`. Writing pixtuoid's generic USERPROFILE-first path
-/// on Windows lands the hooks where Reasonix never reads → installed, no sprite.
+/// Reasonix links the plugin dir in place, so a rewrite of the manifest reaches the
+/// next session.
+pub(crate) const HOST: HostRegistration = HostRegistration {
+    cli: CLI,
+    register,
+    unregister,
+    is_registered,
+    copy: None,
+    legacy: Some(LegacyConfig {
+        path: settings_path,
+        strip: merge::flat_json_uninstall,
+    }),
+};
+
+const CLI: io::HostCli = io::HostCli {
+    command: "reasonix",
+};
+
+const MANIFEST: &str = "reasonix-plugin.json";
+
+const HOOKS_AT: host_plugin::HooksAt = host_plugin::HooksAt {
+    hooks: "/contributes/hooks",
+    command: "/command",
+};
+
 pub(crate) fn default_config_path() -> Result<PathBuf> {
+    host_plugin::owned_path("reasonix-plugin", &[MANIFEST])
+}
+
+/// The GLOBAL `settings.json` a pixtuoid from before the plugin merged into.
+fn settings_path() -> Result<PathBuf> {
+    Ok(home()?.join("settings.json"))
+}
+
+/// Where Reasonix records its installed plugins and whether each is enabled
+/// (`internal/ext/pluginpkg/pluginpkg.go` @ v2.35.0).
+fn packages_path() -> Result<PathBuf> {
+    Ok(home()?.join("plugin-packages.json"))
+}
+
+/// Reasonix's home is platform-ASYMMETRIC, so a generic USERPROFILE-first path on
+/// Windows misses it. Erroring mirrors the sibling home-anchored targets instead of
+/// silently reading a CWD-relative file Reasonix never writes.
+fn home() -> Result<PathBuf> {
     reasonix_home()
-        .map(|h| h.join("settings.json"))
-        .ok_or_else(|| {
-            // Erroring mirrors the sibling home-anchored targets instead of
-            // silently writing a CWD-relative config Reasonix never reads.
-            io::home_unset("Reasonix's home", "REASONIX_HOME/APPDATA/HOME/USERPROFILE")
-        })
+        .ok_or_else(|| io::home_unset("Reasonix's home", "REASONIX_HOME/APPDATA/HOME/USERPROFILE"))
 }
 
 /// `REASONIX_HOME` (upstream trims but does NOT `~`-expand it, hence `home: None`)
@@ -69,7 +102,8 @@ fn reasonix_home() -> Option<PathBuf> {
 
 /// Pure core for [`reasonix_home`] — everything is injected so BOTH platform arms
 /// unit-test on any host. `None` only when neither `%APPDATA%` nor a home
-/// resolves; installing then would write a CWD-relative file Reasonix never reads.
+/// resolves, and the legacy strip and the registration probe then error rather
+/// than read a CWD-relative file Reasonix never writes.
 fn resolve_reasonix_home(
     reasonix_home_env: Option<PathBuf>,
     windows: bool,
@@ -85,11 +119,8 @@ fn resolve_reasonix_home(
     unix_home.map(|h| h.join(".reasonix"))
 }
 
-/// Presence probe for auto-detection. The default file-exists check on
-/// `default_config_path` would NEVER fire: Reasonix itself never creates
-/// `settings.json`, it is purely user-authored. What a real install does create
-/// is the Reasonix home dir — and hook/trust users additionally have a
-/// `~/.reasonix` even on Windows, so probe both.
+/// Reasonix is present when its home dir is — and hook/trust users additionally
+/// have a `~/.reasonix` even on Windows, so probe both.
 pub(crate) fn detect_installed() -> bool {
     reasonix_home().is_some_and(|d| d.exists()) || io::home_relative(".reasonix").exists()
 }
@@ -134,58 +165,133 @@ fn user_config_dir_checked(
     ))
 }
 
-/// Reasonix runs the `command` string under a shell (`sh -c` / `cmd.exe /c`), so
-/// the OS forms are [`crate::install::hook_cmd::shell_hook_command`]'s. Err on
-/// non-UTF-8 (prevents the to_string_lossy dead-hook).
+/// The shim's absolute path, exec form; the source rides as `--source` in `args`.
+/// Err on non-UTF-8 (prevents the to_string_lossy dead-hook).
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — Reasonix always
     // embeds the absolute path, so the flag changes nothing here.
-    let p = merge::hook_path_str(resolved)?;
-    crate::install::hook_cmd::shell_hook_command(p, "reasonix")
+    merge::hook_path_str(resolved).map(str::to_string)
 }
 
-pub(crate) fn merge_install(content: &str, hook_cmd: &str) -> Result<MergeOutcome> {
-    merge::flat_json_merge_outcome_install(content, "settings", |doc| {
-        merge::flat_json_merge_install(doc, REASONIX_EVENTS, SENTINEL_KEY, managed_entry, hook_cmd)
-    })
-}
-
-pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
-    merge::flat_json_merge_outcome_uninstall(content, |doc| {
-        merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
-    })
-}
-
-fn managed_entry(hook_command: &str) -> Value {
-    json!({
-        SENTINEL_KEY: true,
-        "command": hook_command,
+pub(crate) fn render_manifest(hook_cmd: &str) -> Result<String> {
+    let entry = json!({
+        "command": hook_cmd,
+        "args": ["--source", pixtuoid_core::source::reasonix::SOURCE_NAME],
         "timeout": 1000,
-        "description": "pixtuoid visualizer"
+        "description": "pixtuoid visualizer",
+    });
+    let mut doc = manifest();
+    doc["contributes"] = json!({ "hooks": host_plugin::hooks_map(REASONIX_EVENTS, &entry) });
+    Ok(serde_json::to_string_pretty(&doc)?)
+}
+
+/// The manifest with nothing to contribute. No `version`: none is required, and one
+/// would put the release in a file a launch compares byte for byte.
+fn manifest() -> Value {
+    json!({
+        "apiVersion": "reasonix.io/plugin/v2",
+        "name": NAME,
+        "description": "Sends Reasonix's session events to the pixtuoid office",
     })
 }
 
-/// Install-schema verification: `hooks.<event>` arrays of `{_pixtuoid, command}`.
-pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
-    crate::install::verify::flat_json_verify(content, REASONIX_EVENTS, SENTINEL_KEY)
+pub(crate) fn verify_schema(content: &str) -> SchemaParse {
+    host_plugin::verify_hooks(content, HOOKS_AT, REASONIX_EVENTS, |c| {
+        ShimRef::Absolute(PathBuf::from(c))
+    })
+}
+
+pub(crate) fn installed_shim(content: &str) -> ShimRef {
+    verify_schema(content).shim
+}
+
+/// The manifest as a disconnect leaves it: still one Reasonix loads, should the
+/// plugin stay registered, and still naming us so `unregister` may delete it.
+pub(crate) fn uninstall(content: &str) -> Result<MergeOutcome> {
+    Ok(MergeOutcome {
+        content: serde_json::to_string_pretty(&manifest())?,
+        changed: host_plugin::holds_hooks(content, HOOKS_AT),
+    })
+}
+
+/// `--yes` is the CLI's consent to write, not a trust step; `--replace` makes a
+/// repeat connect re-link (`docs/PLUGIN_PACKAGES.md` @ v2.35.0).
+fn register(config: &Path) -> Result<()> {
+    let (plugin, _) = host_plugin::layout(config, &[MANIFEST])?;
+    CLI.run(&[
+        "plugin".as_ref(),
+        "install".as_ref(),
+        plugin.as_os_str(),
+        "--link".as_ref(),
+        "--replace".as_ref(),
+        "--yes".as_ref(),
+    ])?;
+    Ok(())
+}
+
+/// Reads Reasonix's state first, so a disconnect with nothing registered starts no
+/// CLI. Removing a linked plugin leaves its dir (`docs/PLUGIN_PACKAGES.md`
+/// @ v2.35.0), so this deletes it.
+fn unregister(config: &Path) -> Result<Unregistered> {
+    let (_, root) = host_plugin::layout(config, &[MANIFEST])?;
+    let installed = plugin_entry()?.is_some();
+    if installed {
+        if CLI.locate().is_none() {
+            tracing::warn!("reasonix not on PATH; leaving the pixtuoid plugin registered");
+            return Ok(Unregistered::Unreachable);
+        }
+        CLI.run(&[
+            "plugin".as_ref(),
+            "remove".as_ref(),
+            NAME.as_ref(),
+            "--yes".as_ref(),
+        ])?;
+    }
+    host_plugin::remove_if_ours(root, config)?;
+    Ok(if installed {
+        Unregistered::Removed
+    } else {
+        Unregistered::Absent
+    })
+}
+
+fn is_registered() -> Result<bool> {
+    Ok(plugin_entry()?.is_some_and(|p| p["enabled"].as_bool() == Some(true)))
+}
+
+/// Our row in Reasonix's installed plugins, if any.
+fn plugin_entry() -> Result<Option<Value>> {
+    let path = packages_path()?;
+    let content = io::read_config(&path)?;
+    if content.trim().is_empty() {
+        return Ok(None);
+    }
+    let state: Value =
+        serde_json::from_str(&content).with_context(|| format!("parsing {}", path.display()))?;
+    Ok(state["plugins"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["name"].as_str() == Some(NAME)))
+        .cloned())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn json_merge_install(doc: Value, hook_command: &str) -> Value {
-        merge::flat_json_merge_install(
-            doc,
-            REASONIX_EVENTS,
-            SENTINEL_KEY,
-            managed_entry,
-            hook_command,
-        )
-    }
+    use crate::install::SENTINEL_KEY;
 
     fn json_merge_uninstall(doc: Value) -> Value {
         merge::flat_json_merge_uninstall(doc, SENTINEL_KEY)
+    }
+
+    /// Two events as a pixtuoid from before the plugin merged them into settings.json.
+    fn legacy() -> Value {
+        let ours = json!({
+            SENTINEL_KEY: true,
+            "command": "PIXTUOID_SOURCE=reasonix '/opt/pixtuoid-hook'",
+            "timeout": 1000,
+            "description": "pixtuoid visualizer"
+        });
+        json!({ "hooks": { "PreToolUse": [ours.clone()], "Stop": [ours] } })
     }
 
     #[test]
@@ -248,63 +354,12 @@ mod tests {
     }
 
     #[test]
-    fn install_creates_flat_entries_for_all_events() {
-        let doc = json_merge_install(json!({}), "PIXTUOID_SOURCE=reasonix '/opt/pixtuoid-hook'");
-        let hooks = doc.get("hooks").and_then(|v| v.as_object()).unwrap();
-        for ev in REASONIX_EVENTS {
-            let arr = hooks.get(*ev).and_then(|v| v.as_array()).unwrap();
-            assert_eq!(arr.len(), 1, "event {ev}");
-            let entry = &arr[0];
-            assert_eq!(
-                entry["command"].as_str().unwrap(),
-                "PIXTUOID_SOURCE=reasonix '/opt/pixtuoid-hook'"
-            );
-            assert!(entry[SENTINEL_KEY].as_bool().unwrap());
-            assert_eq!(entry["timeout"].as_i64().unwrap(), 1000);
-            assert!(
-                entry.get("hooks").is_none() && entry.get("type").is_none(),
-                "must not write CC-style nested groups"
-            );
-            assert!(entry.get("match").is_none(), "must not write a match key");
-        }
-    }
-
-    #[test]
-    fn install_is_idempotent_and_replaces_across_paths() {
-        let a = json_merge_install(json!({}), "PIXTUOID_SOURCE=reasonix '/opt/a/pixtuoid-hook'");
-        let b = json_merge_install(a.clone(), "PIXTUOID_SOURCE=reasonix '/opt/a/pixtuoid-hook'");
-        assert_eq!(a, b, "same command re-install is a no-op");
-        let c = json_merge_install(a, "PIXTUOID_SOURCE=reasonix '/opt/b/pixtuoid-hook'");
-        for ev in REASONIX_EVENTS {
-            assert_eq!(
-                c["hooks"][*ev].as_array().unwrap().len(),
-                1,
-                "event {ev} duplicated on path change"
-            );
-        }
-    }
-
-    #[test]
-    fn install_preserves_user_entries() {
-        let initial = json!({
-            "hooks": {
-                "PreToolUse": [ { "match": "bash", "command": "my-guard.sh" } ]
-            },
-            "other": "setting"
-        });
-        let merged = json_merge_install(initial, "/x");
-        let arr = merged["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(arr.len(), 2);
-        assert_eq!(arr[0]["command"], json!("my-guard.sh"));
-        assert_eq!(merged["other"], json!("setting"));
-    }
-
-    #[test]
     fn uninstall_removes_only_managed_entries_and_empty_maps() {
-        let installed = json_merge_install(
-            json!({"hooks": {"PreToolUse": [ { "match": "bash", "command": "my-guard.sh" } ]}}),
-            "/x",
-        );
+        let mut installed = legacy();
+        installed["hooks"]["PreToolUse"]
+            .as_array_mut()
+            .unwrap()
+            .insert(0, json!({ "match": "bash", "command": "my-guard.sh" }));
         let cleaned = json_merge_uninstall(installed);
         let arr = cleaned["hooks"]["PreToolUse"].as_array().unwrap();
         assert_eq!(arr.len(), 1);
@@ -319,77 +374,63 @@ mod tests {
 
     #[test]
     fn uninstall_all_managed_drops_hooks_map() {
-        let installed = json_merge_install(json!({}), "/x");
-        let cleaned = json_merge_uninstall(installed);
+        let cleaned = json_merge_uninstall(legacy());
         assert!(cleaned.get("hooks").is_none(), "got {cleaned}");
     }
 
     #[test]
-    fn merge_install_idempotent_reports_unchanged() {
-        let first = merge_install("", "/x").unwrap();
-        assert!(first.changed);
-        let second = merge_install(&first.content, "/x").unwrap();
-        assert!(!second.changed, "second install is a semantic no-op");
+    fn every_event_execs_the_shim_with_its_source_and_reads_it_back() {
+        let shim = if cfg!(windows) {
+            r"C:\Program Files\pixtuoid-hook.exe"
+        } else {
+            "/Users/Jane Doe/bin/pixtuoid-hook"
+        };
+        let cmd = hook_command(Path::new(shim), false).unwrap();
+        assert_eq!(cmd, shim, "exec form: the bare path, spaces and all");
+        let rendered = render_manifest(&cmd).unwrap();
+        let doc: Value = serde_json::from_str(&rendered).unwrap();
+        assert_eq!(doc["apiVersion"], json!("reasonix.io/plugin/v2"));
+        let mut keys: Vec<_> = doc.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            ["apiVersion", "contributes", "description", "name"],
+            "a v2 manifest rejects unknown fields"
+        );
+        let hooks = doc["contributes"]["hooks"].as_object().unwrap();
+        assert_eq!(hooks.len(), REASONIX_EVENTS.len());
+        for ev in REASONIX_EVENTS {
+            assert_eq!(
+                hooks[*ev],
+                json!([{
+                    "command": shim,
+                    "args": ["--source", "reasonix"],
+                    "timeout": 1000,
+                    "description": "pixtuoid visualizer",
+                }]),
+                "{ev}"
+            );
+        }
+        let v = verify_schema(&rendered);
+        assert!(v.issues.is_empty(), "{:?}", v.issues);
+        assert_eq!(v.shim, ShimRef::Absolute(PathBuf::from(shim)));
+    }
+
+    #[test]
+    fn a_disconnected_manifest_still_loads_and_names_us() {
+        let out = uninstall(&render_manifest("/x/pixtuoid-hook").unwrap()).unwrap();
+        assert!(out.changed);
+        let doc: Value = serde_json::from_str(&out.content).unwrap();
+        assert_eq!(doc, manifest());
+        assert!(!uninstall(&out.content).unwrap().changed);
+        assert!(!uninstall("").unwrap().changed);
     }
 
     #[test]
     fn merge_uninstall_no_pixtuoid_hooks_reports_unchanged() {
         let user = r#"{ "hooks": { "Stop": [ { "command": "notify-send done" } ] } }"#;
-        let out = merge_uninstall(user).unwrap();
+        let out = merge::flat_json_uninstall(user).unwrap();
         assert!(!out.changed, "no managed entries → semantic no-op");
-    }
-
-    #[test]
-    fn merge_install_rejects_valid_json_that_is_not_an_object() {
-        assert!(merge_install("[1, 2, 3]", "/x").is_err());
-        assert!(merge_install("42", "/x").is_err());
-    }
-
-    #[test]
-    fn merge_install_rejects_invalid_json() {
-        assert!(merge_install("{not json", "/x").is_err());
-    }
-
-    #[test]
-    fn install_coerces_non_object_hooks_and_non_array_events() {
-        let doc = json_merge_install(json!({"hooks": "garbage"}), "/x");
-        assert!(doc["hooks"].is_object());
-        let doc = json_merge_install(json!({"hooks": {"Stop": 42}}), "/x");
-        assert_eq!(doc["hooks"]["Stop"].as_array().unwrap().len(), 1);
-    }
-
-    // Unix-only: on Windows `hook_command` emits the bare form and this spaced
-    // path would be REJECTED.
-    #[cfg(unix)]
-    #[test]
-    fn hook_command_stamps_source_and_quotes() {
-        let cmd = hook_command(Path::new("/Users/Jane Doe/bin/pixtuoid-hook"), false).unwrap();
-        assert_eq!(
-            cmd,
-            "PIXTUOID_SOURCE=reasonix '/Users/Jane Doe/bin/pixtuoid-hook'"
-        );
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn hook_command_emits_bare_exec_form_with_source_flag_on_windows() {
-        let cmd = hook_command(Path::new(r"C:\tools\pixtuoid-hook.exe"), false).unwrap();
-        assert_eq!(cmd, r"C:\tools\pixtuoid-hook.exe --source reasonix");
-    }
-
-    // These fixture paths don't exist on the runner, so the 8.3 short-name lookup
-    // fails and the reject fallback is what fires.
-    #[test]
-    #[cfg(windows)]
-    fn hook_command_rejects_cmd_unsafe_path_on_windows() {
-        assert!(hook_command(Path::new(r"C:\Program Files\pixtuoid-hook.exe"), false).is_err());
-        let err = hook_command(Path::new(r"C:\Users\a&b\pixtuoid-hook.exe"), false)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("cmd.exe") && err.contains("ordinary characters"),
-            "must explain the cmd-unsafe path + workaround: {err}"
-        );
     }
 
     #[cfg(windows)]

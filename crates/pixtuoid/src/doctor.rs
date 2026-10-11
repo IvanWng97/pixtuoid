@@ -278,9 +278,6 @@ pub(crate) struct SourceDiagnostics {
     /// checked (no target / not installed).
     pub install: Option<crate::install::verify::SchemaVerifyResult>,
     pub(crate) drift: LogScanResult,
-    /// [`HostRegistration::leftover_hooks`](crate::install::target::HostRegistration::leftover_hooks)'s
-    /// note. Not broken: those hooks still fire.
-    pub(crate) leftover_hooks: Option<String>,
 }
 
 impl SourceDiagnostics {
@@ -291,15 +288,12 @@ impl SourceDiagnostics {
     }
 
     /// The single worst issue as a one-line, glyph-prefixed summary. Priority:
-    /// install-broken (hooks can't fire) > leftover hooks > decode-drift.
+    /// install-broken (hooks can't fire) > decode-drift.
     pub(crate) fn summary(&self) -> Option<String> {
         if let Some(i) = &self.install
             && !i.is_sound()
         {
             return Some(format!("⚠ install broken: {}", i.issues.join("; ")));
-        }
-        if self.leftover_hooks.is_some() {
-            return Some("⚠ an older pixtuoid's hooks still fire — run `pixtuoid doctor`".into());
         }
         let n = self.drift.total();
         if n > 0 {
@@ -309,28 +303,11 @@ impl SourceDiagnostics {
     }
 }
 
-/// A disconnected source's health: nothing of it runs but hooks that fire
-/// anyway.
-pub(crate) fn leftover_hooks_health(source: &str) -> Option<String> {
-    SourceDiagnostics {
-        leftover_hooks: leftover_hooks(source),
-        ..Default::default()
-    }
-    .summary()
-}
-
-fn leftover_hooks(source: &str) -> Option<String> {
-    crate::install::target::by_source(source)
-        .and_then(|t| t.host)
-        .and_then(|h| (h.leftover_hooks)())
-}
-
 /// The install check runs whenever the source's target has managed hooks
 /// installed, NOT gated on the connected flag — the report must surface a stale
 /// broken install even on a disconnected source. `config` injects a config root
 /// (`None` in prod) so an install-broken verdict is exercisable through the SAME
-/// root both the `has_hooks` gate and `verify_target` read; the leftover-hook probe
-/// always reads the CLI's own settings.
+/// root both the `has_hooks` gate and `verify_target` read.
 pub(crate) fn diagnose(
     source: &str,
     log: &str,
@@ -342,7 +319,6 @@ pub(crate) fn diagnose(
     SourceDiagnostics {
         install,
         drift: scan_log_for_source(log, source),
-        leftover_hooks: leftover_hooks(source),
     }
 }
 
@@ -424,12 +400,12 @@ fn parsed_version_display(s: &str) -> Option<String> {
     parse_version(s).map(|(major, minor, patch)| format!("{major}.{minor}.{patch}"))
 }
 
-/// A broken install outranks drift and leftover hooks (✗ vs !); the two quiet
+/// A broken install outranks drift (✗ vs !); the two quiet
 /// states (– no install target, ○ not installed) are dimmed, not alarmed.
 fn verdict_glyph(row: &DoctorSourceRow, ink: &Ink) -> String {
     if row.diag.is_broken() {
         ink.bad("✗")
-    } else if row.diag.drift.total() > 0 || row.diag.leftover_hooks.is_some() {
+    } else if row.diag.drift.total() > 0 {
         ink.warn("!")
     } else if !row.has_target {
         ink.dim("–")
@@ -507,7 +483,8 @@ fn format_doctor_row(row: &DoctorSourceRow, ink: &Ink) -> String {
         version
     );
     // Each of `issues` is stripped where it is minted (a target's
-    // `verify_schema`, or `install::verify_target`), so it prints as is.
+    // `verify_schema`, or `install::verify_target`), so it prints as is; `notes`
+    // carry error chains that quote another CLI's files, so they are stripped here.
     if let Some(s) = &row.diag.install {
         if !s.is_sound() {
             out.push_str(&format!(
@@ -517,12 +494,9 @@ fn format_doctor_row(row: &DoctorSourceRow, ink: &Ink) -> String {
         } else if !s.notes.is_empty() {
             out.push_str(&format!(
                 "\n{CONT_INDENT}\u{21b3} note: {}",
-                s.notes.join("; ")
+                crate::strip_control_chars(&s.notes.join("; "))
             ));
         }
-    }
-    if let Some(note) = &row.diag.leftover_hooks {
-        out.push_str(&format!("\n{CONT_INDENT}\u{21b3} leftover hooks: {note}"));
     }
     if row.diag.drift.total() > 0 {
         out.push_str(&format!(
@@ -898,7 +872,7 @@ fn collect(
                 .map(|t| crate::install::has_hooks(t, None))
                 .unwrap_or(false);
             let is_connected = connected.contains(src);
-            let cli_detected = target.map(crate::install::target::is_present);
+            let cli_detected = target.map(|t| (t.presence_probe)());
             DoctorSourceRow {
                 prefix: desc.map(|d| d.label_prefix).unwrap_or("??"),
                 source_id: src,
@@ -1064,25 +1038,6 @@ fn sources_category(rows: &[DoctorSourceRow], ink: &Ink) -> Category {
         summary: format!("{broken} of {} {verb} attention", rows.len()),
         details,
     }
-}
-
-/// The verdict over the leftover-hook `↳` rows under `sources`: each row carries
-/// its own removal step, since reconnecting keeps them.
-fn leftover_hooks_category(rows: &[DoctorSourceRow]) -> Option<Category> {
-    let n = rows
-        .iter()
-        .filter(|r| r.diag.leftover_hooks.is_some())
-        .count();
-    (n > 0).then(|| Category {
-        status: CategoryStatus::Warn,
-        name: "leftover hooks",
-        summary: format!(
-            "{n} source{} still {} hooks an older pixtuoid wrote (see the \u{21b3} rows under sources)",
-            plural_s(n),
-            if n == 1 { "runs" } else { "run" }
-        ),
-        details: Vec::new(),
-    })
 }
 
 /// A CLI running AHEAD of the version this build's decoder was verified
@@ -1383,7 +1338,6 @@ fn render(r: &DoctorReport) -> String {
     let mut cats: Vec<Category> = vec![terminal_category(r)];
     cats.extend(config_category(r));
     cats.push(sources_category(&r.rows, &ink));
-    cats.extend(leftover_hooks_category(&r.rows));
     cats.push(versions_category(&r.rows));
     cats.push(drift_category(r, &ink));
     cats.extend(roots_category(&r.roots, &ink));
@@ -1641,7 +1595,6 @@ mod tests {
             installed_version: Some("1.0.0".into()),
             verified_version: "unknown",
             diag: SourceDiagnostics {
-                leftover_hooks: None,
                 install: Some(crate::install::verify::SchemaVerifyResult::default()),
                 drift: LogScanResult::default(),
             },
@@ -1698,28 +1651,12 @@ mod tests {
             issues,
             notes: vec![],
         });
-        let cc = tempfile::tempdir().unwrap();
-        let cc = if cfg!(windows) {
-            cc.path().join("cfg\u{202e}")
-        } else {
-            cc.path().join(format!("cfg{EVIL}"))
-        };
-        std::fs::create_dir(&cc).unwrap();
-        std::fs::write(
-            cc.join("settings.json"),
-            serde_json::json!({ "hooks": { EVIL: [{ crate::install::SENTINEL_KEY: true }] } })
-                .to_string(),
-        )
-        .unwrap();
-        let probe = crate::install::target::CLAUDE
-            .host
-            .map(|h| h.leftover_hooks);
-        row.diag.leftover_hooks = temp_env::with_var("CLAUDE_CONFIG_DIR", Some(&cc), || probe?());
-        assert!(
-            row.diag.leftover_hooks.is_some(),
-            "the settings must hold ours"
-        );
-        let mut r = summary_report(vec![row]);
+        let mut noted = summary_row("cx", "codex");
+        noted.diag.install = Some(crate::install::verify::SchemaVerifyResult {
+            issues: vec![],
+            notes: vec![evil()],
+        });
+        let mut r = summary_report(vec![row, noted]);
         r.log_path = ShownPath::new(evil());
         r.config_path = ShownPath::new(evil());
         r.config_warnings = vec![evil()];
@@ -2359,7 +2296,6 @@ mod tests {
             installed_version: Some("2.0.0".into()),
             verified_version: "unknown",
             diag: SourceDiagnostics {
-                leftover_hooks: None,
                 install: Some(crate::install::verify::SchemaVerifyResult::default()),
                 drift: LogScanResult::default(),
             },
@@ -2387,7 +2323,6 @@ mod tests {
             installed_version: Some("1.1.0".into()),
             verified_version: "1.0.62",
             diag: SourceDiagnostics {
-                leftover_hooks: None,
                 install: None,
                 drift: LogScanResult {
                     missing_field: 3,
@@ -2419,7 +2354,6 @@ mod tests {
             installed_version: None,
             verified_version: "unknown",
             diag: SourceDiagnostics {
-                leftover_hooks: None,
                 install: Some(crate::install::verify::SchemaVerifyResult {
                     issues: vec!["shim binary missing: /old/pixtuoid-hook".into()],
                     notes: vec![],
@@ -2442,11 +2376,7 @@ mod tests {
         install: Option<crate::install::verify::SchemaVerifyResult>,
         drift: LogScanResult,
     ) -> SourceDiagnostics {
-        SourceDiagnostics {
-            install,
-            drift,
-            leftover_hooks: None,
-        }
+        SourceDiagnostics { install, drift }
     }
 
     #[test]
@@ -2520,7 +2450,7 @@ mod tests {
         use crate::install::{install_target, target::CLAUDE};
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("m/pixtuoid/hooks/hooks.json");
-        let d = crate::install::tests::with_fake_claude(|_| {
+        let d = crate::install::tests::with_fake_hosts(|_| {
             temp_env::with_var(
                 crate::install::io::HOOK_OVERRIDE_ENV,
                 Some("/nonexistent/pixtuoid-hook"),
@@ -2537,83 +2467,6 @@ mod tests {
             s.contains("install broken") && s.contains("shim binary missing"),
             "unexpected summary: {s:?}"
         );
-    }
-
-    #[test]
-    fn diagnose_reports_the_hooks_a_pre_plugin_install_left_in_claude_codes_settings() {
-        use crate::install::target::{CLAUDE, CODEX};
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::write(
-            tmp.path().join("settings.json"),
-            r#"{"hooks":{"Stop":[{"_pixtuoid":true,"matcher":".*","hooks":[]}]}}"#,
-        )
-        .unwrap();
-        let unhooked = Some(tmp.path().join("m/pixtuoid/hooks/hooks.json"));
-        let (cc, cx) = temp_env::with_var("CLAUDE_CONFIG_DIR", Some(tmp.path()), || {
-            (
-                diagnose(CLAUDE.core_source, "", unhooked.clone()),
-                diagnose(CODEX.core_source, "", unhooked.clone()),
-            )
-        });
-        assert!(
-            cc.leftover_hooks
-                .as_deref()
-                .is_some_and(|n| n.contains("Stop")),
-            "{:?}",
-            cc.leftover_hooks
-        );
-        assert!(cc.install.is_none(), "no plugin is installed");
-        assert!(!cc.is_broken(), "the leftovers still fire");
-        assert!(
-            cc.summary()
-                .is_some_and(|s| s.contains("older pixtuoid") && s.contains("pixtuoid doctor")),
-            "{:?}",
-            cc.summary()
-        );
-        assert_eq!(cx.leftover_hooks, None, "only a host target has leftovers");
-    }
-
-    #[test]
-    fn diagnostics_leftover_hooks_summarize_below_a_broken_install_and_above_drift() {
-        let mut d = diag(
-            Some(crate::install::verify::SchemaVerifyResult::default()),
-            LogScanResult {
-                missing_field: 3,
-                ..Default::default()
-            },
-        );
-        d.leftover_hooks = Some("settings.json still holds hooks".into());
-        assert!(!d.is_broken());
-        let s = d.summary().unwrap();
-        assert!(s.contains("older pixtuoid") && !s.contains("drift"), "{s}");
-        d.install = Some(crate::install::verify::SchemaVerifyResult {
-            issues: vec!["shim binary missing: /x".into()],
-            notes: vec![],
-        });
-        assert!(d.summary().unwrap().contains("install broken"));
-    }
-
-    #[test]
-    fn leftover_hooks_warn_in_their_own_category_and_leave_sources_sound() {
-        let mut row = summary_row("cc", "claude-code");
-        row.hooks_installed = false;
-        row.diag.install = None;
-        row.diag.leftover_hooks = Some("settings.json still holds hooks".into());
-        let line = format_doctor_row(&row, &Ink { on: false });
-        assert!(line.starts_with("      !"), "{line}");
-        assert!(
-            line.contains("\n          \u{21b3} leftover hooks: settings.json still holds hooks"),
-            "{line}"
-        );
-        let out = render(&summary_report(vec![row, summary_row("cx", "codex")]));
-        assert!(out.contains("[\u{2713}] sources — 2 registered"), "{out}");
-        assert!(
-            out.contains("[!] leftover hooks — 1 source still runs hooks"),
-            "{out}"
-        );
-        assert!(out.contains("issues in 1 category"), "{out}");
-        let clean = render(&summary_report(vec![summary_row("cx", "codex")]));
-        assert!(!clean.contains("leftover hooks"), "{clean}");
     }
 
     #[test]
@@ -2758,7 +2611,6 @@ mod tests {
             installed_version: None,
             verified_version: "unknown",
             diag: SourceDiagnostics {
-                leftover_hooks: None,
                 install: None,
                 drift: LogScanResult::default(),
             },
@@ -2783,7 +2635,6 @@ mod tests {
             installed_version: None,
             verified_version: "unknown",
             diag: SourceDiagnostics {
-                leftover_hooks: None,
                 install: None,
                 drift: LogScanResult::default(),
             },
@@ -2812,7 +2663,6 @@ mod tests {
             installed_version: Some("1.0.0".into()),
             verified_version: "unknown",
             diag: SourceDiagnostics {
-                leftover_hooks: None,
                 install: Some(crate::install::verify::SchemaVerifyResult {
                     issues: vec![],
                     notes: vec!["pixtuoid-hook not on PATH".into()],
@@ -2846,7 +2696,6 @@ mod tests {
             installed_version: None,
             verified_version: "unknown",
             diag: SourceDiagnostics {
-                leftover_hooks: None,
                 install: None,
                 drift: LogScanResult {
                     unknown_event: 2,

@@ -22,8 +22,7 @@ pub use native::CodexSource;
 #[cfg(feature = "native")]
 pub(crate) use native::live_codex_rollout_ids;
 
-/// homebrew-core contract: their formula's `test do` asserts this exact id, so
-/// renaming it breaks Homebrew's CI on the next autobump. Coordinate a core PR.
+/// The Codex source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "codex";
 
 /// Trailing canonical UUID (`8-4-4-4-12`) of a `rollout-<ts>-<UUID>.jsonl`
@@ -310,9 +309,9 @@ fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> 
 }
 
 /// The Codex home dir — honors `CODEX_HOME` when it points at an existing dir,
-/// else `~/.codex` (codex's own precedence). The installer routes its
-/// `config.toml` path through here too, so the watched sessions root and the
-/// installed-hook config can never disagree.
+/// else `~/.codex` (codex's own precedence). The installer reads Codex's
+/// `config.toml` through here too, so the watched sessions root and the plugin
+/// state it reads can never disagree.
 pub fn codex_home() -> PathBuf {
     crate::platform::codex_home()
 }

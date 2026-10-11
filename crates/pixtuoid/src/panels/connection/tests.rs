@@ -251,35 +251,18 @@ fn build_rows_covers_every_registry_source_with_aligned_live_view() {
     assert_eq!(live.len(), rows.len());
 }
 
-/// A disconnected Claude Code row still names the hooks an older pixtuoid
-/// left firing: they run whatever the row says.
+/// A disconnected row carries no health line, even with drift its connected
+/// self would report.
 #[test]
-fn a_disconnected_row_names_hooks_that_still_fire() {
-    let cfg = tempfile::tempdir().unwrap();
-    std::fs::write(
-        cfg.path().join("settings.json"),
-        r#"{"hooks":{"Stop":[{"_pixtuoid":true,"matcher":".*","hooks":[]}]}}"#,
-    )
-    .unwrap();
-    // Codex drift a connected row would report.
+fn a_disconnected_row_shows_no_health_line() {
     let log = format!(
         "ts  WARN {}: source=codex kind=unknown_event name=OtherHook",
         pixtuoid_core::source::drift::TARGET
     );
-    let rows = temp_env::with_var("CLAUDE_CONFIG_DIR", Some(cfg.path()), || {
-        build_rows(&HashSet::new(), &log)
-    });
-    let cc = rows.iter().find(|r| r.source_id == "claude-code").unwrap();
-    assert_ne!(cc.state, ConnState::Connected);
-    assert!(
-        cc.health
-            .as_deref()
-            .is_some_and(|h| h.contains("pixtuoid doctor")),
-        "{:?}",
-        cc.health
-    );
+    let rows = build_rows(&HashSet::new(), &log);
     let cx = rows.iter().find(|r| r.source_id == "codex").unwrap();
-    assert_eq!(cx.health, None, "a disconnected row shows nothing else");
+    assert_ne!(cx.state, ConnState::Connected);
+    assert_eq!(cx.health, None);
 }
 
 #[test]
@@ -402,11 +385,12 @@ fn only_restart_bound_targets_declare_a_post_install_step_naming_it() {
     assert_eq!(
         with_hint,
         vec![
+            pixtuoid_core::source::codex::SOURCE_NAME,
             pixtuoid_core::source::openclaw::SOURCE_NAME,
             pixtuoid_core::source::omp::SOURCE_NAME,
             pixtuoid_core::source::dsh::SOURCE_NAME,
         ],
-        "only openclaw, omp and dsh need a post-install step today"
+        "only codex, openclaw, omp and dsh need a post-install step today"
     );
 }
 
@@ -415,21 +399,24 @@ fn format_disconnect_result_renders_disconnected_plus_registration_note() {
     use crate::install::{UninstallOutcome, UninstallReport};
     let removed = UninstallReport {
         outcome: UninstallOutcome::Removed,
-        plugin_left_registered: false,
+        plugin_left_registered: None,
     };
     let s = format_disconnect_result(&removed, "Claude Code");
     assert_eq!(s, "\u{2713} Claude Code disconnected");
 
     let stranded = UninstallReport {
-        plugin_left_registered: true,
+        plugin_left_registered: crate::install::target::CODEX.host.map(|h| h.cli),
         ..removed
     };
-    let s = format_disconnect_result(&stranded, "Claude Code");
-    assert!(s.contains("plugin left registered"), "{s}");
+    let s = format_disconnect_result(&stranded, "Codex");
+    assert!(
+        s.contains("plugin left registered (codex not on PATH)"),
+        "the CLI it could not reach, by name: {s}"
+    );
 
     let nothing = UninstallReport {
         outcome: UninstallOutcome::NothingToRemove,
-        plugin_left_registered: false,
+        plugin_left_registered: None,
     };
     let s2 = format_disconnect_result(&nothing, "Codex");
     assert_eq!(s2, "\u{2713} Codex disconnected");

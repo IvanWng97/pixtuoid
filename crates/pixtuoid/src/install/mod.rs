@@ -5,6 +5,7 @@ pub(crate) mod cursor;
 pub(crate) mod grok;
 pub(crate) mod hermes;
 mod hook_cmd;
+pub(crate) mod host_plugin;
 pub(crate) mod io;
 pub(crate) mod kimi;
 pub(crate) use io::{nonempty_abs_env, owner_only_create};
@@ -26,8 +27,9 @@ use target::{BinaryStrategy, Primary, Target};
 
 /// The idempotency sentinel stamped on every hook entry pixtuoid merges into a
 /// shared config — those targets key install/uninstall/detect on this, not the
-/// command shape. A plugin's own hooks file (Claude Code's) is ours whole and
-/// carries none.
+/// command shape. A plugin's own file (Claude Code's, Codex's, Reasonix's) is ours
+/// whole and carries none; for those hosts it names only what an older pixtuoid
+/// merged into the CLI's own config ([`target::LegacyConfig`]).
 pub(crate) const SENTINEL_KEY: &str = "_pixtuoid";
 
 /// Whether `t`'s config currently bears pixtuoid hooks — whether its source is
@@ -130,7 +132,18 @@ pub(crate) fn verify_target(
     }
     if let Some(host) = t.host {
         match (host.is_registered)() {
-            Ok(true) => {}
+            Ok(true) => match host.copy.as_ref().map(|c| (c.stale)(&path)) {
+                Some(Ok(true)) => issues.push(format!(
+                    "{} runs an older copy of the plugin (a launch re-copies it; the log \
+                     names a re-copy that failed)",
+                    t.display_name
+                )),
+                Some(Err(e)) => notes.push(format!(
+                    "could not compare {}'s copy of the plugin with pixtuoid's: {e:#}",
+                    t.display_name
+                )),
+                Some(Ok(false)) | None => {}
+            },
             Ok(false) => issues.push(format!(
                 "the pixtuoid plugin is not installed and enabled in {} — reconnect the source",
                 t.display_name
@@ -525,11 +538,12 @@ fn install_target_from(
         lock.write_atomic(&outcome.content)?;
     }
     // After the hooks file is written, so the plugin never registers empty, and
-    // still under its lock, so a failed registration puts back exactly what this
-    // call changed: the hooks ARE the connected fact (`has_hooks`), and a plugin
-    // that never registered fires none of the new ones.
+    // still under its lock, so a failed registration puts back the hooks file this
+    // call wrote: the hooks ARE the connected fact (`has_hooks`), and a plugin that
+    // never registered fires none of the new ones. Legacy hooks `connect_host`
+    // already stripped stay stripped.
     if let Some(host) = t.host
-        && let Err(e) = (host.register)(&path)
+        && let Err(e) = connect_host(host, &path)
     {
         if outcome.changed
             && let Err(undo) = restore(&lock, prior.as_deref())
@@ -547,6 +561,31 @@ fn install_target_from(
         path_warning,
         post_install_hint: t.post_install_hint,
     })
+}
+
+/// Strip what an older pixtuoid merged into the CLI's own config, then register. A
+/// registration that fails after the strip leaves neither firing, which is what a
+/// failed connect reads as; a CLI that isn't on PATH fails it before the strip.
+fn connect_host(host: &target::HostRegistration, primary: &std::path::Path) -> Result<()> {
+    host.cli.require()?;
+    strip_legacy(host)?;
+    (host.register)(primary)
+}
+
+/// Whether it removed anything from the host's [`target::LegacyConfig`].
+fn strip_legacy(host: &target::HostRegistration) -> Result<bool> {
+    let Some(legacy) = &host.legacy else {
+        return Ok(false);
+    };
+    let path = (legacy.path)()?;
+    // The CLI's own config resolves from its home, not the primary a test passes.
+    #[cfg(test)]
+    assert!(
+        path.starts_with(std::env::temp_dir()),
+        "a test is about to strip {} — point the CLI's home at a TempDir first",
+        path.display()
+    );
+    strip_managed(legacy.strip, &path)
 }
 
 /// Put the locked file back as an install found it: `prior`, or no file at all.
@@ -630,9 +669,9 @@ pub(crate) enum UninstallOutcome {
 #[derive(Debug)]
 pub(crate) struct UninstallReport {
     pub outcome: UninstallOutcome,
-    /// The CLI couldn't be reached to deregister a host target's plugin, which
-    /// stays registered with no hooks.
-    pub plugin_left_registered: bool,
+    /// The host CLI that couldn't be reached to deregister its plugin, which stays
+    /// registered.
+    pub plugin_left_registered: Option<io::HostCli>,
 }
 
 /// Remove pixtuoid hooks from `t`'s config, returning a structured report. Same
@@ -642,19 +681,25 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
     let mut removed = strip_managed(t.primary.uninstall(), &path)?;
-    // Last, since the strip needs no CLI: a failing deregister leaves a
-    // registered plugin with no hooks, never hooks that still fire.
+    // After the strip, which needs no CLI: a failing deregister leaves a
+    // registered plugin whose hooks are gone, or whose copy fires into a
+    // disconnected source, which drops the events.
     let plugin_left_registered = match t.host {
         Some(host) => match (host.unregister)(&path)? {
             target::Unregistered::Removed => {
                 removed = true;
-                false
+                None
             }
-            target::Unregistered::Absent => false,
-            target::Unregistered::Unreachable => true,
+            target::Unregistered::Absent => None,
+            target::Unregistered::Unreachable => Some(host.cli),
         },
-        None => false,
+        None => None,
     };
+    // Last, so a legacy config it cannot parse fails the disconnect only once the
+    // plugin is gone.
+    if let Some(host) = t.host {
+        removed |= strip_legacy(host)?;
+    }
     Ok(UninstallReport {
         outcome: if removed {
             UninstallOutcome::Removed

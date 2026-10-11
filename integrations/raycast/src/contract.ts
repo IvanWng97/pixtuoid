@@ -17,8 +17,7 @@ export interface SourceStatus {
   cli_present: boolean;
   /**
    * The source's worst issue as one line, or `null` if none was found: a broken
-   * install or decode drift (connected sources only), or hooks an older release
-   * left that still fire.
+   * install or decode drift, for connected sources only.
    */
   health?: string | null;
 }
