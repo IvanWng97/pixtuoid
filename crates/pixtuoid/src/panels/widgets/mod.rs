@@ -148,31 +148,33 @@ fn rgb_of(c: Color) -> Option<Rgb> {
 /// makes it read as a cast box-shadow (the card floats above it) rather than an outline.
 const SHADOW_OFFSET: u16 = 1;
 
-/// Multiply an `Rgb` color toward black by `f`. Half-block office cells carry a real RGB
-/// on BOTH `fg` (top sub-pixel) and `bg` (bottom sub-pixel), so a clean shadow darkens
-/// both — ratatui's own `Block::shadow` tints bg-only and smears over the pixel art.
-fn dim_rgb(c: Color, f: f32) -> Color {
+/// An `Rgb` color under `dim`; a named one is the terminal's, so it stays.
+fn dim_color(c: Color, dim: pixtuoid_scene::look::Dim) -> Color {
     match c {
-        Color::Rgb(r, g, b) => Color::Rgb(
-            (f32::from(r) * f) as u8,
-            (f32::from(g) * f) as u8,
-            (f32::from(b) * f) as u8,
-        ),
+        Color::Rgb(r, g, b) => {
+            let pixtuoid_core::sprite::Rgb { r, g, b } =
+                dim.of(pixtuoid_core::sprite::Rgb { r, g, b });
+            Color::Rgb(r, g, b)
+        }
         other => other,
     }
 }
 
 /// Darken the cell at `(x, y)` by the uniform [`CARD_SHADOW`], if it is a real `Rgb` and
-/// inside `bounds`. With `top_half_only`, darkens only the upper half-block sub-pixel
-/// (`fg`) and leaves the lower one lit — a 1px-tall line.
+/// inside `bounds`. Half-block office cells carry a real RGB on BOTH `fg` (top sub-pixel)
+/// and `bg` (bottom sub-pixel), so a clean shadow darkens both — ratatui's own
+/// `Block::shadow` tints bg-only and smears over the pixel art. With `top_half_only`,
+/// darkens only the upper half-block sub-pixel (`fg`) and leaves the lower one lit — a
+/// 1px-tall line.
 fn dim_cell(f: &mut ratatui::Frame<'_>, x: u16, y: u16, bounds: Rect, top_half_only: bool) {
     if x < bounds.x || y < bounds.y || x >= bounds.right() || y >= bounds.bottom() {
         return;
     }
     let cell = &mut f.buffer_mut()[(x, y)];
-    cell.fg = dim_rgb(cell.fg, CARD_SHADOW);
+    let shadow = pixtuoid_scene::look::Dim::from_brightness(CARD_SHADOW);
+    cell.fg = dim_color(cell.fg, shadow);
     if !top_half_only {
-        cell.bg = dim_rgb(cell.bg, CARD_SHADOW);
+        cell.bg = dim_color(cell.bg, shadow);
     }
 }
 

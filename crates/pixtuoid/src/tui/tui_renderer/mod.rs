@@ -296,6 +296,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     floor: None,
                 },
                 debug_walkable,
+                dim: self.chrome.frames.onboarding.dim,
             },
             &self.chrome.pets,
             self.chrome.theme.surface.bg_fallback,
@@ -671,15 +672,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .overlays(popup_scale, self.offers_walkable_debug());
         let theme = self.chrome.theme;
         let flashes = self.session.flashes();
-        let Some(slide) = self.session.slide_mut() else {
+        let Some(slide) = self.session.buf() else {
             return Ok(());
         };
-        // Modal backdrop: the same multiply a floor's frame takes.
-        crate::tui::renderer::apply_dim(slide, self.chrome.frames.onboarding.dim);
         if self.flash.holds(flashes, term_size) {
             return Ok(());
         }
-        let slide = &*slide;
         self.terminal.draw(|f| {
             let full = f.area();
             paint_footer(f, &footer, full, theme);
@@ -920,7 +918,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             world: &world,
             mouse_pos,
         };
-        let Some((floor, _)) = self.session.floor_mut(current) else {
+        let Some(floor) = self.session.floor(current) else {
             return Ok(());
         };
         let out = crate::tui::renderer::flush_classic(&mut self.terminal, &frame, layout, floor)?;

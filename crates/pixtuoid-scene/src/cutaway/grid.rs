@@ -180,7 +180,7 @@ pub trait Canvas {
     /// does: a canvas with nothing under a pixel overrides it.
     fn shade(&mut self, x: i32, y: i32, factor: f32) {
         if let Some(under) = self.pixel(x, y) {
-            self.set(x, y, darken(under, factor));
+            self.set(x, y, crate::look::Dim::from_brightness(factor).of(under));
         }
     }
 }
@@ -374,16 +374,6 @@ fn paint_art(canvas: &mut impl Canvas, frame: &Frame, at: (i32, i32), s: i32, st
     }
 }
 
-/// `c` darkened toward black by `factor` (0 is black, 1 unchanged).
-fn darken(c: Rgb, factor: f32) -> Rgb {
-    let f = |v: u8| (f32::from(v) * factor.clamp(0.0, 1.0)) as u8;
-    Rgb {
-        r: f(c.r),
-        g: f(c.g),
-        b: f(c.b),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,7 +505,10 @@ mod tests {
             ink,
         );
         assert_eq!(buf.get(0, 0), fill);
-        assert_eq!(buf.get(VS_CODE.w, VS_CODE.h / 2), darken(BG, 0.5));
+        assert_eq!(
+            buf.get(VS_CODE.w, VS_CODE.h / 2),
+            crate::look::Dim::from_brightness(0.5).of(BG)
+        );
         assert_eq!(buf.get(VS_CODE.w, VS_CODE.h / 2 - 1), BG);
         assert_eq!(buf.get(2 * VS_CODE.w, 2 * VS_CODE.h), BG);
     }

@@ -418,8 +418,8 @@ impl OfficeSession {
     }
 
     /// Render one frame of `inputs.world.scene` in `look`: the floor showing,
-    /// or both floors of a slide composed into one, `gap` between them and
-    /// their world text baked whatever `look` says.
+    /// or both floors of a slide composed into one, `gap` between them dimmed
+    /// as the floors are and their world text baked whatever `look` says.
     /// `inputs.world.scene` is the FULL live scene: the office evicts against
     /// it and projects each floor out of it. `inputs.world.floor` carries the
     /// office's weather and motion, `inputs.place.gateway` its gateway; each
@@ -477,7 +477,7 @@ impl OfficeSession {
             .slide
             .get_or_insert_with(|| (RgbBuffer::filled(0, 0, gap), Default::default()));
         if let (Some(leaving), Some(arriving)) = (self.views[from].buf(), self.views[to].buf()) {
-            compose_slide(slide, (leaving, arriving), t, to > from, gap);
+            compose_slide(slide, (leaving, arriving), t, to > from, inputs.dim.of(gap));
             *flashes =
                 crate::flash::Flashes::of_slide(self.views[from].flash(), self.views[to].flash());
         }
@@ -529,12 +529,6 @@ impl OfficeSession {
                     .unwrap_or_default(),
             ),
         }
-    }
-
-    /// The last slide's composed frame, for a painter's own pass over it (a
-    /// modal's dim); `None` outside a slide.
-    pub fn slide_mut(&mut self) -> Option<&mut RgbBuffer> {
-        self.slide.as_mut().map(|(slide, _)| slide)
     }
 
     /// What the last frame shows a pointer over `area`, in layout units; none
