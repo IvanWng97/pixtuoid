@@ -235,7 +235,7 @@ async fn stalled_daemon_shim_exits_zero_within_watchdog_bound() {
 
     let (status, elapsed) = run_shim(&name, r#"{"hook_event_name":"Stop","session_id":"s2"}"#);
     assert!(status.success(), "watchdog exits 0");
-    // The watchdog bound is 200ms; 1500 leaves runner-jitter headroom while still
-    // proving "never blocks the calling CLI".
+    // The watchdog bound is `transport::WRITE_TIMEOUT`; 1500 leaves runner-jitter
+    // headroom while still proving "never blocks the calling CLI".
     assert!(elapsed < Duration::from_millis(1500), "took {elapsed:?}");
 }

@@ -46,8 +46,8 @@ pub(crate) const HERMES_EVENTS: &[&str] = &[
     "on_session_finalize",
 ];
 
-/// The shim returns within its 200ms send bound, so 5s is generous headroom (Hermes
-/// defaults to 60s when the key is omitted).
+/// The shim's send is watchdog-bounded (pixtuoid-hook's `transport::WRITE_TIMEOUT`),
+/// so 5s is generous headroom (Hermes defaults to 60s when the key is omitted).
 const HOOK_TIMEOUT_SECS: i64 = 5;
 
 pub(crate) fn default_config_path() -> Result<PathBuf> {
