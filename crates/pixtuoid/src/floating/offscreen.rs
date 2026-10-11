@@ -23,8 +23,6 @@ pub struct OfficeRenderer {
     audio: crate::audio::AudioHandle,
     /// The flashes the window shows.
     flash: FlashHold<(u32, u32)>,
-    /// The walkable debug layer, the TUI's `w`; not persisted.
-    pub(super) debug_walkable: bool,
 }
 
 impl OfficeRenderer {
@@ -36,13 +34,7 @@ impl OfficeRenderer {
             pointer: Pointer::default(),
             audio: crate::audio::AudioHandle::disabled(),
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
-            debug_walkable: false,
         }
-    }
-
-    /// Show or hide the walkable debug layer.
-    pub(crate) fn toggle_walkable_debug(&mut self) {
-        self.debug_walkable = !self.debug_walkable;
     }
 
     /// The pets each floor picks its own from.
@@ -89,6 +81,7 @@ impl OfficeRenderer {
             world,
             theme,
             place,
+            dim,
         } = frame;
         let FloorInputs {
             scene, floor, now, ..
@@ -101,7 +94,8 @@ impl OfficeRenderer {
                 theme,
                 size: at.logical(),
                 place,
-                debug_walkable: self.debug_walkable,
+                debug_walkable: false,
+                dim,
             },
             &self.pets,
             gap,
@@ -413,13 +407,14 @@ pub struct WindowFrame<'a> {
     pub world: FloorInputs<'a>,
     pub theme: &'static pixtuoid_scene::theme::Theme,
     pub place: pixtuoid_scene::look::Place,
+    pub dim: pixtuoid_scene::look::Dim,
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::SystemTime;
 
-    use super::super::fixtures::{active_on, cutaway, density, scene_with};
+    use super::super::fixtures::{active_on, cutaway, density, frame, scene_with};
     use super::super::geometry::{Zoom, window_geometry};
     use super::super::overlays::footer_budget;
     use super::*;
@@ -453,6 +448,7 @@ mod tests {
                     },
                     theme,
                     place: pixtuoid_scene::look::Place::default(),
+                    dim: pixtuoid_scene::look::Dim::NONE,
                 },
             )
             .expect("a frame");
@@ -471,6 +467,31 @@ mod tests {
                 .any(|p| *p != Rgb { r: 0, g: 0, b: 0 } && *p != bg),
             "the painter draws office content beyond the cleared background"
         );
+    }
+
+    /// The window's office darkens under its modal's dim, as the TUI's does.
+    #[test]
+    fn the_window_dims_its_office_under_a_modal() {
+        let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut renderer = OfficeRenderer::new(crate::test_flash::pack_arc());
+        let mut lit = |dim| -> u64 {
+            let at = WindowFrame {
+                dim,
+                ..frame(&scene, crate::test_flash::pack(), theme, now)
+            };
+            renderer
+                .render(cutaway(Size { w: 160, h: 96 }), at)
+                .expect("a frame")
+                .as_slice()
+                .iter()
+                .map(|p| u64::from(p.r) + u64::from(p.g) + u64::from(p.b))
+                .sum()
+        };
+        let bright = lit(pixtuoid_scene::look::Dim::NONE);
+        let dimmed = lit(pixtuoid_scene::look::Dim::from_brightness(0.4));
+        assert!(2 * dimmed < bright, "dimmed={dimmed} vs bright={bright}");
     }
 
     /// An empty office's window, under `weather`, moving fully, its flashes
@@ -532,6 +553,7 @@ mod tests {
                     },
                     theme,
                     place: pixtuoid_scene::look::Place::default(),
+                    dim: pixtuoid_scene::look::Dim::NONE,
                 },
                 self.px,
             );
@@ -880,14 +902,14 @@ mod tests {
         // Under a panel a carry still sets down, and a click lands nowhere.
         let open = crate::panels::ModalState {
             help_open: true,
-            ..closed_modal()
+            ..crate::panels::ModalState::closed()
         };
-        assert!(renderer.tooltip_shows(true, &closed_modal()));
+        assert!(renderer.tooltip_shows(true, &crate::panels::ModalState::closed()));
         assert!(
             !renderer.tooltip_shows(true, &open),
             "no tooltip under a panel"
         );
-        assert!(!renderer.tooltip_shows(false, &closed_modal()));
+        assert!(!renderer.tooltip_shows(false, &crate::panels::ModalState::closed()));
         let press = |renderer: &mut OfficeRenderer| {
             renderer.press_at(
                 on_agent,
@@ -903,7 +925,7 @@ mod tests {
         press(&mut renderer);
         assert!(renderer.pointer_moved(away, at));
         assert!(
-            !renderer.tooltip_shows(true, &closed_modal()),
+            !renderer.tooltip_shows(true, &crate::panels::ModalState::closed()),
             "nor in hand"
         );
         assert_eq!(renderer.release_under(away, at, &open), None);
@@ -916,7 +938,7 @@ mod tests {
         press(&mut renderer);
         assert!(
             renderer
-                .release_under(on_agent, at, &closed_modal())
+                .release_under(on_agent, at, &crate::panels::ModalState::closed())
                 .is_some(),
             "with no panel the click lands"
         );
@@ -994,6 +1016,7 @@ mod tests {
                 },
                 theme,
                 place: pixtuoid_scene::look::Place::default(),
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
         let text: String = renderer
@@ -1037,6 +1060,7 @@ mod tests {
                 },
                 theme,
                 place: pixtuoid_scene::look::Place::default(),
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
         let frames = crate::audio::drain_frames(&rx);
@@ -1110,6 +1134,7 @@ mod tests {
                     },
                     theme,
                     place: pixtuoid_scene::look::Place::default(),
+                    dim: pixtuoid_scene::look::Dim::NONE,
                 },
             );
             heard.extend(
@@ -1158,6 +1183,7 @@ mod tests {
                 },
                 theme,
                 place: pixtuoid_scene::look::Place::default(),
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
         crate::audio::drain_frames(&rx); // discard the priming frames
@@ -1177,6 +1203,7 @@ mod tests {
                 },
                 theme,
                 place: pixtuoid_scene::look::Place::default(),
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
         let off_floor: Vec<_> = crate::audio::drain_frames(&rx)
@@ -1203,6 +1230,7 @@ mod tests {
                 },
                 theme,
                 place: pixtuoid_scene::look::Place::default(),
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
         let on_floor: Vec<_> = crate::audio::drain_frames(&rx)
@@ -1298,10 +1326,10 @@ mod tests {
     fn the_cursor_reads_the_frame_on_screen() {
         use winit::window::CursorIcon;
         let (mut renderer, at, size, now, _) = one_agent_office();
-        let closed = closed_modal();
+        let closed = crate::panels::ModalState::closed();
         let open = crate::panels::ModalState {
             help_open: true,
-            ..closed_modal()
+            ..crate::panels::ModalState::closed()
         };
         let icon = |r: &OfficeRenderer, cursor, modal: &crate::panels::ModalState| {
             r.cursor_icon(cursor, size, at, modal, None, now)
@@ -1360,6 +1388,7 @@ mod tests {
                     },
                     theme,
                     place: pixtuoid_scene::look::Place::default(),
+                    dim: pixtuoid_scene::look::Dim::NONE,
                 },
             )
             .expect("a frame");
@@ -1387,18 +1416,5 @@ mod tests {
                 )
             })
             .expect("the frame drew the agent")
-    }
-
-    fn closed_modal() -> crate::panels::ModalState {
-        crate::panels::ModalState {
-            onboarding_open: false,
-            help_open: false,
-            version_popup: false,
-            theme_picker: None,
-            dashboard_open: false,
-            connection_open: false,
-            connection_confirm: false,
-            n_themes: pixtuoid_scene::theme::ALL_THEMES.len(),
-        }
     }
 }

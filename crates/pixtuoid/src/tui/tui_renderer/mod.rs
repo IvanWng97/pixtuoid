@@ -118,10 +118,19 @@ impl PopupState {
 }
 
 impl Chrome {
-    /// The panels open over a frame at `popup_scale`; the terminal's help
-    /// lists no shortcuts of its own.
-    fn overlays(&self, popup_scale: f32) -> crate::panels::OverlayFrame<'_> {
-        self.frames.overlays(popup_scale, &[])
+    /// The panels open over a frame at `popup_scale`, the help listing the
+    /// terminal's own shortcuts.
+    fn overlays(
+        &self,
+        popup_scale: f32,
+        offers_walkable_debug: bool,
+    ) -> crate::panels::OverlayFrame<'_> {
+        let host_keys = if offers_walkable_debug {
+            crate::tui::WALKABLE_SHORTCUTS
+        } else {
+            &[]
+        };
+        self.frames.overlays(popup_scale, host_keys)
     }
 
     /// Floor `floor` of `session`'s office in `scene`, whose projection is
@@ -229,6 +238,19 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cutaway = Some(cutaway);
     }
 
+    /// Whether the last office frame drawn was the half-blocks of a debug
+    /// build, which draw the walkable debug layer where the cutaway never does:
+    /// `w` is listed and read only then, including while a cutaway too big for
+    /// the cell falls back to them. A footer-only frame draws no office, so it
+    /// keeps the answer of the one before it.
+    pub(crate) fn offers_walkable_debug(&self) -> bool {
+        cfg!(debug_assertions)
+            && self
+                .session
+                .floor(self.session.nav().current())
+                .is_some_and(|f| f.raster.shown() == Some(Look::Classic))
+    }
+
     /// Draw the first frame of `scene` unseen, in the look the first frame
     /// shown will take, so the caches it fills (the cloud rasters above all)
     /// are warm when it is shown; what it shows is unchanged.
@@ -274,6 +296,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     floor: None,
                 },
                 debug_walkable,
+                dim: self.chrome.frames.onboarding.dim,
             },
             &self.chrome.pets,
             self.chrome.theme.surface.bg_fallback,
@@ -644,18 +667,17 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.chrome.footer(&self.session, scene),
         );
         let popup_scale = self.version_popup_scale(now);
-        let overlays = self.chrome.overlays(popup_scale);
+        let overlays = self
+            .chrome
+            .overlays(popup_scale, self.offers_walkable_debug());
         let theme = self.chrome.theme;
         let flashes = self.session.flashes();
-        let Some(slide) = self.session.slide_mut() else {
+        let Some(slide) = self.session.buf() else {
             return Ok(());
         };
-        // Modal backdrop: the same multiply a floor's frame takes.
-        crate::tui::renderer::apply_dim(slide, self.chrome.frames.onboarding.dim);
         if self.flash.holds(flashes, term_size) {
             return Ok(());
         }
-        let slide = &*slide;
         self.terminal.draw(|f| {
             let full = f.area();
             paint_footer(f, &footer, full, theme);
@@ -678,11 +700,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.chrome.footer(&self.session, scene),
         );
         let popup_scale = self.version_popup_scale(now);
+        let offers_walkable_debug = self.offers_walkable_debug();
         let drawn = crate::tui::renderer::draw_footer_only_frame(
             &mut self.terminal,
             &footer,
             self.chrome.theme,
-            &self.chrome.overlays(popup_scale),
+            &self.chrome.overlays(popup_scale, offers_walkable_debug),
             now,
         );
         self.session.drew_no_office();
@@ -885,7 +908,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let world = self
             .chrome
             .world(&self.session, &floor_scene, pack, now, current);
-        let overlays = self.chrome.overlays(popup_scale);
+        let overlays = self
+            .chrome
+            .overlays(popup_scale, self.offers_walkable_debug());
         let frame = crate::tui::renderer::ClassicFrame {
             footer: &footer,
             overlays: &overlays,
@@ -893,7 +918,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             world: &world,
             mouse_pos,
         };
-        let Some((floor, _)) = self.session.floor_mut(current) else {
+        let Some(floor) = self.session.floor(current) else {
             return Ok(());
         };
         let out = crate::tui::renderer::flush_classic(&mut self.terminal, &frame, layout, floor)?;
@@ -950,7 +975,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let world = self
             .chrome
             .world(&self.session, &floor_scene, pack, now, current);
-        let overlays = self.chrome.overlays(popup_scale);
+        let overlays = self
+            .chrome
+            .overlays(popup_scale, self.offers_walkable_debug());
         /// What a frame sets over its image: the world's text, with the agent
         /// the pointer is on, and the tooltip by the pointer.
         struct Over<'w> {

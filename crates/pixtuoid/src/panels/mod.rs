@@ -143,14 +143,14 @@ pub(crate) fn paint_overlays(
 pub(crate) trait Host {
     fn set_theme(&mut self, theme: &'static theme::Theme);
     fn navigate_floor(&mut self, floor: usize, now: SystemTime);
-    fn toggle_walkable_debug(&mut self);
     /// Repaint the whole surface.
     fn redraw(&mut self) -> anyhow::Result<()>;
 }
 
 /// Which overlay (if any) currently owns input, plus the one count the picker needs.
 /// An open overlay swallows keys and the normal-scene bindings are suspended; the
-/// precedence chain itself lives in [`dispatch_key`].
+/// precedence chain itself lives in [`dispatch_key`], and a host's own key reads
+/// [`Self::any_open`] to defer the same way.
 #[derive(Clone, Copy)]
 pub(crate) struct ModalState {
     pub(crate) onboarding_open: bool,
@@ -165,6 +165,21 @@ pub(crate) struct ModalState {
 }
 
 impl ModalState {
+    /// No panel open.
+    #[cfg(test)]
+    pub(crate) fn closed() -> Self {
+        Self {
+            onboarding_open: false,
+            help_open: false,
+            version_popup: false,
+            theme_picker: None,
+            dashboard_open: false,
+            connection_open: false,
+            connection_confirm: false,
+            n_themes: pixtuoid_scene::theme::ALL_THEMES.len(),
+        }
+    }
+
     /// Whether any panel owns input, so the office behind takes no click.
     /// Destructured whole, so a new panel can't take keys without counting
     /// here.
@@ -273,14 +288,6 @@ pub(crate) enum KeyAction {
     ToggleAudioMute,
     /// `true` = up.
     AdjustVolume(bool),
-    #[cfg_attr(
-        all(not(debug_assertions), not(test)),
-        expect(
-            dead_code,
-            reason = "only the debug-build `w` dispatch arm builds it; the apply arm stays unconditional for exhaustiveness"
-        )
-    )]
-    ToggleWalkableDebug,
     ToggleDashboard,
     DashboardUp,
     DashboardDown,
@@ -481,8 +488,7 @@ pub(crate) fn dispatch_key(
     }
     if modal.version_popup {
         return match (code, mods) {
-            (KeyCode::Enter, _) => KeyAction::DismissVersionPopup,
-            (KeyCode::Esc, _) => KeyAction::Quit,
+            (KeyCode::Enter, _) | (KeyCode::Esc, _) => KeyAction::DismissVersionPopup,
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
             _ => KeyAction::None,
         };
@@ -544,8 +550,6 @@ pub(crate) fn dispatch_key(
         KeyCode::Char('?') => KeyAction::ToggleHelp,
         KeyCode::Tab => KeyAction::ToggleDashboard,
         KeyCode::Char('s') => KeyAction::ToggleConnection,
-        #[cfg(debug_assertions)]
-        KeyCode::Char('w') => KeyAction::ToggleWalkableDebug,
         KeyCode::PageUp | KeyCode::Up | KeyCode::Char('k') => {
             if floor.current_floor + 1 < floor.n_floors && !floor.in_transition {
                 KeyAction::NavigateFloor(floor.current_floor + 1)
@@ -630,9 +634,6 @@ pub(crate) fn apply_key_action<H: Host>(action: KeyAction, cx: &mut KeyCtx<'_, H
                 Instant::now(),
                 cx.respawn,
             );
-        }
-        KeyAction::ToggleWalkableDebug => {
-            cx.host.toggle_walkable_debug();
         }
         KeyAction::ToggleDashboard => cx.ui.toggle_dashboard(cx.snapshot),
         KeyAction::DashboardClose => cx.ui.close_dashboard(),
@@ -764,14 +765,8 @@ mod dispatch_tests {
 
     fn modal() -> ModalState {
         ModalState {
-            onboarding_open: false,
-            help_open: false,
-            version_popup: false,
-            theme_picker: None,
-            dashboard_open: false,
-            connection_open: false,
-            connection_confirm: false,
             n_themes: 6,
+            ..ModalState::closed()
         }
     }
 
@@ -847,10 +842,11 @@ mod dispatch_tests {
             dispatch_key(KeyCode::Char('?'), NONE, modal(), nav()),
             KeyAction::ToggleHelp
         );
-        #[cfg(debug_assertions)]
+        // The classic's walkable debug layer is the terminal's alone: the
+        // shared dispatch, the window's too, never reads its key.
         assert_eq!(
             dispatch_key(KeyCode::Char('w'), NONE, modal(), nav()),
-            KeyAction::ToggleWalkableDebug
+            KeyAction::None
         );
         assert_eq!(
             dispatch_key(KeyCode::Char('x'), NONE, modal(), nav()),
@@ -989,16 +985,17 @@ mod dispatch_tests {
     }
 
     #[test]
-    fn version_popup_enter_dismisses_esc_quits() {
+    fn version_popup_enter_and_esc_dismiss() {
         let c = ModalState {
             version_popup: true,
             ..modal()
         };
-        assert_eq!(
-            dispatch_key(KeyCode::Enter, NONE, c, nav()),
-            KeyAction::DismissVersionPopup
-        );
-        assert_eq!(dispatch_key(KeyCode::Esc, NONE, c, nav()), KeyAction::Quit);
+        for dismiss in [KeyCode::Enter, KeyCode::Esc] {
+            assert_eq!(
+                dispatch_key(dismiss, NONE, c, nav()),
+                KeyAction::DismissVersionPopup
+            );
+        }
         assert_eq!(
             dispatch_key(KeyCode::Char('q'), NONE, c, nav()),
             KeyAction::Quit

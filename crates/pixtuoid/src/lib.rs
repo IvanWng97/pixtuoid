@@ -348,6 +348,7 @@ pub(crate) mod test_flash {
                 size: pixtuoid_scene::layout::min_layout_size(),
                 place: Place::default(),
                 debug_walkable: false,
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
         session.flashes()

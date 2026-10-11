@@ -120,8 +120,9 @@ pub struct Office<'a> {
     pub scale: RenderScale,
 }
 
-/// Which floor a frame shows, when, and what its wall board says: what moves
-/// a frame beyond its office and the sim's world.
+/// Which floor a frame shows, when, what its wall board says, and how far the
+/// host's modal dims it: what moves a frame beyond its office and the sim's
+/// world.
 #[derive(Debug, Clone, Copy)]
 pub struct Showing<'a> {
     /// The floor of the building it shows.
@@ -131,13 +132,20 @@ pub struct Showing<'a> {
     /// The wall board, the classic painter's
     /// ([`build_board`](crate::neon_sign::build_board)).
     pub board: &'a crate::neon_sign::BoardModel,
+    /// The brightness the host's modal leaves it.
+    pub dim: crate::look::Dim,
 }
 
 /// `frame`'s [`DisplayList`] as `showing` says.
 pub(crate) fn compose<'a>(
     frame: &SimFrame,
     office: Office<'a>,
-    Showing { floor, now, board }: Showing<'_>,
+    Showing {
+        floor,
+        now,
+        board,
+        dim,
+    }: Showing<'_>,
     caches: (&mut LightCache, &mut crate::outside::OutsideCache),
 ) -> DisplayList<'a> {
     let timing = floor.motion.timing(now);
@@ -147,7 +155,9 @@ pub(crate) fn compose<'a>(
         floor.altitude,
         timing,
     );
-    compose_at(frame, office, &moment, floor, board, caches)
+    let mut list = compose_at(frame, office, &moment, floor, board, caches);
+    list.dim = dim;
+    list
 }
 
 /// Compose `frame`'s [`DisplayList`] at `moment`, on `floor`. Every
@@ -194,6 +204,8 @@ pub(crate) fn compose_at<'a>(
         ambient,
         carpet: moment.look.carpet(theme),
         flash: crate::display::light::Flash::of(&moment.sky),
+        // [`compose`] sets the host's, from its `Showing`.
+        dim: crate::look::Dim::NONE,
         flash_phase: crate::flash::FlashPhase::of(&moment.sky, frame),
         hovers: pieces.iter().filter_map(Piece::hover).collect(),
         pieces,

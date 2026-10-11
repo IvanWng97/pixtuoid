@@ -212,6 +212,44 @@ fn the_first_frame_transmits_and_an_identical_one_sends_nothing() {
     assert_eq!(wire.take(), "");
 }
 
+/// The onboarding's backdrop dims the cutaway: the composed frame darkens
+/// under it, its tiles are sent again though nothing else in the office
+/// moved, and the world text the terminal sets over it darkens too.
+#[test]
+fn the_onboarding_dims_the_cutaway_and_sends_its_tiles() {
+    use crate::panels::welcome::OnboardingFrame;
+    let (mut r, wire) = kitty(120, 40);
+    let scene = office();
+    let lum = |r: &TuiRenderer<Window>| {
+        let frame = r.session.buf().expect("a frame");
+        avg_lum(frame, 0, 0, frame.width(), frame.height())
+    };
+    r.render(&scene, pack(), t0()).expect("render");
+    let bright = lum(&r);
+    let bright_cells = r.frame_buffer().clone();
+    wire.take();
+    r.set_frames(
+        RenderFrames {
+            onboarding: OnboardingFrame {
+                open: true,
+                dim: pixtuoid_scene::look::Dim::from_brightness(0.4),
+                ..OnboardingFrame::default()
+            },
+            ..RenderFrames::default()
+        },
+        t0(),
+    );
+    r.render(&scene, pack(), t0()).expect("render");
+    let dim = lum(&r);
+    assert!(dim < bright * 0.6, "dim={dim} vs bright={bright}");
+    assert!(wire.take().contains(TRANSMIT), "the dimmed tiles are sent");
+    assert_world_text_dims(
+        &bright_cells,
+        r.frame_buffer(),
+        pixtuoid_scene::look::Dim::from_brightness(0.4),
+    );
+}
+
 /// A frame encoded across four threads, on any machine, still reaches the
 /// wire as one transmit per tile, in the grid's order.
 #[test]
@@ -1429,4 +1467,69 @@ fn a_floor_clamped_into_view_repaints_whole() {
         terminal == want,
         "the terminal still shows the vanished floor"
     );
+}
+
+/// `w` follows the look the last frame drew: not listed or read under the
+/// cutaway, which never draws the walkable layer, and listed, read and drawn
+/// while a cell too small for the art falls back to the half-blocks.
+#[cfg(debug_assertions)]
+#[test]
+fn w_follows_the_look_the_frame_drew() {
+    use crossterm::event::KeyCode;
+    let (mut r, _wire) = kitty(140, 60);
+    let scene = office();
+    let cadence = ImageProtocol::Kitty.cadence();
+    let w = |r: &mut TuiRenderer<Window>| {
+        crate::tui::toggle_walkable_debug_on_w(
+            r,
+            KeyCode::Char('w'),
+            &crate::panels::ModalState::closed(),
+        )
+    };
+    // The help the frame draws: its text, read off the composed cells.
+    let help = |r: &mut TuiRenderer<Window>, at| {
+        r.set_frames(
+            RenderFrames {
+                help_open: true,
+                ..Default::default()
+            },
+            t0(),
+        );
+        r.render(&scene, pack(), at).expect("render");
+        let text = frame_text(r.frame_buffer());
+        r.set_frames(RenderFrames::default(), t0());
+        text
+    };
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(!r.offers_walkable_debug(), "the cutaway");
+    let text = help(&mut r, t0() + cadence);
+    assert!(text.contains("Keyboard"), "premise: the help is drawn");
+    assert!(!text.contains("walkable"), "the cutaway's help: {text}");
+    assert!(!w(&mut r) && !r.debug_walkable());
+
+    r.terminal.backend_mut().zoom(CellSize {
+        w: CELL.w / 2,
+        h: CELL.h / 2,
+    });
+    r.render(&scene, pack(), t0() + cadence * 2)
+        .expect("render");
+    assert!(r.offers_walkable_debug(), "the fallback");
+    let text = help(&mut r, t0() + cadence * 3);
+    assert!(text.contains("walkable"), "the fallback's help: {text}");
+    r.render(&scene, pack(), t0() + cadence * 4)
+        .expect("render");
+    let before = r.buf().expect("a frame").clone();
+    assert!(w(&mut r));
+    r.render(&scene, pack(), t0() + cadence * 5)
+        .expect("render");
+    let after = r.buf().expect("a frame");
+    assert!(
+        region_diff(&before, after, 0, 0, before.width(), before.height()) > 1_000,
+        "the fallback's half-blocks show the layer"
+    );
+
+    r.terminal.backend_mut().zoom(CELL);
+    r.render(&scene, pack(), t0() + cadence * 6)
+        .expect("render");
+    assert!(!r.offers_walkable_debug(), "the cutaway is back");
 }

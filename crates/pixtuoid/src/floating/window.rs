@@ -7,8 +7,9 @@
 //!
 //! Platform glue — codecov-ignored; the testable seams are `floating::offscreen`
 //! (render), `floating::overlays` and `floating::compose` (the chrome and the
-//! frame), `floating::geometry` (the window/monitor rect math), and
-//! `floating::cadence` (the animation throttle).
+//! frame), `floating::geometry` (the window/monitor rect math),
+//! `floating::cadence` (the animation throttle), and `floating::lifecycle`
+//! (the redraw's pacing and the exit order).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -411,12 +412,6 @@ impl FloatingApp {
         )
     }
 
-    /// The cursor reads the frame just painted, as a press and the tooltip do.
-    fn redraw(&mut self) {
-        self.paint();
-        self.recursor();
-    }
-
     fn paint(&mut self) {
         let started = Instant::now();
         let Some(window) = self.window.as_ref() else {
@@ -460,6 +455,12 @@ impl FloatingApp {
                 petting: self.petting.as_ref(),
             },
         };
+        let health = self
+            .live
+            .as_ref()
+            .map(super::LivePipeline::health)
+            .unwrap_or_default();
+        let frames = self.ui.build_frames(now, &scene, &health);
         let live = self.renderer.render_live(
             at,
             WindowFrame {
@@ -469,6 +470,7 @@ impl FloatingApp {
                     gateway: pixtuoid_scene::tally::office_gateway(&scene),
                     floor: None,
                 },
+                dim: frames.onboarding.dim,
             },
             (win_w, win_h),
         );
@@ -514,20 +516,12 @@ impl FloatingApp {
                     pixtuoid_scene::tooltip::for_hit(hit, &shown)
                 })
                 .map(|tip| (tip, (cursor.0 as i32, cursor.1 as i32))),
-            panels: {
-                let health = self
-                    .live
-                    .as_ref()
-                    .map(super::LivePipeline::health)
-                    .unwrap_or_default();
-                let frames = self.ui.build_frames(now, &scene, &health);
-                super::overlays::panels_grid(
-                    &frames,
-                    super::overlays::panel_cells((win_w, win_h), Face::chrome(at)),
-                    now,
-                    self.theme,
-                )
-            },
+            panels: super::overlays::panels_grid(
+                &frames,
+                super::overlays::panel_cells((win_w, win_h), Face::chrome(at)),
+                now,
+                self.theme,
+            ),
         };
         self.overlays.update(next, at, (self.theme, &*self.pack));
         let dirty = self.renderer.dirty();
@@ -587,6 +581,40 @@ fn position_on_a_monitor(event_loop: &ActiveEventLoop, x: i32, y: i32, w: u32, h
             (pos.x, pos.y, size.width, size.height)
         }),
     )
+}
+
+impl super::lifecycle::Redraw for FloatingApp {
+    fn jank(&mut self) -> &mut crate::jank::Jank {
+        &mut self.jank
+    }
+
+    fn paint(&mut self) {
+        FloatingApp::paint(self);
+    }
+
+    /// The cursor reads the frame just painted, as a press and the tooltip do.
+    fn recursor(&mut self) {
+        FloatingApp::recursor(self);
+    }
+}
+
+impl super::lifecycle::Teardown for FloatingApp {
+    fn hide_window(&mut self) {
+        if let Some(window) = &self.window {
+            window.set_visible(false);
+        }
+    }
+
+    // The surface holds its own clone of the window's `Arc`, so the window is
+    // destroyed once both are dropped.
+    fn release_surface(&mut self) {
+        self.gpu = None;
+        self.window = None;
+    }
+
+    fn stop_audio(&mut self) {
+        self.audio_ctl.stop();
+    }
 }
 
 impl ApplicationHandler<FloatingEvent> for FloatingApp {
@@ -656,8 +684,6 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 self.zoom,
             ));
         }
-        // `cfg.opacity` is parsed + clamped but NOT applied: winit 0.30 exposes no
-        // per-window opacity, and the surface composites opaque.
         self.screen = super::compose::Screen::of_window(
             winit::raw_window_handle::HasWindowHandle::window_handle(&*window)
                 .ok()
@@ -719,7 +745,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 self.request_redraw();
             }
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
-            WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::RedrawRequested => super::lifecycle::redraw(self),
             WindowEvent::Resized(_) => self.request_redraw(),
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = position;
@@ -759,12 +785,19 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         }
     }
 
+    /// The loop is ending, by [`FloatingApp::quit`] or by the OS: the window and
+    /// the audio go.
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        super::lifecycle::tear_down(self);
+    }
+
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         // An EMPTY office still steps on its beat (clock hands, weather,
         // lightning, day/night), so it paints each beat, never 0fps. A LIVE
         // gateway daemon lives in `daemons`, not `agents`, and is a WANDERING
         // mascot, so it holds the fast cadence, as does whatever the floor
-        // reports moving between beats: a walk, or a light mid-fade.
+        // reports moving between beats (a walk, or a light mid-fade) and the
+        // onboarding's backdrop dim mid-ramp.
         let office_idle = self.live.as_ref().is_none_or(|live| {
             let scene = live.scene_rx.borrow();
             scene.agents.is_empty()
@@ -772,7 +805,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                     .daemons()
                     .all(|(_, _, d)| d.liveness == DaemonLiveness::Down)
         }) && !self.renderer.moves_off_beat()
-            && self.renderer.nav().transition().is_none();
+            && self.renderer.nav().transition().is_none()
+            && !self.ui.dim_moving();
         // The redraw REQUEST rides the same deadline as the wait: requesting one
         // unconditionally here leaves winit a pending redraw, so `WaitUntil` never
         // sleeps and both cadences collapse to max-rate (see `super::cadence`).

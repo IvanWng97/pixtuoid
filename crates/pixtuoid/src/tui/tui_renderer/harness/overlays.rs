@@ -216,7 +216,7 @@ fn onboarding_overlay_renders_roster_and_hint() {
                 ],
                 selected: 0,
                 elapsed_ms: 100_000,
-                dim: 0.4,
+                dim: pixtuoid_scene::look::Dim::from_brightness(0.4),
             },
             ..Default::default()
         },
@@ -273,7 +273,7 @@ fn onboarding_dims_the_office_buffer() {
                 }],
                 selected: 0,
                 elapsed_ms: 100_000,
-                dim: 0.4,
+                dim: pixtuoid_scene::look::Dim::from_brightness(0.4),
             },
             ..Default::default()
         },
@@ -292,6 +292,30 @@ fn onboarding_dims_the_office_buffer() {
         dim < bright * 0.6,
         "onboarding should dim the office buffer: dim={dim} vs bright={bright}"
     );
+}
+
+/// The onboarding's backdrop dims the world text the terminal sets over the
+/// half-blocks, as it dims the office under it.
+#[test]
+fn onboarding_dims_the_world_text_over_the_half_blocks() {
+    use crate::panels::welcome::OnboardingFrame;
+    let scene = scene_with(vec![idle("/dim/0.jsonl", 0, t0())], 16);
+    let dim = pixtuoid_scene::look::Dim::from_brightness(0.4);
+    let mut bright = build(100, 40, vec![]);
+    bright.render(&scene, pack(), t0()).unwrap();
+    let mut dimmed = build(100, 40, vec![]);
+    dimmed.set_frames(
+        RenderFrames {
+            onboarding: OnboardingFrame {
+                dim,
+                ..OnboardingFrame::default()
+            },
+            ..RenderFrames::default()
+        },
+        t0(),
+    );
+    dimmed.render(&scene, pack(), t0()).unwrap();
+    assert_world_text_dims(bright.frame_buffer(), dimmed.frame_buffer(), dim);
 }
 
 #[test]
@@ -325,7 +349,7 @@ fn onboarding_dims_the_composed_slide_on_the_transition_path() {
                 }],
                 selected: 0,
                 elapsed_ms: 100_000,
-                dim: 0.4,
+                dim: pixtuoid_scene::look::Dim::from_brightness(0.4),
             },
             ..Default::default()
         },
@@ -772,5 +796,39 @@ fn a_still_floor_holds_its_wall_board_flap() {
         board_at(Motion::Still, rolling),
         board_at(Motion::Still, rolling + beat),
         "the Still board rolled"
+    );
+}
+
+/// In the half-blocks `w` is listed in the help the frame draws and flips a
+/// layer the frame shows.
+#[cfg(debug_assertions)]
+#[test]
+fn the_classic_lists_w_and_its_key_tints_the_frame() {
+    use crossterm::event::KeyCode;
+    let scene = scene_with(vec![idle("/t/0.jsonl", 0, t0())], 16);
+    let mut r = build(140, 60, vec![]);
+    r.set_frames(
+        RenderFrames {
+            help_open: true,
+            ..Default::default()
+        },
+        t0(),
+    );
+    r.render(&scene, pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(text.contains("walkable"), "the help lists w: {text}");
+    r.set_frames(RenderFrames::default(), t0());
+    r.render(&scene, pack(), t0()).unwrap();
+    let before = r.buf().expect("a frame").clone();
+    assert!(crate::tui::toggle_walkable_debug_on_w(
+        &mut r,
+        KeyCode::Char('w'),
+        &crate::panels::ModalState::closed()
+    ));
+    r.render(&scene, pack(), t0()).unwrap();
+    let after = r.buf().expect("a frame");
+    assert!(
+        region_diff(&before, after, 0, 0, before.width(), before.height()) > 1_000,
+        "the key must show the layer"
     );
 }

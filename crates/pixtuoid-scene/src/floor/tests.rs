@@ -641,6 +641,7 @@ fn classic_frame(
             size,
             place: crate::look::Place::default(),
             debug_walkable: false,
+            dim: crate::look::Dim::NONE,
         },
     )
 }
@@ -777,6 +778,7 @@ fn floor_session_render_owns_the_dual_eviction() {
             size: Size { w: 160, h: 96 },
             place: crate::look::Place::default(),
             debug_walkable: false,
+            dim: crate::look::Dim::NONE,
         },
     );
     assert!(layout.is_some(), "a layoutable size renders");
@@ -829,6 +831,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
                     size: Size { w: 160, h: 96 },
                     place: crate::look::Place::default(),
                     debug_walkable: false,
+                    dim: crate::look::Dim::NONE,
                 },
             )
             .expect("160x96 lays out");
@@ -869,6 +872,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
             size: Size { w: 8, h: 8 },
             place: crate::look::Place::default(),
             debug_walkable: false,
+            dim: crate::look::Dim::NONE,
         },
     );
     assert!(none.is_none());
@@ -1667,6 +1671,7 @@ fn paint(
             floor: None,
         },
         debug_walkable: false,
+        dim: crate::look::Dim::NONE,
     };
     session.render(look, inputs).expect("lays out");
     session.buf().expect("a frame").as_slice().to_vec()
@@ -2034,6 +2039,7 @@ fn an_office_session_shows_each_floor_and_slides_between_them() {
                 size: Size { w: 160, h: 96 },
                 place: crate::look::Place::default(),
                 debug_walkable: false,
+                dim: crate::look::Dim::NONE,
             },
             &[],
             theme.surface.bg_fallback,
@@ -2105,6 +2111,7 @@ fn a_cutaway_slide_bakes_its_floors_text() {
                     size: Size { w: 160, h: 96 },
                     place: crate::look::Place::default(),
                     debug_walkable: false,
+                    dim: crate::look::Dim::NONE,
                 },
                 &[],
                 theme.surface.bg_fallback,
@@ -2133,6 +2140,56 @@ fn a_cutaway_slide_bakes_its_floors_text() {
         frame(WorldText::Baked, Some(400)),
         "a slide bakes it"
     );
+}
+
+/// Under a host's dim, the gap a slide leaves between its floors is dimmed
+/// as the floors are: no band of it shows at full brightness.
+#[test]
+fn a_slides_gap_dims_with_its_floors() {
+    use crate::look::{Dim, Look};
+    let pack = Arc::new(crate::pack::test_office());
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let scene = make_scene(3, 2);
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let gap = pixtuoid_core::sprite::Rgb {
+        r: u8::MAX,
+        g: 0,
+        b: u8::MAX,
+    };
+    let dim = Dim::from_brightness(0.4);
+    let mut office = OfficeSession::new(Arc::clone(&pack));
+    let render = |office: &mut OfficeSession, now| {
+        office.render(
+            Look::Classic,
+            crate::look::RenderInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
+                },
+                theme,
+                size: Size { w: 160, h: 96 },
+                place: crate::look::Place::default(),
+                debug_walkable: false,
+                dim,
+            },
+            &[],
+            gap,
+        )
+    };
+    render(&mut office, t0);
+    assert!(office.navigate(1, t0));
+    render(&mut office, t0 + Duration::from_millis(400));
+    let slide = office.buf().expect("composed");
+    let rows = |rgb| {
+        (0..slide.height())
+            .filter(|&y| (0..slide.width()).all(|x| slide.get(x, y) == rgb))
+            .count()
+    };
+    assert!(rows(dim.of(gap)) > 0, "the slide shows its gap");
+    assert_eq!(rows(gap), 0, "a gap row at full brightness");
 }
 
 /// A frame that drew no office keeps nothing of the last: a pointer hits
@@ -2166,6 +2223,7 @@ fn a_frame_without_the_office_forgets_the_last() {
                 size: Size { w: 160, h: 96 },
                 place: crate::look::Place::default(),
                 debug_walkable: false,
+                dim: crate::look::Dim::NONE,
             },
             &[],
             theme.surface.bg_fallback,
@@ -2211,6 +2269,7 @@ fn an_office_session_follows_its_floors_down() {
                 size: Size { w: 160, h: 96 },
                 place: crate::look::Place::default(),
                 debug_walkable: false,
+                dim: crate::look::Dim::NONE,
             },
             &[],
             theme.surface.bg_fallback,
@@ -2517,6 +2576,7 @@ fn a_lifted_creature_is_in_front_of_the_room() {
                     size,
                     place: crate::look::Place::default(),
                     debug_walkable: false,
+                    dim: crate::look::Dim::NONE,
                 },
             )
             .expect("lays out");
