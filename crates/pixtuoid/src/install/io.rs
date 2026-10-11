@@ -90,14 +90,14 @@ pub(crate) const SHIM_LOCATE_REMEDY: &str = "install it alongside pixtuoid (`bre
      pixtuoid` / `cargo install pixtuoid-hook` / `npm i -g pixtuoid`) or point \
      PIXTUOID_HOOK at an absolute path to the shim";
 
+/// The shim's binary name, which a bare-name hook command resolves on PATH.
+pub(crate) const HOOK_BIN: &str = "pixtuoid-hook";
+
 /// AUTO-locate `pixtuoid-hook`: PATH, then a sibling of the running exe — both
 /// arms return absolute, verified-existing paths. The [`HOOK_OVERRIDE_ENV`]
 /// override is deliberately NOT read here: [`super::resolve_hook_binary_from`] absolutizes it
 /// first, since a relative value embedded into a Codex/Reasonix config would
 /// silently never fire from another cwd.
-/// The shim's binary name, which a bare-name hook command resolves on PATH.
-pub(crate) const HOOK_BIN: &str = "pixtuoid-hook";
-
 pub(crate) fn default_hook_binary() -> Result<PathBuf> {
     default_hook_binary_from(
         || which::which(HOOK_BIN).ok(),

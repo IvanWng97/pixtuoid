@@ -1620,8 +1620,8 @@ fn every_owned_set_re_renders_byte_identical_from_the_shim_its_first_file_bakes(
                 let rendered = files.render(&primary, &hook).unwrap();
                 let back = files.installed_shim(&rendered[0].1);
                 let rehooked = rehook(t.hook_command, &back)
-                    .expect("a rendered file gives back its shim")
-                    .unwrap();
+                    .unwrap()
+                    .expect("a rendered file gives back its shim");
                 assert_eq!(
                     files.render(&primary, &rehooked).unwrap(),
                     rendered,
@@ -1722,7 +1722,7 @@ fn converge_rewrites_only_stale_owned_files_with_the_installed_shim() {
 
                 let stamp = write_stamp(&entry);
                 assert!(
-                    converge(t, Some(cfg.clone())).unwrap().is_empty(),
+                    converge(t, Some(cfg.clone())).unwrap().rewritten.is_empty(),
                     "{}",
                     t.name
                 );
@@ -1741,7 +1741,7 @@ fn converge_rewrites_only_stale_owned_files_with_the_installed_shim() {
                 });
                 let other = abs_fixture("/opt/two/pixtuoid-hook", r"C:\two\pixtuoid-hook.exe");
                 let rewritten = temp_env::with_var(io::HOOK_OVERRIDE_ENV, Some(&other), || {
-                    converge(t, Some(cfg.clone())).unwrap()
+                    converge(t, Some(cfg.clone())).unwrap().rewritten
                 });
                 assert_eq!(rewritten, std::slice::from_ref(&entry), "{}", t.name);
                 assert_eq!(io::read_config(&entry).unwrap(), installed, "{}", t.name);
@@ -1783,30 +1783,46 @@ fn converge_never_re_enables_an_openclaw_plugin_the_user_disabled() {
         )
         .unwrap();
 
-        assert_eq!(converge(&OPENCLAW, Some(cfg.clone())).unwrap(), [entry]);
+        assert_eq!(
+            converge(&OPENCLAW, Some(cfg.clone())).unwrap().rewritten,
+            [entry]
+        );
         assert_eq!(io::read_config(&cfg).unwrap(), disabled);
     });
 }
 
-/// A file another pixtuoid holds the lock on is left alone: the boot logs it, and
-/// the next boot (or doctor's reconnect advice) finishes the job.
+/// A file another pixtuoid holds the lock on is left alone and reported, while the
+/// target's other files still converge: OpenClaw's `index.js` refreshed with its
+/// `package.json` locked must still reach the launch's restart notice.
 #[test]
-fn converge_writes_nothing_while_a_file_is_locked() {
+fn converge_skips_a_locked_file_and_still_reports_the_rest() {
     with_owned_homes(|| {
         let tmp = tempfile::TempDir::new().unwrap();
-        let cfg = tmp.path().join("pixtuoid.ts");
+        let cfg = tmp.path().join("openclaw.json");
         install_target_from(
-            &target::OPENCODE,
+            &OPENCLAW,
             Some(cfg.clone()),
             Some(PathBuf::from("/fake/pixtuoid-hook")),
         )
         .unwrap();
-        let stale = format!("{}\n", io::read_config(&cfg).unwrap());
-        std::fs::write(&cfg, &stale).unwrap();
+        let files = (OPENCLAW.primary.owned().unwrap())
+            .render(&cfg, io::HOOK_BIN)
+            .unwrap();
+        let (entry, locked) = (files[0].0.clone(), files[2].0.clone());
+        for p in [&entry, &locked] {
+            let body = io::read_config(p).unwrap();
+            std::fs::write(p, format!("{body}\n")).unwrap();
+        }
+        let stale = io::read_config(&locked).unwrap();
 
-        let _held = io::lock_config(&cfg).unwrap();
-        assert!(converge(&target::OPENCODE, Some(cfg.clone())).is_err());
-        assert_eq!(io::read_config(&cfg).unwrap(), stale);
+        let _held = io::lock_config(&locked).unwrap();
+        let done = converge(&OPENCLAW, Some(cfg.clone())).unwrap();
+        assert_eq!(done.rewritten, [entry]);
+        assert_eq!(
+            done.failed.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+            [&locked]
+        );
+        assert_eq!(io::read_config(&locked).unwrap(), stale);
     });
 }
 
@@ -1862,4 +1878,95 @@ fn reinstall_re_bakes_a_moved_shim_into_every_owned_primary() {
             "no target owns its primary — did the registry change?"
         );
     });
+}
+
+/// A disconnected owned primary holds a stub with no shim to read back, so a launch
+/// that converges it anyway (a stale connected set) leaves the stub alone.
+#[test]
+fn converge_leaves_a_disconnected_owned_primary_alone() {
+    with_fake_claude(|_| {
+        for &t in target::TARGETS {
+            if !matches!(t.primary, Primary::Owned { .. }) {
+                continue;
+            }
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = plugin_hooks_path(tmp.path());
+            install_target_from(
+                t,
+                Some(cfg.clone()),
+                Some(PathBuf::from("/fake/pixtuoid-hook")),
+            )
+            .unwrap();
+            uninstall_target(t, Some(cfg.clone())).unwrap();
+            let stub = io::read_config(&cfg).unwrap();
+            assert!(
+                converge(t, Some(cfg.clone())).unwrap().rewritten.is_empty(),
+                "{}",
+                t.name
+            );
+            assert_eq!(io::read_config(&cfg).unwrap(), stub, "{}", t.name);
+        }
+    });
+}
+
+/// The file that bakes the shim is what convergence re-renders from: a sibling gone
+/// missing is written back, but with the entry gone there is no shim to bake, so
+/// nothing is written and the reconnect doctor names is the repair.
+#[test]
+fn converge_heals_a_missing_sibling_but_not_a_missing_entry() {
+    with_owned_homes(|| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("openclaw.json");
+        install_target_from(
+            &OPENCLAW,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        let files = (OPENCLAW.primary.owned().unwrap())
+            .render(&cfg, io::HOOK_BIN)
+            .unwrap();
+        let (entry, sibling) = (&files[0].0, &files[1].0);
+
+        std::fs::remove_file(sibling).unwrap();
+        assert_eq!(
+            converge(&OPENCLAW, Some(cfg.clone())).unwrap().rewritten,
+            std::slice::from_ref(sibling)
+        );
+        assert!(sibling.exists());
+
+        std::fs::remove_file(entry).unwrap();
+        std::fs::write(sibling, "{}").unwrap();
+        assert!(
+            converge(&OPENCLAW, Some(cfg.clone()))
+                .unwrap()
+                .rewritten
+                .is_empty()
+        );
+        assert!(!entry.exists());
+    });
+}
+
+/// A hooks.json from before the `PIXTUOID_SOURCE=` stamp ran the bare shim name; the
+/// shim stays where PATH finds it, while the command takes this build's shape.
+#[cfg(unix)]
+#[test]
+fn converge_stamps_a_pre_stamp_claude_hooks_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cfg = tmp.path().join("hooks.json");
+    std::fs::write(
+        &cfg,
+        crate::install::claude::render_hooks(io::HOOK_BIN).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        converge(&CLAUDE_FILE, Some(cfg.clone())).unwrap().rewritten,
+        std::slice::from_ref(&cfg)
+    );
+    let stamped = (CLAUDE.hook_command)(std::path::Path::new(io::HOOK_BIN), false).unwrap();
+    assert_eq!(
+        io::read_config(&cfg).unwrap(),
+        crate::install::claude::render_hooks(&stamped).unwrap()
+    );
 }

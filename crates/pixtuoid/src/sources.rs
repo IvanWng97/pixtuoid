@@ -226,25 +226,31 @@ pub(crate) fn converge_owned(connected: &HashSet<String>) -> Vec<&'static Target
 /// [`converge_owned`] with the convergence injected.
 fn converge_owned_with(
     connected: &HashSet<String>,
-    converge: impl Fn(&'static Target) -> Result<Vec<PathBuf>>,
+    converge: impl Fn(&'static Target) -> Result<install::Converged>,
 ) -> Vec<&'static Target> {
-    install::TARGETS
-        .iter()
-        .copied()
-        .filter(|t| connected.contains(t.core_source))
-        .filter(|t| match converge(t) {
-            Ok(rewritten) => {
-                for path in &rewritten {
-                    tracing::info!(cli = t.name, path = ?path, "refreshed a plugin file to this build");
-                }
-                !rewritten.is_empty()
-            }
+    let mut refreshed = Vec::new();
+    for t in install::TARGETS.iter().copied() {
+        if !connected.contains(t.core_source) {
+            continue;
+        }
+        let done = match converge(t) {
+            Ok(done) => done,
             Err(e) => {
                 tracing::warn!(cli = t.name, error = ?e, "could not refresh the plugin to this build");
-                false
+                continue;
             }
-        })
-        .collect()
+        };
+        for path in &done.rewritten {
+            tracing::info!(cli = t.name, path = ?path, "refreshed a plugin file to this build");
+        }
+        for (path, error) in &done.failed {
+            tracing::warn!(cli = t.name, path = ?path, error = ?error, "could not refresh a plugin file to this build");
+        }
+        if !done.rewritten.is_empty() {
+            refreshed.push(t);
+        }
+    }
+    refreshed
 }
 
 /// The line a launch prints for a plugin [`converge_owned`] rewrote.
@@ -578,9 +584,12 @@ mod tests {
         let refreshed = converge_owned_with(&set(&["opencode", "omp", "claude-code"]), |t| {
             seen.borrow_mut().push(t.name);
             match t.name {
-                "opencode" => Ok(vec![PathBuf::from("/x/pixtuoid.ts")]),
-                "omp" => Err(anyhow::anyhow!("could not lock")),
-                _ => Ok(Vec::new()),
+                "opencode" => Ok(install::Converged {
+                    rewritten: vec![PathBuf::from("/x/pixtuoid.ts")],
+                    failed: vec![(PathBuf::from("/x/other"), anyhow::anyhow!("could not lock"))],
+                }),
+                "omp" => Err(anyhow::anyhow!("no home")),
+                _ => Ok(install::Converged::default()),
             }
         });
         assert_eq!(

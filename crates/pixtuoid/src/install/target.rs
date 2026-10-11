@@ -8,7 +8,6 @@ use anyhow::Result;
 /// that resolver too or it writes the developer's real plugin.
 pub(crate) type RenderBeside = fn(hook_cmd: &str) -> Result<Vec<(PathBuf, String)>>;
 
-/// [`Target::hook_command`]'s shape.
 pub(crate) type HookCommand = fn(resolved: &Path, explicit: bool) -> Result<String>;
 
 /// Where the shim a rendered plugin file bakes lives, read back from its content.
@@ -18,7 +17,6 @@ pub(crate) type InstalledShim = fn(content: &str) -> crate::install::verify::Shi
 #[derive(Debug, Clone, Copy)]
 pub struct Beside {
     pub render: RenderBeside,
-    /// Reads the first file.
     pub installed_shim: InstalledShim,
 }
 

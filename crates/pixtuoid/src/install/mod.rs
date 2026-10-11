@@ -253,7 +253,7 @@ pub(crate) fn owned_state(
         return Ok(OwnedState::Unknown);
     };
     let shim = files.installed_shim(&io::read_config(entry)?);
-    let Some(hook) = rehook(hook_command, &shim).transpose()? else {
+    let Some(hook) = rehook(hook_command, &shim)? else {
         return Ok(OwnedState::Unknown);
     };
     let differs: Vec<_> = files
@@ -268,12 +268,20 @@ pub(crate) fn owned_state(
     })
 }
 
-/// Rewrite each of `t`'s owned files that differs from this binary's render, and
-/// return their paths. Nothing else: a config merge or a host registration is a
-/// consent only `connect` asks for, so [`converge_files`] is never handed either.
-pub(crate) fn converge(t: &Target, config: Option<PathBuf>) -> Result<Vec<PathBuf>> {
+/// What a convergence did to a target's owned files.
+#[derive(Debug, Default)]
+pub(crate) struct Converged {
+    pub(crate) rewritten: Vec<PathBuf>,
+    /// Each file it could not write, the others still converged.
+    pub(crate) failed: Vec<(PathBuf, anyhow::Error)>,
+}
+
+/// Rewrite each of `t`'s owned files that differs from this binary's render. Nothing
+/// else: a config merge or a host registration is a consent only `connect` asks for,
+/// so [`converge_files`] is never handed either.
+pub(crate) fn converge(t: &Target, config: Option<PathBuf>) -> Result<Converged> {
     let Some(files) = t.primary.owned() else {
-        return Ok(Vec::new());
+        return Ok(Converged::default());
     };
     let primary = config
         .map(Ok)
@@ -285,40 +293,37 @@ fn converge_files(
     files: target::OwnedFiles,
     hook_command: target::HookCommand,
     primary: &std::path::Path,
-) -> Result<Vec<PathBuf>> {
+) -> Result<Converged> {
+    let mut done = Converged::default();
     let OwnedState::Differs(stale) = owned_state(files, hook_command, primary)? else {
-        return Ok(Vec::new());
+        return Ok(done);
     };
-    let mut rewritten = Vec::new();
     for (p, _) in stale {
-        #[cfg(test)]
-        assert!(
-            p.starts_with(std::env::temp_dir()),
-            "a test is about to converge {} outside the temp dir",
-            p.display()
-        );
-        let lock = io::lock_config(&p)?;
         // Re-derived under the lock: a concurrent connect may have re-pointed the shim.
-        let OwnedState::Differs(now) = owned_state(files, hook_command, primary)? else {
-            break;
-        };
-        if let Some((_, want)) = now.into_iter().find(|(q, _)| *q == p) {
-            lock.write_atomic(&want)?;
-            rewritten.push(p);
+        let wrote = write_owned_file(&p, || {
+            Ok(match owned_state(files, hook_command, primary)? {
+                OwnedState::Differs(now) => now.into_iter().find(|(q, _)| *q == p).map(|(_, w)| w),
+                OwnedState::Current | OwnedState::Unknown => None,
+            })
+        });
+        match wrote {
+            Ok(true) => done.rewritten.push(p),
+            Ok(false) => {}
+            Err(e) => done.failed.push((p, e)),
         }
     }
-    Ok(rewritten)
+    Ok(done)
 }
 
 /// The hook command this binary writes for an installed shim: an explicit path
 /// stays explicit and a PATH-resolved bare name stays bare, while the command's
 /// shape is this binary's.
-fn rehook(hook_command: target::HookCommand, shim: &verify::ShimRef) -> Option<Result<String>> {
-    match shim {
-        verify::ShimRef::Absolute(p) => Some(hook_command(p, true)),
-        verify::ShimRef::BareName => Some(hook_command(std::path::Path::new(io::HOOK_BIN), false)),
+fn rehook(hook_command: target::HookCommand, shim: &verify::ShimRef) -> Result<Option<String>> {
+    Ok(match shim {
+        verify::ShimRef::Absolute(p) => Some(hook_command(p, true)?),
+        verify::ShimRef::BareName => Some(hook_command(std::path::Path::new(io::HOOK_BIN), false)?),
         verify::ShimRef::Unknown => None,
-    }
+    })
 }
 
 /// The HARD issue(s) for missing code artifacts, collapsed when they share a
@@ -570,32 +575,44 @@ fn strip_managed(
 
 /// Write each of `files` that differs on disk. Called before the primary's
 /// WRITE so a re-install refreshes them even when the merge is a no-op, which heals a
-/// deleted or tampered plugin file. Each file is its own lock target, disjoint from the primary's
-/// lock the caller holds and taken in a consistent primary→file order, so no
+/// deleted or tampered plugin file. Each file is its own lock target, disjoint from the
+/// primary's lock the caller holds and taken in a consistent primary→file order, so no
 /// self-deadlock.
 fn write_beside(files: &[(PathBuf, String)]) -> Result<()> {
     for (p, c) in files {
-        // A real write here would be invisible: CI has no such dir, and the shim exits
-        // 0 by invariant #5, so nothing downstream would report it.
-        #[cfg(test)]
-        assert!(
-            p.starts_with(std::env::temp_dir()),
-            "a test is about to write {} outside the temp dir — redirect the target's \
-             own state resolver (OpenClaw: OPENCLAW_STATE_DIR) at a TempDir first",
-            p.display()
-        );
-        if io::read_config(p).is_ok_and(|on_disk| on_disk == *c) {
-            continue;
-        }
-        if let Some(dir) = p.parent() {
-            std::fs::create_dir_all(dir)
-                .with_context(|| format!("creating plugin dir {}", dir.display()))?;
-        }
-        // Atomic (temp-in-dir → fsync → rename), NOT a plain `fs::write`: a torn write
-        // leaves a half-rendered plugin the gateway then fails to load.
-        io::write_config_atomic(p, c).with_context(|| format!("writing {}", p.display()))?;
+        write_owned_file(p, || Ok(Some(c.clone())))?;
     }
     Ok(())
+}
+
+/// Write `want()` to `p` under `p`'s own lock when the file holds anything else, and
+/// say whether it did. `want` runs under the lock, so a caller can re-derive the
+/// content there; `None` leaves the file alone.
+fn write_owned_file(
+    p: &std::path::Path,
+    want: impl FnOnce() -> Result<Option<String>>,
+) -> Result<bool> {
+    // A real write here would be invisible: CI has no such dir, and the shim exits
+    // 0 by invariant #5, so nothing downstream would report it.
+    #[cfg(test)]
+    assert!(
+        p.starts_with(std::env::temp_dir()),
+        "a test is about to write {} outside the temp dir — redirect the target's \
+         own state resolver (OpenClaw: OPENCLAW_STATE_DIR) at a TempDir first",
+        p.display()
+    );
+    let lock = io::lock_config(p)?;
+    let Some(want) = want()? else {
+        return Ok(false);
+    };
+    if lock.read()? == want {
+        return Ok(false);
+    }
+    // Atomic (temp-in-dir → fsync → rename), NOT a plain `fs::write`: a torn write
+    // leaves a half-rendered plugin the gateway then fails to load.
+    lock.write_atomic(&want)
+        .with_context(|| format!("writing {}", p.display()))?;
+    Ok(true)
 }
 
 #[derive(Debug)]

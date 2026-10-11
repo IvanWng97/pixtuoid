@@ -32,7 +32,7 @@ const PLUGIN_NAME: &str = "pixtuoid";
 
 /// Claude Code loads the hooks through its plugin system
 /// (code.claude.com/docs/en/plugins): a local marketplace whose one plugin loads
-/// in place, so a re-install's rewrite reaches the next session.
+/// in place, so a rewrite of the file reaches the next session.
 pub(crate) const HOST: HostRegistration = HostRegistration {
     register,
     unregister,
