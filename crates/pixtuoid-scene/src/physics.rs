@@ -344,7 +344,7 @@ mod tests {
         assert_eq!(digest, WALK_PROGRESS_DIGEST, "{digest:#018x}");
     }
 
-    const WALK_PROGRESS_DIGEST: u64 = 0;
+    const WALK_PROGRESS_DIGEST: u64 = 0x3492_d826_2471_18b0;
 
     #[test]
     fn leg_pixels_are_every_position_a_walk_lands_on() {
