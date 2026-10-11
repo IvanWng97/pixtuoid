@@ -24,16 +24,30 @@ pub(crate) const ONE_SHOT_GAIN: f32 = 0.5;
 /// peaks under 1.0, so drops ride at the rain level itself.
 pub(crate) const DROP_GAIN: f32 = 0.9;
 
-/// The six TRACK-OWNED loop stems, in registration order. Rain is not here —
-/// it is weather, shared by every mood track.
-pub const TRACK_STEMS: [LoopStem; 6] = [
-    LoopStem::Pad,
-    LoopStem::Sparkle,
-    LoopStem::Keys,
-    LoopStem::Drums,
-    LoopStem::Texture,
-    LoopStem::Bass,
-];
+/// The six TRACK-OWNED loop stems, in lane render order. Rain is not here — it
+/// is weather, shared by every mood track.
+pub const TRACK_STEMS: [LoopStem; synth::Lane::ALL.len()] = {
+    let mut out = [LoopStem::Pad; synth::Lane::ALL.len()];
+    let mut i = 0;
+    while i < out.len() {
+        out[i] = stem_of(synth::Lane::ALL[i]);
+        i += 1;
+    }
+    out
+};
+
+/// The stem each music lane plays on — exhaustive, so a new lane fails to
+/// compile until it has one.
+const fn stem_of(lane: synth::Lane) -> LoopStem {
+    match lane {
+        synth::Lane::Pad => LoopStem::Pad,
+        synth::Lane::Sparkle => LoopStem::Sparkle,
+        synth::Lane::Keys => LoopStem::Keys,
+        synth::Lane::Drums => LoopStem::Drums,
+        synth::Lane::Texture => LoopStem::Texture,
+        synth::Lane::Bass => LoopStem::Bass,
+    }
+}
 
 /// Which one-shot pool a play draws from — the ONE vocabulary both backends
 /// share: the native gateway resolves it to a buffer via [`AssetBank::sample`],
@@ -212,6 +226,26 @@ pub(crate) fn track_stems_silent(gains: &[(LoopStem, f32)]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Both sinks register track stems in this order and the web wire indexes
+    /// `LoopStem::ALL` by it, so the derivation must not reorder them.
+    #[test]
+    fn track_stems_keep_their_registration_order() {
+        assert_eq!(
+            TRACK_STEMS,
+            [
+                LoopStem::Pad,
+                LoopStem::Sparkle,
+                LoopStem::Keys,
+                LoopStem::Drums,
+                LoopStem::Texture,
+                LoopStem::Bass,
+            ]
+        );
+        for (lane, stem) in synth::Lane::ALL.into_iter().zip(TRACK_STEMS) {
+            assert_eq!(stem_of(lane), stem);
+        }
+    }
 
     #[test]
     fn track_beds_wire_each_lane_to_the_right_synth() {
