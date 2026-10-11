@@ -274,7 +274,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                     floor: None,
                 },
                 debug_walkable,
-                dim: pixtuoid_scene::look::Dim(self.chrome.frames.onboarding.dim),
+                dim: self.chrome.frames.onboarding.dim,
             },
             &self.chrome.pets,
             self.chrome.theme.surface.bg_fallback,
@@ -891,7 +891,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             world: &world,
             mouse_pos,
         };
-        let Some((floor, _)) = self.session.floor_mut(current) else {
+        let Some(floor) = self.session.floor(current) else {
             return Ok(());
         };
         let out = crate::tui::renderer::flush_classic(&mut self.terminal, &frame, layout, floor)?;
@@ -1002,6 +1002,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         };
         cutaway.before_flush(now);
         let mut carves = Vec::new();
+        let dim = self.chrome.frames.onboarding.dim;
         self.terminal.draw(|f| {
             let full = f.area();
             let scene_area = scene_rect(full);
@@ -1009,7 +1010,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             cutaway.place(f.buffer_mut(), scene_area);
             let over = shown.as_ref().map(|(_, over)| over);
             if let Some((text, hovered)) = over.and_then(|o| o.text) {
-                paint_host_text(f, text, (scene_area, fitted.geometry().map()), hovered);
+                paint_host_text(f, text, (scene_area, fitted.geometry().map()), hovered, dim);
             }
             if let Some((mx, my, tip)) = over.and_then(|o| o.tooltip.as_ref()) {
                 let at = TooltipAt {

@@ -498,7 +498,7 @@ mod tests {
                 .sum()
         };
         let bright = lit(pixtuoid_scene::look::Dim::NONE);
-        let dimmed = lit(pixtuoid_scene::look::Dim(0.4));
+        let dimmed = lit(pixtuoid_scene::look::Dim::from_brightness(0.4));
         assert!(2 * dimmed < bright, "dimmed={dimmed} vs bright={bright}");
     }
 

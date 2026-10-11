@@ -284,7 +284,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 floor: footer.context.floor,
             },
             debug_walkable: ctx.debug_walkable,
-            dim: pixtuoid_scene::look::Dim(overlays.onboarding.dim),
+            dim: overlays.onboarding.dim,
         },
     );
     let Some(Rendered { layout, .. }) = rendered else {
@@ -322,7 +322,7 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     frame: &ClassicFrame<'_>,
     layout: Arc<SceneLayout>,
-    floor: &mut PerFloor,
+    floor: &PerFloor,
 ) -> Result<DrawOut> {
     let &ClassicFrame {
         footer,
@@ -359,7 +359,13 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, footer, actual_full, theme);
         flush_buffer_to_term(f, pixels, actual_scene);
-        paint_host_text(f, text, (actual_scene, CellMap::HALF_BLOCK), hovered);
+        paint_host_text(
+            f,
+            text,
+            (actual_scene, CellMap::HALF_BLOCK),
+            hovered,
+            overlays.onboarding.dim,
+        );
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
             my,

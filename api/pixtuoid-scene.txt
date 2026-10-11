@@ -844,13 +844,18 @@ impl<'a> core::marker::Unpin for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> core::marker::UnsafeUnpin for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::ClassicDrawn<'a>
-pub struct pixtuoid_scene::look::Dim(pub f32)
+pub struct pixtuoid_scene::look::Dim(_)
 impl pixtuoid_scene::look::Dim
 pub const pixtuoid_scene::look::Dim::NONE: Self
+pub fn pixtuoid_scene::look::Dim::brightness(self) -> f32
+pub fn pixtuoid_scene::look::Dim::from_brightness(f32) -> Self
+pub fn pixtuoid_scene::look::Dim::of(self, pixtuoid_core::sprite::Rgb) -> pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_scene::look::Dim
 pub fn pixtuoid_scene::look::Dim::clone(&self) -> pixtuoid_scene::look::Dim
 impl core::cmp::PartialEq for pixtuoid_scene::look::Dim
 pub fn pixtuoid_scene::look::Dim::eq(&self, &pixtuoid_scene::look::Dim) -> bool
+impl core::default::Default for pixtuoid_scene::look::Dim
+pub fn pixtuoid_scene::look::Dim::default() -> Self
 impl core::fmt::Debug for pixtuoid_scene::look::Dim
 pub fn pixtuoid_scene::look::Dim::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for pixtuoid_scene::look::Dim

@@ -216,7 +216,7 @@ fn onboarding_overlay_renders_roster_and_hint() {
                 ],
                 selected: 0,
                 elapsed_ms: 100_000,
-                dim: 0.4,
+                dim: pixtuoid_scene::look::Dim::from_brightness(0.4),
             },
             ..Default::default()
         },
@@ -273,7 +273,7 @@ fn onboarding_dims_the_office_buffer() {
                 }],
                 selected: 0,
                 elapsed_ms: 100_000,
-                dim: 0.4,
+                dim: pixtuoid_scene::look::Dim::from_brightness(0.4),
             },
             ..Default::default()
         },
@@ -292,6 +292,30 @@ fn onboarding_dims_the_office_buffer() {
         dim < bright * 0.6,
         "onboarding should dim the office buffer: dim={dim} vs bright={bright}"
     );
+}
+
+/// The onboarding's backdrop dims the world text the terminal sets over the
+/// half-blocks, as it dims the office under it.
+#[test]
+fn onboarding_dims_the_world_text_over_the_half_blocks() {
+    use crate::panels::welcome::OnboardingFrame;
+    let scene = scene_with(vec![idle("/dim/0.jsonl", 0, t0())], 16);
+    let dim = pixtuoid_scene::look::Dim::from_brightness(0.4);
+    let mut bright = build(100, 40, vec![]);
+    bright.render(&scene, pack(), t0()).unwrap();
+    let mut dimmed = build(100, 40, vec![]);
+    dimmed.set_frames(
+        RenderFrames {
+            onboarding: OnboardingFrame {
+                dim,
+                ..OnboardingFrame::default()
+            },
+            ..RenderFrames::default()
+        },
+        t0(),
+    );
+    dimmed.render(&scene, pack(), t0()).unwrap();
+    assert_world_text_dims(bright.frame_buffer(), dimmed.frame_buffer(), dim);
 }
 
 #[test]
@@ -325,7 +349,7 @@ fn onboarding_dims_the_composed_slide_on_the_transition_path() {
                 }],
                 selected: 0,
                 elapsed_ms: 100_000,
-                dim: 0.4,
+                dim: pixtuoid_scene::look::Dim::from_brightness(0.4),
             },
             ..Default::default()
         },

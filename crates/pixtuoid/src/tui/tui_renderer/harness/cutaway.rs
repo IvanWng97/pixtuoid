@@ -158,7 +158,13 @@ fn world_text(r: &TuiRenderer<Window>) -> ratatui::buffer::Buffer {
     let mut term = Terminal::new(TestBackend::new(area.width, area.height)).expect("terminal");
     term.draw(|f| {
         let scene = crate::tui::renderer::scene_rect(f.area());
-        crate::panels::widgets::paint_host_text(f, text, (scene, map), None);
+        crate::panels::widgets::paint_host_text(
+            f,
+            text,
+            (scene, map),
+            None,
+            pixtuoid_scene::look::Dim::NONE,
+        );
     })
     .expect("draw");
     term.backend().buffer().clone()
@@ -213,8 +219,8 @@ fn the_first_frame_transmits_and_an_identical_one_sends_nothing() {
 }
 
 /// The onboarding's backdrop dims the cutaway: the composed frame darkens
-/// under it, and its tiles are sent again though nothing else in the office
-/// moved.
+/// under it, its tiles are sent again though nothing else in the office
+/// moved, and the world text the terminal sets over it darkens too.
 #[test]
 fn the_onboarding_dims_the_cutaway_and_sends_its_tiles() {
     use crate::panels::welcome::OnboardingFrame;
@@ -226,12 +232,13 @@ fn the_onboarding_dims_the_cutaway_and_sends_its_tiles() {
     };
     r.render(&scene, pack(), t0()).expect("render");
     let bright = lum(&r);
+    let bright_cells = r.frame_buffer().clone();
     wire.take();
     r.set_frames(
         RenderFrames {
             onboarding: OnboardingFrame {
                 open: true,
-                dim: 0.4,
+                dim: pixtuoid_scene::look::Dim::from_brightness(0.4),
                 ..OnboardingFrame::default()
             },
             ..RenderFrames::default()
@@ -242,6 +249,11 @@ fn the_onboarding_dims_the_cutaway_and_sends_its_tiles() {
     let dim = lum(&r);
     assert!(dim < bright * 0.6, "dim={dim} vs bright={bright}");
     assert!(wire.take().contains(TRANSMIT), "the dimmed tiles are sent");
+    assert_world_text_dims(
+        &bright_cells,
+        r.frame_buffer(),
+        pixtuoid_scene::look::Dim::from_brightness(0.4),
+    );
 }
 
 /// A frame encoded across four threads, on any machine, still reaches the

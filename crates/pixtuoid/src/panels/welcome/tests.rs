@@ -43,49 +43,60 @@ fn navigation_clamps_at_both_ends() {
 
 #[test]
 fn dim_ramps_in_on_open_and_out_on_close() {
-    assert!((dim_opening(0) - 1.0).abs() < 1e-6, "no dim at t=0");
+    let at = |dim: pixtuoid_scene::look::Dim| dim.brightness();
+    assert_eq!(
+        dim_opening(0),
+        pixtuoid_scene::look::Dim::NONE,
+        "no dim at t=0"
+    );
     assert!(
-        (dim_opening(DIM_RAMP_MS) - DIM_FLOOR).abs() < 1e-6,
+        (at(dim_opening(DIM_RAMP_MS)) - DIM_FLOOR).abs() < 1e-6,
         "floor at full ramp"
     );
     assert!(
-        (dim_opening(DIM_RAMP_MS * 10) - DIM_FLOOR).abs() < 1e-6,
+        (at(dim_opening(DIM_RAMP_MS * 10)) - DIM_FLOOR).abs() < 1e-6,
         "clamps past the ramp"
     );
-    assert!(dim_opening(DIM_RAMP_MS / 2) > DIM_FLOOR && dim_opening(DIM_RAMP_MS / 2) < 1.0);
+    let half = at(dim_opening(DIM_RAMP_MS / 2));
+    assert!(half > DIM_FLOOR && half < 1.0);
 
+    let floor = dim_opening(DIM_RAMP_MS);
     assert!(
-        (dim_closing(DIM_FLOOR, 0).unwrap() - DIM_FLOOR).abs() < 1e-6,
+        (at(dim_closing(floor, 0).unwrap()) - DIM_FLOOR).abs() < 1e-6,
         "floor at fade start"
     );
-    let mid = dim_closing(DIM_FLOOR, DIM_FADE_OUT_MS / 2).unwrap();
+    let mid = at(dim_closing(floor, DIM_FADE_OUT_MS / 2).unwrap());
     assert!(mid > DIM_FLOOR && mid < 1.0, "climbing back: {mid}");
     assert_eq!(
-        dim_closing(DIM_FLOOR, DIM_FADE_OUT_MS),
+        dim_closing(floor, DIM_FADE_OUT_MS),
         None,
         "fully restored ⇒ drop the state"
     );
-    assert_eq!(dim_closing(DIM_FLOOR, DIM_FADE_OUT_MS + 100), None);
+    assert_eq!(dim_closing(floor, DIM_FADE_OUT_MS + 100), None);
 
-    assert!((OnboardingFrame::default().dim - 1.0).abs() < 1e-6);
+    assert_eq!(
+        OnboardingFrame::default().dim,
+        pixtuoid_scene::look::Dim::NONE
+    );
 }
 
 /// A close ramp hardcoded to `DIM_FLOOR` darkened the whole office for a frame
 /// before climbing back.
 #[test]
 fn the_close_fade_continues_from_the_dim_it_was_interrupted_at() {
+    let at = |dim: pixtuoid_scene::look::Dim| dim.brightness();
     let interrupted = dim_opening(DIM_RAMP_MS / 3);
     assert!(
-        interrupted > DIM_FLOOR,
-        "the probe must be mid-ramp: {interrupted}"
+        at(interrupted) > DIM_FLOOR,
+        "the probe must be mid-ramp: {interrupted:?}"
     );
     let first_close_frame = dim_closing(interrupted, 0).expect("the fade is armed");
     assert!(
-        (first_close_frame - interrupted).abs() < 1e-6,
-        "the fade must resume at {interrupted}, not snap to {first_close_frame}"
+        (at(first_close_frame) - at(interrupted)).abs() < 1e-6,
+        "the fade must resume at {interrupted:?}, not snap to {first_close_frame:?}"
     );
-    let mid = dim_closing(interrupted, DIM_FADE_OUT_MS / 2).expect("still fading");
-    assert!(mid > interrupted && mid < 1.0, "climbing back: {mid}");
+    let mid = at(dim_closing(interrupted, DIM_FADE_OUT_MS / 2).expect("still fading"));
+    assert!(mid > at(interrupted) && mid < 1.0, "climbing back: {mid}");
     assert_eq!(dim_closing(interrupted, DIM_FADE_OUT_MS), None);
 }
 

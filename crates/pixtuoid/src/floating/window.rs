@@ -475,7 +475,7 @@ impl FloatingApp {
                     gateway: pixtuoid_scene::tally::office_gateway(&scene),
                     floor: None,
                 },
-                dim: pixtuoid_scene::look::Dim(frames.onboarding.dim),
+                dim: frames.onboarding.dim,
             },
             (win_w, win_h),
         );
@@ -763,7 +763,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         // lightning, day/night), so it paints each beat, never 0fps. A LIVE
         // gateway daemon lives in `daemons`, not `agents`, and is a WANDERING
         // mascot, so it holds the fast cadence, as does whatever the floor
-        // reports moving between beats: a walk, or a light mid-fade.
+        // reports moving between beats (a walk, or a light mid-fade) and the
+        // onboarding's backdrop dim mid-ramp.
         let office_idle = self.live.as_ref().is_none_or(|live| {
             let scene = live.scene_rx.borrow();
             scene.agents.is_empty()
@@ -771,7 +772,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                     .daemons()
                     .all(|(_, _, d)| d.liveness == DaemonLiveness::Down)
         }) && !self.renderer.moves_off_beat()
-            && self.renderer.nav().transition().is_none();
+            && self.renderer.nav().transition().is_none()
+            && !self.ui.dim_moving();
         // The redraw REQUEST rides the same deadline as the wait: requesting one
         // unconditionally here leaves winit a pending redraw, so `WaitUntil` never
         // sleeps and both cadences collapse to max-rate (see `super::cadence`).

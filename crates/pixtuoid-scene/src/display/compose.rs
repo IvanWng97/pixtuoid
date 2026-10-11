@@ -132,8 +132,7 @@ pub struct Showing<'a> {
     /// The wall board, the classic painter's
     /// ([`build_board`](crate::neon_sign::build_board)).
     pub board: &'a crate::neon_sign::BoardModel,
-    /// The host's modal dim, which the display list ignores and the canvas
-    /// paints.
+    /// The brightness the host's modal leaves it.
     pub dim: crate::look::Dim,
 }
 
@@ -145,7 +144,7 @@ pub(crate) fn compose<'a>(
         floor,
         now,
         board,
-        dim: _,
+        dim,
     }: Showing<'_>,
     caches: (&mut LightCache, &mut crate::outside::OutsideCache),
 ) -> DisplayList<'a> {
@@ -156,7 +155,9 @@ pub(crate) fn compose<'a>(
         floor.altitude,
         timing,
     );
-    compose_at(frame, office, &moment, floor, board, caches)
+    let mut list = compose_at(frame, office, &moment, floor, board, caches);
+    list.dim = dim;
+    list
 }
 
 /// Compose `frame`'s [`DisplayList`] at `moment`, on `floor`. Every
@@ -203,6 +204,8 @@ pub(crate) fn compose_at<'a>(
         ambient,
         carpet: moment.look.carpet(theme),
         flash: crate::display::light::Flash::of(&moment.sky),
+        // [`compose`] sets the host's, from its `Showing`.
+        dim: crate::look::Dim::NONE,
         flash_phase: crate::flash::FlashPhase::of(&moment.sky, frame),
         hovers: pieces.iter().filter_map(Piece::hover).collect(),
         pieces,

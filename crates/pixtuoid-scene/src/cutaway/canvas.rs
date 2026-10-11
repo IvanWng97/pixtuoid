@@ -205,8 +205,8 @@ impl CutawayCanvas {
     }
 
     /// Paint `stepped` as [`render_cutaway`](crate::cutaway::paint::render_cutaway)
-    /// does, under `showing`'s dim, its world text as `text` says, unless the
-    /// frame would be the one already shown.
+    /// does, its world text as `text` says, unless the frame would be the one
+    /// already shown.
     pub fn frame(
         &mut self,
         stepped: &SteppedFloor,
@@ -226,7 +226,6 @@ impl CutawayCanvas {
             theme,
             scale,
         };
-        let dim = showing.dim;
         let mut list = tracing::trace_span!("canvas.compose")
             .in_scope(|| compose(&stepped.frame, office, showing, (&mut self.lights, outside)));
         let host_text = (text == crate::look::WorldText::Host).then(|| list.host_text());
@@ -237,7 +236,7 @@ impl CutawayCanvas {
             ambient: list.ambient(),
             carpet: list.carpet(),
             flash: list.flash(),
-            dim,
+            dim: list.dim(),
         };
         let footprints: Vec<(Span, u64)> = list
             .pieces()
@@ -277,17 +276,13 @@ impl CutawayCanvas {
                     self.buf = RgbBuffer::filled(size.0, size.1, list.backdrop().tones.bg);
                 }
                 paint(&list, cache, &mut self.buf);
-                dim.apply(&mut self.buf);
             }
             Dirty::Rects(rects) => {
                 // a new size changes the epoch's backdrop, so it paints whole
                 debug_assert_eq!((self.buf.width(), self.buf.height()), size);
                 for pass in passes(rects.as_slice(), MAX_PASSES) {
                     let clip = (pass.x..pass.x + pass.width, pass.y..pass.y + pass.height);
-                    self.buf.with_clip(clip, |buf| {
-                        paint(&list, cache, buf);
-                        dim.apply(buf);
-                    });
+                    self.buf.with_clip(clip, |buf| paint(&list, cache, buf));
                 }
             }
             Dirty::Unchanged => {}
@@ -417,14 +412,14 @@ mod tests {
         crate::theme::theme_by_name("normal").expect("theme")
     }
 
-    /// `layout`'s full render of `frame` on `floor` at `now`, under the normal
+    /// `layout`'s full render of `frame` as `showing` says, under the normal
     /// theme.
     fn full_render(
         layout: &SceneLayout,
         pack: &OfficeArt,
         scale: RenderScale,
-        (frame, floor): (&SimFrame, FloorMeta),
-        now: SystemTime,
+        frame: &SimFrame,
+        showing: Showing<'_>,
     ) -> RgbBuffer {
         let theme = normal();
         let mut buf = RgbBuffer::filled(
@@ -442,7 +437,7 @@ mod tests {
         render_cutaway(
             frame,
             office,
-            crate::display::compose::tests::showing(floor, now),
+            showing,
             (&mut cache, &mut crate::outside::OutsideCache::default()),
             &mut buf,
         );
@@ -462,8 +457,7 @@ mod tests {
         )
     }
 
-    /// [`run`] on `floor`, under its weather and `dim`, each full render
-    /// dimmed alike.
+    /// [`run`] on `floor`, under its weather and `dim`.
     fn run_under(
         layout: SceneLayout,
         pack: OfficeArt,
@@ -494,8 +488,16 @@ mod tests {
         let mut tally = Run::default();
         let mut last: Option<(RgbBuffer, Vec<(Span, u64)>)> = None;
         for (k, (frame, now)) in steps.iter().enumerate() {
-            let mut full = full_render(&layout, &pack, scale, (frame, floor), *now);
-            dim.apply(&mut full);
+            let full = full_render(
+                &layout,
+                &pack,
+                scale,
+                frame,
+                Showing {
+                    dim,
+                    ..crate::display::compose::tests::showing(floor, *now)
+                },
+            );
             let list = compose(
                 frame,
                 office,
@@ -606,7 +608,7 @@ mod tests {
             SceneLayout::clone(&layout),
             OfficeArt::clone(&pack),
             &steps,
-            (clear_ground(), crate::look::Dim(0.4)),
+            (clear_ground(), crate::look::Dim::from_brightness(0.4)),
         );
         assert!(tally.partial > 0, "{tally:?}");
         let (mut cache, mut outside) = (
@@ -632,7 +634,7 @@ mod tests {
             )
         };
         show(crate::look::Dim::NONE);
-        let dimmed = show(crate::look::Dim(0.4));
+        let dimmed = show(crate::look::Dim::from_brightness(0.4));
         assert_eq!(dimmed.dirty, Dirty::All);
         assert!(
             dimmed.repaint.is_some_and(|r| r.dim),
@@ -1411,7 +1413,14 @@ mod tests {
         assert_eq!(shown.dirty, Dirty::All);
         assert!(
             canvas.buf().as_slice()
-                == full_render(&b.layout, &pack, scale, (&b.frame, clear_ground()), now).as_slice(),
+                == full_render(
+                    &b.layout,
+                    &pack,
+                    scale,
+                    &b.frame,
+                    crate::display::compose::tests::showing(clear_ground(), now)
+                )
+                .as_slice(),
             "the canvas shows other than the new layout"
         );
     }

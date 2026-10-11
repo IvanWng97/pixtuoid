@@ -69,26 +69,44 @@ pub struct RenderInputs<'a> {
     pub place: Place,
     /// The classic's walkable/approach/route debug layer (the `w` toggle).
     pub debug_walkable: bool,
-    /// How far the host's modal dims the frame.
+    /// The brightness the host's modal leaves the frame.
     pub dim: Dim,
 }
 
-/// How bright a host's modal leaves the office under it: the multiplier each
-/// pixel of a frame takes, [`Self::NONE`] leaving it as drawn.
+/// How bright a host's modal leaves the office under it, from black to as
+/// drawn: the multiplier each pixel of a frame takes.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Dim(pub f32);
+pub struct Dim(f32);
+
+impl Default for Dim {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
 
 impl Dim {
     /// The office as drawn.
     pub const NONE: Self = Self(1.0);
-    /// The factor from which a frame counts as undimmed: one at or above it is
-    /// left as drawn.
-    const UNDIMMED: f32 = 0.999;
+
+    /// The office at `brightness` of its own, clamped to black..=as drawn; a
+    /// NaN leaves it as drawn.
+    pub fn from_brightness(brightness: f32) -> Self {
+        if brightness.is_nan() {
+            Self::NONE
+        } else {
+            Self(brightness.clamp(0.0, 1.0))
+        }
+    }
+
+    /// The brightness it leaves.
+    pub fn brightness(self) -> f32 {
+        self.0
+    }
 
     /// Darken every pixel of `buf` a frame may write: within its clip, where
     /// it has one.
     pub(crate) fn apply(self, buf: &mut RgbBuffer) {
-        if self.0 >= Self::UNDIMMED {
+        if self == Self::NONE {
             return;
         }
         for (_, _, row) in buf.writable_rows_mut() {
@@ -98,11 +116,8 @@ impl Dim {
         }
     }
 
-    /// `rgb` darkened.
-    pub(crate) fn of(self, rgb: Rgb) -> Rgb {
-        if self.0 >= Self::UNDIMMED {
-            return rgb;
-        }
+    /// `rgb` under this dim.
+    pub fn of(self, rgb: Rgb) -> Rgb {
         let channel = |c: u8| (f32::from(c) * self.0) as u8;
         Rgb {
             r: channel(rgb.r),
