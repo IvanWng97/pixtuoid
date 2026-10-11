@@ -238,10 +238,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cutaway = Some(cutaway);
     }
 
-    /// Whether the last frame was the half-blocks of a debug build, which draw
-    /// the walkable debug layer where the cutaway never does: `w` is listed and
-    /// read only then, including while a cutaway too big for the cell falls
-    /// back to them.
+    /// Whether the last office frame drawn was the half-blocks of a debug
+    /// build, which draw the walkable debug layer where the cutaway never does:
+    /// `w` is listed and read only then, including while a cutaway too big for
+    /// the cell falls back to them. A footer-only frame draws no office, so it
+    /// keeps the answer of the one before it.
     pub(crate) fn offers_walkable_debug(&self) -> bool {
         cfg!(debug_assertions)
             && self

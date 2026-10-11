@@ -109,9 +109,10 @@ pub(crate) struct AudioController {
 
 impl AudioController {
     /// Construct the controller AND own the device thread's whole lifecycle:
-    /// boot-spawn here (iff a persisted unmute wants sound), tear down in `Drop`.
-    /// Each painter builds it AFTER its fallible boot steps, so no device thread
-    /// can exist before its Drop-owner and `Drop` alone covers EVERY exit path.
+    /// boot-spawn here (iff a persisted unmute wants sound), tear down via
+    /// [`Self::stop`], with `Drop` as the net for every other exit path. Each
+    /// painter builds it AFTER its fallible boot steps, so no device thread can
+    /// exist before its Drop-owner.
     pub(crate) fn new(cfg: crate::config::AudioConfig, config_path: std::path::PathBuf) -> Self {
         Self::new_with(cfg, config_path, respawn)
     }

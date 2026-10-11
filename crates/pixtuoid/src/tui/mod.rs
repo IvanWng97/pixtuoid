@@ -1024,6 +1024,112 @@ mod runtime_model {
     }
 }
 
+/// Tests for the terminal's own key step, ahead of the shared dispatch.
+#[cfg(all(test, debug_assertions))]
+mod route_tests {
+    use super::KeyAction;
+    use crate::tui::tui_renderer::TuiRenderer;
+    use pixtuoid_scene::theme;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use std::time::SystemTime;
+
+    /// Pins the `!` the mutation run flagged: dropping it makes the toggle a
+    /// no-op that always writes the value already there. A panel that owns
+    /// input, and any other key, leave the layer alone.
+    #[test]
+    fn the_w_key_flips_the_walkable_layer_only_with_no_panel_open() {
+        use crate::panels::ModalState;
+        use crossterm::event::KeyCode;
+        let modal = |help_open| ModalState {
+            help_open,
+            ..ModalState::closed()
+        };
+        let pack =
+            std::sync::Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"));
+        let mut r = TuiRenderer::new(
+            Terminal::new(TestBackend::new(120, 60)).expect("test backend"),
+            &theme::NORMAL,
+            Vec::new(),
+            std::sync::Arc::clone(&pack),
+        );
+        r.render(
+            &pixtuoid_core::state::SceneState::uniform(16),
+            &pack,
+            SystemTime::UNIX_EPOCH,
+        )
+        .expect("a half-block frame");
+        let before = r.debug_walkable();
+        assert!(super::toggle_walkable_debug_on_w(
+            &mut r,
+            KeyCode::Char('w'),
+            &modal(false)
+        ));
+        assert_eq!(r.debug_walkable(), !before, "w must FLIP");
+        assert!(super::toggle_walkable_debug_on_w(
+            &mut r,
+            KeyCode::Char('w'),
+            &modal(false)
+        ));
+        assert_eq!(r.debug_walkable(), before, "w must flip back");
+        for (code, modal) in [
+            (KeyCode::Char('w'), modal(true)),
+            (KeyCode::Char('x'), modal(false)),
+        ] {
+            assert!(!super::toggle_walkable_debug_on_w(&mut r, code, &modal));
+            assert_eq!(r.debug_walkable(), before);
+        }
+    }
+
+    /// The loop's routing: `w` flips the layer and is swallowed with no panel
+    /// open; with one open, and for every other key, the shared dispatch decides.
+    #[test]
+    fn route_key_reads_w_before_the_shared_dispatch() {
+        use crate::panels::{FloorNav, ModalState};
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let pack =
+            std::sync::Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"));
+        let mut r = TuiRenderer::new(
+            Terminal::new(TestBackend::new(120, 60)).expect("test backend"),
+            &theme::NORMAL,
+            Vec::new(),
+            std::sync::Arc::clone(&pack),
+        );
+        r.render(
+            &pixtuoid_core::state::SceneState::uniform(16),
+            &pack,
+            SystemTime::UNIX_EPOCH,
+        )
+        .expect("a half-block frame");
+        let floor = FloorNav {
+            n_floors: 1,
+            current_floor: 0,
+            in_transition: false,
+        };
+        let key = |code| (code, KeyModifiers::NONE);
+        let help = ModalState {
+            help_open: true,
+            ..ModalState::closed()
+        };
+        assert_eq!(
+            super::route_key(&mut r, key(KeyCode::Char('w')), ModalState::closed(), floor),
+            KeyAction::None
+        );
+        assert!(r.debug_walkable(), "w flipped the layer");
+        assert_eq!(
+            super::route_key(&mut r, key(KeyCode::Char('?')), ModalState::closed(), floor),
+            KeyAction::ToggleHelp,
+            "other keys reach the shared dispatch"
+        );
+        assert_eq!(
+            super::route_key(&mut r, key(KeyCode::Char('w')), help, floor),
+            crate::panels::dispatch_key(KeyCode::Char('w'), KeyModifiers::NONE, help, floor),
+            "a panel open sends w on"
+        );
+        assert!(r.debug_walkable(), "and leaves the layer alone");
+    }
+}
+
 /// Tests for the APPLIER half of the key path; `dispatch_tests` covers the decoder.
 #[cfg(test)]
 mod apply_key_action_tests {
@@ -1215,103 +1321,6 @@ mod apply_key_action_tests {
             !h.audio_ctl.handle().is_muted(),
             "unpause must unmute in the same apply"
         );
-    }
-
-    /// Pins the `!` the mutation run flagged: dropping it makes the toggle a
-    /// no-op that always writes the value already there. A panel that owns
-    /// input, and any other key, leave the layer alone.
-    #[cfg(debug_assertions)]
-    #[test]
-    fn the_w_key_flips_the_walkable_layer_only_with_no_panel_open() {
-        use crate::panels::ModalState;
-        use crossterm::event::KeyCode;
-        let modal = |help_open| ModalState {
-            help_open,
-            ..ModalState::closed()
-        };
-        let pack =
-            std::sync::Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"));
-        let mut r = TuiRenderer::new(
-            Terminal::new(TestBackend::new(120, 60)).expect("test backend"),
-            &theme::NORMAL,
-            Vec::new(),
-            std::sync::Arc::clone(&pack),
-        );
-        r.render(
-            &pixtuoid_core::state::SceneState::uniform(16),
-            &pack,
-            SystemTime::UNIX_EPOCH,
-        )
-        .expect("a half-block frame");
-        let before = r.debug_walkable();
-        assert!(super::toggle_walkable_debug_on_w(
-            &mut r,
-            KeyCode::Char('w'),
-            &modal(false)
-        ));
-        assert_eq!(r.debug_walkable(), !before, "w must FLIP");
-        assert!(super::toggle_walkable_debug_on_w(
-            &mut r,
-            KeyCode::Char('w'),
-            &modal(false)
-        ));
-        assert_eq!(r.debug_walkable(), before, "w must flip back");
-        for (code, modal) in [
-            (KeyCode::Char('w'), modal(true)),
-            (KeyCode::Char('x'), modal(false)),
-        ] {
-            assert!(!super::toggle_walkable_debug_on_w(&mut r, code, &modal));
-            assert_eq!(r.debug_walkable(), before);
-        }
-    }
-
-    /// The loop's routing: `w` flips the layer and is swallowed with no panel
-    /// open; with one open, and for every other key, the shared dispatch decides.
-    #[cfg(debug_assertions)]
-    #[test]
-    fn route_key_reads_w_before_the_shared_dispatch() {
-        use crate::panels::{FloorNav, ModalState};
-        use crossterm::event::{KeyCode, KeyModifiers};
-        let pack =
-            std::sync::Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"));
-        let mut r = TuiRenderer::new(
-            Terminal::new(TestBackend::new(120, 60)).expect("test backend"),
-            &theme::NORMAL,
-            Vec::new(),
-            std::sync::Arc::clone(&pack),
-        );
-        r.render(
-            &pixtuoid_core::state::SceneState::uniform(16),
-            &pack,
-            SystemTime::UNIX_EPOCH,
-        )
-        .expect("a half-block frame");
-        let floor = FloorNav {
-            n_floors: 1,
-            current_floor: 0,
-            in_transition: false,
-        };
-        let key = |code| (code, KeyModifiers::NONE);
-        let help = ModalState {
-            help_open: true,
-            ..ModalState::closed()
-        };
-        assert_eq!(
-            super::route_key(&mut r, key(KeyCode::Char('w')), ModalState::closed(), floor),
-            KeyAction::None
-        );
-        assert!(r.debug_walkable(), "w flipped the layer");
-        assert_eq!(
-            super::route_key(&mut r, key(KeyCode::Char('?')), ModalState::closed(), floor),
-            KeyAction::ToggleHelp,
-            "other keys reach the shared dispatch"
-        );
-        assert_eq!(
-            super::route_key(&mut r, key(KeyCode::Char('w')), help, floor),
-            crate::panels::dispatch_key(KeyCode::Char('w'), KeyModifiers::NONE, help, floor),
-            "a panel open sends w on"
-        );
-        assert!(r.debug_walkable(), "and leaves the layer alone");
     }
 
     /// `delete -` on either `-1` makes Up behave as Down. The panels are
