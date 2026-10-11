@@ -19,8 +19,6 @@ const SHORTCUTS: &[Shortcut] = &[
     ("t", "themes"),
     ("Tab", "agent dashboard"),
     ("s", "sources (connect / health)"),
-    #[cfg(debug_assertions)]
-    ("w", "walkable / approach / route debug"),
     ("?", "toggle this overlay"),
     ("\u{2191} \u{2193} j k", "switch floor"),
     ("PgUp / PgDn", "switch floor"),
@@ -134,6 +132,13 @@ mod tests {
             out.push('\n');
         }
         out
+    }
+
+    /// The walkable debug layer is the half-blocks': the shared rows, which
+    /// the window's help draws, never list its key.
+    #[test]
+    fn the_shared_rows_do_not_list_the_walkable_key() {
+        assert!(!frame_text(140, 40, &[]).contains("walkable"));
     }
 
     #[test]

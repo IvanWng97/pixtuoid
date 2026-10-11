@@ -109,9 +109,10 @@ pub(crate) struct AudioController {
 
 impl AudioController {
     /// Construct the controller AND own the device thread's whole lifecycle:
-    /// boot-spawn here (iff a persisted unmute wants sound), tear down in `Drop`.
-    /// Each painter builds it AFTER its fallible boot steps, so no device thread
-    /// can exist before its Drop-owner and `Drop` alone covers EVERY exit path.
+    /// boot-spawn here (iff a persisted unmute wants sound), tear down via
+    /// [`Self::stop`], with `Drop` as the net for every other exit path. Each
+    /// painter builds it AFTER its fallible boot steps, so no device thread can
+    /// exist before its Drop-owner.
     pub(crate) fn new(cfg: crate::config::AudioConfig, config_path: std::path::PathBuf) -> Self {
         Self::new_with(cfg, config_path, respawn)
     }
@@ -199,17 +200,25 @@ impl AudioController {
     pub(crate) fn handle(&self) -> &AudioHandle {
         &self.ui.handle
     }
-}
 
-/// RAII teardown — the ONE exit verb for BOTH halves of the audio protocol:
-/// PERSIST a pending debounced volume, THEN stop the device thread. Both run
-/// unconditionally, so a Ctrl-C / terminate / error can't lose a nudge that
-/// landed inside the debounce window. Both halves are panic-free, so this is safe to run
-/// during unwind.
-impl Drop for AudioController {
-    fn drop(&mut self) {
+    /// The ONE exit verb for BOTH halves of the audio protocol: PERSIST a
+    /// pending debounced volume, THEN stop the device thread. Both run
+    /// unconditionally, so a Ctrl-C / terminate / error can't lose a nudge that
+    /// landed inside the debounce window. Both halves are panic-free, so this
+    /// is safe to run during unwind. Idempotent, so a painter can run it ahead
+    /// of the drop to order the join against its own teardown.
+    pub(crate) fn stop(&mut self) {
         self.flush_on_exit();
         self.ui.handle.shutdown();
+    }
+}
+
+/// The net under [`AudioController::stop`] for every exit path that never
+/// called it (an error, an unwind). `stop` is idempotent, so a caller that ran
+/// it first leaves this nothing to do.
+impl Drop for AudioController {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
@@ -274,6 +283,42 @@ mod controller_tests {
             done.get().unwrap().load(Ordering::SeqCst),
             "dropping the controller must JOIN the boot-spawned device thread so \
              its teardown completes — the RAII teardown-on-quit guarantee"
+        );
+    }
+
+    /// `stop` persists and joins once; the drop after it, which production runs
+    /// at every floating quit, does nothing more and does not panic.
+    #[test]
+    fn stop_then_drop_persists_and_joins_once() {
+        use std::sync::atomic::Ordering;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "theme = \"normal\"\n").unwrap();
+        let done = std::cell::OnceCell::new();
+        let mut c = AudioController::new_with(
+            AudioConfig {
+                muted: false,
+                volume: 0.5,
+            },
+            path.clone(),
+            |h, _| {
+                let _ = done.set(install_slow_fake_device(h));
+            },
+        );
+        c.apply(AudioAction::Volume(false), false, Instant::now(), |_, _| {});
+        c.stop();
+        assert!(done.get().unwrap().load(Ordering::SeqCst), "stop joins");
+        assert!(
+            std::fs::read_to_string(&path).unwrap().contains("volume"),
+            "stop persists the pending nudge"
+        );
+        std::fs::write(&path, "theme = \"normal\"\n").unwrap();
+        drop(c);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "theme = \"normal\"\n",
+            "the drop after stop writes nothing"
         );
     }
 
@@ -654,7 +699,7 @@ impl AudioHandle {
 
     /// Stop the device thread SYNCHRONOUSLY: dropping the sole sender makes `run_loop` return
     /// and drop its `RodioSink` (the OS device close); the JOIN makes that Drop finish before
-    /// the process exits (see `join`). INVARIANT: only from `AudioController::drop`, after the
+    /// the process exits (see `join`). INVARIANT: only from `AudioController::stop`, after the
     /// painter's loop ended — nothing races `tx`/`join`.
     pub(crate) fn shutdown(&self) {
         *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = None;

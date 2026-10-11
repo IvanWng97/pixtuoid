@@ -347,6 +347,11 @@ impl Raster {
         }
     }
 
+    /// The look of the last frame drawn, `None` before the first.
+    pub fn shown(&self) -> Option<Look> {
+        self.shown
+    }
+
     /// What the last frame drawn was drawn under, `None` before the first.
     #[doc(hidden)]
     pub fn note(&self) -> Option<FrameNote> {
