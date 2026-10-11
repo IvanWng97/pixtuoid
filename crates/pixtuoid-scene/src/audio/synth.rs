@@ -94,8 +94,8 @@ fn bar_s() -> f32 {
     score::beat_s() * score::BEATS_PER_BAR
 }
 
-/// The lofi master chain, applied per MUSICAL stem (texture skips it — they
-/// ARE the medium). No hiss here: per-stem hiss STACKS across the musical
+/// The lofi master chain, applied per MUSICAL stem (texture skips it — it
+/// IS the medium). No hiss here: per-stem hiss STACKS across the musical
 /// stems, so the medium noise is `texture_bed`'s job, exactly once.
 fn lofi_post(buf: &[f32], drive: f32) -> Vec<f32> {
     let warped = crate::audio::dsp::warp_resample(buf, &[(0.7, 0.0025), (8.0, 0.0006)]);

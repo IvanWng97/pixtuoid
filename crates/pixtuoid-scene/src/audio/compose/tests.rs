@@ -443,7 +443,7 @@ const GOLDEN: u64 = 0x71ca_6f22_f488_2daf;
 
 /// Both moods' first eight seeds, every event and the harmonic timeline as f32
 /// bits. `compose` runs no transcendental function, so these bits hold on every
-/// platform (RFC 3514), unlike the synth's.
+/// platform (Rust RFC 3514), unlike the synth's.
 #[test]
 fn every_seed_composes_the_score_it_did() {
     let mut words: Vec<u64> = Vec::new();
