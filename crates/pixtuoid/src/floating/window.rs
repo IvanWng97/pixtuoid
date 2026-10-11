@@ -399,6 +399,7 @@ impl FloatingApp {
                 focus_roots: &self.focus_roots,
                 now,
                 respawn: crate::audio::respawn,
+                installed: crate::sources::detect,
             },
         )
     }

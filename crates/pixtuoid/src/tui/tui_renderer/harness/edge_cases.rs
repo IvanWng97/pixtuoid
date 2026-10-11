@@ -183,7 +183,10 @@ fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
     let mut r = build(100, 16, vec![]);
     r.set_frames(
         RenderFrames {
-            version_popup: true,
+            version_popup: crate::panels::ui_state::VersionPopupFrame {
+                open: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
         t0(),
@@ -292,7 +295,10 @@ fn modal_overlays_still_paint_during_a_slide_on_a_too_small_terminal() {
     r.set_frames(
         RenderFrames {
             help_open: true,
-            version_popup: true,
+            version_popup: crate::panels::ui_state::VersionPopupFrame {
+                open: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
         now,

@@ -34,8 +34,8 @@ fn body_row(version: &str, inner_w: usize) -> String {
     )
 }
 
-/// The left indent every painted row sits at, and the column the link's click
-/// target starts at.
+/// The left indent the notices, the body and the link sit at, and the column
+/// the link's click target starts at.
 const INDENT: &str = "  ";
 
 /// The clickable link's VISIBLE text — a compact label decouples display width
@@ -116,12 +116,12 @@ fn cut(row: &str, width: usize) -> String {
     format!("{}{CUT_MARK}", kept.trim_end())
 }
 
-/// The content rows with `notice_rows` rows of notices painted.
-fn content_rows(notice_rows: usize) -> u16 {
-    if notice_rows == 0 {
+/// The content rows with `notice_count` notice rows painted.
+fn content_rows(notice_count: usize) -> u16 {
+    if notice_count == 0 {
         return FRAME_ROWS;
     }
-    let notices = u16::try_from(notice_rows).unwrap_or(u16::MAX);
+    let notices = u16::try_from(notice_count).unwrap_or(u16::MAX);
     FRAME_ROWS
         .saturating_add(notices)
         .saturating_add(NOTICE_GAP)
@@ -132,13 +132,13 @@ fn content_rows(notice_rows: usize) -> u16 {
 /// same [`notice_rows`], so the painted link and its click target can't drift
 /// apart. The URL row is always one (truncated) row, so only the notice rows
 /// vary the height.
-fn version_geometry(bounds: Rect, scale: f32, notice_rows: usize) -> Option<PanelGeometry> {
+fn version_geometry(bounds: Rect, scale: f32, notice_count: usize) -> Option<PanelGeometry> {
     // The title TEXT is irrelevant to geometry — only the reserved title row
     // (is_some) matters here; the painter draws the real title into it.
     let geom = PanelGeometry::compute(
         bounds,
         VERSION_POPUP_W,
-        content_rows(notice_rows),
+        content_rows(notice_count),
         Some(""),
         scale,
     );
@@ -148,8 +148,9 @@ fn version_geometry(bounds: Rect, scale: f32, notice_rows: usize) -> Option<Pane
 
 /// The popup's title, sized to the panel's real inner width. The dismiss hint
 /// outranks the prose: the title is the ONLY place the modal says how to close
-/// itself, so a narrow panel drops "Updated to" first rather than cutting
-/// mid-word and leaving a key-swallowing overlay with no exit instruction.
+/// itself, so a narrow panel drops the leading name ("Updated to" or
+/// "pixtuoid") first rather than cutting mid-word and leaving a key-swallowing
+/// overlay with no exit instruction.
 fn version_title(version: &str, upgraded: bool, inner_w: usize) -> String {
     let named = if upgraded { "Updated to" } else { "pixtuoid" };
     let full = format!("{named} v{version} \u{2014} Enter to close");
@@ -159,18 +160,18 @@ fn version_title(version: &str, upgraded: bool, inner_w: usize) -> String {
     truncate(&format!("v{version} \u{2014} Enter to close"), inner_w)
 }
 
-/// The popup for `version`, with `body`'s notices (each one paragraph) above
+/// The popup for `version`, with `popup`'s notices (each one paragraph) above
 /// its release.
 pub(crate) fn paint_version_popup(
     f: &mut ratatui::Frame<'_>,
     version: &str,
-    body: &crate::panels::ui_state::VersionBody,
+    popup: &crate::panels::ui_state::VersionPopupFrame,
     bounds: Rect,
     theme: &pixtuoid_scene::theme::Theme,
     scale: f32,
 ) {
     let scale = scale.clamp(0.0, 1.0);
-    let rows = notice_rows(bounds, &body.notices);
+    let rows = notice_rows(bounds, &popup.notices);
     let Some(geom) = version_geometry(bounds, scale, rows.len()) else {
         return;
     };
@@ -208,7 +209,7 @@ pub(crate) fn paint_version_popup(
         ]),
     ]);
 
-    let title = version_title(version, body.upgraded, inner_w as usize);
+    let title = version_title(version, popup.upgraded, inner_w as usize);
     // `borderless_panel(outer)` returns the SAME rect `geom.inner()` and
     // `cell_rect` derive from, so paint and click agree.
     let inner = borderless_panel(f, outer, Some(&title), theme);
@@ -369,8 +370,8 @@ mod tests {
 
     fn notices() -> Vec<String> {
         vec![
-            "pixtuoid now runs as a plugin in Claude Code, Codex and Reasonix: \
-             reconnect each one you use in Sources (s)."
+            "pixtuoid now connects to Claude Code, Codex and Reasonix as a plugin: \
+             reconnect the ones you use in Sources (s)."
                 .to_string(),
             "This terminal can draw the cutaway office: try \
              `pixtuoid run --graphics auto`, or set graphics = \"auto\" in the config."
@@ -387,7 +388,8 @@ mod tests {
             paint_version_popup(
                 f,
                 "1.2.3",
-                &crate::panels::ui_state::VersionBody {
+                &crate::panels::ui_state::VersionPopupFrame {
+                    open: true,
                     upgraded: true,
                     notices: notices.into(),
                 },
@@ -443,7 +445,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("{needle:?} is painted: {screen:#?}"))
         };
         let link = row_of(LINK_LABEL);
-        assert!(row_of("pixtuoid now runs as a plugin") < row_of("releases/tag/v1.2.3"));
+        assert!(row_of("pixtuoid now connects to") < row_of("releases/tag/v1.2.3"));
         let rect = version_popup_url_rect(bounds, &notices(), 1.0).expect("clickable");
         assert_eq!(usize::from(rect.y), link);
         let col = screen[link]
@@ -467,6 +469,22 @@ mod tests {
         );
         let rect = version_popup_url_rect(bounds, &notices(), 1.0).expect("the link survives");
         assert!(painted(bounds, &notices())[usize::from(rect.y)].contains(LINK_LABEL));
+    }
+
+    /// Both sides of the budget, found through the geometry `notice_rows`
+    /// reads: at the shortest panel that holds every row they come back whole
+    /// and unmarked, and one row shorter they lose a row and gain the mark.
+    #[test]
+    fn notices_are_cut_exactly_past_the_rows_the_panel_holds() {
+        let whole = notice_rows(wide(), &notices());
+        assert!(!whole.iter().any(|r| r.ends_with(CUT_MARK)), "{whole:?}");
+        let at = |h: u16| notice_rows(Rect::new(0, 0, 80, h), &notices());
+        let fits = (1..60)
+            .find(|&h| at(h) == whole)
+            .expect("some height holds them");
+        let cut = at(fits - 1);
+        assert_eq!(cut.len(), whole.len() - 1, "{cut:?}");
+        assert!(cut.last().is_some_and(|r| r.ends_with(CUT_MARK)), "{cut:?}");
     }
 
     /// The cut row is measured as the wrap is, by display width, so a row of
@@ -497,7 +515,7 @@ mod tests {
             paint_version_popup(
                 f,
                 "1.2.3",
-                &crate::panels::ui_state::VersionBody::default(),
+                &crate::panels::ui_state::VersionPopupFrame::default(),
                 Rect::new(0, 0, 80, 30),
                 &pixtuoid_scene::theme::NORMAL,
                 0.0,

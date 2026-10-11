@@ -56,7 +56,10 @@ fn version_popup_entrance_reaches_full_scale() {
     let mut r = build(100, 40, vec![]);
     r.set_frames(
         RenderFrames {
-            version_popup: true,
+            version_popup: crate::panels::ui_state::VersionPopupFrame {
+                open: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
         t0(),
@@ -70,7 +73,10 @@ fn version_popup_dismissal_reaches_zero() {
     let mut r = build(100, 40, vec![]);
     r.set_frames(
         RenderFrames {
-            version_popup: true,
+            version_popup: crate::panels::ui_state::VersionPopupFrame {
+                open: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
         t0(),
@@ -86,7 +92,10 @@ fn version_popup_interrupt_continues_from_edge() {
     let mut r = build(100, 40, vec![]);
     r.set_frames(
         RenderFrames {
-            version_popup: true,
+            version_popup: crate::panels::ui_state::VersionPopupFrame {
+                open: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
         t0(),
@@ -113,7 +122,10 @@ fn the_version_popup_renders_whole_on_a_classic_terminal() {
     let mut r = build(80, rows, vec![]);
     r.set_frames(
         RenderFrames {
-            version_popup: true,
+            version_popup: crate::panels::ui_state::VersionPopupFrame {
+                open: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
         t0(),
@@ -145,7 +157,10 @@ fn the_popup_body_reaches_the_frame_at_every_office_width() {
         let mut r = build(cols, rows, vec![]);
         r.set_frames(
             RenderFrames {
-                version_popup: true,
+                version_popup: crate::panels::ui_state::VersionPopupFrame {
+                    open: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             t0(),

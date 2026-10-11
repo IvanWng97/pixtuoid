@@ -711,7 +711,11 @@ fn main() -> Result<()> {
     };
     let frames = pixtuoid::dev::RenderFrames {
         theme_picker: args.theme_picker,
-        version_popup: args.popup,
+        version_popup: pixtuoid::dev::VersionPopupFrame {
+            open: args.popup,
+            upgraded: true,
+            ..Default::default()
+        },
         help_open: args.help_open,
         dashboard: dashboard_frame,
         connection: connection_frame,

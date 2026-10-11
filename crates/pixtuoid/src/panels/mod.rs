@@ -63,7 +63,7 @@ pub struct OverlayFrame<'a> {
     /// The version popup's scale: 0.0 hidden, 1.0 whole.
     pub(crate) popup_scale: f32,
     /// What the version popup shows beside its release.
-    pub(crate) version: &'a ui_state::VersionBody,
+    pub(crate) version_popup: &'a ui_state::VersionPopupFrame,
     pub(crate) help_open: bool,
     /// Shortcuts the host adds to the help, after the shared ones.
     pub(crate) host_keys: &'a [widgets::Shortcut],
@@ -89,7 +89,7 @@ impl OverlayFrame<'_> {
             dashboard,
             connection,
             popup_scale,
-            version: _,
+            version_popup: _,
             help_open,
             host_keys: _,
             onboarding,
@@ -118,7 +118,7 @@ pub(crate) fn paint_overlays(
         dashboard,
         connection,
         popup_scale,
-        version,
+        version_popup,
         help_open,
         host_keys,
         onboarding,
@@ -136,7 +136,7 @@ pub(crate) fn paint_overlays(
         widgets::paint_version_popup(
             f,
             env!("CARGO_PKG_VERSION"),
-            version,
+            version_popup,
             bounds,
             theme,
             popup_scale,
@@ -607,6 +607,9 @@ pub(crate) struct KeyCtx<'a, H: Host> {
     /// Injected because the real `crate::audio::respawn` opens an output device, so a
     /// test firing an audio arm would grab the machine's sound hardware.
     pub(crate) respawn: fn(&crate::audio::AudioHandle, f32),
+    /// The agent CLIs installed here, injected because the real
+    /// `crate::sources::detect` reads the developer's own machine.
+    pub(crate) installed: fn() -> Vec<&'static str>,
 }
 
 /// Apply one decoded [`KeyAction`], returning whether it asked to QUIT — the single piece
@@ -627,7 +630,7 @@ pub(crate) fn apply_key_action<H: Host>(action: KeyAction, cx: &mut KeyCtx<'_, H
         KeyAction::DismissVersionPopup => cx.ui.dismiss_version_popup(),
         KeyAction::OpenVersionPopup => cx
             .ui
-            .open_version_popup(&cx.connected.snapshot(), &crate::sources::detect()),
+            .open_version_popup(&cx.connected.snapshot(), &(cx.installed)()),
         KeyAction::OpenThemePicker => cx.ui.open_theme_picker(),
         KeyAction::ThemePreview(i) => {
             cx.ui.preview_theme(i);

@@ -57,7 +57,7 @@ pub(crate) fn boot_decision(current_ver: &str, last_seen: Option<&str>) -> BootD
 /// Something a user who last ran an older version must know.
 struct Notice {
     /// The last release without the change it announces.
-    newer_than: Version,
+    last_without: Version,
     /// What it says, while the state that needs it holds.
     says: fn(&Facts<'_>) -> Option<String>,
 }
@@ -65,11 +65,11 @@ struct Notice {
 /// Every notice, in the order the popup lists them: an action before a tip.
 const NOTICES: [Notice; 2] = [
     Notice {
-        newer_than: Version::new(0, 19, 0),
+        last_without: Version::new(0, 19, 0),
         says: reconnect,
     },
     Notice {
-        newer_than: Version::new(0, 19, 0),
+        last_without: Version::new(0, 19, 0),
         says: cutaway_tip,
     },
 ];
@@ -81,9 +81,8 @@ const REPLUGGED: [&Target; 3] = [&target::CLAUDE, &target::CODEX, &target::REASO
 const CUTAWAY_RUN: [&str; 4] = ["pixtuoid", "run", "--graphics", "auto"];
 const CUTAWAY_CONFIG: &str = "graphics = \"auto\"";
 
-/// #1586 made these hosts load pixtuoid as a plugin, so the hooks an older
-/// pixtuoid merged no longer count as a connection: each installed host that
-/// reads disconnected is named.
+/// The hooks an older pixtuoid merged no longer count as a connection, so each
+/// installed host that reads disconnected is named.
 fn reconnect(facts: &Facts<'_>) -> Option<String> {
     let names: Vec<&str> = REPLUGGED
         .iter()
@@ -92,13 +91,16 @@ fn reconnect(facts: &Facts<'_>) -> Option<String> {
         })
         .map(|t| t.display_name)
         .collect();
-    (!names.is_empty()).then(|| {
-        format!(
-            "pixtuoid now runs as a plugin in {}: reconnect each one you use in Sources ({}).",
-            english_list(&names),
-            crate::panels::SOURCES_KEY
-        )
-    })
+    let key = crate::panels::SOURCES_KEY;
+    let ask = match names.as_slice() {
+        [] => return None,
+        [_] => format!("reconnect it in Sources ({key}) if you use it"),
+        _ => format!("reconnect the ones you use in Sources ({key})"),
+    };
+    Some(format!(
+        "pixtuoid now connects to {} as a plugin: {ask}.",
+        english_list(&names)
+    ))
 }
 
 /// The cutaway office (#1189) ships off, so a terminal that draws it is told.
@@ -147,7 +149,7 @@ pub(crate) fn due(versions: Option<&Versions>, facts: &Facts<'_>) -> Vec<String>
     };
     NOTICES
         .iter()
-        .filter(|n| *previous <= n.newer_than && n.newer_than < *current)
+        .filter(|n| *previous <= n.last_without && n.last_without < *current)
         .filter_map(|n| (n.says)(facts))
         .collect()
 }
@@ -377,13 +379,13 @@ mod tests {
         assert_eq!(due_from("0.20.0", "0.21.0"), 0, "already past it");
     }
 
-    /// `newer_than` names a release, so a value guessed ahead of the build
+    /// `last_without` names a release, so a value guessed ahead of the build
     /// (the next release's number) fails here before any user misses it.
     #[test]
     fn every_notice_announces_a_change_after_a_release() {
         let current = v(env!("CARGO_PKG_VERSION"));
         for n in &NOTICES {
-            assert!(n.newer_than <= current, "{}", n.newer_than);
+            assert!(n.last_without <= current, "{}", n.last_without);
         }
     }
 
@@ -412,14 +414,14 @@ mod tests {
         assert_eq!(
             says(&EVERY_HOST, &[]).as_deref(),
             Some(
-                "pixtuoid now runs as a plugin in Claude Code, Codex and Reasonix: \
-                 reconnect each one you use in Sources (s)."
+                "pixtuoid now connects to Claude Code, Codex and Reasonix as a plugin: \
+                 reconnect the ones you use in Sources (s)."
             )
         );
         assert_eq!(
             says(&["codex", "opencode"], &["opencode"]).as_deref(),
             Some(
-                "pixtuoid now runs as a plugin in Codex: reconnect each one you use in Sources (s)."
+                "pixtuoid now connects to Codex as a plugin: reconnect it in Sources (s) if you use it."
             )
         );
         assert_eq!(says(&EVERY_HOST, &EVERY_HOST), None, "all reconnected");
@@ -431,7 +433,7 @@ mod tests {
         assert_eq!(
             says(&EVERY_HOST, &["claude-code", "reasonix"]).as_deref(),
             Some(
-                "pixtuoid now runs as a plugin in Codex: reconnect each one you use in Sources (s)."
+                "pixtuoid now connects to Codex as a plugin: reconnect it in Sources (s) if you use it."
             )
         );
     }

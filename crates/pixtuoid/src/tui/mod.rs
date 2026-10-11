@@ -591,6 +591,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<Option<QuitSignal>> {
                                 focus_roots: &focus_roots,
                                 now,
                                 respawn: crate::audio::respawn,
+                                installed: crate::sources::detect,
                             },
                         );
                         if quit {
@@ -1161,6 +1162,7 @@ mod apply_key_action_tests {
         connected: crate::runtime::ConnectedSources,
         snapshot: pixtuoid_core::state::SceneState,
         focus_roots: (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
+        installed: fn() -> Vec<&'static str>,
         _tmp: tempfile::TempDir,
         config_path: std::path::PathBuf,
     }
@@ -1198,6 +1200,7 @@ mod apply_key_action_tests {
                 connected: crate::runtime::ConnectedSources::new(HashSet::new()),
                 snapshot: pixtuoid_core::state::SceneState::uniform(4),
                 focus_roots: (None, None),
+                installed: Vec::new,
                 _tmp: tmp,
                 config_path,
             }
@@ -1237,6 +1240,7 @@ mod apply_key_action_tests {
                     focus_roots: &self.focus_roots,
                     now: SystemTime::UNIX_EPOCH,
                     respawn: no_respawn,
+                    installed: self.installed,
                 },
             )
         }
@@ -1275,6 +1279,25 @@ mod apply_key_action_tests {
         assert!(h.connected.is_connected("antigravity"));
         let cfg = crate::config::load(&h.config_path, &mut Vec::new());
         assert_eq!(cfg.sources, [("antigravity".to_string(), true)].into());
+    }
+
+    /// `v` reopens the popup with the notices due against the LIVE connections:
+    /// a host connected since boot is not named.
+    #[test]
+    fn v_reopens_the_popup_with_the_notices_still_due() {
+        let mut h = Harness::new();
+        h.ui = super::ui_state::UiState::upgraded_from("0.19.0", "0.20.0");
+        h.connected = crate::runtime::ConnectedSources::new(HashSet::from(["codex".to_string()]));
+        h.installed = || vec!["codex", "reasonix"];
+        assert!(!h.apply(KeyAction::OpenVersionPopup));
+        assert!(h.ui.modal().version_popup);
+        let shown = h.ui.version_notices();
+        assert!(
+            shown
+                .iter()
+                .any(|n| n.contains("Reasonix") && !n.contains("Codex")),
+            "{shown:?}"
+        );
     }
 
     /// The highest-blast-radius pair: `Quit` must be the ONLY action that ends

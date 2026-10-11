@@ -306,6 +306,7 @@ mod tests {
                     focus_roots: &self.focus_roots,
                     now: SystemTime::UNIX_EPOCH,
                     respawn: no_respawn,
+                    installed: Vec::new,
                 },
             )
         }

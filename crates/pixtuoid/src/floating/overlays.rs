@@ -32,7 +32,7 @@ pub(crate) fn panels_grid(
     theme: &Theme,
 ) -> Option<CellGrid> {
     let overlays = frames.overlays(
-        crate::panels::ui_state::popup_whole(frames.version_popup),
+        crate::panels::ui_state::popup_whole(frames.version_popup.open),
         super::input::ZOOM_SHORTCUTS,
     );
     if !overlays.any_open() {

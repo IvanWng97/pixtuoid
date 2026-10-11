@@ -822,6 +822,20 @@ mod tests {
 
     /// Each terminal kind's default motion: every loop on a local kitty image or
     /// half-block grid, the calm pace for SIXEL, iTerm2, tmux or ssh.
+    /// Only graphics left off reads as off: a run whose terminal refused the
+    /// cutaway already asked for it, and one painting it has it.
+    #[test]
+    fn graphics_is_off_only_when_the_user_left_it_off() {
+        assert!(resolve(GraphicsMode::Off, Probe::NotQueried, BUNDLED, AREA).graphics_off());
+        let refused = resolve(GraphicsMode::Auto, Probe::NoAnswer, BUNDLED, AREA);
+        assert!(matches!(refused, Plan::Classic { .. }));
+        assert!(!refused.graphics_off());
+        let probe = answered(Some(ImageProtocol::Kitty), CELL_8X16, false);
+        let painting = resolve(GraphicsMode::Auto, probe, BUNDLED, AREA);
+        assert!(matches!(painting, Plan::Cutaway { .. }));
+        assert!(!painting.graphics_off());
+    }
+
     #[test]
     fn each_terminal_kind_paints_at_its_affordable_motion() {
         use pixtuoid_scene::anim::Motion;
