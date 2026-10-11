@@ -119,11 +119,11 @@ pub(crate) fn verify_target(
         }
     }
     if let Primary::Config {
-        beside: Some(beside),
+        beside: Some(render),
         ..
     } = t.primary
     {
-        verify_beside(beside.render, t.display_name, &mut issues, &mut notes);
+        verify_beside(render, t.display_name, &mut issues, &mut notes);
     }
     if let Some(files) = t.primary.owned_files() {
         verify_owned_drift(t, files, &path, &mut issues, &mut notes);
@@ -502,7 +502,7 @@ fn install_target_from(
             // nowhere (partial install).
             let outcome = merge_install(&content, &hook_cmd)
                 .with_context(|| format!("processing {}", path.display()))?;
-            let files = beside.map(|b| (b.render)(&hook_cmd)).transpose()?;
+            let files = beside.map(|r| r(&hook_cmd)).transpose()?;
             (outcome, files.unwrap_or_default())
         }
         Primary::Owned { render, .. } => {

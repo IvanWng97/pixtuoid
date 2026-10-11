@@ -138,7 +138,7 @@ static FAKE_NO_HOME: Target = Target {
 /// The files a target owns beside its config, `None` for every other target.
 fn beside_of(t: &Target) -> Option<target::RenderBeside> {
     match t.primary {
-        Primary::Config { beside, .. } => beside.map(|b| b.render),
+        Primary::Config { beside, .. } => beside,
         Primary::Owned { .. } => None,
     }
 }
@@ -849,7 +849,7 @@ fn verify_target_flags_any_byte_drift_in_every_owned_file() {
                     )
                     .unwrap();
                     let body = std::fs::read_to_string(&p).unwrap();
-                    std::fs::write(&p, format!("{body}\n")).unwrap();
+                    std::fs::write(&p, drift_edit(&p, &body)).unwrap();
                     let v = verify_target(t, Some(cfg.clone()));
                     assert!(
                         v.issues.iter().any(|i| i
@@ -1665,7 +1665,7 @@ fn owned_state_is_current_after_install_and_differs_after_any_byte_edit() {
 
                 let entry = files.render(&cfg, io::HOOK_BIN).unwrap().remove(0).0;
                 let body = io::read_config(&entry).unwrap();
-                std::fs::write(&entry, format!("{body}\n")).unwrap();
+                std::fs::write(&entry, drift_edit(&entry, &body)).unwrap();
                 match owned_state(files, t.hook_command, &cfg).unwrap() {
                     OwnedState::Differs(d) => assert_eq!(
                         d.iter().map(|(p, _)| p).collect::<Vec<_>>(),
@@ -1688,6 +1688,16 @@ fn owned_state_is_current_after_install_and_differs_after_any_byte_edit() {
     });
 }
 
+/// A drift edit to an owned file: a whole-line comment wherever the format has one,
+/// a trailing newline in JSON, which has none.
+fn drift_edit(p: &std::path::Path, body: &str) -> String {
+    if p.extension().is_some_and(|e| e == "json") {
+        format!("{body}\n")
+    } else {
+        format!("// a comment no release shipped\n{body}")
+    }
+}
+
 /// `(inode, mtime)` on Unix, `mtime` elsewhere: what a rewrite always changes.
 fn write_stamp(p: &std::path::Path) -> (u64, std::time::SystemTime) {
     let m = std::fs::metadata(p).unwrap();
@@ -1705,7 +1715,8 @@ fn write_stamp(p: &std::path::Path) -> (u64, std::time::SystemTime) {
 #[test]
 fn converge_rewrites_only_stale_owned_files_with_the_installed_shim() {
     with_owned_homes(|| {
-        with_fake_claude(|_| {
+        with_fake_claude(|fake| {
+            let host_calls = || std::fs::read_to_string(fake.join("calls.log")).unwrap_or_default();
             for t in target::TARGETS {
                 let Some(files) = t.primary.owned_files() else {
                     continue;
@@ -1717,6 +1728,7 @@ fn converge_rewrites_only_stale_owned_files_with_the_installed_shim() {
                     r"C:\one\pixtuoid-hook.exe",
                 ));
                 install_target_from(t, Some(cfg.clone()), shim).unwrap();
+                let calls = host_calls();
                 let entry = files.render(&cfg, io::HOOK_BIN).unwrap().remove(0).0;
                 let installed = io::read_config(&entry).unwrap();
 
@@ -1745,6 +1757,12 @@ fn converge_rewrites_only_stale_owned_files_with_the_installed_shim() {
                 });
                 assert_eq!(rewritten, std::slice::from_ref(&entry), "{}", t.name);
                 assert_eq!(io::read_config(&entry).unwrap(), installed, "{}", t.name);
+                assert_eq!(
+                    host_calls(),
+                    calls,
+                    "{}: converge ran the host's CLI",
+                    t.name
+                );
                 if let Some(edited) = user_config {
                     assert_eq!(
                         io::read_config(&cfg).unwrap(),
@@ -1978,11 +1996,7 @@ fn verify_target_hard_flags_a_beside_entry_with_no_readable_shim() {
     with_owned_homes(|| {
         let mut covered = 0;
         for &t in target::TARGETS {
-            let Primary::Config {
-                beside: Some(beside),
-                ..
-            } = t.primary
-            else {
+            let Some(render) = beside_of(t) else {
                 continue;
             };
             let tmp = tempfile::TempDir::new().unwrap();
@@ -1993,7 +2007,7 @@ fn verify_target_hard_flags_a_beside_entry_with_no_readable_shim() {
                 Some(PathBuf::from("/fake/pixtuoid-hook")),
             )
             .unwrap();
-            let entry = (beside.render)(io::HOOK_BIN).unwrap().remove(0).0;
+            let entry = render(io::HOOK_BIN).unwrap().remove(0).0;
             std::fs::write(&entry, "").unwrap();
             let v = verify_target(t, Some(cfg));
             assert!(
@@ -2020,12 +2034,8 @@ fn verify_target_reports_a_deleted_sibling_as_missing_not_as_drift() {
     with_owned_homes(|| {
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg = tmp.path().join("openclaw.json");
-        install_target_from(
-            &OPENCLAW,
-            Some(cfg.clone()),
-            Some(PathBuf::from("/fake/pixtuoid-hook")),
-        )
-        .unwrap();
+        let shim = std::env::current_exe().unwrap();
+        install_target_from(&OPENCLAW, Some(cfg.clone()), Some(shim)).unwrap();
         let sibling = OPENCLAW
             .primary
             .owned_files()
@@ -2036,8 +2046,11 @@ fn verify_target_reports_a_deleted_sibling_as_missing_not_as_drift() {
             .0;
         std::fs::remove_file(&sibling).unwrap();
         let v = verify_target(&OPENCLAW, Some(cfg));
+        let name = sibling.file_name().unwrap().to_string_lossy();
         assert!(
-            v.issues.iter().any(|i| i.contains("missing")),
+            v.issues
+                .iter()
+                .any(|i| i.contains("plugin artifact missing") && i.contains(&*name)),
             "{:?}",
             v.issues
         );

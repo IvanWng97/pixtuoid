@@ -13,13 +13,6 @@ pub(crate) type HookCommand = fn(resolved: &Path, explicit: bool) -> Result<Stri
 /// Where the shim a rendered plugin file bakes lives, read back from its content.
 pub(crate) type InstalledShim = fn(content: &str) -> crate::install::verify::ShimRef;
 
-/// The files a target owns beside its config.
-#[derive(Debug, Clone, Copy)]
-pub struct Beside {
-    pub render: RenderBeside,
-    pub installed_shim: InstalledShim,
-}
-
 /// A target's owned files, whichever kind of primary keys them: all `install::converge_files`
 /// is handed, so it cannot reach a config merge or a host registration.
 #[derive(Debug, Clone, Copy)]
@@ -28,7 +21,9 @@ pub(crate) enum OwnedFiles {
         render: fn(hook_cmd: &str) -> Result<String>,
         installed_shim: InstalledShim,
     },
-    Beside(Beside),
+    /// Its first file bakes the shim the way [`crate::install::verify::baked_shim`]
+    /// reads it, the reader doctor's `check_beside_shim` shares.
+    Beside(RenderBeside),
 }
 
 impl OwnedFiles {
@@ -39,14 +34,14 @@ impl OwnedFiles {
             OwnedFiles::Primary { render, .. } => {
                 Ok(vec![(primary.to_path_buf(), render(hook_cmd)?)])
             }
-            OwnedFiles::Beside(b) => (b.render)(hook_cmd),
+            OwnedFiles::Beside(render) => render(hook_cmd),
         }
     }
 
     pub(crate) fn installed_shim(self, content: &str) -> crate::install::verify::ShimRef {
         match self {
             OwnedFiles::Primary { installed_shim, .. } => installed_shim(content),
-            OwnedFiles::Beside(b) => (b.installed_shim)(content),
+            OwnedFiles::Beside(_) => crate::install::verify::baked_shim(content),
         }
     }
 }
@@ -125,7 +120,7 @@ pub enum Primary {
         verify_schema: fn(content: &str) -> crate::install::verify::SchemaParse,
         /// Files pixtuoid owns beside the config, where [`RenderBeside`] says they
         /// live. Left in place on uninstall (the config un-merge disables loading).
-        beside: Option<Beside>,
+        beside: Option<RenderBeside>,
     },
     Owned {
         /// The primary's whole content, `hook_cmd` baked in.
@@ -366,10 +361,7 @@ pub(crate) const OPENCLAW: Target = Target {
         merge_install: crate::install::openclaw::merge_install,
         merge_uninstall: crate::install::openclaw::merge_uninstall,
         verify_schema: crate::install::openclaw::verify_schema,
-        beside: Some(Beside {
-            render: crate::install::openclaw::plugin_artifacts,
-            installed_shim: crate::install::verify::baked_shim,
-        }),
+        beside: Some(crate::install::openclaw::plugin_artifacts),
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // openclaw.json is created by OpenClaw itself; probe its own dir so
@@ -411,10 +403,7 @@ pub(crate) const DSH: Target = Target {
         merge_install: crate::install::dsh::merge_install,
         merge_uninstall: crate::install::dsh::merge_uninstall,
         verify_schema: crate::install::dsh::verify_schema,
-        beside: Some(Beside {
-            render: crate::install::dsh::plugin_artifacts,
-            installed_shim: crate::install::verify::baked_shim,
-        }),
+        beside: Some(crate::install::dsh::plugin_artifacts),
     },
     // The plugin spawns the shim under Node by embedded path — no PATH.
     binary_strategy: BinaryStrategy::EmbedAbsolute,
