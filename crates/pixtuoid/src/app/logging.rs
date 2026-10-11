@@ -271,12 +271,14 @@ mod tests {
     }
 
     /// Whatever carries a value (a `%` or `?` field, a bare `str`, the message
-    /// as arguments or a `str`, a span's field, an error), it reaches the log
-    /// escaped, not dropped.
+    /// as arguments or a `str`, a span's field, an error or its cause), it
+    /// reaches the log escaped, not dropped.
     #[test]
     fn every_field_value_is_escaped_whatever_carries_it() {
         let hostile = terminal_unsafe();
+        let escaped: String = hostile.chars().flat_map(char::escape_debug).collect();
         let error = Caused(hostile.clone(), std::io::Error::other(hostile.clone()));
+        let cause = Caused("outer".to_owned(), std::io::Error::other(hostile.clone()));
         let out = crate::test_capture::capture(|| {
             let span = tracing::warn_span!("span", field = %hostile);
             let _in = span.enter();
@@ -290,16 +292,26 @@ mod tests {
                 error = &error as &(dyn std::error::Error + 'static),
                 "error"
             );
+            tracing::warn!(
+                error = &cause as &(dyn std::error::Error + 'static),
+                "cause"
+            );
             tracing::warn!(message = hostile.as_str());
         });
         let lines: Vec<&str> = out.lines().collect();
-        assert_eq!(lines.len(), 3, "a value broke its line: {out:?}");
+        assert_eq!(lines.len(), 4, "a value broke its line: {out:?}");
         for line in lines {
             assert!(!line.chars().any(crate::is_terminal_unsafe), "{line:?}");
         }
-        assert!(out.contains(r"\u{1f}\u{7f}\u{80}"), "dropped: {out:?}");
-        assert!(out.contains(r"\u{2066}\u{2067}"), "dropped: {out:?}");
-        assert!(out.contains("error.sources=["), "a source dropped: {out:?}");
+        for carrier in [
+            format!("span{{field={escaped}}}"),
+            format!("message {escaped} display={escaped} debug="),
+            format!("error={escaped} error.sources=[{escaped}]"),
+            format!("error=outer error.sources=[{escaped}]"),
+            format!(": {escaped}\n"),
+        ] {
+            assert!(out.contains(&carrier), "{carrier:?} not in {out:?}");
+        }
     }
 
     /// Clean text formats byte for byte as the default formatter writes it, so
