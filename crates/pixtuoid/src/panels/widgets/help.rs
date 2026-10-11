@@ -134,13 +134,11 @@ mod tests {
         out
     }
 
-    /// The walkable debug layer is the terminal's alone: the help the window
-    /// draws (shared rows only) never lists its key, and the terminal's own rows do.
+    /// The walkable debug layer is the half-blocks': the shared rows, which
+    /// the window's help draws, never list its key.
     #[test]
-    fn the_walkable_key_is_listed_only_by_the_terminal() {
+    fn the_shared_rows_do_not_list_the_walkable_key() {
         assert!(!frame_text(140, 40, &[]).contains("walkable"));
-        let terminal = frame_text(140, 40, crate::tui::SHORTCUTS);
-        assert_eq!(terminal.contains("walkable"), cfg!(debug_assertions));
     }
 
     #[test]

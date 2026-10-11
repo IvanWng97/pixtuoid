@@ -1471,11 +1471,15 @@ fn w_follows_the_look_the_frame_drew() {
     let scene = office();
     let cadence = ImageProtocol::Kitty.cadence();
     let w = |r: &mut TuiRenderer<Window>| {
-        crate::tui::read_walkable_debug_key(r, KeyCode::Char('w'), &super::overlays::no_panel())
+        crate::tui::read_walkable_debug_key(
+            r,
+            KeyCode::Char('w'),
+            &crate::panels::ModalState::closed(),
+        )
     };
     let lists_w = |r: &TuiRenderer<Window>| {
         r.chrome
-            .overlays(0.0)
+            .overlays(0.0, r.offers_walkable_debug())
             .host_keys
             .iter()
             .any(|(k, _)| *k == "w")

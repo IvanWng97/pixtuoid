@@ -199,25 +199,25 @@ impl AudioController {
     pub(crate) fn handle(&self) -> &AudioHandle {
         &self.ui.handle
     }
-}
 
-/// RAII teardown — the ONE exit verb for BOTH halves of the audio protocol:
-/// PERSIST a pending debounced volume, THEN stop the device thread. Both run
-/// unconditionally, so a Ctrl-C / terminate / error can't lose a nudge that
-/// landed inside the debounce window. Both halves are panic-free, so this is safe to run
-/// during unwind.
-impl Drop for AudioController {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-
-impl AudioController {
-    /// Persist, then join the device thread. Idempotent, so a caller that
-    /// must not wait on the drop can run it first.
+    /// The ONE exit verb for BOTH halves of the audio protocol: PERSIST a
+    /// pending debounced volume, THEN stop the device thread. Both run
+    /// unconditionally, so a Ctrl-C / terminate / error can't lose a nudge that
+    /// landed inside the debounce window. Both halves are panic-free, so this
+    /// is safe to run during unwind. Idempotent, so a painter can run it ahead
+    /// of the drop to order the join against its own teardown.
     pub(crate) fn stop(&mut self) {
         self.flush_on_exit();
         self.ui.handle.shutdown();
+    }
+}
+
+/// The net under [`AudioController::stop`] for every exit path that never
+/// called it (an error, an unwind). `stop` is idempotent, so a caller that ran
+/// it first leaves this nothing to do.
+impl Drop for AudioController {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 

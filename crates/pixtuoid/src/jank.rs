@@ -177,10 +177,10 @@ impl Jank {
         self.due = Some(at);
     }
 
-    /// The frame the schedule asked for ended without being recorded (nothing
-    /// to show, or nothing changed): its due is spent, so the next redraw, one
-    /// no schedule asked for, does not count as it.
-    pub(crate) fn skipped(&mut self) {
+    /// Spend a due the frame did not take: one that ended without a
+    /// [`Self::record`] (nothing to show, or nothing changed) must not count
+    /// the next redraw, which no schedule asked for, as the scheduled one.
+    pub(crate) fn spend_due(&mut self) {
         self.due = None;
     }
 

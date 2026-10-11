@@ -149,7 +149,8 @@ pub(crate) trait Host {
 
 /// Which overlay (if any) currently owns input, plus the one count the picker needs.
 /// An open overlay swallows keys and the normal-scene bindings are suspended; the
-/// precedence chain itself lives in [`dispatch_key`].
+/// precedence chain itself lives in [`dispatch_key`], and a host's own key reads
+/// [`Self::any_open`] to defer the same way.
 #[derive(Clone, Copy)]
 pub(crate) struct ModalState {
     pub(crate) onboarding_open: bool,
@@ -164,6 +165,21 @@ pub(crate) struct ModalState {
 }
 
 impl ModalState {
+    /// No panel open.
+    #[cfg(test)]
+    pub(crate) fn closed() -> Self {
+        Self {
+            onboarding_open: false,
+            help_open: false,
+            version_popup: false,
+            theme_picker: None,
+            dashboard_open: false,
+            connection_open: false,
+            connection_confirm: false,
+            n_themes: pixtuoid_scene::theme::ALL_THEMES.len(),
+        }
+    }
+
     /// Whether any panel owns input, so the office behind takes no click.
     /// Destructured whole, so a new panel can't take keys without counting
     /// here.
@@ -750,14 +766,8 @@ mod dispatch_tests {
 
     fn modal() -> ModalState {
         ModalState {
-            onboarding_open: false,
-            help_open: false,
-            version_popup: false,
-            theme_picker: None,
-            dashboard_open: false,
-            connection_open: false,
-            connection_confirm: false,
             n_themes: 6,
+            ..ModalState::closed()
         }
     }
 

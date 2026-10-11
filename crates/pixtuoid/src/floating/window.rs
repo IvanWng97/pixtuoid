@@ -599,8 +599,14 @@ impl super::lifecycle::Frame for FloatingApp {
 }
 
 impl super::lifecycle::Teardown for FloatingApp {
+    fn hide_window(&mut self) {
+        if let Some(window) = &self.window {
+            window.set_visible(false);
+        }
+    }
+
     // The surface borrows the window, so it goes first.
-    fn close_surface(&mut self) {
+    fn release_surface(&mut self) {
         self.gpu = None;
         self.window = None;
     }
@@ -778,8 +784,8 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         }
     }
 
-    /// `exit` was called: geometry persisted in [`FloatingApp::quit`], so the
-    /// window can go.
+    /// The loop is ending, by [`FloatingApp::quit`] or by the OS: the window and
+    /// the audio go.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         super::lifecycle::tear_down(self);
     }

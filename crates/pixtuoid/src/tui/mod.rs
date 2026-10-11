@@ -41,10 +41,10 @@ fn should_dispatch_key(kind: KeyEventKind) -> bool {
 
 /// What the terminal's help lists beside the shared shortcuts.
 #[cfg(debug_assertions)]
-pub(crate) const SHORTCUTS: &[crate::panels::widgets::Shortcut] =
+pub(crate) const WALKABLE_SHORTCUTS: &[crate::panels::widgets::Shortcut] =
     &[("w", "walkable / approach / route debug")];
 #[cfg(not(debug_assertions))]
-pub(crate) const SHORTCUTS: &[crate::panels::widgets::Shortcut] = &[];
+pub(crate) const WALKABLE_SHORTCUTS: &[crate::panels::widgets::Shortcut] = &[];
 
 /// Whether `code` was `w`, which flips the half-block painter's walkable
 /// debug layer when no panel owns input. Only the half-blocks draw that layer
@@ -1219,39 +1219,42 @@ mod apply_key_action_tests {
         use crate::panels::ModalState;
         use crossterm::event::KeyCode;
         let modal = |help_open| ModalState {
-            onboarding_open: false,
             help_open,
-            version_popup: false,
-            theme_picker: None,
-            dashboard_open: false,
-            connection_open: false,
-            connection_confirm: false,
-            n_themes: 1,
+            ..ModalState::closed()
         };
-        let mut h = Harness::new();
-        let before = h.renderer.debug_walkable();
+        let pack =
+            std::sync::Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"));
+        let mut r = TuiRenderer::new(
+            Terminal::new(TestBackend::new(120, 60)).expect("test backend"),
+            &theme::NORMAL,
+            Vec::new(),
+            std::sync::Arc::clone(&pack),
+        );
+        r.render(
+            &pixtuoid_core::state::SceneState::uniform(16),
+            &pack,
+            SystemTime::UNIX_EPOCH,
+        )
+        .expect("a half-block frame");
+        let before = r.debug_walkable();
         assert!(super::read_walkable_debug_key(
-            &mut h.renderer,
+            &mut r,
             KeyCode::Char('w'),
             &modal(false)
         ));
-        assert_eq!(h.renderer.debug_walkable(), !before, "w must FLIP");
+        assert_eq!(r.debug_walkable(), !before, "w must FLIP");
         assert!(super::read_walkable_debug_key(
-            &mut h.renderer,
+            &mut r,
             KeyCode::Char('w'),
             &modal(false)
         ));
-        assert_eq!(h.renderer.debug_walkable(), before, "w must flip back");
+        assert_eq!(r.debug_walkable(), before, "w must flip back");
         for (code, modal) in [
             (KeyCode::Char('w'), modal(true)),
             (KeyCode::Char('x'), modal(false)),
         ] {
-            assert!(!super::read_walkable_debug_key(
-                &mut h.renderer,
-                code,
-                &modal
-            ));
-            assert_eq!(h.renderer.debug_walkable(), before);
+            assert!(!super::read_walkable_debug_key(&mut r, code, &modal));
+            assert_eq!(r.debug_walkable(), before);
         }
     }
 

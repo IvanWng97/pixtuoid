@@ -17,23 +17,30 @@ pub(super) trait Frame {
 /// spends a scheduled frame's due, so it is spent here.
 pub(super) fn redraw(frame: &mut impl Frame) {
     frame.paint();
-    frame.jank().skipped();
+    frame.jank().spend_due();
     frame.recursor();
 }
 
 /// What the loop's end releases.
 pub(super) trait Teardown {
-    /// Hide and release the window and the surface drawn onto it.
-    fn close_surface(&mut self);
+    /// Take the window off screen now. Dropping it does not: winit queues the
+    /// destroy for a message pump that never runs again.
+    fn hide_window(&mut self);
+    /// Release the window and the surface drawn onto it.
+    fn release_surface(&mut self);
     /// Flush audio state and join the device thread, which can wait out a
     /// synthesis build ([`crate::audio::AudioHandle::shutdown`]).
     fn stop_audio(&mut self);
 }
 
-/// The loop's end: the window goes before the audio join, so a quit never
-/// leaves it on screen, frozen, while the device thread is waited out.
+/// The loop's end: the window is hidden before the audio join, so a quit does
+/// not leave it up, frozen, while the device thread is waited out. Residual:
+/// where winit cannot hide a window (Wayland,
+/// [`winit::window::Window::set_visible`]) it stays until the process exits,
+/// and macOS has closed it already.
 pub(super) fn tear_down(parts: &mut impl Teardown) {
-    parts.close_surface();
+    parts.hide_window();
+    parts.release_surface();
     parts.stop_audio();
 }
 
@@ -113,33 +120,31 @@ mod tests {
         assert!(logged.contains("scheduled=1 "), "{logged}");
     }
 
+    #[derive(Default)]
     struct Parts {
-        log: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>,
+        log: Vec<&'static str>,
     }
 
     impl Teardown for Parts {
-        fn close_surface(&mut self) {
-            self.log.lock().unwrap().push("window closed");
+        fn hide_window(&mut self) {
+            self.log.push("window hidden");
+        }
+        fn release_surface(&mut self) {
+            self.log.push("surface released");
         }
         fn stop_audio(&mut self) {
-            // A join that waits out a synthesis build.
-            self.log.lock().unwrap().push("audio join begins");
-            std::thread::sleep(Duration::from_millis(20));
-            self.log.lock().unwrap().push("audio join ends");
+            self.log.push("audio join");
         }
     }
 
-    /// The window is gone before the audio join starts, whatever it takes.
+    /// The window is hidden before the audio join starts.
     #[test]
-    fn the_window_closes_before_the_audio_join_begins() {
-        let log = std::sync::Arc::default();
-        let mut parts = Parts {
-            log: std::sync::Arc::clone(&log),
-        };
+    fn the_window_is_hidden_before_the_audio_join_begins() {
+        let mut parts = Parts::default();
         tear_down(&mut parts);
         assert_eq!(
-            *log.lock().unwrap(),
-            ["window closed", "audio join begins", "audio join ends"]
+            parts.log,
+            ["window hidden", "surface released", "audio join"]
         );
     }
 }

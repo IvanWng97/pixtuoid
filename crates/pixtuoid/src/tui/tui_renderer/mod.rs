@@ -93,10 +93,6 @@ struct Chrome {
     volume_flash: Option<u8>,
     weather: pixtuoid_scene::sky::WeatherPolicy,
     motion: pixtuoid_scene::anim::Motion,
-    /// Whether the last frame was the half-blocks, which draw the walkable
-    /// debug layer where the cutaway never does: `w` is listed and read only
-    /// then, including while a cutaway too big for the cell falls back to them.
-    offers_walkable_debug: bool,
 }
 
 impl PopupState {
@@ -124,9 +120,13 @@ impl PopupState {
 impl Chrome {
     /// The panels open over a frame at `popup_scale`, the help listing the
     /// terminal's own shortcuts.
-    fn overlays(&self, popup_scale: f32) -> crate::panels::OverlayFrame<'_> {
-        let host_keys = if self.offers_walkable_debug {
-            crate::tui::SHORTCUTS
+    fn overlays(
+        &self,
+        popup_scale: f32,
+        offers_walkable_debug: bool,
+    ) -> crate::panels::OverlayFrame<'_> {
+        let host_keys = if offers_walkable_debug {
+            crate::tui::WALKABLE_SHORTCUTS
         } else {
             &[]
         };
@@ -225,7 +225,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 volume_flash: None,
                 weather: pixtuoid_scene::sky::WeatherPolicy::Clock,
                 motion: pixtuoid_scene::anim::Motion::Full,
-                offers_walkable_debug: true,
             },
             flash: pixtuoid_scene::flash::FlashHold::on(pixtuoid_scene::flash::monotonic()),
             #[cfg(feature = "graphics")]
@@ -239,9 +238,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cutaway = Some(cutaway);
     }
 
-    /// Whether `w` flips a layer the next frame draws.
+    /// Whether the last frame was the half-blocks, which draw the walkable
+    /// debug layer where the cutaway never does: `w` is listed and read only
+    /// then, including while a cutaway too big for the cell falls back to them.
     pub(crate) fn offers_walkable_debug(&self) -> bool {
-        self.chrome.offers_walkable_debug
+        self.session
+            .floor(self.session.nav().current())
+            .is_some_and(|f| f.raster.shown() == Some(Look::Classic))
     }
 
     /// Draw the first frame of `scene` unseen, in the look the first frame
@@ -659,7 +662,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.chrome.footer(&self.session, scene),
         );
         let popup_scale = self.version_popup_scale(now);
-        let overlays = self.chrome.overlays(popup_scale);
+        let overlays = self
+            .chrome
+            .overlays(popup_scale, self.offers_walkable_debug());
         let theme = self.chrome.theme;
         let flashes = self.session.flashes();
         let Some(slide) = self.session.slide_mut() else {
@@ -693,11 +698,12 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             self.chrome.footer(&self.session, scene),
         );
         let popup_scale = self.version_popup_scale(now);
+        let offers_walkable_debug = self.offers_walkable_debug();
         let drawn = crate::tui::renderer::draw_footer_only_frame(
             &mut self.terminal,
             &footer,
             self.chrome.theme,
-            &self.chrome.overlays(popup_scale),
+            &self.chrome.overlays(popup_scale, offers_walkable_debug),
             now,
         );
         self.session.drew_no_office();
@@ -848,10 +854,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 .window_size()
                 .ok()
                 .and_then(crate::graphics::CellSize::of_window);
-            let fitted = cutaway.fit_to(scene_area, window);
-            self.chrome.offers_walkable_debug = fitted.is_none();
-            let drawn =
-                fitted.map(|fitted| self.render_cutaway(&mut cutaway, fitted, scene, pack, now));
+            let drawn = cutaway
+                .fit_to(scene_area, window)
+                .map(|fitted| self.render_cutaway(&mut cutaway, fitted, scene, pack, now));
             self.cutaway = Some(cutaway);
             if let Some(drawn) = drawn {
                 return drawn;
@@ -896,7 +901,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let world = self
             .chrome
             .world(&self.session, &floor_scene, pack, now, current);
-        let overlays = self.chrome.overlays(popup_scale);
+        let overlays = self
+            .chrome
+            .overlays(popup_scale, self.offers_walkable_debug());
         let frame = crate::tui::renderer::ClassicFrame {
             footer: &footer,
             overlays: &overlays,
@@ -961,7 +968,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let world = self
             .chrome
             .world(&self.session, &floor_scene, pack, now, current);
-        let overlays = self.chrome.overlays(popup_scale);
+        let overlays = self
+            .chrome
+            .overlays(popup_scale, self.offers_walkable_debug());
         /// What a frame sets over its image: the world's text, with the agent
         /// the pointer is on, and the tooltip by the pointer.
         struct Over<'w> {
