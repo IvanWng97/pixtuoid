@@ -73,8 +73,8 @@ pub struct RenderInputs<'a> {
     pub dim: Dim,
 }
 
-/// How bright a host's modal leaves the office under it, from black to as
-/// drawn: the multiplier each pixel of a frame takes.
+/// A brightness multiplier, from black to unchanged, each pixel takes: a
+/// host modal's backdrop over the office, a card's drop shadow.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Dim(f32);
 
@@ -85,11 +85,11 @@ impl Default for Dim {
 }
 
 impl Dim {
-    /// The office as drawn.
+    /// Unchanged.
     pub const NONE: Self = Self(1.0);
 
-    /// The office at `brightness` of its own, clamped to black..=as drawn; a
-    /// NaN leaves it as drawn.
+    /// At `brightness` of its own, clamped to black..=unchanged; a NaN leaves
+    /// it unchanged.
     pub fn from_brightness(brightness: f32) -> Self {
         if brightness.is_nan() {
             Self::NONE
@@ -228,6 +228,8 @@ struct Classic {
     hits: Drawn,
     /// The last frame's wall board lines and floor indicator.
     signs: Vec<crate::display::TextRun>,
+    /// The dim the last frame was drawn under.
+    dim: Dim,
 }
 
 impl Classic {
@@ -236,6 +238,7 @@ impl Classic {
             badges: &self.hits.badges,
             bubbles: &self.hits.bubbles,
             signs: &self.signs,
+            dim: self.dim,
         }
     }
 }
@@ -270,6 +273,7 @@ impl Raster {
             caches: ClassicCaches::new(),
             hits: Drawn::default(),
             signs: Vec::new(),
+            dim: Dim::NONE,
         })
     }
 
@@ -279,17 +283,10 @@ impl Raster {
             .classic
             .as_ref()
             .filter(|_| self.shown == Some(Look::Classic))?;
-        let Classic {
-            buf, hits, signs, ..
-        } = classic;
         Some(ClassicDrawn {
-            pixels: buf,
-            text: crate::display::HostText {
-                badges: &hits.badges,
-                bubbles: &hits.bubbles,
-                signs,
-            },
-            hovers: &hits.hovers,
+            pixels: &classic.buf,
+            text: classic.host_text(),
+            hovers: &classic.hits.hovers,
         })
     }
 
@@ -442,6 +439,7 @@ pub fn render(
             let flash = paint.flash(&stepped.frame);
             classic.hits = paint_frame(&mut paint, &stepped.frame);
             dim.apply(&mut classic.buf);
+            classic.dim = dim;
             classic.signs =
                 crate::display::TextRun::signs(&board, stepped.layout.door, world.floor, theme);
             (Dirty::All, flash)

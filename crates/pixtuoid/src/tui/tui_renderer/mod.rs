@@ -1002,7 +1002,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         };
         cutaway.before_flush(now);
         let mut carves = Vec::new();
-        let dim = self.chrome.frames.onboarding.dim;
         self.terminal.draw(|f| {
             let full = f.area();
             let scene_area = scene_rect(full);
@@ -1010,7 +1009,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             cutaway.place(f.buffer_mut(), scene_area);
             let over = shown.as_ref().map(|(_, over)| over);
             if let Some((text, hovered)) = over.and_then(|o| o.text) {
-                paint_host_text(f, text, (scene_area, fitted.geometry().map()), hovered, dim);
+                paint_host_text(f, text, (scene_area, fitted.geometry().map()), hovered);
             }
             if let Some((mx, my, tip)) = over.and_then(|o| o.tooltip.as_ref()) {
                 let at = TooltipAt {

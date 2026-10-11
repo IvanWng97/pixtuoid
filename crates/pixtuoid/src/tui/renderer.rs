@@ -359,13 +359,7 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, footer, actual_full, theme);
         flush_buffer_to_term(f, pixels, actual_scene);
-        paint_host_text(
-            f,
-            text,
-            (actual_scene, CellMap::HALF_BLOCK),
-            hovered,
-            overlays.onboarding.dim,
-        );
+        paint_host_text(f, text, (actual_scene, CellMap::HALF_BLOCK), hovered);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
             my,

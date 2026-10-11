@@ -333,7 +333,8 @@ impl CutawayCanvas {
     /// The world text the last frame left to the host; `None` before the
     /// first or when it baked its own.
     pub(crate) fn host_text(&self) -> Option<crate::display::HostText<'_>> {
-        self.shown.as_ref()?.host_text.as_ref().map(|w| w.view())
+        let shown = self.shown.as_ref()?;
+        shown.host_text.as_ref().map(|w| w.view(shown.epoch.dim))
     }
 }
 
@@ -488,16 +489,17 @@ mod tests {
         let mut tally = Run::default();
         let mut last: Option<(RgbBuffer, Vec<(Span, u64)>)> = None;
         for (k, (frame, now)) in steps.iter().enumerate() {
-            let full = full_render(
+            let mut full = full_render(
                 &layout,
                 &pack,
                 scale,
                 frame,
-                Showing {
-                    dim,
-                    ..crate::display::compose::tests::showing(floor, *now)
-                },
+                crate::display::compose::tests::showing(floor, *now),
             );
+            // Dimmed apart from `paint`, which the canvas shares.
+            for px in full.as_mut_slice() {
+                *px = dim.of(*px);
+            }
             let list = compose(
                 frame,
                 office,

@@ -158,13 +158,7 @@ fn world_text(r: &TuiRenderer<Window>) -> ratatui::buffer::Buffer {
     let mut term = Terminal::new(TestBackend::new(area.width, area.height)).expect("terminal");
     term.draw(|f| {
         let scene = crate::tui::renderer::scene_rect(f.area());
-        crate::panels::widgets::paint_host_text(
-            f,
-            text,
-            (scene, map),
-            None,
-            pixtuoid_scene::look::Dim::NONE,
-        );
+        crate::panels::widgets::paint_host_text(f, text, (scene, map), None);
     })
     .expect("draw");
     term.backend().buffer().clone()
