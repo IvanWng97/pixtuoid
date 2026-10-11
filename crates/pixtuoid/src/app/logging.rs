@@ -146,7 +146,7 @@ impl tracing::field::Visit for Escaping<'_> {
 }
 
 /// An error chain with each link's Display escaped, for the default visitor to
-/// list as it lists any chain: its own escaping of a source misses bidi.
+/// list as it lists any chain: its own escaping misses bidi and `\n`.
 #[derive(Debug)]
 struct EscapedChain(String, Option<Box<EscapedChain>>);
 
