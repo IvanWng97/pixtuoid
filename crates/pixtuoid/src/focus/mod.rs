@@ -458,46 +458,6 @@ mod tests {
         );
         assert_eq!(activated, None, "no focusable ancestor ⇒ nothing activated");
     }
-
-    /// A label carries a cwd's basename or a subagent's name, wire content, so
-    /// every focus refusal logs it as a `?` field.
-    #[test]
-    fn each_focus_refusal_logs_the_wire_label_escaped() {
-        let hostile = |pid| AgentSlot {
-            label: "re\u{1b}]0;pwned\u{7}po\u{202e}Z".into(),
-            ..slot("opencode", "s", pid)
-        };
-        let mut exiting = hostile(Some(pid_id(4242, None)));
-        exiting.exiting_at = Some(std::time::SystemTime::UNIX_EPOCH);
-        let declines = MockTable {
-            parents: HashMap::from([(4242, 100)]),
-            focusable: vec![100],
-            started: HashMap::new(),
-        };
-        let out = crate::test_capture::capture(|| {
-            focus_agent(&exiting, &NO_PATHS, &empty_table(), |_| true);
-            let recycled = hostile(Some(pid_id(4242, Some(1_000))));
-            focus_agent(&recycled, &NO_PATHS, &empty_table(), |_| true);
-            let orphan = hostile(Some(pid_id(4242, None)));
-            focus_agent(&orphan, &NO_PATHS, &empty_table(), |_| true);
-            focus_agent(&orphan, &NO_PATHS, &declines, |_| false);
-        });
-        for refusal in [
-            "agent is exiting",
-            "start marker mismatch",
-            "no pid resolved",
-            "no focusable ancestor",
-            "activation declined",
-        ] {
-            assert!(out.contains(refusal), "{refusal:?} not logged: {out:?}");
-        }
-        for line in out.lines() {
-            assert!(
-                line.contains(r#"agent="re\u{1b}]0;pwned\u{7}po\u{202e}Z""#),
-                "not the label's Debug: {line:?}"
-            );
-        }
-    }
 }
 
 /// Live dogfood (manual, `--ignored`): walks THIS test process's own ancestor

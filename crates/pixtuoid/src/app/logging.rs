@@ -141,14 +141,33 @@ impl tracing::field::Visit for Escaping<'_> {
         field: &tracing::field::Field,
         value: &(dyn std::error::Error + 'static),
     ) {
-        let mut chain = std::iter::successors(Some(value), |e| e.source());
-        if chain.any(|e| e.to_string().chars().any(crate::is_terminal_unsafe)) {
-            // The default lists the chain with only some controls escaped, so an
-            // unsafe chain is written as its Display alone.
-            self.record_debug(field, &format_args!("{value}"));
-        } else {
-            self.0.record_error(field, value);
-        }
+        self.0.record_error(field, &EscapedChain::of(value));
+    }
+}
+
+/// An error chain with each link's Display escaped, for the default visitor to
+/// list as it lists any chain: its own escaping of a source misses bidi.
+#[derive(Debug)]
+struct EscapedChain(String, Option<Box<EscapedChain>>);
+
+impl EscapedChain {
+    fn of(e: &(dyn std::error::Error + 'static)) -> Self {
+        Self(
+            format!("{:?}", Escaped(&format_args!("{e}"))),
+            e.source().map(|s| Box::new(Self::of(s))),
+        )
+    }
+}
+
+impl std::fmt::Display for EscapedChain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for EscapedChain {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.1.as_deref().map(|e| e as _)
     }
 }
 
@@ -280,6 +299,7 @@ mod tests {
         }
         assert!(out.contains(r"\u{1f}\u{7f}\u{80}"), "dropped: {out:?}");
         assert!(out.contains(r"\u{2066}\u{2067}"), "dropped: {out:?}");
+        assert!(out.contains("error.sources=["), "a source dropped: {out:?}");
     }
 
     /// Clean text formats byte for byte as the default formatter writes it, so
