@@ -190,7 +190,7 @@ pub(crate) fn walk_profile_for(path_len_octile: u32, gait: Gait) -> WalkProfile 
     }
 }
 
-pub(crate) use progress::{Progress, distance_at, leg_pixels, walking_position};
+pub(crate) use progress::{Progress, distance_at, segment_pixels, walking_position};
 
 /// Walk-leg progress and the pixels and distances it maps to: the one place
 /// that knows its scale.
@@ -247,7 +247,7 @@ mod progress {
 
     /// Every pixel [`walking_position`] lands on along `from → to`, in walk order,
     /// each once: the progress values where either axis's truncated offset steps.
-    pub(crate) fn leg_pixels(from: Point, to: Point) -> impl Iterator<Item = Point> {
+    pub(crate) fn segment_pixels(from: Point, to: Point) -> impl Iterator<Item = Point> {
         let scale = u32::from(SCALE);
         let steps = |a: u16, b: u16| {
             let d = u32::from(a.abs_diff(b));
@@ -302,7 +302,7 @@ mod progress {
         }
 
         #[test]
-        fn leg_pixels_are_every_position_a_walk_lands_on() {
+        fn segment_pixels_are_every_position_a_walk_lands_on() {
             let legs = [
                 (Point { x: 3, y: 5 }, Point { x: 6, y: 7 }),
                 (Point { x: 20, y: 4 }, Point { x: 13, y: 15 }),
@@ -314,7 +314,11 @@ mod progress {
                     .map(|t| walking_position(a, b, Progress(t)))
                     .collect();
                 walked.dedup();
-                assert_eq!(leg_pixels(a, b).collect::<Vec<_>>(), walked, "{a:?}->{b:?}");
+                assert_eq!(
+                    segment_pixels(a, b).collect::<Vec<_>>(),
+                    walked,
+                    "{a:?}->{b:?}"
+                );
             }
         }
 

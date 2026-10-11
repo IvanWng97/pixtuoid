@@ -2372,17 +2372,17 @@ fn route_walking_pose_measures_travelled_along_the_whole_route() {
 }
 
 #[test]
-fn leg_along_past_the_route_snaps_to_the_final_segment() {
+fn segment_along_past_the_route_snaps_to_the_final_segment() {
     // The "past the last segment" fall-through fires only when `travelled` exceeds
-    // the summed leg lengths, which in-tree callers never do.
+    // the summed segment lengths, which in-tree callers never do.
     let a = Point { x: 10, y: 10 };
     let b = Point { x: 30, y: 10 };
     let c = Point { x: 30, y: 30 };
     let total = octile_path_len(&[a, b, c]);
 
     assert_eq!(
-        Leg::along(&[a, b, c], total + 1),
-        Leg {
+        Segment::along(&[a, b, c], total + 1),
+        Segment {
             from: b,
             to: c,
             progress: Progress::DONE,

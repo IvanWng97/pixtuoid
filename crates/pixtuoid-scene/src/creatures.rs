@@ -23,7 +23,7 @@ use crate::pet::PetKind;
 use crate::physics::{
     Gait, WALK_ACCEL, WalkProfile, distance_at, walk_arrived, walk_profile_for, walk_progress,
 };
-use crate::pose::{Leg, STALE_RESUME_GAP_BASE_MS};
+use crate::pose::{STALE_RESUME_GAP_BASE_MS, Segment};
 use crate::walk::octile_path_len;
 
 /// How close a resting spot must be to an idle agent's desk to count as "napping
@@ -209,11 +209,11 @@ impl Walk {
     }
 
     /// Where on its path it is at `now`; `None` once it has arrived.
-    fn leg(&self, now: SystemTime) -> Option<Leg> {
+    fn segment(&self, now: SystemTime) -> Option<Segment> {
         let elapsed = elapsed_ms(now, self.started_at);
         (!walk_arrived(&self.profile, elapsed)).then(|| {
             let t = walk_progress(&self.profile, elapsed);
-            Leg::along(&self.path, distance_at(t, self.profile.path_len_octile))
+            Segment::along(&self.path, distance_at(t, self.profile.path_len_octile))
         })
     }
 }
@@ -239,11 +239,11 @@ enum Phase {
     Gone,
 }
 
-/// Where a creature is this frame, and its leg while it walks.
+/// Where a creature is this frame, and the segment it is on while it walks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Stance {
     pub(crate) at: Point,
-    pub(crate) walking: Option<Leg>,
+    pub(crate) walking: Option<Segment>,
 }
 
 /// One creature on the people's walker: resting somewhere, or on a leg.
@@ -291,7 +291,7 @@ impl CreatureWalk {
         let mut walk = Self::at_home(ground.layout, seed, now);
         if let Phase::Resting { at: home, .. } = walk.phase
             && let Some(w) = Walk::plan(from, home, roam.gait, ground, started_at)
-            && w.leg(now).is_some()
+            && w.segment(now).is_some()
         {
             walk.phase = Phase::Walking(w);
         }
@@ -391,10 +391,10 @@ impl CreatureWalk {
             Phase::Walking(w) | Phase::Leaving(w) => w,
             Phase::Gone => return None,
         };
-        Some(match walk.leg(now) {
-            Some(leg) => Stance {
-                at: leg.at(),
-                walking: Some(leg),
+        Some(match walk.segment(now) {
+            Some(segment) => Stance {
+                at: segment.at(),
+                walking: Some(segment),
             },
             None => Stance {
                 at: walk.to,
@@ -435,14 +435,14 @@ impl CreatureWalk {
         }
         self.advanced_at = now;
         match &self.phase {
-            Phase::Walking(w) if w.leg(now).is_none() => {
+            Phase::Walking(w) if w.segment(now).is_none() => {
                 self.phase = Phase::Resting {
                     at: w.to,
                     since: w.started_at,
                     walked_ms: w.profile.duration_ms,
                 };
             }
-            Phase::Leaving(w) if w.leg(now).is_none() => self.phase = Phase::Gone,
+            Phase::Leaving(w) if w.segment(now).is_none() => self.phase = Phase::Gone,
             _ => {}
         }
         if let Phase::Resting {
@@ -783,7 +783,7 @@ mod tests {
                 let mut walk = CreatureWalk::at_home(&l, seed, at(0));
                 let stances = drive(&mut walk, roam, &l, Motion::Full, (0, 90_000));
                 for run in stances.split(|s| s.is_none_or(|s| s.walking.is_none())) {
-                    let legs: Vec<Leg> = run
+                    let legs: Vec<Segment> = run
                         .iter()
                         .filter_map(|s| s.and_then(|s| s.walking))
                         .collect();

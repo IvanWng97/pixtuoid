@@ -702,13 +702,13 @@ fn route_walking_pose(
         return Some(pose);
     }
     let travelled = distance_at(progress, total);
-    let leg = Leg::along(&path, travelled);
-    history.record(slot.agent_id, leg.at(), now);
+    let segment = Segment::along(&path, travelled);
+    history.record(slot.agent_id, segment.at(), now);
     Some(Pose::Walking {
-        from: leg.from,
-        to: leg.to,
-        progress: leg.progress,
-        travelled: leg.travelled,
+        from: segment.from,
+        to: segment.to,
+        progress: segment.progress,
+        travelled: segment.travelled,
         carrying_coffee,
     })
 }
@@ -717,14 +717,14 @@ fn route_walking_pose(
 /// how far through it, by cumulative OCTILE distance — the metric A* planned
 /// with, so timing stays uniform along diagonals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Leg {
+pub(crate) struct Segment {
     pub(crate) from: Point,
     pub(crate) to: Point,
     pub(crate) progress: Progress,
     pub(crate) travelled: u32,
 }
 
-impl Leg {
+impl Segment {
     /// `travelled` along `path` (two or more points), its last segment's end
     /// past the whole of it.
     pub(crate) fn along(path: &[Point], travelled: u32) -> Self {
@@ -732,7 +732,7 @@ impl Leg {
         for w in path.windows(2) {
             let leg = octile_distance(w[0], w[1]);
             if acc + leg >= travelled {
-                return Leg {
+                return Segment {
                     from: w[0],
                     to: w[1],
                     progress: Progress::of(u64::from(travelled - acc), u64::from(leg)),
@@ -742,7 +742,7 @@ impl Leg {
             acc += leg;
         }
         let last = path.len().saturating_sub(1);
-        Leg {
+        Segment {
             from: path[last.saturating_sub(1)],
             to: path[last],
             progress: Progress::DONE,

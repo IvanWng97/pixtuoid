@@ -916,7 +916,7 @@ fn a_route_through_a_one_pixel_gap_stays_on_open_floor() {
     let path = find_path(&l.walkable, &OccupancyOverlay::new(), None, from, to).expect("routable");
     let off: Vec<Point> = path
         .windows(2)
-        .flat_map(|leg| crate::physics::leg_pixels(leg[0], leg[1]))
+        .flat_map(|leg| crate::physics::segment_pixels(leg[0], leg[1]))
         .filter(|p| !l.walkable.is_walkable(p.x, p.y))
         .collect();
     assert_eq!(off, [], "{path:?}");

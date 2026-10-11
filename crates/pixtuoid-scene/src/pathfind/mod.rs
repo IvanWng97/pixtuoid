@@ -479,7 +479,7 @@ fn elbow(mask: &WalkableMask, a: Point, b: Point) -> Option<Point> {
 /// Does every pixel a walker passes strictly between `a` and `b` stand on the
 /// static `mask`? The ends are exempt: a raw endpoint may sit in a routing pad.
 fn leg_clear(mask: &WalkableMask, a: Point, b: Point) -> bool {
-    crate::physics::leg_pixels(a, b)
+    crate::physics::segment_pixels(a, b)
         .filter(|&p| p != a && p != b)
         .all(|p| mask.is_walkable(p.x, p.y))
 }
