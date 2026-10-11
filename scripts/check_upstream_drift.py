@@ -245,6 +245,14 @@ CODEX_MARKETPLACE_CMD_URL = (
 CODEX_MARKETPLACE_URL = (
     "https://raw.githubusercontent.com/openai/codex/main/codex-rs/core-plugins/src/marketplace.rs"
 )
+CODEX_MARKETPLACE_RECORD_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/"
+    "codex-rs/core-plugins/src/marketplace_add/metadata.rs"
+)
+CODEX_MARKETPLACE_SOURCE_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/"
+    "codex-rs/core-plugins/src/marketplace_add/source.rs"
+)
 CODEX_PLUGIN_EDIT_URL = (
     "https://raw.githubusercontent.com/openai/codex/main/codex-rs/config/src/plugin_edit.rs"
 )
@@ -291,6 +299,13 @@ PLUGIN_DOC_MARKERS: dict[str, PluginDoc] = {
     }),
     CODEX_MARKETPLACE_URL: PluginDoc("Codex", {
         '".agents/plugins/marketplace.json"': "where register writes the marketplace manifest",
+    }),
+    CODEX_MARKETPLACE_RECORD_URL: PluginDoc("Codex", {
+        'config.get("marketplaces")': "the config.toml table a marketplace is recorded in (unregister, marketplace_moved_from)",
+        '.get("source")': "the recorded source marketplace_moved_from compares",
+    }),
+    CODEX_MARKETPLACE_SOURCE_URL: PluginDoc("Codex", {
+        "path.canonicalize()": "a local source is recorded canonicalized (marketplace_moved_from)",
     }),
     CODEX_PLUGIN_EDIT_URL: PluginDoc("Codex", {
         'root.get_mut("plugins")': "the config.toml table an install is recorded in (is_registered)",
@@ -456,6 +471,12 @@ ANCHORS: dict[str, Anchor] = {
         r"const MARKETPLACE_MANIFEST_RELATIVE_PATHS\b", "`MARKETPLACE_MANIFEST_RELATIVE_PATHS`"
     ),
     CODEX_PLUGIN_EDIT_URL: Anchor(r"fn set_plugin_enabled\b", "`set_plugin_enabled`"),
+    CODEX_MARKETPLACE_RECORD_URL: Anchor(
+        r"fn record_added_marketplace_entry\b", "`record_added_marketplace_entry`"
+    ),
+    CODEX_MARKETPLACE_SOURCE_URL: Anchor(
+        r"fn resolve_local_source_path\b", "`resolve_local_source_path`"
+    ),
     REASONIX_PLUGIN_DOC_URL: Anchor(r"(?m)^## CLI Mode", "the plugin-packages CLI section"),
     CURSOR_HOOKS_URL: Anchor(r"(?m)^#{2,4} Hook events", "the hook-events section"),
     KIMI_HOOKS_URL: Anchor(r"hook_event_name", "the hook-event payload docs"),

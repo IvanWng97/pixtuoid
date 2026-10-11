@@ -143,7 +143,10 @@ fn register(config: &Path) -> Result<()> {
 }
 
 /// Whether Codex records our marketplace from a dir other than `root`, as after
-/// pixtuoid's config dir moved.
+/// pixtuoid's config dir moved. `codex plugin marketplace add` records a local
+/// source as `[marketplaces.<name>] source`, canonicalized
+/// (`codex-rs/core-plugins/src/marketplace_add.rs:336-358` and
+/// `marketplace_add/source.rs:149-163` @ rust-v0.162.1).
 fn marketplace_moved_from(root: &Path) -> Result<bool> {
     let doc = read_codex_config()?;
     let Some(source) = doc
@@ -154,7 +157,7 @@ fn marketplace_moved_from(root: &Path) -> Result<bool> {
     else {
         return Ok(false);
     };
-    // Codex records the canonical path; a source gone from disk has moved.
+    // A source gone from disk has moved.
     Ok(std::fs::canonicalize(source).ok() != Some(std::fs::canonicalize(root)?))
 }
 
@@ -200,6 +203,7 @@ fn unregister(config: &Path) -> Result<Unregistered> {
     let (_, root) = host_plugin::layout(config, host_plugin::HOOKS_FILE)?;
     let doc = read_codex_config()?;
     let installed = plugin_entry(&doc).is_some();
+    // The table `marketplace_moved_from` reads the source from.
     let listed = doc.get("marketplaces").and_then(|m| m.get(NAME)).is_some();
     if !installed && !listed {
         host_plugin::remove_if_ours(root, &marketplace_manifest(root))?;

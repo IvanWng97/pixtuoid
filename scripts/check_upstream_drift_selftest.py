@@ -149,6 +149,8 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.CODEX_MARKETPLACE_CMD_URL: "enum MarketplaceSubcommand {\n    Add(AddMarketplaceArgs),\n}\n",
     d.CODEX_MARKETPLACE_URL: "const MARKETPLACE_MANIFEST_RELATIVE_PATHS: &[&str] = &[];\n",
     d.CODEX_PLUGIN_EDIT_URL: "fn set_plugin_enabled(doc: &mut DocumentMut) -> bool {\n}\n",
+    d.CODEX_MARKETPLACE_RECORD_URL: "pub(super) fn record_added_marketplace_entry(\n) {\n}\n",
+    d.CODEX_MARKETPLACE_SOURCE_URL: "fn resolve_local_source_path(source: &str) {\n}\n",
     d.REASONIX_PLUGIN_DOC_URL: "\n## CLI Mode\n",
     d.CURSOR_HOOKS_URL: "\n### Hook events\n\n#### preToolUse\n",
     d.KIMI_HOOKS_URL: '"hook_event_name": "PreToolUse"',
