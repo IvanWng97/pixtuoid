@@ -504,7 +504,7 @@ where
     );
     send(r, &mut ui, MouseEventKind::Drag(MouseButton::Left), away);
     assert!(r.pointer.carrying(), "premise: the agent is lifted");
-    r.screen.blank();
+    r.screen.blank(r.terminal.size().expect("a size"));
     send(r, &mut ui, MouseEventKind::Down(MouseButton::Left), away);
     assert!(
         !r.pointer.carrying(),

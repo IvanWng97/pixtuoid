@@ -18,10 +18,10 @@ use ratatui::layout::Rect;
 
 use crate::tui::renderer::PetState;
 use pixtuoid_scene::floor::{
-    FloorInputs, FloorMeta, FloorTransition, Frame, OfficeSession, PetInputs, project_floor_scene,
+    FloorInputs, FloorMeta, FloorTransition, OfficeSession, PetInputs, project_floor_scene,
 };
 use pixtuoid_scene::layout::{SceneLayout, Size};
-use pixtuoid_scene::look::{Look, Picture, Place, RenderInputs};
+use pixtuoid_scene::look::{FrameNote, Look, Picture, Place, RenderInputs};
 use pixtuoid_scene::screen::Screen;
 
 #[derive(Debug, Default)]
@@ -261,7 +261,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
 
     /// One frame of `scene` drawn through the session in `look` at `size`:
     /// the floor showing, or a slide's two floors composed, its picture the
-    /// session's.
+    /// session's. What it was drawn under.
     fn render_office(
         &mut self,
         scene: &SceneState,
@@ -270,8 +270,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         look: Look,
         size: Size,
         debug_walkable: bool,
-    ) -> Frame {
-        self.session.render(
+    ) -> Option<FrameNote> {
+        let frame = self.session.render(
             look,
             RenderInputs {
                 world: self.chrome.office_world(scene, pack, now),
@@ -286,7 +286,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             },
             &self.chrome.pets,
             self.chrome.theme.surface.bg_fallback,
-        )
+        );
+        // Fed as it is composed, before anything can fail, muted or not:
+        // `AudioObserver::frame`'s every-world-frame contract.
+        self.chrome.audio.frame(frame.audio);
+        frame.note
     }
 
     /// The cutaway's look and office extent over `scene_area`, as its next
@@ -674,14 +678,14 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// The footer-only frame of a terminal too small for the office; a slide
-    /// it would hide ends at once rather than run its course unseen. `drawn`
-    /// is the office frame stepped for it, if one was.
+    /// it would hide ends at once rather than run its course unseen. Its
+    /// audio is the empty floor's unless the office `stepped` for it.
     fn draw_too_small(
         &mut self,
         scene: &SceneState,
         now: SystemTime,
-        drawn: Option<Frame>,
-    ) -> Result<Frame> {
+        stepped: bool,
+    ) -> Result<Option<FrameNote>> {
         self.session.prepare(scene, now);
         self.cancel_transition();
         let footer_scene = self.session.footer_scene(scene);
@@ -698,17 +702,15 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             &self.chrome.overlays(popup_scale, offers_walkable_debug),
             now,
         );
-        let audio = match drawn {
-            Some(frame) => frame.audio,
-            None => {
-                let office_floor = self.chrome.office_world(scene, &self.pack, now).floor;
-                self.session.no_office(scene, office_floor, now)
-            }
-        };
-        self.screen.blank();
+        if !stepped {
+            let office_floor = self.chrome.office_world(scene, &self.pack, now).floor;
+            let audio = self.session.no_office(scene, office_floor, now);
+            self.chrome.audio.frame(audio);
+        }
+        self.screen.blank(self.terminal.size()?);
         self.chrome.popup.last_scale = popup_scale;
         self.rest_floor(now);
-        flushed.map(|()| Frame { audio, note: None })
+        flushed.map(|()| None)
     }
 
     /// A refused frame steps nothing, but the door's clamp still keeps time, as
@@ -738,14 +740,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         } else {
             Ok(())
         };
-        let drawn = redrawn
-            .and_then(|()| self.draw_frame(scene, pack, now))
-            .map(|frame| {
-                // Composed even when disabled or muted: `AudioObserver::frame`'s
-                // contract.
-                self.chrome.audio.frame(frame.audio);
-                frame.note
-            });
+        let drawn = redrawn.and_then(|()| self.draw_frame(scene, pack, now));
         self.follow_resize();
         // Presented even when the draw failed, so nothing stays held.
         let presenting = std::time::Instant::now();
@@ -795,14 +790,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         Ok(())
     }
 
-    /// One frame of `scene`, whichever path draws it: what it feeds besides
-    /// its picture.
+    /// One frame of `scene`, whichever path draws it: what it was drawn under.
     fn draw_frame(
         &mut self,
         scene: &SceneState,
         pack: &OfficeArt,
         now: SystemTime,
-    ) -> Result<Frame> {
+    ) -> Result<Option<FrameNote>> {
         if self
             .chrome
             .active_pet
@@ -835,7 +829,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let term_size = self.terminal.size()?;
         let full_rect = Rect::new(0, 0, term_size.width, term_size.height);
         if crate::tui::renderer::scene_too_small(crate::tui::renderer::scene_rect(full_rect)) {
-            return self.draw_too_small(scene, now, None);
+            return self.draw_too_small(scene, now, false);
         }
         let (buf_w, buf_h) =
             crate::tui::renderer::scene_buf_size(full_rect.width, full_rect.height);
@@ -851,7 +845,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             return self.flush_classic_slide(scene, now).map(|()| drawn);
         }
         if !matches!(self.session.picture(), Some(Picture::Floor(_))) {
-            return self.draw_too_small(scene, now, Some(drawn));
+            return self.draw_too_small(scene, now, true);
         }
         let current = self.session.nav().current();
         let floor_scene = project_floor_scene(scene, current);
@@ -912,19 +906,19 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         scene: &SceneState,
         pack: &OfficeArt,
         now: SystemTime,
-    ) -> Result<Frame> {
+    ) -> Result<Option<FrameNote>> {
         use crate::panels::paint_overlays;
         use crate::panels::widgets::{paint_host_text, star_area};
         use crate::tui::hit_test::SceneHit;
         use crate::tui::renderer::{TooltipAt, paint_footer, scene_rect};
         use pixtuoid_scene::display::HoverTarget;
         if crate::tui::renderer::scene_too_small(fitted.scene) {
-            return self.draw_too_small(scene, now, None);
+            return self.draw_too_small(scene, now, false);
         }
         let drawn =
             self.render_office(scene, pack, now, fitted.look(), fitted.fit.logical(), false);
         if self.session.picture().is_none() {
-            return self.draw_too_small(scene, now, Some(drawn));
+            return self.draw_too_small(scene, now, true);
         }
         let term_size = self.terminal.size()?;
         let current = self.session.nav().current();

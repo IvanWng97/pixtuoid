@@ -237,9 +237,11 @@ impl Office {
         let Some(picture) = self.session.picture() else {
             // Too small to lay out: the canvas still takes a frame its size,
             // the raster's backdrop.
+            self.screen.blank((buf_w, buf_h));
             if let Some(backdrop) = self.session.floor().raster.pixels() {
                 expand_rgba(&mut self.rgba, backdrop);
             }
+            self.screen.landed();
             return;
         };
         let picture = pixtuoid_scene::look::Picture::Floor(picture);
@@ -1016,6 +1018,25 @@ mod tests {
     /// instant `step` is handed: after a slow step, the next phase waits for
     /// the floor to pass on the screen clock, though the page's own clock says
     /// it has.
+    /// A canvas shrunk too small for the office and grown back inside a
+    /// strike phase's floor gets a frame its size: the backdrop it showed
+    /// flashed nothing, so the frame after it is a new shape's, never held.
+    #[test]
+    fn a_canvas_grown_back_from_too_small_is_never_held() {
+        use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS as FLOOR_MS;
+        let strike = storm_strike();
+        let [first, second] = [strike.changes[0], strike.changes[1]];
+        let (mut o, screen) = storm_on_screen();
+        step_at(&mut o, &screen, first - 2 * FLOOR_MS);
+        step_at(&mut o, &screen, second - FLOOR_MS / 4);
+        screen.at(SystemTime::UNIX_EPOCH + Duration::from_millis(second - FLOOR_MS / 8));
+        o.step((second - FLOOR_MS / 8) as f64, 8, 8);
+        assert_eq!(o.frame_len(), 8 * 8 * 4, "premise: the backdrop");
+        screen.at(SystemTime::UNIX_EPOCH + Duration::from_millis(second));
+        o.step(second as f64, 160, 96);
+        assert_eq!(o.frame_len(), 160 * 96 * 4);
+    }
+
     #[test]
     fn a_slow_steps_phase_holds_the_floor_from_when_it_lands() {
         use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS as FLOOR_MS;

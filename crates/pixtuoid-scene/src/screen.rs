@@ -248,8 +248,10 @@ impl<S: Copy + PartialEq, G> Screen<S, G> {
         self.staged = None;
     }
 
-    /// The screen shows no office now: a pointer hits nothing.
-    pub fn blank(&mut self) {
+    /// A write showing no office to a screen shaped `shape` is under way:
+    /// a pointer hits nothing now, and once it lands nothing flashes.
+    pub fn blank(&mut self, shape: S) {
+        self.hold.stage(Flashes::default(), shape);
         self.staged = None;
         self.shown = None;
     }
@@ -513,7 +515,7 @@ mod tests {
             height: 96,
         };
         assert!(shown.hit_at(whole).is_none());
-        screen.blank();
+        screen.blank(SHAPE);
         assert!(screen.shown().is_none());
     }
 }
