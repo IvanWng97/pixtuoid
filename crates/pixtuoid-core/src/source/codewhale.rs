@@ -41,9 +41,10 @@ use crate::source::{AgentEvent, ToolDetail};
 
 /// The CodeWhale CLI source's registry name (its `SourceDescriptor.name`).
 ///
-/// homebrew-core contract: the formula `test do` that packaging-build replays
-/// connects this id, which needs no agent CLI installed. A rename needs a core PR to
-/// the formula first, or Homebrew's CI breaks on the next autobump.
+/// homebrew-core contract: the id packaging-build's replay of the formula's
+/// `test do` connects, since it connects with no agent CLI installed. The formula
+/// must connect it too; a rename needs a core PR there first, or Homebrew's CI
+/// breaks on the next autobump.
 pub const SOURCE_NAME: &str = "codewhale";
 
 /// CodeWhale's one sub-agent tool; its `action` picks the verb

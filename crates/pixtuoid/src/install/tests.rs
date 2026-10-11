@@ -1320,10 +1320,10 @@ cache="$CODEX_HOME/plugins/cache/pixtuoid/pixtuoid/local"
 echo "codex $*" >> "$d/calls.log"
 [ "codex $*" = "${FAKE_HOST_FAIL-}" ] && exit 1
 case "$*" in
-"plugin marketplace add "*) echo "$4" > "$d/codex-root"; grep -qxF '[marketplaces.pixtuoid]' "$c" 2>/dev/null || printf "[marketplaces.pixtuoid]\nsource_type = 'local'\n" >> "$c" ;;
+"plugin marketplace add "*) echo "$4" > "$d/codex-root"; grep -qxF '[marketplaces.pixtuoid]' "$c" 2>/dev/null || printf "[marketplaces.pixtuoid]\nsource_type = 'local'\nsource = '%s'\n" "$4" >> "$c" ;;
 "plugin add pixtuoid@pixtuoid") rm -rf "$cache"; mkdir -p "$cache"; for p in "$(cat "$d/codex-root")"/*/; do cp -R "$p". "$cache"; done; grep -qxF "[plugins.'pixtuoid@pixtuoid']" "$c" 2>/dev/null || printf "[plugins.'pixtuoid@pixtuoid']\nenabled = true\n" >> "$c" ;;
 "plugin remove pixtuoid@pixtuoid") rm -rf "$cache"; grep -vxF -e "[plugins.'pixtuoid@pixtuoid']" -e 'enabled = true' "$c" > "$c.tmp"; mv "$c.tmp" "$c" ;;
-"plugin marketplace remove pixtuoid") grep -vxF -e '[marketplaces.pixtuoid]' -e "source_type = 'local'" "$c" > "$c.tmp"; mv "$c.tmp" "$c" ;;
+"plugin marketplace remove pixtuoid") grep -v -e '^\[marketplaces\.pixtuoid\]$' -e '^source_type = ' -e '^source = ' "$c" > "$c.tmp"; mv "$c.tmp" "$c" ;;
 esac
 "#;
 
@@ -1336,8 +1336,8 @@ if exist \"%d%codex-root\" set /p root=<\"%d%codex-root\"\r
 >>\"%d%calls.log\" echo codex %~1 %~2 %~3 %~4\r
 if defined FAKE_HOST_FAIL if \"codex %*\"==\"%FAKE_HOST_FAIL%\" exit /b 1\r
 if \"%1 %2 %3\"==\"plugin marketplace add\" (>\"%d%codex-root\" echo %~4)\r
-if \"%1 %2 %3\"==\"plugin marketplace add\" ((findstr /l /x /c:\"[marketplaces.pixtuoid]\" \"%c%\" >nul 2>&1 || (>>\"%c%\" echo [marketplaces.pixtuoid]& >>\"%c%\" echo source_type = 'local'))& exit /b 0)\r
-if \"%1 %2 %3\"==\"plugin marketplace remove\" ((findstr /l /v /x /c:\"[marketplaces.pixtuoid]\" /c:\"source_type = 'local'\" \"%c%\" >\"%c%.tmp\"& move /y \"%c%.tmp\" \"%c%\" >nul)& exit /b 0)\r
+if \"%1 %2 %3\"==\"plugin marketplace add\" ((findstr /l /x /c:\"[marketplaces.pixtuoid]\" \"%c%\" >nul 2>&1 || (>>\"%c%\" echo [marketplaces.pixtuoid]& >>\"%c%\" echo source_type = 'local'& >>\"%c%\" echo source = '%~4'))& exit /b 0)\r
+if \"%1 %2 %3\"==\"plugin marketplace remove\" ((findstr /l /v /b /c:\"[marketplaces.pixtuoid]\" /c:\"source_type = \" /c:\"source = \" \"%c%\" >\"%c%.tmp\"& move /y \"%c%.tmp\" \"%c%\" >nul)& exit /b 0)\r
 if \"%1 %2\"==\"plugin add\" if not defined root exit /b 1\r
 if \"%1 %2\"==\"plugin add\" (if exist \"%cache%\" rmdir /s /q \"%cache%\")\r
 if \"%1 %2\"==\"plugin add\" (for /d %%p in (\"%root%\\*\") do xcopy /e /i /y /q \"%%p\" \"%cache%\" >nul)\r
@@ -1751,6 +1751,81 @@ fn codex_doctor_names_a_stale_copy_until_it_is_re_copied() {
         (copy.refresh)().unwrap();
         assert!(!(copy.stale)(&hooks).unwrap());
         assert!(verify_target(&CODEX, Some(hooks)).is_sound());
+    });
+}
+
+/// Codex refuses to re-add a marketplace name from another source, so a connect
+/// after pixtuoid's config dir moved removes the old one first, and only then.
+#[test]
+fn codex_connect_re_adds_a_marketplace_codex_records_from_a_moved_root() {
+    with_fake_hosts(|fake| {
+        let old = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            codex_config(),
+            format!(
+                "[marketplaces.pixtuoid]\nsource_type = 'local'\nsource = '{}'\n",
+                old.path().display()
+            ),
+        )
+        .unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
+        install_target_from(&CODEX, Some(hooks.clone()), hook.clone()).unwrap();
+        let removes = || {
+            std::fs::read_to_string(fake.join("calls.log"))
+                .unwrap()
+                .matches("codex plugin marketplace remove pixtuoid")
+                .count()
+        };
+        assert_eq!(removes(), 1);
+        install_target_from(&CODEX, Some(hooks), hook).unwrap();
+        assert_eq!(removes(), 1, "the same root is re-added in place");
+    });
+}
+
+/// A host CLI off PATH fails a connect before it touches the legacy config, so the
+/// hooks an older pixtuoid merged keep firing.
+#[test]
+fn a_connect_without_the_host_cli_leaves_the_legacy_hooks() {
+    with_fake_hosts(|fake| {
+        std::fs::write(codex_config(), CODEX_LEGACY_HOOK).unwrap();
+        std::fs::remove_file(fake.join(if cfg!(windows) { "codex.cmd" } else { "codex" })).unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let hooks = plugin_hooks_path(tmp.path());
+        let hook = Some(PathBuf::from("/fake/pixtuoid-hook"));
+        let err = temp_env::with_var("PATH", Some(fake), || {
+            install_target_from(&CODEX, Some(hooks.clone()), hook).unwrap_err()
+        });
+        assert!(format!("{err:#}").contains("not on PATH"), "{err:#}");
+        assert_eq!(
+            std::fs::read_to_string(codex_config()).unwrap(),
+            CODEX_LEGACY_HOOK
+        );
+        assert!(!has_hooks(&CODEX, Some(hooks)));
+    });
+}
+
+/// A legacy config the strip cannot parse fails the disconnect, but only after the
+/// plugin is deregistered.
+#[test]
+fn a_disconnect_removes_the_plugin_before_an_unparsable_legacy_config_fails_it() {
+    with_fake_hosts(|fake| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let manifest = reasonix_manifest_path(tmp.path());
+        install_target_from(
+            &REASONIX,
+            Some(manifest.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        std::fs::write(reasonix_settings(), "{not json").unwrap();
+        assert!(uninstall_target(&REASONIX, Some(manifest)).is_err());
+        let calls = std::fs::read_to_string(fake.join("calls.log")).unwrap();
+        assert!(
+            calls.contains("reasonix plugin remove pixtuoid --yes"),
+            "calls: {calls}"
+        );
     });
 }
 

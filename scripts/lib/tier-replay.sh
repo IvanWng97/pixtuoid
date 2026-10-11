@@ -53,11 +53,15 @@ trap cleanup EXIT
 # installed, and the driver drops a disconnected source's events ahead of the
 # reducer, so a box that never connected Codex would replay into zero agents —
 # silently, since the drop sits above the gate's own log line. The replay rides
-# the rollout, so the shim the hooks name never runs.
+# the rollout, so the shim the hooks name never runs, and a no-op `codex` stands
+# in for the CLI connect registers the plugin through.
 home="$sb/home"
-mkdir -p "$home"
+fakebin="$sb/bin"
+mkdir -p "$home" "$fakebin"
+printf '#!/bin/sh\nexit 0\n' >"$fakebin/codex"
+chmod +x "$fakebin/codex"
 HOME="$home" CODEX_HOME="" XDG_CONFIG_HOME="$cfgdir" PIXTUOID_HOOK=/usr/bin/true \
-    "$bin" connect codex --json >/dev/null || {
+    PATH="$fakebin:$PATH" "$bin" connect codex --json >/dev/null || {
     echo "FAIL: connect codex in the isolated home" >&2
     exit 1
 }

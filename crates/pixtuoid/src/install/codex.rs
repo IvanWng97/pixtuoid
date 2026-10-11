@@ -131,8 +131,11 @@ fn register(config: &Path) -> Result<()> {
             }),
         ),
     ])?;
-    // A repeat add of the same local source is a no-op
-    // (`codex-rs/core-plugins/src/marketplace_add.rs` @ rust-v0.162.1).
+    // A repeat add of the same local source is a no-op, and of another source an
+    // error (`codex-rs/core-plugins/src/marketplace_add.rs` @ rust-v0.162.1).
+    if marketplace_moved_from(root)? {
+        remove_marketplace()?;
+    }
     CLI.run(&[
         "plugin".as_ref(),
         "marketplace".as_ref(),
@@ -140,6 +143,32 @@ fn register(config: &Path) -> Result<()> {
         root.as_os_str(),
     ])?;
     add_plugin()
+}
+
+/// Whether Codex records our marketplace from a dir other than `root`, as after
+/// pixtuoid's config dir moved.
+fn marketplace_moved_from(root: &Path) -> Result<bool> {
+    let doc = read_codex_config()?;
+    let Some(source) = doc
+        .get("marketplaces")
+        .and_then(|m| m.get(NAME))
+        .and_then(|m| m.get("source"))
+        .and_then(toml::Value::as_str)
+    else {
+        return Ok(false);
+    };
+    // Codex records the canonical path; a source gone from disk has moved.
+    Ok(std::fs::canonicalize(source).ok() != Some(std::fs::canonicalize(root)?))
+}
+
+fn remove_marketplace() -> Result<()> {
+    CLI.run(&[
+        "plugin".as_ref(),
+        "marketplace".as_ref(),
+        "remove".as_ref(),
+        NAME.as_ref(),
+    ])?;
+    Ok(())
 }
 
 /// Copy the plugin into Codex's cache, replacing an older copy, and enable it
@@ -192,12 +221,7 @@ fn unregister(config: &Path) -> Result<Unregistered> {
         ])?;
     }
     if listed {
-        CLI.run(&[
-            "plugin".as_ref(),
-            "marketplace".as_ref(),
-            "remove".as_ref(),
-            NAME.as_ref(),
-        ])?;
+        remove_marketplace()?;
     }
     host_plugin::remove_if_ours(root, &marketplace_manifest(root))?;
     Ok(Unregistered::Removed)

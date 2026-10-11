@@ -70,9 +70,10 @@ jobs:
           enable-cache: 'false'
       # homebrew-core's `test do` runs against every release on its autobump
       # and changes only by a PR there, so a subcommand it still calls that
-      # this tree dropped breaks a CI we never see. Checked before a release
-      # PR exists, so that PR waits for homebrew-core's (CONTRIBUTING.md#releasing).
-      - name: homebrew-core's test calls only subcommands this tree has
+      # this tree dropped, or a source it connects that this tree can no longer,
+      # breaks a CI we never see. Checked before a release PR exists, so that PR
+      # waits for homebrew-core's (CONTRIBUTING.md#releasing).
+      - name: homebrew-core's test calls only what this tree can run
         run: |
           set -euo pipefail
           formula="$(curl -fsSL --retry 3 \
@@ -88,6 +89,17 @@ jobs:
           for sub in $subs; do
             if ! ./target/debug/pixtuoid "$sub" --help >/dev/null 2>&1; then
               echo "::error::homebrew-core's test calls \`pixtuoid $sub\`, which this tree dropped: change the formula there first"
+              exit 1
+            fi
+          done
+          # Its sandbox has no agent CLI, which a plugin host's connect needs.
+          ids="$(sed -n '/^  test do/,/^  end/p' <<<"$formula" \
+            | { grep -oE 'pixtuoid("?, "| )connect("?, "| )[a-z][a-z0-9-]*' || true; } \
+            | sed -E 's/.*connect("?, "| )//' | sort -u)"
+          for id in $ids; do
+            if ! env -i HOME="$(mktemp -d)" PATH=/usr/bin:/bin PIXTUOID_HOOK=/usr/bin/true \
+              ./target/debug/pixtuoid connect "$id" --json >/dev/null 2>&1; then
+              echo "::error::homebrew-core's test connects \`$id\`, which fails with no agent CLI installed: change the formula there first"
               exit 1
             fi
           done

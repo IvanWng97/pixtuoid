@@ -385,11 +385,12 @@ fn only_restart_bound_targets_declare_a_post_install_step_naming_it() {
     assert_eq!(
         with_hint,
         vec![
+            pixtuoid_core::source::codex::SOURCE_NAME,
             pixtuoid_core::source::openclaw::SOURCE_NAME,
             pixtuoid_core::source::omp::SOURCE_NAME,
             pixtuoid_core::source::dsh::SOURCE_NAME,
         ],
-        "only openclaw, omp and dsh need a post-install step today"
+        "only codex, openclaw, omp and dsh need a post-install step today"
     );
 }
 

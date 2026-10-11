@@ -113,13 +113,13 @@ fn register(config: &Path) -> Result<()> {
 /// Removing the marketplace uninstalls its plugins too. `remove` exits non-zero on
 /// a marketplace it doesn't know, hence the list first.
 fn unregister(config: &Path) -> Result<Unregistered> {
-    let (_, root) = host_plugin::layout(config, host_plugin::HOOKS_FILE)?;
     if CLI.locate().is_none() {
         // Disabled is still installed: its marketplace must outlive it.
         if plugin_entry()?.is_some() {
             tracing::warn!("claude not on PATH; leaving the pixtuoid plugin registered");
             return Ok(Unregistered::Unreachable);
         }
+        let (_, root) = host_plugin::layout(config, host_plugin::HOOKS_FILE)?;
         host_plugin::remove_if_ours(root, &marketplace_manifest(root))?;
         return Ok(Unregistered::Absent);
     }
@@ -130,6 +130,7 @@ fn unregister(config: &Path) -> Result<Unregistered> {
         "--json".as_ref(),
     ])?;
     let found = marketplace_listed(&listed)?;
+    let (_, root) = host_plugin::layout(config, host_plugin::HOOKS_FILE)?;
     if found {
         CLI.run(&[
             "plugin".as_ref(),

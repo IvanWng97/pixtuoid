@@ -392,18 +392,24 @@ impl HostCli {
         which::which(self.command).ok()
     }
 
-    /// Run it with `args` and return its stdout; a non-zero exit is the error.
-    pub(crate) fn run(self, args: &[&std::ffi::OsStr]) -> Result<String> {
+    /// [`Self::locate`], or the error that names what to do about it.
+    pub(crate) fn require(self) -> Result<PathBuf> {
         let Self {
             command,
             display_name,
         } = self;
-        let cli = self.locate().with_context(|| {
+        self.locate().with_context(|| {
             format!(
                 "{display_name}'s `{command}` command is not on PATH; pixtuoid installs its \
                  hooks as a {display_name} plugin through it — put it on PATH and reconnect"
             )
-        })?;
+        })
+    }
+
+    /// Run it with `args` and return its stdout; a non-zero exit is the error.
+    pub(crate) fn run(self, args: &[&std::ffi::OsStr]) -> Result<String> {
+        let Self { command, .. } = self;
+        let cli = self.require()?;
         // The real CLI would register and remove plugins in the developer's own
         // CLI — a test run once did.
         #[cfg(test)]

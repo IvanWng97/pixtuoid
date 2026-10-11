@@ -563,8 +563,9 @@ fn install_target_from(
 
 /// Strip what an older pixtuoid merged into the CLI's own config, then register. A
 /// registration that fails after the strip leaves neither firing, which is what a
-/// failed connect reads as.
+/// failed connect reads as; a CLI that isn't on PATH fails it before the strip.
 fn connect_host(host: &target::HostRegistration, primary: &std::path::Path) -> Result<()> {
+    host.cli.require()?;
     strip_legacy(host)?;
     (host.register)(primary)
 }
@@ -678,10 +679,7 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
     let mut removed = strip_managed(t.primary.uninstall(), &path)?;
-    if let Some(host) = t.host {
-        removed |= strip_legacy(host)?;
-    }
-    // Last, since the strips need no CLI: a failing deregister leaves a
+    // After the strip, which needs no CLI: a failing deregister leaves a
     // registered plugin whose hooks are gone, or whose copy fires into a
     // disconnected source, which drops the events.
     let plugin_left_registered = match t.host {
@@ -695,6 +693,11 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
         },
         None => None,
     };
+    // Last, so a legacy config it cannot parse fails the disconnect only once the
+    // plugin is gone.
+    if let Some(host) = t.host {
+        removed |= strip_legacy(host)?;
+    }
     Ok(UninstallReport {
         outcome: if removed {
             UninstallOutcome::Removed

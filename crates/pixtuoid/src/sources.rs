@@ -118,7 +118,7 @@ pub(crate) struct OutcomeRow {
 impl OutcomeRow {
     /// The message is control-char-stripped HERE, where the untrusted value
     /// enters the row: it folds another CLI's config content verbatim (a failed
-    /// `connect codex` embeds the RAW offending source line) and
+    /// `connect codewhale` embeds the RAW offending source line) and
     /// `sources_cli::text_line` prints it to a real terminal (R0615-06).
     pub(crate) fn new(id: String, outcome: &ChangeOutcome) -> Self {
         OutcomeRow {
@@ -704,8 +704,14 @@ mod tests {
             "non-web profiles compose patches once at boot; web hot-reloads — got {hint:?}"
         );
 
+        let hint = post_install_hint("codex").expect("codex needs a trust step");
+        assert!(
+            hint.contains("Hooks need review"),
+            "untrusted hooks never run, so the step names Codex's own prompt — got {hint:?}"
+        );
+
         for id in pixtuoid_core::source::registry::registered_source_names() {
-            if id == "openclaw" || id == "omp" || id == "dsh" {
+            if id == "codex" || id == "openclaw" || id == "omp" || id == "dsh" {
                 continue;
             }
             assert!(
