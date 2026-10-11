@@ -53,7 +53,7 @@ const SWEEP_SIZES: &[(u16, u16)] = &[
 
 /// Seeds swept per size. 0..12 reaches every `FloorVariant` through its
 /// hash, pinned by `the_sweep_reaches_every_floor_variant`.
-const SWEEP_SEEDS: std::ops::Range<u64> = 0..12;
+pub(super) const SWEEP_SEEDS: std::ops::Range<u64> = 0..12;
 
 /// Run `f` over `SWEEP_SIZES` × `seeds` at production fill (`max_desks: None`,
 /// the densest desk grid — the strictest placement case). A `None` layout is
@@ -1019,7 +1019,7 @@ fn no_walkable_hole_where_a_vertical_wall_meets_a_horizontal_one() {
 /// not 64, to cover the FULL single-pod-column window: the desk grid stays one
 /// column through buf_w≈70 and only splits to two (two drains, robust) at ≈71,
 /// and the discrete grid's nearest points either side are 64 and 80.
-const NARROW_BAND: std::ops::RangeInclusive<u16> = super::compute::MIN_LAYOUT_W..=76;
+pub(super) const NARROW_BAND: std::ops::RangeInclusive<u16> = super::compute::MIN_LAYOUT_W..=76;
 
 /// The Y twin of the width scan below: the derived height floor opened 45..59, where
 /// `pod_rows` collapses to 1 and the appliance aisle sits at its 8px minimum. The
@@ -1306,21 +1306,6 @@ fn assert_each_appliance_lands_where_its_aisle_fits(w: u16, h: u16, seed: u64, l
 fn each_appliance_lands_wherever_its_aisle_fits() {
     sweep(assert_each_appliance_lands_where_its_aisle_fits);
     sweep_production_floors(assert_each_appliance_lands_where_its_aisle_fits);
-}
-
-/// The boundary scan can't catch an over-drop: dropping the couch only IMPROVES
-/// connectivity. 61x160 seed 1 is the KNIFE-EDGE — the floor lamp flanking the
-/// couch east (`compute::LoungeFlanks`) meets the door threshold's column
-/// with its padded ground exactly; 66x160 seed 3 clears comfortably.
-#[test]
-fn couch_survives_a_narrow_band_that_clears_the_door() {
-    for &(w, h, seed) in &[(61u16, 160u16, 1u64), (66, 160, 3)] {
-        let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("lays out");
-        assert!(
-            l.couch_sprite_center().is_some(),
-            "{w}x{h} seed {seed}: the lounge couch must survive a band that clears the door"
-        );
-    }
 }
 
 #[test]
