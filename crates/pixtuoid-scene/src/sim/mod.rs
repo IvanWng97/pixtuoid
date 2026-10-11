@@ -1032,7 +1032,7 @@ pub(crate) fn resolve_characters(
             Pose::Walking {
                 from,
                 to,
-                t_x1000,
+                progress,
                 travelled,
                 mut carrying_coffee,
             } => {
@@ -1044,7 +1044,7 @@ pub(crate) fn resolve_characters(
                 if carrying_coffee {
                     new_coffee_carriers.push(agent.agent_id);
                 }
-                let pos = walking_position(from, to, t_x1000);
+                let pos = walking_position(from, to, progress);
                 let walker_top_left = walking_top_left(pos, CHARACTER_SPRITE_W);
                 let dx = i32::from(to.x) - i32::from(from.x);
                 let dy = i32::from(to.y) - i32::from(from.y);

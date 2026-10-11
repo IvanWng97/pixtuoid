@@ -10,7 +10,7 @@ use crate::layout::{
     Bounds, DwellWindow, Point, SceneLayout, WaypointKind, desk_furniture_def,
     desk_walk_anchor_facing, furniture_def,
 };
-use crate::physics::PROGRESS_SCALE;
+use crate::physics::{Progress, distance_at};
 use crate::walk::{WanderKind, WanderTarget};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::Sprite;
@@ -57,15 +57,9 @@ pub(crate) fn walk_frame(travelled: u32, anim: &Sprite, stride: NonZeroU16) -> u
     ((u64::from(travelled) * frames / per_cycle) % frames) as usize
 }
 
-/// The distance `t_x1000` along a leg `length` long is, both in
-/// [`travelled`](Pose::Walking::travelled)'s unit.
-pub(crate) fn distance_at(t_x1000: u16, length: u32) -> u32 {
-    u32::from(t_x1000) * length / u32::from(PROGRESS_SCALE)
-}
-
-/// How far `t_x1000` along the straight leg `from`→`to` is.
-pub(crate) fn travelled_on(from: Point, to: Point, t_x1000: u16) -> u32 {
-    distance_at(t_x1000, super::octile_distance(from, to))
+/// How far `progress` along the straight leg `from`→`to` is.
+pub(crate) fn travelled_on(from: Point, to: Point, progress: Progress) -> u32 {
+    distance_at(progress, super::octile_distance(from, to))
 }
 
 /// Spawn-window guard for entry routing in `pose::derive_with_routing`: the
@@ -185,8 +179,8 @@ pub(crate) enum Pose {
         from: Point,
         /// Leg end point (layout pixels).
         to: Point,
-        /// Progress along the leg, `0..=PROGRESS_SCALE`.
-        t_x1000: u16,
+        /// Progress along the leg.
+        progress: Progress,
         /// How far into the whole leg the walker is, in octile units: the
         /// tenths of a layout pixel A* measures by.
         travelled: u32,
@@ -206,13 +200,18 @@ pub(crate) enum Pose {
 }
 
 impl Pose {
-    /// Walking `t_x1000` along the straight leg `from`→`to`, as far as that is.
-    pub(crate) fn walking(from: Point, to: Point, t_x1000: u16, carrying_coffee: bool) -> Self {
+    /// Walking `progress` along the straight leg `from`→`to`, as far as that is.
+    pub(crate) fn walking(
+        from: Point,
+        to: Point,
+        progress: Progress,
+        carrying_coffee: bool,
+    ) -> Self {
         Pose::Walking {
             from,
             to,
-            t_x1000,
-            travelled: travelled_on(from, to, t_x1000),
+            progress,
+            travelled: travelled_on(from, to, progress),
             carrying_coffee,
         }
     }
@@ -268,9 +267,7 @@ pub(crate) fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) ->
 /// distinct from the routed path's kinematic profiles — the overlay/snapshot
 /// path stays linear so it has no per-frame history.
 fn linear_walk_pose(since_ms: u64, from: Point, to: Point) -> Pose {
-    let scale = u64::from(PROGRESS_SCALE);
-    let t = (since_ms * scale / ENTRY_ANIMATION_MS).min(scale) as u16;
-    Pose::walking(from, to, t, false)
+    Pose::walking(from, to, Progress::of(since_ms, ENTRY_ANIMATION_MS), false)
 }
 
 /// The state→pose tail shared by `derive` and `derive_state_only`, applied
@@ -549,16 +546,13 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         Pose::SeatedIdle
     } else if phase_t < walk_out_end {
         let span = walk_out_end - seated_end;
-        let t = ((phase_t - seated_end) * u64::from(PROGRESS_SCALE) / span) as u16;
+        let t = Progress::of(phase_t - seated_end, span);
         Pose::walking(desk, dest, t, false)
     } else if phase_t < at_wp_end {
         at_dest_pose
     } else {
-        // `span == WANDER_WALK_EST_MS` by construction; assert it so a future
-        // estimate-constant change that zeroed it can't divide by zero here.
         let span = cycle_ms - at_wp_end;
-        debug_assert!(span > 0, "idle_pose walk-back span invariant violated");
-        let t = ((phase_t - at_wp_end) * u64::from(PROGRESS_SCALE) / span) as u16;
+        let t = Progress::of(phase_t - at_wp_end, span);
         Pose::walking(dest, desk, t, target.kind.carries_coffee())
     }
 }

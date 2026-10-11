@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
-use crate::physics::{WalkIntent, WalkProfile, walk_arrived, walk_profile};
+use crate::physics::{Progress, WalkIntent, WalkProfile, walk_arrived, walk_profile};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
@@ -50,9 +50,9 @@ pub(crate) enum WanderPhase {
 pub(crate) struct WanderFrame {
     /// The resolved phase this frame — selects the pose builder's arm.
     pub phase: WanderPhase,
-    /// Physics walk progress, `0..=`[`PROGRESS_SCALE`](crate::physics::PROGRESS_SCALE),
-    /// meaningful ONLY in `WalkingOut`/`WalkingBack` (0 otherwise).
-    pub t_x1000: u16,
+    /// Physics walk progress, meaningful ONLY in `WalkingOut`/`WalkingBack`
+    /// ([`Progress::ZERO`] otherwise).
+    pub progress: Progress,
     /// The current trip's destination cell (the walk `to` / waypoint `dest`).
     pub dest: Point,
     /// The current trip's kind — the seat cell + waypoint identity the walk /
@@ -368,14 +368,14 @@ pub(crate) fn advance_wander(
                         .unwrap_or(now);
                 }
             }
-            (walk.wander.phase, 0)
+            (walk.wander.phase, Progress::ZERO)
         }
 
         WanderPhase::WalkingOut(profile) => {
             match poll_walk_leg(&profile, elapsed_phase, may_transition) {
                 WalkLegStatus::InFlight(t) => (WanderPhase::WalkingOut(profile), t),
                 WalkLegStatus::Arrived {
-                    t_x1000,
+                    progress,
                     walk_total,
                 } => {
                     // Snapshot the walk-back profile now — the overlay may differ
@@ -383,7 +383,7 @@ pub(crate) fn advance_wander(
                     let back = snapshot_back_profile(slot, walk, layout, router, overlay);
                     walk.wander.phase = WanderPhase::AtWaypoint(back);
                     advance_phase_clock(walk, walk_total, now);
-                    (WanderPhase::AtWaypoint(back), t_x1000)
+                    (WanderPhase::AtWaypoint(back), progress)
                 }
             }
         }
@@ -397,7 +397,7 @@ pub(crate) fn advance_wander(
                     .checked_add(Duration::from_millis(dwell_dur))
                     .unwrap_or(now);
             }
-            (walk.wander.phase, 0)
+            (walk.wander.phase, Progress::ZERO)
         }
 
         WanderPhase::WalkingBack(profile) => {
@@ -410,7 +410,7 @@ pub(crate) fn advance_wander(
                     walk.wander.target.kind = WanderKind::Aimless;
                     walk.wander.phase = WanderPhase::Seated;
                     advance_phase_clock(walk, walk_total, now);
-                    (WanderPhase::Seated, 0)
+                    (WanderPhase::Seated, Progress::ZERO)
                 }
             }
         }
@@ -422,34 +422,34 @@ pub(crate) fn advance_wander(
 
     // `result.0` == `walk.wander.phase` in every arm, so the frame's
     // `dest`/`kind` always describe the returned phase.
-    let (phase, t_x1000) = result;
+    let (phase, progress) = result;
     WanderFrame {
         phase,
-        t_x1000,
+        progress,
         dest: walk.wander.target.dest,
         kind: walk.wander.target.kind,
     }
 }
 
 enum WalkLegStatus {
-    /// Still walking: the physics progress `t_x1000`, `0..=`[`PROGRESS_SCALE`](crate::physics::PROGRESS_SCALE).
-    InFlight(u16),
+    /// Still walking: the physics progress.
+    InFlight(Progress),
     /// The walk and its pause have completed; `walk_total` = `duration_ms +
     /// pause_ms`.
-    Arrived { t_x1000: u16, walk_total: u64 },
+    Arrived { progress: Progress, walk_total: u64 },
 }
 
 /// The progress/arrival check the `WalkingOut` and `WalkingBack` arms share;
 /// each arm runs its OWN divergent on-arrival cleanup.
 fn poll_walk_leg(profile: &WalkProfile, elapsed_phase: u64, may_transition: bool) -> WalkLegStatus {
-    let t_x1000 = crate::physics::walk_progress(profile, elapsed_phase);
+    let progress = crate::physics::walk_progress(profile, elapsed_phase);
     if may_transition && walk_arrived(profile, elapsed_phase) {
         WalkLegStatus::Arrived {
-            t_x1000,
+            progress,
             walk_total: profile.duration_ms + profile.pause_ms,
         }
     } else {
-        WalkLegStatus::InFlight(t_x1000)
+        WalkLegStatus::InFlight(progress)
     }
 }
 
@@ -555,7 +555,7 @@ pub(crate) struct LegPlan {
 
 /// Freeze one walk leg's timing profile. Measuring the ROUTED (not raw)
 /// polyline is load-bearing: the duration must cover the whole path or `t`
-/// reaches [`PROGRESS_SCALE`](crate::physics::PROGRESS_SCALE) before the sprite
+/// reaches [`Progress::DONE`] before the sprite
 /// arrives and it pops.
 pub(crate) fn snapshot_leg_profile(
     router: &mut dyn Router,

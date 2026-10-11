@@ -164,8 +164,8 @@ pub(crate) fn character_top_left(
         }
         Pose::AimlessAt { dest: at } | Pose::Held { at } => waypoint_top_left(at, w),
         Pose::Walking {
-            from, to, t_x1000, ..
-        } => walking_top_left(crate::physics::walking_position(from, to, t_x1000), w),
+            from, to, progress, ..
+        } => walking_top_left(crate::physics::walking_position(from, to, progress), w),
     };
     Some(on_canvas(
         layout,

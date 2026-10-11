@@ -13,7 +13,7 @@ use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 
 use crate::physics::{
-    PROGRESS_SCALE, WalkIntent, WalkProfile, walk_arrived, walk_progress, walking_position,
+    Progress, WalkIntent, WalkProfile, distance_at, walk_arrived, walk_progress, walking_position,
 };
 use crate::walk::{
     LegPlan, Lifted, Settle, WalkLeg, WalkPathSnapshot, WalkState, WanderKind, WanderPhase,
@@ -33,7 +33,7 @@ pub use pure::{
 };
 // These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
 // visibility.
-pub(crate) use pure::{SpotClaims, distance_at, resolve_wander_target, typing_frame, walk_frame};
+pub(crate) use pure::{SpotClaims, resolve_wander_target, typing_frame, walk_frame};
 
 use crate::layout::{Point, SceneLayout, desk_walk_anchor_facing};
 use crate::pathfind::Router;
@@ -232,7 +232,7 @@ fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
 ///
 /// [`RouteCtx::walks`] drives entry/exit physics — the A* path length is
 /// snapshotted into a `WalkProfile` on first sighting (commit-to-route), and
-/// later frames compute `t_x1000` against that frozen profile.
+/// later frames compute progress against that frozen profile.
 /// [`RouteCtx::history`] is consulted on state transitions so an agent whose
 /// pose flipped mid-wander walks back to the desk instead of teleporting.
 pub(crate) fn derive_with_routing(
@@ -300,7 +300,7 @@ pub(crate) fn derive_with_routing(
             return None;
         }
 
-        let t_x1000 = walk_progress(profile, eff_elapsed);
+        let progress = walk_progress(profile, eff_elapsed);
 
         // Must reproduce the snapshotted profile's endpoints, or the leg's
         // duration no longer matches the distance it renders.
@@ -317,7 +317,7 @@ pub(crate) fn derive_with_routing(
             now,
             layout,
             rctx,
-            Pose::walking(from, door_target, t_x1000, false),
+            Pose::walking(from, door_target, progress, false),
             exit_settle,
         );
     }
@@ -381,13 +381,13 @@ pub(crate) fn derive_with_routing(
         let elapsed_ms = crate::anim::elapsed_ms(now, started_at);
 
         if !walk_arrived(&profile, elapsed_ms) {
-            let t_x1000 = walk_progress(&profile, elapsed_ms);
+            let progress = walk_progress(&profile, elapsed_ms);
             return route_walking_pose(
                 slot,
                 now,
                 layout,
                 rctx,
-                Pose::walking(from, approach, t_x1000, false),
+                Pose::walking(from, approach, progress, false),
                 settle,
             );
         }
@@ -423,7 +423,7 @@ pub(crate) fn derive_with_routing(
                     now,
                     layout,
                     rctx,
-                    Pose::walking(from, dest, wf.t_x1000, false),
+                    Pose::walking(from, dest, wf.progress, false),
                     settle,
                 );
             }
@@ -447,7 +447,7 @@ pub(crate) fn derive_with_routing(
                     now,
                     layout,
                     rctx,
-                    Pose::walking(wf.dest, snap_target, wf.t_x1000, carrying_coffee),
+                    Pose::walking(wf.dest, snap_target, wf.progress, carrying_coffee),
                     settle,
                 );
             }
@@ -531,7 +531,7 @@ pub(crate) fn derive_with_routing(
                     walk.snap_back = None;
                     raw
                 } else {
-                    let t_x1000 = walk_progress(&profile, elapsed_ms);
+                    let progress = walk_progress(&profile, elapsed_ms);
                     // Deterministic, so the rendered leg reproduces the armed
                     // profile's endpoint.
                     let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
@@ -539,7 +539,7 @@ pub(crate) fn derive_with_routing(
                     // The FROZEN origin from arm time, not the per-frame `prev`:
                     // history holds the advancing walker, so reading it back creeps
                     // `from` deskward and breaks the freeze's `wp.from == from` guard.
-                    Pose::walking(snap_prev, snap_target, t_x1000, false)
+                    Pose::walking(snap_prev, snap_target, progress, false)
                 }
             }
             _ => raw,
@@ -642,7 +642,7 @@ fn route_walking_pose(
     let Pose::Walking {
         from,
         to,
-        t_x1000,
+        progress,
         travelled: _,
         carrying_coffee,
     } = pose
@@ -704,20 +704,20 @@ fn route_walking_pose(
     };
     if path.len() <= 2 {
         // Record the interpolated position for the next frame's snap-back lookup.
-        history.record(slot.agent_id, walking_position(from, to, t_x1000), now);
-        return Some(Pose::walking(from, to, t_x1000, carrying_coffee));
+        history.record(slot.agent_id, walking_position(from, to, progress), now);
+        return Some(Pose::walking(from, to, progress, carrying_coffee));
     }
     let total = crate::walk::octile_path_len(&path);
     if total == 0 {
         return Some(pose);
     }
-    let travelled = distance_at(t_x1000, total);
+    let travelled = distance_at(progress, total);
     let leg = Leg::along(&path, travelled);
     history.record(slot.agent_id, leg.at(), now);
     Some(Pose::Walking {
         from: leg.from,
         to: leg.to,
-        t_x1000: leg.t_x1000,
+        progress: leg.progress,
         travelled: leg.travelled,
         carrying_coffee,
     })
@@ -730,7 +730,7 @@ fn route_walking_pose(
 pub(crate) struct Leg {
     pub(crate) from: Point,
     pub(crate) to: Point,
-    pub(crate) t_x1000: u16,
+    pub(crate) progress: Progress,
     pub(crate) travelled: u32,
 }
 
@@ -742,15 +742,10 @@ impl Leg {
         for w in path.windows(2) {
             let leg = octile_distance(w[0], w[1]);
             if acc + leg >= travelled {
-                let scale = u32::from(PROGRESS_SCALE);
-                let t_x1000 = ((travelled - acc) * scale)
-                    .checked_div(leg)
-                    .map(|t| t.min(scale) as u16)
-                    .unwrap_or(PROGRESS_SCALE);
                 return Leg {
                     from: w[0],
                     to: w[1],
-                    t_x1000,
+                    progress: Progress::of(u64::from(travelled - acc), u64::from(leg)),
                     travelled,
                 };
             }
@@ -760,14 +755,14 @@ impl Leg {
         Leg {
             from: path[last.saturating_sub(1)],
             to: path[last],
-            t_x1000: PROGRESS_SCALE,
+            progress: Progress::DONE,
             travelled: acc,
         }
     }
 
     /// The point it stands on.
     pub(crate) fn at(self) -> Point {
-        walking_position(self.from, self.to, self.t_x1000)
+        walking_position(self.from, self.to, self.progress)
     }
 }
 

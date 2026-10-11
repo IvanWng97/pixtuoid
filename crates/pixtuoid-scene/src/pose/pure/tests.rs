@@ -124,9 +124,14 @@ fn idle_phase_1_is_walking_out() {
     let l = layout();
     match derive(&s, now, &l).expect("pose") {
         Pose::Walking {
-            t_x1000, travelled, ..
+            progress,
+            travelled,
+            ..
         } => {
-            assert!((400..=600).contains(&t_x1000), "t_x1000={t_x1000}");
+            assert!(
+                (Progress::of(2, 5)..=Progress::of(3, 5)).contains(&progress),
+                "progress={progress:?}"
+            );
             assert!(travelled > 0, "halfway down the leg, it has walked");
         }
         other => panic!("expected Walking, got {other:?}"),
@@ -158,8 +163,8 @@ fn idle_phase_3_is_walking_back() {
     let (s, now) = slot(ActivityState::Idle, midpoint);
     let l = layout();
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking { t_x1000, .. } => {
-            assert!((400..=600).contains(&t_x1000));
+        Pose::Walking { progress, .. } => {
+            assert!((Progress::of(2, 5)..=Progress::of(3, 5)).contains(&progress));
         }
         other => panic!("expected Walking, got {other:?}"),
     }
@@ -374,9 +379,12 @@ fn entry_animation_overrides_normal_pose_for_first_4s() {
     let probe = now0 + Duration::from_millis(1500);
     let l = layout();
     match derive(&s, probe, &l).expect("pose") {
-        Pose::Walking { t_x1000, .. } => {
-            // 1500/4000 = 0.375 → t_x1000 ~= 375
-            assert!((300..=450).contains(&t_x1000), "t_x1000={t_x1000}");
+        Pose::Walking { progress, .. } => {
+            // 1500/4000 = 0.375
+            assert!(
+                (Progress::of(3, 10)..=Progress::of(9, 20)).contains(&progress),
+                "progress={progress:?}"
+            );
         }
         other => panic!("expected Walking entry, got {other:?}"),
     }
@@ -735,9 +743,12 @@ fn walk_out_intact_when_gate_releases_during_the_seated_phase() {
     let mid_walk_out = seated_dwell_ms(id) + WANDER_WALK_EST_MS / 2;
     let now = s.state_started_at + Duration::from_millis(mid_walk_out);
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking { from, t_x1000, .. } => {
+        Pose::Walking { from, progress, .. } => {
             assert_eq!(from, desk, "cycle-0 walk-out starts from the desk");
-            assert!((400..=600).contains(&t_x1000), "t_x1000={t_x1000}");
+            assert!(
+                (Progress::of(2, 5)..=Progress::of(3, 5)).contains(&progress),
+                "progress={progress:?}"
+            );
         }
         other => panic!("expected the cycle-0 walk-out, got {other:?}"),
     }
@@ -756,9 +767,12 @@ fn cycle_after_a_suppressed_release_walks_out_from_its_beginning() {
     let mid_walk_out = cycle + seated_dwell_ms(id) + WANDER_WALK_EST_MS / 2;
     let now = s.state_started_at + Duration::from_millis(mid_walk_out);
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking { from, t_x1000, .. } => {
+        Pose::Walking { from, progress, .. } => {
             assert_eq!(from, desk, "cycle-1 walk-out starts from the desk");
-            assert!((400..=600).contains(&t_x1000), "t_x1000={t_x1000}");
+            assert!(
+                (Progress::of(2, 5)..=Progress::of(3, 5)).contains(&progress),
+                "progress={progress:?}"
+            );
         }
         other => panic!("expected the cycle-1 walk-out, got {other:?}"),
     }

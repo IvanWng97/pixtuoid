@@ -21,9 +21,9 @@ use crate::layout::{Point, SceneLayout};
 use crate::pathfind::{OCTILE_STRAIGHT_COST, Router, snap_point_to_walkable, snap_point_where};
 use crate::pet::PetKind;
 use crate::physics::{
-    Gait, WALK_ACCEL, WalkProfile, walk_arrived, walk_profile_for, walk_progress,
+    Gait, WALK_ACCEL, WalkProfile, distance_at, walk_arrived, walk_profile_for, walk_progress,
 };
-use crate::pose::{Leg, STALE_RESUME_GAP_BASE_MS, distance_at};
+use crate::pose::{Leg, STALE_RESUME_GAP_BASE_MS};
 use crate::walk::octile_path_len;
 
 /// How close a resting spot must be to an idle agent's desk to count as "napping
@@ -762,12 +762,12 @@ mod tests {
         const PAINTS: usize = (1_000 / PAINT_MS) as usize;
         let pack = test_pack();
         let l = layout(192, 80);
-        // the travel `t_x1000` rounds at each end of a span, on a path about
+        // the travel progress rounds at each end of a span, on a path about
         // the floor's width and height long
         let rounding = 2
             * u64::from(l.walkable.width() + l.walkable.height())
             * u64::from(OCTILE_STRAIGHT_COST)
-            / u64::from(crate::physics::PROGRESS_SCALE)
+            / u64::from(crate::physics::Progress::SCALE)
             + 1;
         for (walk, roam, ticks) in roams(&pack) {
             let anim = walk.piece().name();
