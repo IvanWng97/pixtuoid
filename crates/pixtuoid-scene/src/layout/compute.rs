@@ -1851,7 +1851,6 @@ mod tests {
         use crate::layout::SceneLayout;
         use crate::layout::placement_sweep::{NARROW_BAND, SWEEP_SEEDS};
         let h = 160;
-        let mut exact_fits = 0;
         for seed in SWEEP_SEEDS {
             let scan: Vec<(u16, bool, Option<u16>, u16)> = NARROW_BAND
                 .map(|w| {
@@ -1876,21 +1875,23 @@ mod tests {
             }
             let exact = scan
                 .iter()
-                .find(|&&(_, kept, east, threshold)| kept && east == Some(threshold));
-            let below = exact.and_then(|e| scan.iter().find(|&&(w, ..)| w + 1 == e.0));
-            if let Some(below) = below {
-                exact_fits += 1;
-                assert!(
-                    !below.1 && below.2.is_some_and(|e| e > below.3),
-                    "seed {seed}: the width below the exact fit must drop the lounge for \
-                     crossing the threshold: {below:?}"
-                );
-            }
+                .find(|&&(_, kept, east, threshold)| kept && east == Some(threshold))
+                .unwrap_or_else(|| panic!("seed {seed}: no width meets the threshold exactly"));
+            let below = scan
+                .iter()
+                .find(|&&(w, ..)| w + 1 == exact.0)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "seed {seed}: the width below {} falls outside the band",
+                        exact.0
+                    )
+                });
+            assert!(
+                !below.1 && below.2.is_some_and(|e| e > below.3),
+                "seed {seed}: the width below the exact fit must drop the lounge for \
+                 crossing the threshold: {below:?}"
+            );
         }
-        assert!(
-            exact_fits > 0,
-            "no seed puts an exact fit with the width below it inside the band"
-        );
     }
 
     /// The couch↔door gate reads the column past the lamp's ground AS THE MASK
