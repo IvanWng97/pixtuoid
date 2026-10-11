@@ -30,8 +30,8 @@ impl FlashPhase {
 }
 
 /// The phases a picture shows: a floor slide's two floors', or one floor's.
-/// Only a session makes one that flashes, of the picture it last drew, so no
-/// painter's hold can key on half a slide.
+/// Only a session makes one that flashes, of its picture, so no painter's
+/// hold can key on half a slide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Flashes([FlashPhase; 2]);
 
@@ -158,6 +158,7 @@ impl Admit {
 /// the picture on it answers a pointer with, through the painter's geometry
 /// `G` (its cells, its window pixels). A held or lost write leaves the screen
 /// showing the last, and a pointer hitting it.
+#[derive(Debug)]
 pub struct Screen<S, G> {
     hold: FlashHold<S>,
     /// The write under way, shown once it [`landed`](Self::landed).
@@ -172,16 +173,6 @@ struct Showing<G> {
     geometry: G,
     /// The board's star where the painter set the text itself.
     host_star: Option<crate::layout::Bounds>,
-}
-
-impl<S: std::fmt::Debug, G: std::fmt::Debug> std::fmt::Debug for Screen<S, G> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Screen")
-            .field("hold", &self.hold)
-            .field("staged", &self.staged)
-            .field("shown", &self.shown)
-            .finish()
-    }
 }
 
 /// The picture a [`Screen`] shows, as its painter's geometry maps onto it.

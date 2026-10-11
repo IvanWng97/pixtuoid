@@ -19,8 +19,7 @@ use super::{
 use crate::footer::FooterFloor;
 
 /// One floor of a painter's office: its raster and sim stores, and what its
-/// last frame laid out, occupied and flashed, so a painter reads the frame it
-/// just drew.
+/// last frame laid out, occupied and flashed.
 #[derive(Debug)]
 pub(crate) struct FloorView {
     pub(super) floor: PerFloor,
@@ -127,8 +126,7 @@ impl FloorView {
 #[must_use]
 #[derive(Debug)]
 pub struct Frame {
-    /// Its audio intent: `AudioObserver::frame`'s every-world-frame
-    /// contract.
+    /// Its audio intent.
     pub audio: AudioFrame,
     /// What the floor showing was drawn under, for a painter's jank report.
     #[doc(hidden)]
@@ -528,7 +526,6 @@ impl OfficeSession {
 
     /// A frame drew no office (a painter's too-small screen): the floor
     /// showing keeps nothing of its last, so its audio hears an empty floor.
-    /// Its audio, under `office_floor`'s weather and motion.
     pub fn no_office(
         &mut self,
         scene: &SceneState,

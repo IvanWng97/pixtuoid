@@ -136,7 +136,7 @@ pub struct Rendered {
     pub(crate) hits: Hits,
     /// Waypoints with an occupant: the appliance audio cues' feed.
     pub(crate) occupied_waypoints: HashSet<usize>,
-    /// What of the frame flashes, which its session's `flashes()` reports.
+    /// What of the frame flashes.
     pub(crate) flash: crate::screen::FlashPhase,
 }
 

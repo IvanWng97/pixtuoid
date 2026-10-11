@@ -78,8 +78,8 @@ pub(crate) struct TileCutaway {
     /// What the tiles are cut from when sent: the last frame, or a slide's
     /// two composed.
     image: RgbBuffer,
-    /// The last frame or slide the flash hold kept back: [`Self::image`]
-    /// lags it whatever the next frame's damage.
+    /// The last frame or slide the screen held back: [`Self::image`] lags
+    /// it whatever the next frame's damage.
     image_behind: bool,
     /// What the last image showed: a floor's raster diffs against its own
     /// last frame, so any other image before it — a slide, another floor —

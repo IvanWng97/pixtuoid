@@ -433,8 +433,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         shown.hits().and(shown.geometry.area_at(col, row))
     }
 
-    /// A left press at cell `(col, row)` at `now`: on what the last frame
-    /// showed there, a click or a drag follows.
+    /// A left press at cell `(col, row)` at `now`: on what the terminal
+    /// shows there, a click or a drag follows.
     pub(crate) fn press(&mut self, col: u16, row: u16, now: std::time::SystemTime) {
         let Some(cell) = self.scene_area_at(col, row) else {
             // As any press does: a carry whose release never came ends here.
@@ -512,7 +512,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         shown.hit_at(shown.geometry.area_at(col, row)?.bounds())
     }
 
-    /// The agent topmost at cell `(col, row)` in the last frame drawn.
+    /// The agent topmost at cell `(col, row)` in the frame the terminal
+    /// shows.
     #[cfg(test)]
     pub(crate) fn hit_test_agent_at(&self, col: u16, row: u16) -> Option<pixtuoid_core::AgentId> {
         match self.scene_hit_at(col, row)? {
@@ -595,8 +596,8 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.chrome.active_pet.as_ref()
     }
 
-    /// The pet the last frame drew, found as the pointer finds it: on some
-    /// logical pixel it is the topmost hover.
+    /// The pet the frame the terminal shows drew, found as the pointer finds
+    /// it: on some logical pixel it is the topmost hover.
     #[cfg(test)]
     pub(crate) fn drawn_pet(&self) -> Option<pixtuoid_scene::display::PetHover> {
         let hits = self.screen.shown()?.hits()?;
@@ -955,7 +956,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let admit = self.screen.admit(&picture, term_size, geometry, star);
         cutaway.paint(fitted, &picture, admit, now);
         if !admit.written() {
-            // The terminal still shows the last frame, and its hit targets.
             return Ok(drawn);
         }
         let mouse = floor.zip(mouse_pos).and_then(|(floor, (mx, my))| {
