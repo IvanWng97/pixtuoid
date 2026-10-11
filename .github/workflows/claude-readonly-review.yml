@@ -175,11 +175,14 @@ jobs:
 
       # REVIEW.md's Re-review keys on it: the heads the review was published
       # at before this one, from the PR comments headed by its title. A
-      # re-review of a head counts it once, and a deleted comment undercounts,
-      # which posts more.
+      # re-review of a head counts it once, and a head whose own change against
+      # main repeats the previous reviewed head's shares its round. A deleted
+      # comment or a diff that cannot be had leaves its head out, which
+      # undercounts: the review posts more, never less.
       - name: Count the review's rounds
         if: steps.pr.outputs.reviewable == 'true'
         env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
@@ -187,11 +190,29 @@ jobs:
         run: |
           set -euo pipefail
           earlier="$(gh api --paginate --slurp "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" |
-            jq --arg heading "## $REVIEW_TITLE" --arg head "$HEAD_SHA" '
+            jq -r --arg heading "## $REVIEW_TITLE" --arg head "$HEAD_SHA" '
               [add[] | select(.user.login == "github-actions[bot]" and (.body | split("\n")[0]) == $heading)
                 | .body | capture("(?m)^Head: `(?<sha>[0-9a-f]+)`").sha | select(. != $head)]
-              | unique | length')"
-          echo "Round: $((earlier + 1))" >> .claude-review/review-context.md
+              | reduce .[] as $sha ([]; if index($sha) then . else . + [$sha] end) | .[]')"
+          # A hash of the PR's own change at a head. `git patch-id` also hashes
+          # the context lines, which a merge of main that edits above the hunk
+          # moves; the changed lines, file headers and mode lines it leaves as they were.
+          own_change_id() {
+            gh api -H "Accept: application/vnd.github.v3.diff" \
+              "repos/${REPOSITORY}/compare/${DEFAULT_BRANCH}...$1" |
+              grep -E '^(diff --git |[+-]|(old|new|deleted file|new file) mode )' | git hash-object --stdin
+          }
+          round=1
+          previous_id=""
+          for sha in $earlier "$HEAD_SHA"; do
+            change_id="$(own_change_id "$sha")" || {
+              echo "::notice title=Round count::no diff for ${sha::7}, so it is left out"
+              continue
+            }
+            [[ -z "$previous_id" || "$change_id" == "$previous_id" ]] || round=$((round + 1))
+            previous_id="$change_id"
+          done
+          echo "Round: $round" >> .claude-review/review-context.md
 
       - name: Record the PR title and body
         if: steps.pr.outputs.reviewable == 'true'

@@ -111,7 +111,7 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
         return SchemaParse::broken("could not read HOOK_PATH from the omp extension");
     };
     let stale = render_extension(&p.to_string_lossy())
-        .map(|want| want.trim() != content.trim())
+        .map(|want| crate::install::plugin_code_differs(content, &want))
         .unwrap_or(false);
     SchemaParse {
         shim: ShimRef::Absolute(p),
@@ -292,6 +292,11 @@ mod tests {
         assert!(
             verify_schema(&current).issues.is_empty(),
             "the extension this binary would install must verify clean"
+        );
+        let reworded = verify_schema(&crate::install::comment_only_edit(&current)).issues;
+        assert!(
+            reworded.is_empty(),
+            "an extension whose comments alone changed must verify clean, got {reworded:?}"
         );
 
         // An older pixtuoid's extension: same sentinel, same baked path, one

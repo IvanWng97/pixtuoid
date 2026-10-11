@@ -5,8 +5,6 @@ use crate::graphics::kitty::PLACEHOLDER;
 use crate::graphics::{CellSize, ImageProtocol, cutaway_fit};
 use crate::tui::cutaway::TileCutaway;
 use pixtuoid_core::sprite::format::Density;
-use std::io::Write;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A cell whose natural scale is the bundled art's density, so the image is
@@ -15,32 +13,6 @@ const CELL: CellSize = CellSize { w: 4, h: 8 };
 const TRANSMIT: &str = "\x1b_Ga=T,";
 const SIXEL: &str = "\x1bP9;1q";
 const ITERM2: &str = "\x1b]1337;File=";
-
-/// The terminal's side of the transmits; set `fail` to make it refuse writes
-/// as a full terminal does (`WouldBlock`), or `slow` to make a flush take that
-/// long on a screen clock.
-#[derive(Clone, Default)]
-struct Wire {
-    bytes: Arc<Mutex<Vec<u8>>>,
-    fail: Arc<AtomicBool>,
-    slow: Arc<Mutex<Option<Latency>>>,
-}
-
-impl Write for Wire {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if self.fail.load(Ordering::Relaxed) {
-            return Err(std::io::ErrorKind::WouldBlock.into());
-        }
-        self.bytes.lock().expect("lock").extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        if let Some(latency) = &*self.slow.lock().expect("lock") {
-            latency.land();
-        }
-        Ok(())
-    }
-}
 
 impl Wire {
     /// What arrived since the last take.
@@ -238,6 +210,44 @@ fn the_first_frame_transmits_and_an_identical_one_sends_nothing() {
     assert!(wire.take().contains(TRANSMIT));
     r.render(&scene, pack(), t0()).expect("render");
     assert_eq!(wire.take(), "");
+}
+
+/// The onboarding's backdrop dims the cutaway: the composed frame darkens
+/// under it, its tiles are sent again though nothing else in the office
+/// moved, and the world text the terminal sets over it darkens too.
+#[test]
+fn the_onboarding_dims_the_cutaway_and_sends_its_tiles() {
+    use crate::panels::welcome::OnboardingFrame;
+    let (mut r, wire) = kitty(120, 40);
+    let scene = office();
+    let lum = |r: &TuiRenderer<Window>| {
+        let frame = r.session.buf().expect("a frame");
+        avg_lum(frame, 0, 0, frame.width(), frame.height())
+    };
+    r.render(&scene, pack(), t0()).expect("render");
+    let bright = lum(&r);
+    let bright_cells = r.frame_buffer().clone();
+    wire.take();
+    r.set_frames(
+        RenderFrames {
+            onboarding: OnboardingFrame {
+                open: true,
+                dim: pixtuoid_scene::look::Dim::from_brightness(0.4),
+                ..OnboardingFrame::default()
+            },
+            ..RenderFrames::default()
+        },
+        t0(),
+    );
+    r.render(&scene, pack(), t0()).expect("render");
+    let dim = lum(&r);
+    assert!(dim < bright * 0.6, "dim={dim} vs bright={bright}");
+    assert!(wire.take().contains(TRANSMIT), "the dimmed tiles are sent");
+    assert_world_text_dims(
+        &bright_cells,
+        r.frame_buffer(),
+        pixtuoid_scene::look::Dim::from_brightness(0.4),
+    );
 }
 
 /// A frame encoded across four threads, on any machine, still reaches the
@@ -1087,7 +1097,7 @@ fn each_stutter_phase_holds_the_floor_on_screen_at_every_protocols_cadence() {
                 }
             }
             let at = format!("{protocol:?}, a frame each {frame:?} from +{offset:?}");
-            assert_each_phase_holds_the_floor(&changed, stutter.changes, &at);
+            assert_each_phase_holds_the_floor(&changed, stutter.changes.len(), &at);
         }
     }
 }
@@ -1457,4 +1467,69 @@ fn a_floor_clamped_into_view_repaints_whole() {
         terminal == want,
         "the terminal still shows the vanished floor"
     );
+}
+
+/// `w` follows the look the last frame drew: not listed or read under the
+/// cutaway, which never draws the walkable layer, and listed, read and drawn
+/// while a cell too small for the art falls back to the half-blocks.
+#[cfg(debug_assertions)]
+#[test]
+fn w_follows_the_look_the_frame_drew() {
+    use crossterm::event::KeyCode;
+    let (mut r, _wire) = kitty(140, 60);
+    let scene = office();
+    let cadence = ImageProtocol::Kitty.cadence();
+    let w = |r: &mut TuiRenderer<Window>| {
+        crate::tui::toggle_walkable_debug_on_w(
+            r,
+            KeyCode::Char('w'),
+            &crate::panels::ModalState::closed(),
+        )
+    };
+    // The help the frame draws: its text, read off the composed cells.
+    let help = |r: &mut TuiRenderer<Window>, at| {
+        r.set_frames(
+            RenderFrames {
+                help_open: true,
+                ..Default::default()
+            },
+            t0(),
+        );
+        r.render(&scene, pack(), at).expect("render");
+        let text = frame_text(r.frame_buffer());
+        r.set_frames(RenderFrames::default(), t0());
+        text
+    };
+    r.render(&scene, pack(), t0()).expect("render");
+    assert!(!r.offers_walkable_debug(), "the cutaway");
+    let text = help(&mut r, t0() + cadence);
+    assert!(text.contains("Keyboard"), "premise: the help is drawn");
+    assert!(!text.contains("walkable"), "the cutaway's help: {text}");
+    assert!(!w(&mut r) && !r.debug_walkable());
+
+    r.terminal.backend_mut().zoom(CellSize {
+        w: CELL.w / 2,
+        h: CELL.h / 2,
+    });
+    r.render(&scene, pack(), t0() + cadence * 2)
+        .expect("render");
+    assert!(r.offers_walkable_debug(), "the fallback");
+    let text = help(&mut r, t0() + cadence * 3);
+    assert!(text.contains("walkable"), "the fallback's help: {text}");
+    r.render(&scene, pack(), t0() + cadence * 4)
+        .expect("render");
+    let before = r.buf().expect("a frame").clone();
+    assert!(w(&mut r));
+    r.render(&scene, pack(), t0() + cadence * 5)
+        .expect("render");
+    let after = r.buf().expect("a frame");
+    assert!(
+        region_diff(&before, after, 0, 0, before.width(), before.height()) > 1_000,
+        "the fallback's half-blocks show the layer"
+    );
+
+    r.terminal.backend_mut().zoom(CELL);
+    r.render(&scene, pack(), t0() + cadence * 6)
+        .expect("render");
+    assert!(!r.offers_walkable_debug(), "the cutaway is back");
 }

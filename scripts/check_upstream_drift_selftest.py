@@ -383,6 +383,105 @@ def test_two_declarations_are_probe_health_not_a_first_match() -> None:
         d.fetch = real
 
 
+def test_the_openclaw_degraded_watch_tells_a_vanished_field_from_a_missing_type() -> None:
+    """The hook-name sweep stays green while a field or literal the plugin stamps
+    `errored` from vanishes, and Degraded silently becomes unreachable."""
+    table = d.OPENCLAW_DEGRADED_FIELDS
+    check(bool(table), "the watch pins at least one type")
+    plugin = (d.REPO / "crates/pixtuoid/src/install/openclaw_plugin.js").read_text()
+    for fields in table.values():
+        for f, literal in fields:
+            check(re.search(rf"\.{f}\b", plugin) is not None,
+                  f"the watch pins `{f}`, which openclaw_plugin.js no longer reads")
+            if literal is not None:
+                check(re.search(rf"\.{f}\s*[!=]==\s*{re.escape(literal)}", plugin) is not None,
+                      f"the watch pins `{f}` {literal}, which openclaw_plugin.js no longer compares")
+
+    real = d.fetch
+    try:
+        rep0 = d.Report()
+        hooks = sorted(d.read_our_names(rep0).openclaw or ())
+        check(bool(hooks), "the fragment supplies the openclaw hook set")
+        # The anchor and every registered hook, so only the event types vary.
+        names = "export type PluginHookName =\n" + "".join(f'  | "{h}"\n' for h in hooks)
+
+        def member(f: str, literal: str | None, drop_literal: bool) -> str:
+            """A literal's union wraps one member per line, as upstream's formatter
+            does once the line passes its width."""
+            if literal is None:
+                return f"  {f}?: unknown;\n"
+            union = ['"other"'] if drop_literal else [literal, '"other"']
+            return f"  {f}?:\n" + "".join(f"    | {u}\n" for u in union[:-1]) + f"    | {union[-1]};\n"
+
+        def document(omit: tuple[str, str] | None = None,
+                     drop_literal: tuple[str, str] | None = None,
+                     rename: str | None = None) -> str:
+            """Every pinned type, each extending a base as upstream's model-call
+            events do. An omitted field also sits in a comment, a nested object and
+            the next type: the three spellings a whole-document match takes for a
+            declaration."""
+            out = names
+            for ty, fields in table.items():
+                decl = f"{ty}V2" if ty == rename else ty
+                out += f"export type {decl} = PluginHookContextWindow & {{\n  callId: string;\n"
+                for f, literal in fields:
+                    if (ty, f) == omit:
+                        out += f"  /*\n  {f}?: string;\n  */\n  detail?: {{\n    {f}?: string;\n  }};\n"
+                        continue
+                    out += member(f, literal, (ty, f) == drop_literal)
+                out += "};\n"
+                if omit is not None and ty == omit[0]:
+                    out += f"export type PluginHookNextEvent = {{\n  {omit[1]}?: string;\n}};\n"
+            return out
+
+        def drive(doc: str) -> d.Report:
+            def stub(u: str, _d: str = doc) -> str:
+                if u == d.OPENCLAW_HOOK_TYPES_URL:
+                    return _d
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        def on_table(lines: list[str]) -> list[str]:
+            return [x for x in lines if any(ty in x for ty in table)]
+
+        intact = drive(document())
+        check(not intact.breaking and not on_table(intact.blind),
+              f"every field declared -> silent; breaking={intact.breaking} "
+              f"blind={on_table(intact.blind)}")
+        for ty, fields in table.items():
+            for f, literal in fields:
+                gone = drive(document(omit=(ty, f)))
+                check(len(gone.breaking) == 1 and f"`{ty}`" in gone.breaking[0]
+                      and f"`{f}`" in gone.breaking[0] and not on_table(gone.blind),
+                      f"`{ty}.{f}` gone -> one breaking line naming it; "
+                      f"breaking={gone.breaking} blind={on_table(gone.blind)}")
+                if literal is not None:
+                    narrowed = drive(document(drop_literal=(ty, f)))
+                    check(len(narrowed.breaking) == 1 and literal in narrowed.breaking[0],
+                          f"`{ty}.{f}` without {literal} -> one breaking line naming it; "
+                          f"breaking={narrowed.breaking}")
+            renamed = drive(document(rename=ty))
+            check(not renamed.breaking and len(on_table(renamed.blind)) == 1
+                  and f"`{ty}`" in on_table(renamed.blind)[0],
+                  f"a missing `{ty}` is probe health, never drift; "
+                  f"breaking={renamed.breaking} blind={renamed.blind}")
+
+        one_line = drive(names + "".join(
+            f"export type {ty} = {{ "
+            + "; ".join(f"readonly {f}?: " + (literal or "unknown") for f, literal in fields)
+            + " };\n"
+            for ty, fields in table.items()))
+        check(not one_line.breaking and not on_table(one_line.blind),
+              f"a one-line restyle is not a vanish; breaking={one_line.breaking} "
+              f"blind={on_table(one_line.blind)}")
+    finally:
+        d.fetch = real
+
+
 def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
     """Two one-line edits reopen the gate with every other test still green:
     dropping `also=` makes the half-anchor check SKIP rather than fail, and

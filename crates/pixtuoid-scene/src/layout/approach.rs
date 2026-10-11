@@ -237,10 +237,16 @@ mod tests {
     }
 
     /// Build an open mask with a centred obstacle stamped exactly like
-    /// `mask.rs` does for a waypoint (pad = 1).
+    /// `mask.rs` does for a waypoint.
     fn mask_with_obstacle(w: u16, h: u16, pos: Point, fw: u16, fh: u16) -> WalkableMask {
         let mut m = WalkableMask::new_open(w, h);
-        m.mark_blocked(pos.x - fw / 2, pos.y - fh / 2, fw, fh, 1);
+        m.mark_blocked(
+            pos.x - fw / 2,
+            pos.y - fh / 2,
+            fw,
+            fh,
+            WAYPOINT_STAMP_PAD_PX,
+        );
         m
     }
 

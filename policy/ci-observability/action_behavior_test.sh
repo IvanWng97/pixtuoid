@@ -822,12 +822,19 @@ crate serde 1.0.2 >"$f/head123/Cargo.lock"
 run_exempt "$f" newer456 "a head that moved"
 assert_exempt "$f" pending "a head that moved"
 
-# ── The reviewer's round: the heads the review was published at before this one, plus one.
+# ── The reviewer's round: one per distinct own change among the heads the review was
+# published at, the current one included.
 round_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Count the review's rounds")"
 round_dir="$test_dir/round"
-mkdir -p "$round_dir/bin" "$round_dir/work/.claude-review"
-# shellcheck disable=SC2016 # The stub reads its fixture when it runs.
-printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' '[[ "$*" == *"/issues/42/comments"* ]]' 'cat "$ROUND_COMMENTS"' >"$round_dir/bin/gh"
+mkdir -p "$round_dir/bin" "$round_dir/diffs" "$round_dir/work/.claude-review"
+# The comments, and for a compare asking for a diff the fixture named for its head (none: the diff
+# cannot be had).
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+    'case "$*" in *"/issues/42/comments"*) cat "$ROUND_COMMENTS" ;;' \
+    '*"/compare/main..."*) [[ "$*" == *"Accept: application/vnd.github.v3.diff"* ]] || exit 1' \
+    'last="${!#}"; cat "$ROUND_DIFFS/${last##*...}" ;;' \
+    '*) exit 1 ;; esac' >"$round_dir/bin/gh"
 chmod +x "$round_dir/bin/gh"
 comment() { jq -cn --arg u "$1" --arg b "$2" '{user: {login: $u}, body: $b}'; }
 jq -cs '[.[:2], .[2:]]' <(
@@ -839,14 +846,68 @@ jq -cs '[.[:2], .[2:]]' <(
 ) >"$round_dir/comments.json"
 assert_round() {
     : >"$round_dir/work/.claude-review/review-context.md"
-    (cd "$round_dir/work" && PATH="$round_dir/bin:$PATH" ROUND_COMMENTS="$round_dir/comments.json" \
+    (cd "$round_dir/work" && PATH="$round_dir/bin:$PATH" ROUND_COMMENTS="${ROUND_COMMENTS_FILE:-$round_dir/comments.json}" \
         GH_TOKEN=t PR_NUMBER=42 REPOSITORY=owner/repo REVIEW_TITLE="$review_title" HEAD_SHA="$1" \
-        bash -c "$round_script") || fail "the round count exited non-zero"
+        DEFAULT_BRANCH=main ROUND_DIFFS="$round_dir/diffs" bash -c "$round_script" >/dev/null 2>&1) ||
+        fail "the round count exited non-zero"
     grep -qx "Round: $2" "$round_dir/work/.claude-review/review-context.md" ||
         fail "the round count at head $1 wrote $(<"$round_dir/work/.claude-review/review-context.md"), not Round: $2 ($3)"
 }
+# A PR diff whose own change is "-old / +$4" and whose hunk sits at line $2 under context $3.
+diff_of() { printf 'diff --git a/f b/f\nindex %s..%s 100644\n--- a/f\n+++ b/f\n@@ -%s,2 +%s,2 @@\n %s\n-old\n+%s\n' "$1" "$1" "$2" "$2" "$3" "$4"; }
+diff_of 1 10 ctx x >"$round_dir/diffs/a"
+diff_of 2 10 ctx y >"$round_dir/diffs/b"
+diff_of 3 10 ctx z >"$round_dir/diffs/c"
 assert_round c 3 "two heads of the review's, one reviewed twice, across pages"
 assert_round b 2 "a re-review of a head counts that head once"
+
+# A head whose own change against main is the previous head's spends no round:
+# a merge of main moves the context, the line numbers and the index lines only.
+diff_of 2 90 other x >"$round_dir/diffs/b"
+assert_round c 2 "a and b carry the same own change, so c is the second round"
+assert_round b 1 "b repeats a's own change: still the first round"
+
+# A diff that cannot be had leaves its head out, so it never raises the round.
+rm "$round_dir/diffs/b"
+assert_round c 2 "a head whose diff cannot be had is skipped"
+diff_of 4 7 elsewhere x >"$round_dir/diffs/c"
+assert_round c 1 "a main merge after a skipped head is still the first round"
+
+# The hash keeps every changed line: lines opening with -- or ++ are content.
+diff_of 1 10 ctx x >"$round_dir/diffs/a"
+{
+    diff_of 1 10 ctx x
+    printf -- '--- comment\n'
+} >"$round_dir/diffs/b"
+{
+    diff_of 1 10 ctx x
+    printf -- '--- other\n'
+} >"$round_dir/diffs/c"
+assert_round c 3 "changed lines that open with --- are told apart"
+
+# Heads count in the order their reviews were published, not in sha order.
+jq -cs '[.]' <(
+    comment "github-actions[bot]" "## $review_title"$'\n\nHead: `b`'
+    comment "github-actions[bot]" "## $review_title"$'\n\nHead: `a`'
+) >"$round_dir/comments-reversed.json"
+diff_of 1 10 ctx x >"$round_dir/diffs/a"
+diff_of 2 10 ctx y >"$round_dir/diffs/b"
+diff_of 3 10 ctx x >"$round_dir/diffs/c"
+ROUND_COMMENTS_FILE="$round_dir/comments-reversed.json" assert_round c 2 "b then a then c, where c repeats a: a is not compared with b first"
+
+# A mode change alone is a change of its own.
+diff_of 1 10 ctx x >"$round_dir/diffs/a"
+{
+    diff_of 1 10 ctx x
+    printf 'new mode 100755\n'
+} >"$round_dir/diffs/b"
+assert_round b 2 "a mode change on the same lines is a new change"
+
+# A change put back counts: it is a new change on the PR.
+diff_of 1 10 ctx x >"$round_dir/diffs/a"
+diff_of 2 10 ctx y >"$round_dir/diffs/b"
+diff_of 3 10 ctx x >"$round_dir/diffs/c"
+assert_round c 3 "a head restoring the first head's own change is a new round"
 
 # A manifest outside the lockfiles may move version strings, nothing else.
 f="$(exempt_case owner-swap)"

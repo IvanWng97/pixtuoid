@@ -17,6 +17,7 @@ mod fixtures;
 pub(crate) mod geometry;
 mod gpu;
 mod input;
+mod lifecycle;
 pub(crate) mod offscreen;
 pub(crate) mod overlays;
 mod window;

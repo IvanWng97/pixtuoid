@@ -68,6 +68,7 @@ fn inputs<'a>(scene: &'a SceneState, pack: &'a OfficeArt, now: SystemTime) -> Re
         size: SIZE,
         place: Place::default(),
         debug_walkable: false,
+        dim: crate::look::Dim::NONE,
     }
 }
 
@@ -392,4 +393,27 @@ fn a_new_pack_or_theme_empties_the_office_caches() {
     raster.serve(&other, cyberpunk);
     let packed = views(&mut raster.outside, &other, cyberpunk);
     assert!(!Arc::ptr_eq(&themed, &packed), "a new pack kept the views");
+}
+
+/// [`Dim::NONE`] leaves a frame as drawn; a dim darkens each pixel a frame
+/// may write, inside a clip where the buffer has one. A brightness past
+/// either end clamps, and a NaN leaves the frame as drawn.
+#[test]
+fn a_dim_darkens_each_pixel_a_frame_may_write() {
+    let px = pixtuoid_core::sprite::Rgb {
+        r: 201,
+        g: 103,
+        b: 7,
+    };
+    let mut buf = RgbBuffer::filled(3, 2, px);
+    Dim::NONE.apply(&mut buf);
+    assert!(buf.as_slice().iter().all(|p| *p == px));
+    let half = Dim::from_brightness(0.5);
+    buf.with_clip((0..1, 0..2), |buf| half.apply(buf));
+    assert_eq!(buf.get(0, 1), half.of(px));
+    assert_ne!(buf.get(0, 1), px);
+    assert_eq!(buf.get(1, 1), px, "outside the clip");
+    assert_eq!(Dim::from_brightness(f32::NAN), Dim::NONE);
+    assert_eq!(Dim::from_brightness(1.5), Dim::NONE);
+    assert_eq!(Dim::from_brightness(-1.0).of(px), Rgb { r: 0, g: 0, b: 0 });
 }

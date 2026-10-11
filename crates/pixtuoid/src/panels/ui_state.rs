@@ -68,9 +68,8 @@ pub(crate) struct UiState {
     // is also the clock its painter's typewriter reads.
     pub(crate) onboarding_ui: WelcomeUi,
     onboarding_opened_at: Option<Instant>,
-    /// `(fade start, the dim the open ramp was interrupted at)` — the second
-    /// half is what keeps a mid-ramp skip from snapping the office darker.
-    onboarding_closing_at: Option<(Instant, f32)>,
+    /// `(fade start, the dim the open ramp was interrupted at)`.
+    onboarding_closing_at: Option<(Instant, pixtuoid_scene::look::Dim)>,
     version_popup: bool,
     help_open: bool,
     /// `[p]ause`: while paused, `now()` returns the frozen instant so every
@@ -379,9 +378,16 @@ impl UiState {
         self.onboarding_opened_at.is_some()
     }
 
+    /// Whether the backdrop's dim is moving: through the open ramp, or the
+    /// close fade, which every frame shows a step of.
+    pub(crate) fn dim_moving(&self) -> bool {
+        self.onboarding_opened_at.is_some_and(|opened| {
+            opened.elapsed() < std::time::Duration::from_millis(welcome::DIM_RAMP_MS)
+        }) || self.onboarding_closing_at.is_some()
+    }
+
     /// Confirm/skip both end the overlay the same way: card gone, close fade
-    /// armed FROM the dim the open ramp had reached — a skip mid-ramp must not
-    /// snap the office darker first.
+    /// armed from the open ramp's current dim.
     pub(crate) fn close_onboarding(&mut self) {
         self.onboarding_closing_at = self.onboarding_opened_at.take().map(|o| {
             (
@@ -597,6 +603,33 @@ mod tests {
         assert!(!m.connection_open && !m.connection_confirm);
     }
 
+    /// The backdrop's dim moves through the open ramp and the close fade, and
+    /// only then.
+    #[test]
+    fn the_dim_moves_through_its_ramps_only() {
+        use std::time::Duration;
+        let mut ui = UiState::new(
+            ALL_THEMES[0],
+            WelcomeUi::from_detected(&["codex"]),
+            false,
+            std::path::PathBuf::from("sock"),
+            None,
+            crate::doctor::DriftSeen::default(),
+        );
+        assert!(ui.dim_moving(), "the open ramp");
+        let ramped = Duration::from_millis(welcome::DIM_RAMP_MS);
+        ui.onboarding_opened_at = Instant::now().checked_sub(ramped);
+        assert!(!ui.dim_moving(), "dimmed, the card waits");
+        ui.close_onboarding();
+        assert!(ui.dim_moving(), "the close fade");
+        let (_, from) = ui.onboarding_closing_at.expect("the fade is armed");
+        let faded = Duration::from_millis(welcome::DIM_FADE_OUT_MS);
+        ui.onboarding_closing_at = Instant::now().checked_sub(faded).map(|at| (at, from));
+        ui.build_frames(SystemTime::now(), &SceneState::new([0; 10]), &[]);
+        assert!(!ui.dim_moving(), "faded back");
+        assert!(!self::ui().dim_moving(), "no onboarding");
+    }
+
     #[test]
     fn onboarding_opens_only_with_a_roster_and_closes_for_good() {
         assert!(!ui().modal().onboarding_open);
@@ -617,9 +650,9 @@ mod tests {
         assert!(!frames.onboarding.open, "the card itself is gone");
         // Closed immediately, so the open ramp had barely dimmed.
         assert!(
-            frames.onboarding.dim > 0.9,
+            frames.onboarding.dim.brightness() > 0.9,
             "an instantly-skipped overlay must not snap the office to the dim \
-             floor before fading back, got {}",
+             floor before fading back, got {:?}",
             frames.onboarding.dim
         );
     }

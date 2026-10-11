@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::pack::OfficeArt;
-use pixtuoid_core::sprite::RgbBuffer;
+use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::DaemonState;
 
 /// Where a [`Rendered`] frame may differ from the last: the frame entry's
@@ -69,6 +69,62 @@ pub struct RenderInputs<'a> {
     pub place: Place,
     /// The classic's walkable/approach/route debug layer (the `w` toggle).
     pub debug_walkable: bool,
+    /// The brightness the host's modal leaves the frame.
+    pub dim: Dim,
+}
+
+/// A brightness multiplier, from black to unchanged, each pixel takes: a
+/// host modal's backdrop over the office, a card's drop shadow.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Dim(f32);
+
+impl Default for Dim {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+impl Dim {
+    /// Unchanged.
+    pub const NONE: Self = Self(1.0);
+
+    /// At `brightness` of its own, clamped to black..=unchanged; a NaN leaves
+    /// it unchanged.
+    pub fn from_brightness(brightness: f32) -> Self {
+        if brightness.is_nan() {
+            Self::NONE
+        } else {
+            Self(brightness.clamp(0.0, 1.0))
+        }
+    }
+
+    /// The brightness it leaves.
+    pub fn brightness(self) -> f32 {
+        self.0
+    }
+
+    /// Darken every pixel of `buf` a frame may write: within its clip, where
+    /// it has one.
+    pub(crate) fn apply(self, buf: &mut RgbBuffer) {
+        if self == Self::NONE {
+            return;
+        }
+        for (_, _, row) in buf.writable_rows_mut() {
+            for px in row {
+                *px = self.of(*px);
+            }
+        }
+    }
+
+    /// `rgb` under this dim.
+    pub fn of(self, rgb: Rgb) -> Rgb {
+        let channel = |c: u8| (f32::from(c) * self.0) as u8;
+        Rgb {
+            r: channel(rgb.r),
+            g: channel(rgb.g),
+            b: channel(rgb.b),
+        }
+    }
 }
 
 /// One frame from [`render`].
@@ -80,8 +136,8 @@ pub struct Rendered {
     pub layout: Arc<SceneLayout>,
     /// Waypoints with an occupant: the appliance audio cues' feed.
     pub(crate) occupied_waypoints: HashSet<usize>,
-    /// What of the frame flashes, for a painter's hold.
-    pub flash: crate::flash::FlashPhase,
+    /// What of the frame flashes, which its session's `flashes()` reports.
+    pub(crate) flash: crate::flash::FlashPhase,
 }
 
 /// The frame entry's `tracing` span names, for a profiler's subscriber.
@@ -172,6 +228,8 @@ struct Classic {
     hits: Drawn,
     /// The last frame's wall board lines and floor indicator.
     signs: Vec<crate::display::TextRun>,
+    /// The dim the last frame was drawn under.
+    dim: Dim,
 }
 
 impl Classic {
@@ -180,6 +238,7 @@ impl Classic {
             badges: &self.hits.badges,
             bubbles: &self.hits.bubbles,
             signs: &self.signs,
+            dim: self.dim,
         }
     }
 }
@@ -188,8 +247,8 @@ impl Classic {
 /// sets the classic's text and hit-tests it itself.
 #[derive(Debug)]
 pub struct ClassicDrawn<'a> {
-    /// The frame, for a painter's own wash over it (a modal's dim).
-    pub pixels: &'a mut RgbBuffer,
+    /// The frame.
+    pub pixels: &'a RgbBuffer,
     /// The text the painter sets over it.
     pub text: crate::display::HostText<'a>,
     /// What the frame answers a pointer with.
@@ -214,26 +273,20 @@ impl Raster {
             caches: ClassicCaches::new(),
             hits: Drawn::default(),
             signs: Vec::new(),
+            dim: Dim::NONE,
         })
     }
 
     /// The last frame, when the classic drew it.
-    pub fn classic_drawn(&mut self) -> Option<ClassicDrawn<'_>> {
+    pub fn classic_drawn(&self) -> Option<ClassicDrawn<'_>> {
         let classic = self
             .classic
-            .as_mut()
+            .as_ref()
             .filter(|_| self.shown == Some(Look::Classic))?;
-        let Classic {
-            buf, hits, signs, ..
-        } = classic;
         Some(ClassicDrawn {
-            pixels: buf,
-            text: crate::display::HostText {
-                badges: &hits.badges,
-                bubbles: &hits.bubbles,
-                signs,
-            },
-            hovers: &hits.hovers,
+            pixels: &classic.buf,
+            text: classic.host_text(),
+            hovers: &classic.hits.hovers,
         })
     }
 
@@ -294,6 +347,11 @@ impl Raster {
         }
     }
 
+    /// The look of the last frame drawn, `None` before the first.
+    pub fn shown(&self) -> Option<Look> {
+        self.shown
+    }
+
     /// What the last frame drawn was drawn under, `None` before the first.
     #[doc(hidden)]
     pub fn note(&self) -> Option<FrameNote> {
@@ -325,6 +383,7 @@ pub fn render(
         size,
         place,
         debug_walkable,
+        dim,
     } = inputs;
     if !std::ptr::eq(world.pack, &*raster.pack) {
         tracing::error!("frame refused: the sim steps one pack and the raster draws another");
@@ -384,6 +443,8 @@ pub fn render(
             );
             let flash = paint.flash(&stepped.frame);
             classic.hits = paint_frame(&mut paint, &stepped.frame);
+            dim.apply(&mut classic.buf);
+            classic.dim = dim;
             classic.signs =
                 crate::display::TextRun::signs(&board, stepped.layout.door, world.floor, theme);
             (Dirty::All, flash)
@@ -404,6 +465,7 @@ pub fn render(
                     floor: world.floor,
                     now: world.now,
                     board: &board,
+                    dim,
                 },
                 text,
                 (&mut office.raster.cutaway, &mut office.raster.outside),

@@ -240,6 +240,8 @@ pub struct HostText<'a> {
     pub bubbles: &'a [TextRun],
     /// The wall board's lines and the floor indicator.
     pub signs: &'a [TextRun],
+    /// The dim of the frame it is set over, which it takes too.
+    pub dim: crate::look::Dim,
 }
 
 /// A frame's [`HostText`], held.
@@ -251,11 +253,13 @@ pub(crate) struct HostRuns {
 }
 
 impl HostRuns {
-    pub(crate) fn view(&self) -> HostText<'_> {
+    /// Its text, set over a frame under `dim`.
+    pub(crate) fn view(&self, dim: crate::look::Dim) -> HostText<'_> {
         HostText {
             badges: &self.badges,
             bubbles: &self.bubbles,
             signs: &self.signs,
+            dim,
         }
     }
 }

@@ -152,10 +152,6 @@ impl crate::panels::Host for WindowHost<'_> {
         self.renderer.navigate(floor, now);
     }
 
-    fn toggle_walkable_debug(&mut self) {
-        self.renderer.toggle_walkable_debug();
-    }
-
     fn redraw(&mut self) -> anyhow::Result<()> {
         self.screen.stale();
         Ok(())
@@ -320,6 +316,25 @@ mod tests {
         }
     }
 
+    /// Esc closes the version popup, as the help's "Enter / Esc" row says; it
+    /// never quits.
+    #[test]
+    fn esc_dismisses_the_version_popup() {
+        use crossterm::event::KeyCode;
+        let mut k = Keys::new();
+        k.ui = crate::panels::ui_state::UiState::new(
+            pixtuoid_scene::theme::ALL_THEMES[0],
+            crate::panels::welcome::WelcomeUi::from_detected(&[]),
+            true,
+            k._tmp.path().join("sock"),
+            None,
+            crate::doctor::DriftSeen::default(),
+        );
+        assert!(k.ui.modal().version_popup);
+        assert!(!k.press(KeyCode::Esc), "Esc quit");
+        assert!(!k.ui.modal().version_popup, "the popup is still up");
+    }
+
     /// A previewed theme shows in the window at once, and only a commit
     /// saves it: quitting or cancelling mid-preview leaves the config as it
     /// was.
@@ -376,22 +391,6 @@ mod tests {
         assert!(!k.press(KeyCode::Esc));
         assert!(!k.ui.help_open());
         assert!(k.press(KeyCode::Esc), "with nothing open Esc quits");
-    }
-
-    /// The walkable debug key reaches the window's renderer.
-    #[test]
-    fn the_walkable_debug_key_flips_the_windows_layer() {
-        use crate::panels::Host;
-        let mut k = Keys::new();
-        let mut host = WindowHost {
-            renderer: &mut k.renderer,
-            theme: &mut k.theme,
-            screen: &mut k.screen,
-        };
-        host.toggle_walkable_debug();
-        assert!(host.renderer.debug_walkable);
-        host.toggle_walkable_debug();
-        assert!(!host.renderer.debug_walkable);
     }
 
     /// A zoom chord is `=`/`+` in, `-`/`_` out and `0` back to none, held

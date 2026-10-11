@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 use pixtuoid_scene::display::cells::CellMap;
 use pixtuoid_scene::display::{HoverTarget, Hovers};
-use pixtuoid_scene::flash::{FlashHold, Flashes};
 use pixtuoid_scene::floor::{FloorInputs, OfficeStores, PerFloor};
 use pixtuoid_scene::footer::{FooterContext, FooterInputs};
 use pixtuoid_scene::layout::{SceneLayout, Size};
@@ -45,9 +44,6 @@ pub struct DrawCtx<'a> {
     pub footer: FooterContext<'a>,
     /// The panels open over the frame.
     pub overlays: crate::panels::OverlayFrame<'a>,
-    /// The flashes the terminal shows, for a live painter; a still has none
-    /// to hold.
-    pub flash: Option<&'a mut FlashHold<Flashes, ratatui::layout::Size>>,
 }
 
 impl<'a> DrawCtx<'a> {
@@ -78,22 +74,20 @@ impl<'a> DrawCtx<'a> {
             theme,
             footer: crate::panels::widgets::footer_context(scene, None, false, None, None),
             overlays: crate::panels::OverlayFrame::closed(),
-            flash: None,
         }
     }
 }
 
 /// What [`draw_scene`] drew; each sprite field is [`ClassicDrawn`]'s namesake.
-/// `Default` is a frame refused or held by the flash hold, which draws nothing
-/// new to hit-test.
+/// `Default` is a refused frame, which draws nothing new to hit-test.
 #[derive(Debug, Default)]
 pub struct DrawOut {
-    /// `None` when the frame was refused or held.
+    /// `None` when the frame was refused.
     pub layout: Option<Arc<SceneLayout>>,
     pub hovers: Hovers,
     /// The board's star, a link the pointer finds.
     pub(crate) star: Option<pixtuoid_scene::layout::Bounds>,
-    /// Where the frame lies under the cells; `None` when it was refused or held.
+    /// Where the frame lies under the cells; `None` when it was refused.
     pub(crate) geometry: Option<SceneGeometry>,
 }
 
@@ -290,20 +284,13 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 floor: footer.context.floor,
             },
             debug_walkable: ctx.debug_walkable,
+            dim: overlays.onboarding.dim,
         },
     );
-    let Some(Rendered { layout, flash, .. }) = rendered else {
+    let Some(Rendered { layout, .. }) = rendered else {
         draw_footer_only_frame(term, &footer, theme, &overlays, now)?;
         return Ok(DrawOut::default());
     };
-    let flashes = [flash; 2];
-    if ctx
-        .flash
-        .as_ref()
-        .is_some_and(|f| f.holds(flashes, term_size))
-    {
-        return Ok(DrawOut::default());
-    }
     let frame = ClassicFrame {
         footer: &footer,
         overlays: &overlays,
@@ -311,11 +298,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         world: &world,
         mouse_pos: ctx.mouse_pos,
     };
-    let out = flush_classic(term, &frame, layout, ctx.floor)?;
-    if let Some(flash) = ctx.flash.as_deref_mut() {
-        flash.shown(flashes, term_size);
-    }
-    Ok(out)
+    flush_classic(term, &frame, layout, ctx.floor)
 }
 
 /// What a classic frame flushes beside the floor's own drawing: whichever
@@ -339,7 +322,7 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     frame: &ClassicFrame<'_>,
     layout: Arc<SceneLayout>,
-    floor: &mut PerFloor,
+    floor: &PerFloor,
 ) -> Result<DrawOut> {
     let &ClassicFrame {
         footer,
@@ -369,18 +352,13 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         _ => None,
     };
 
-    // The dim is decoupled from `onboarding.open`, so the office keeps fading back
-    // up for a beat AFTER the card is gone.
-    apply_dim(pixels, overlays.onboarding.dim);
-
-    let buf = &*pixels;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
         // terminal resize between term.size() and term.draw().
         let actual_full = f.area();
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, footer, actual_full, theme);
-        flush_buffer_to_term(f, buf, actual_scene);
+        flush_buffer_to_term(f, pixels, actual_scene);
         paint_host_text(f, text, (actual_scene, CellMap::HALF_BLOCK), hovered);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
@@ -437,38 +415,11 @@ fn set_half_block(
     cell.bg = Color::Rgb(bottom.r, bottom.g, bottom.b);
 }
 
-/// Multiply every pixel of `buf` down by `factor` — the modal-backdrop dim.
-pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
-    const UNDIMMED: f32 = 0.999;
-    if factor >= UNDIMMED {
-        return;
-    }
-    for px in buf.as_mut_slice() {
-        px.r = (f32::from(px.r) * factor) as u8;
-        px.g = (f32::from(px.g) * factor) as u8;
-        px.b = (f32::from(px.b) * factor) as u8;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::panels::clip_widget_rect;
     use crate::tui::geometry::CellArea;
-
-    #[test]
-    fn an_undimmed_frame_is_left_untouched() {
-        let px = pixtuoid_core::sprite::Rgb {
-            r: 201,
-            g: 103,
-            b: 7,
-        };
-        let mut buf = RgbBuffer::filled(3, 2, px);
-        apply_dim(&mut buf, 0.9995);
-        assert!(buf.as_slice().iter().all(|p| *p == px));
-        apply_dim(&mut buf, 0.5);
-        assert!(buf.as_slice().iter().all(|p| *p != px));
-    }
 
     #[test]
     fn an_offscreen_still_shows_its_scenes_gateway() {

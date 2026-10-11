@@ -21,7 +21,6 @@ jobs:
           components: rustfmt
           enable-cache: 'false'
       - run: just fmt-check
-      - run: just arch
 
   clippy:
     name: clippy
@@ -53,6 +52,9 @@ jobs:
           tool: cargo-deny
       - uses: ./.github/actions/setup-just
       - run: just deny
+      # Both verdicts show: a red deny must not hide arch.
+      - if: ${{ !cancelled() }}
+        run: just arch
       - uses: ./.github/actions/path-changed
         id: lockfile
         with:
