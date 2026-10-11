@@ -196,17 +196,17 @@ jobs:
               | reduce .[] as $sha ([]; if index($sha) then . else . + [$sha] end) | .[]')"
           # A hash of the PR's own change at a head. `git patch-id` also hashes
           # the context lines, which a merge of main that edits above the hunk
-          # moves; the changed lines, file headers, mode and rename lines it leaves as they were.
+          # moves; the changed lines, file headers and mode lines it leaves as they were.
           own_change_id() {
             gh api -H "Accept: application/vnd.github.v3.diff" \
               "repos/${REPOSITORY}/compare/${DEFAULT_BRANCH}...$1" |
-              grep -E '^(diff --git |[+-]|(old|new|deleted file|new file) mode |rename |Binary files )' | git hash-object --stdin
+              grep -E '^(diff --git |[+-]|(old|new|deleted file|new file) mode )' | git hash-object --stdin
           }
           round=1
           previous_id=""
           for sha in $earlier "$HEAD_SHA"; do
             change_id="$(own_change_id "$sha")" || {
-              echo "::notice title=Round count::no own change for ${sha::7}, so it is left out"
+              echo "::notice title=Round count::no diff for ${sha::7}, so it is left out"
               continue
             }
             [[ -z "$previous_id" || "$change_id" == "$previous_id" ]] || round=$((round + 1))

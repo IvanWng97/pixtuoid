@@ -827,11 +827,13 @@ assert_exempt "$f" pending "a head that moved"
 round_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Count the review's rounds")"
 round_dir="$test_dir/round"
 mkdir -p "$round_dir/bin" "$round_dir/diffs" "$round_dir/work/.claude-review"
-# The comments, and for a compare the diff fixture named for its head (none: the diff cannot be had).
+# The comments, and for a compare asking for a diff the fixture named for its head (none: the diff
+# cannot be had).
 # shellcheck disable=SC2016
 printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
     'case "$*" in *"/issues/42/comments"*) cat "$ROUND_COMMENTS" ;;' \
-    '*"/compare/main..."*) last="${!#}"; cat "$ROUND_DIFFS/${last##*...}" ;;' \
+    '*"/compare/main..."*) [[ "$*" == *"Accept: application/vnd.github.v3.diff"* ]] || exit 1' \
+    'last="${!#}"; cat "$ROUND_DIFFS/${last##*...}" ;;' \
     '*) exit 1 ;; esac' >"$round_dir/bin/gh"
 chmod +x "$round_dir/bin/gh"
 comment() { jq -cn --arg u "$1" --arg b "$2" '{user: {login: $u}, body: $b}'; }
