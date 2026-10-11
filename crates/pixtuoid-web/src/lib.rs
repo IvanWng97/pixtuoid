@@ -1014,10 +1014,6 @@ mod tests {
         }
     }
 
-    /// A phase holds the floor from when its frame is written, not from the
-    /// instant `step` is handed: after a slow step, the next phase waits for
-    /// the floor to pass on the screen clock, though the page's own clock says
-    /// it has.
     /// A canvas shrunk too small for the office and grown back inside a
     /// strike phase's floor gets a frame its size: the backdrop it showed
     /// flashed nothing, so the frame after it is a new shape's, never held.
@@ -1037,6 +1033,10 @@ mod tests {
         assert_eq!(o.frame_len(), 160 * 96 * 4);
     }
 
+    /// A phase holds the floor from when its frame is written, not from the
+    /// instant `step` is handed: after a slow step, the next phase waits for
+    /// the floor to pass on the screen clock, though the page's own clock says
+    /// it has.
     #[test]
     fn a_slow_steps_phase_holds_the_floor_from_when_it_lands() {
         use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS as FLOOR_MS;
