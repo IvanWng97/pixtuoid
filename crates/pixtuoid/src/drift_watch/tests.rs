@@ -71,8 +71,8 @@ const fn each(docs: &'static [Doc], pattern: &'static str) -> Watch {
 
 fn check(served: &Served, w: &Watch) -> Report {
     let mut report = Report::default();
-    let mut docs = Docs::new(served);
-    check_watch("src", &REPO, w, &mut docs, &mut report);
+    let mut fetched = Fetched::new(served);
+    check_watch("src", &REPO, w, &mut fetched, &mut report);
     report
 }
 
@@ -126,9 +126,9 @@ fn a_missing_anchor_is_probe_health_filed_once_per_document() {
     // A re-export facade: it fetches, and declares nothing.
     let facade = Served::default().with(&raw("e.ts"), "export * from './events';");
     let mut report = Report::default();
-    let mut docs = Docs::new(&facade);
-    check_watch("src", &REPO, &W1, &mut docs, &mut report);
-    check_watch("src", &REPO, &W2, &mut docs, &mut report);
+    let mut fetched = Fetched::new(&facade);
+    check_watch("src", &REPO, &W1, &mut fetched, &mut report);
+    check_watch("src", &REPO, &W2, &mut fetched, &mut report);
     assert!(report.breaking.is_empty(), "{report:?}");
     assert_eq!(report.blind.len(), 1, "{report:?}");
     assert!(
@@ -163,6 +163,84 @@ fn a_reader_that_finds_no_declaration_is_probe_health() {
     let moved = Served::default().with(&raw("s.json"), r#"{"Events": 1}"#);
     let r = check(&moved, &W);
     assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
+    assert!(r.blind[0].contains("found no declaration"), "{r:?}");
+}
+
+/// A union read off the documents that parsed would hide whatever changed in
+/// the one that did not, however many names the others still declare.
+#[test]
+fn one_unreadable_document_skips_the_whole_union() {
+    const UNION: Doc = Doc {
+        at: At::Path("a.json"),
+        anchor: r#""Events""#,
+        owns: "`Events`",
+    };
+    const W: Watch = Watch {
+        id: "t.two",
+        ours: || vec!["c"],
+        docs: &[
+            UNION,
+            Doc {
+                at: At::Path("b.json"),
+                ..UNION
+            },
+        ],
+        read: Read::JsonUnion {
+            def: "Events",
+            prop: None,
+        },
+        vanish: Finding::Breaking("x"),
+        siblings: None,
+    };
+    let served = Served::default()
+        .with(
+            &raw("a.json"),
+            r#"{"$defs": {"Events": {"oneOf": [{"const": "c"}]}}}"#,
+        )
+        .with(&raw("b.json"), r#"{"Events": "reshaped"}"#);
+    let r = check(&served, &W);
+    assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
+    assert!(
+        r.blind[0].contains("b.json"),
+        "the line names the document: {r:?}"
+    );
+}
+
+/// A pattern or anchor of ours that cannot compile is ours to fix: the
+/// upstream wording would send the maintainer to repin a working pin.
+#[test]
+fn a_broken_pattern_of_ours_blames_ours() {
+    const W: Watch = each(&[doc("e.ts")], r"({name}");
+    let r = check(&Served::default().with(&raw("e.ts"), "enum Events {\n"), &W);
+    assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
+    assert!(r.blind[0].contains("Our own declaration"), "{r:?}");
+}
+
+/// A failed fetch is upstream's answer for the run too: re-asking per watch
+/// would file the same dark pin once per watch and wait out each timeout.
+#[test]
+fn a_failed_document_is_fetched_and_filed_once() {
+    const W1: Watch = each(&[doc("e.ts")], r#""{name}""#);
+    const W2: Watch = each(&[doc("e.ts")], r#"'{name}'"#);
+    for (served, gone) in [
+        (Served::default().gone(&raw("e.ts"), 404), true),
+        (Served::default(), false),
+    ] {
+        let mut report = Report::default();
+        let mut fetched = Fetched::new(&served);
+        check_watch("src", &REPO, &W1, &mut fetched, &mut report);
+        check_watch("src", &REPO, &W2, &mut fetched, &mut report);
+        let filed = if gone { &report.blind } else { &report.errors };
+        assert_eq!(filed.len(), 1, "{report:?}");
+        assert_eq!(served.fetched(&raw("e.ts")), 1);
+        assert!(
+            served
+                .calls
+                .borrow()
+                .iter()
+                .all(|(_, t)| *t == FETCH_TIMEOUT)
+        );
+    }
 }
 
 #[test]
@@ -195,6 +273,7 @@ fn a_sibling_in_the_family_is_reviewed_and_a_stale_ignore_is_reported() {
     const SCHEMA: &str = r#"{"$defs": {"Events": {"oneOf": [
         {"const": "tool_call"}, {"const": "tool_call_update"},
         {"const": "tool_call_cancelled"}, {"const": "tool_call_deferred"},
+        {"const": "tool_call_`](https://x)\u202e"},
         {"const": "plan"}, {"const": "agent_message"}]}}}"#;
     const W: Watch = Watch {
         id: "t.sib",
@@ -219,7 +298,14 @@ fn a_sibling_in_the_family_is_reviewed_and_a_stale_ignore_is_reported() {
     };
     let r = check(&Served::default().with(&raw("s.json"), SCHEMA), &W);
     assert!(r.breaking.is_empty() && r.blind.is_empty(), "{r:?}");
-    assert_eq!(r.review.len(), 2, "{r:?}");
+    assert_eq!(r.review.len(), 3, "{r:?}");
+    // A fetched name stays inside its code span, its controls dropped.
+    assert!(
+        r.review
+            .iter()
+            .any(|l| l.contains("`tool_call_](https://x)`") && !l.contains('\u{202e}')),
+        "{r:?}"
+    );
     assert!(
         r.review.iter().any(|l| l.contains("`tool_call_cancelled`")),
         "{r:?}"
@@ -336,8 +422,8 @@ fn every_watch_fires_on_a_vanish_and_stays_silent_otherwise() {
                 let run_on = |text: &str| {
                     let served = serve(text);
                     let mut report = Report::default();
-                    let mut docs = Docs::new(&served);
-                    check_watch(d.name, &up.project, w, &mut docs, &mut report);
+                    let mut fetched = Fetched::new(&served);
+                    check_watch(d.name, &up.project, w, &mut fetched, &mut report);
                     report
                 };
                 let ours = (w.ours)();
@@ -434,28 +520,30 @@ fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
 }
 
 #[test]
-fn the_legacy_buckets_merge_and_a_renamed_one_is_refused() {
+fn the_legacy_buckets_merge_and_an_unreadable_run_goes_dark_on_our_side() {
     let mut r = Report::default();
     let json = r#"{"breaking": ["B"], "review": [], "blind": ["D"], "errors": ["E"]}"#;
-    merge_legacy(&mut r, json.as_bytes()).expect("the four buckets merge");
+    fold_legacy(&mut r, "x.py", Ok(json.as_bytes().to_vec()));
     assert_eq!((r.breaking.len(), r.blind.len(), r.errors.len()), (1, 1, 1));
     // A key renamed on either side would otherwise drop its findings and exit 0.
     for bad in [
-        r#"{"breaking": [], "review": [], "blind": []}"#,
-        r#"{"broken": [], "breaking": [], "review": [], "blind": [], "errors": []}"#,
-        "Traceback (most recent call last):",
+        Ok(br#"{"breaking": [], "review": [], "blind": []}"#.to_vec()),
+        Ok(br#"{"broken": [], "breaking": [], "review": [], "blind": [], "errors": []}"#.to_vec()),
+        Ok(b"Traceback (most recent call last):".to_vec()),
+        Err("No such file or directory".to_owned()),
     ] {
-        assert!(
-            merge_legacy(&mut Report::default(), bad.as_bytes()).is_err(),
-            "{bad}"
-        );
+        let mut r = Report::default();
+        fold_legacy(&mut r, "x.py", bad);
+        assert_eq!(r.blind.len(), 1, "{r:?}");
+        assert!(r.blind[0].contains("the legacy watches") && r.blind[0].contains("Our own"));
+        assert_eq!(r.exit_code(), 1);
     }
 }
 
 #[test]
 fn a_fetched_name_cannot_leave_its_code_span() {
     assert_eq!(
-        code_span("tool_call`](https://x)\nmore"),
+        code_span("tool_call`](https://x)\nmore\u{202e}"),
         "tool_call](https://x)more"
     );
 }

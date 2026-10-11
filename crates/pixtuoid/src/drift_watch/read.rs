@@ -1,26 +1,17 @@
 //! The set readers: how a document yields upstream's names, one per
-//! [`Read`] variant that yields any. Each returns `None` when it cannot find
-//! the declaration, which the watch files as probe health, never as a rename.
+//! [`Read`](pixtuoid_core::source::upstream::Read) variant that yields any. A
+//! reader returns `None` when it cannot find the declaration, which the watch
+//! files as probe health, never as a rename.
 
 use std::collections::BTreeSet;
 
-use pixtuoid_core::source::upstream::Read;
 use serde_json::Value;
 
 pub(super) type Names = BTreeSet<String>;
 
-/// Upstream's names per `read`, from one document. `Each` yields none: it
-/// tests our names instead.
-pub(super) fn names(read: &Read, text: &str) -> Option<Names> {
-    match *read {
-        Read::Each { .. } => None,
-        Read::JsonUnion { def, prop } => json_union(text, def, prop),
-    }
-}
-
 /// Scoped to the union ON PURPOSE: every definition's `type` const also yields
 /// nested-content tags (`audio`, `text`) that no envelope carries.
-fn json_union(text: &str, def: &str, prop: Option<&str>) -> Option<Names> {
+pub(super) fn json_union(text: &str, def: &str, prop: Option<&str>) -> Option<Names> {
     let root: Value = serde_json::from_str(text).ok()?;
     let defs = root.get("$defs").or_else(|| root.get("definitions"))?;
     let union = defs.get(def)?;
@@ -78,27 +69,18 @@ mod tests {
             "S": {"oneOf": [{"const": "done"}, {"const": "failed"}]},
             "Nested": {"properties": {"tag": {"const": "never_in_the_union"}}}
         }}"##;
-        let union = Read::JsonUnion {
-            def: "U",
-            prop: Some("tag"),
-        };
-        assert_eq!(names(&union, schema), set(&["by_ref", "inline", "single"]));
-        let own = Read::JsonUnion {
-            def: "S",
-            prop: None,
-        };
-        assert_eq!(names(&own, schema), set(&["done", "failed"]));
-        let missing = Read::JsonUnion {
-            def: "Gone",
-            prop: None,
-        };
-        assert_eq!(names(&missing, schema), None);
-        assert_eq!(names(&union, "not json"), None);
+        assert_eq!(
+            json_union(schema, "U", Some("tag")),
+            set(&["by_ref", "inline", "single"])
+        );
+        assert_eq!(json_union(schema, "S", None), set(&["done", "failed"]));
+        assert_eq!(json_union(schema, "Gone", None), None);
+        assert_eq!(json_union("not json", "U", Some("tag")), None);
         // The draft-07 spelling: `definitions` and `anyOf`.
         let draft7 = r##"{"definitions": {
             "U": {"anyOf": [{"$ref": "#/definitions/A"}]},
             "A": {"properties": {"tag": {"const": "by_ref"}}}
         }}"##;
-        assert_eq!(names(&union, draft7), set(&["by_ref"]));
+        assert_eq!(json_union(draft7, "U", Some("tag")), set(&["by_ref"]));
     }
 }

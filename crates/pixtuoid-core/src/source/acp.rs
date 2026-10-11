@@ -23,7 +23,7 @@ const STATUS_COMPLETED: &str = "completed";
 const STATUS_FAILED: &str = "failed";
 
 /// The `ToolCallStatus` values that END a tool call. Pinned to the arms by
-/// `the_terminal_status_set_is_exactly_what_ends_a_call`.
+/// `tool_call_starts_and_terminal_update_ends_keyed_by_tool_call_id`.
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_TERMINAL_STATUSES: &[&str] = &[STATUS_COMPLETED, STATUS_FAILED];
 
@@ -40,21 +40,24 @@ pub(crate) const DECODED_TAGS: &[&str] = &[TOOL_CALL, TOOL_CALL_UPDATE];
 /// call on this method.
 pub(crate) const SESSION_UPDATE_METHOD: &str = "session/update";
 
-/// grok pins `features = ["unstable"]`, so its ACP surface is the UNION of the
-/// v1 stable and unstable schemas; v2 is a separate line grok does not speak.
+/// Both v1 schemas, each proven by the declaration a watch reads: grok pins
+/// `features = ["unstable"]`, so its ACP surface is the UNION of stable and
+/// unstable; v2 is a separate line grok does not speak.
 #[cfg(any(test, feature = "upstream"))]
-const V1_SCHEMAS: &[Doc] = &[
-    Doc {
-        at: At::Path("schema/v1/schema.json"),
-        anchor: r#""x-method"\s*:"#,
-        owns: "the schema's method declarations",
-    },
-    Doc {
-        at: At::Path("schema/v1/schema.unstable.json"),
-        anchor: r#""x-method"\s*:"#,
-        owns: "the schema's method declarations",
-    },
-];
+const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
+    [
+        Doc {
+            at: At::Path("schema/v1/schema.json"),
+            anchor,
+            owns,
+        },
+        Doc {
+            at: At::Path("schema/v1/schema.unstable.json"),
+            anchor,
+            owns,
+        },
+    ]
+}
 
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const UPSTREAM: Upstream = Upstream {
@@ -66,7 +69,7 @@ pub(crate) const UPSTREAM: Upstream = Upstream {
         Watch {
             id: "acp.method",
             ours: || vec![SESSION_UPDATE_METHOD],
-            docs: V1_SCHEMAS,
+            docs: &v1_schemas(r#""x-method"\s*:"#, "the schema's method declarations"),
             read: Read::Each {
                 pattern: r#""x-method"\s*:\s*"{name}""#,
             },
@@ -79,7 +82,7 @@ pub(crate) const UPSTREAM: Upstream = Upstream {
         Watch {
             id: "acp.session_update_tags",
             ours: || DECODED_TAGS.to_vec(),
-            docs: V1_SCHEMAS,
+            docs: &v1_schemas(r#""SessionUpdate"\s*:"#, "the `SessionUpdate` union"),
             read: Read::JsonUnion {
                 def: "SessionUpdate",
                 prop: Some("sessionUpdate"),
@@ -95,7 +98,7 @@ pub(crate) const UPSTREAM: Upstream = Upstream {
         Watch {
             id: "acp.terminal_statuses",
             ours: || DECODED_TERMINAL_STATUSES.to_vec(),
-            docs: V1_SCHEMAS,
+            docs: &v1_schemas(r#""ToolCallStatus"\s*:"#, "the `ToolCallStatus` union"),
             read: Read::JsonUnion {
                 def: "ToolCallStatus",
                 prop: None,
@@ -195,7 +198,8 @@ mod tests {
             }
         }
         // The negative half binds the export's WIDTH: an added member would have
-        // to break one of these, so the drift row cannot quietly grow.
+        // to break one of these, so the `acp.terminal_statuses` watch cannot
+        // quietly grow.
         for status in ["in_progress", "pending"] {
             assert!(
                 !DECODED_TERMINAL_STATUSES.contains(&status),

@@ -208,8 +208,8 @@ OPENCODE_EVENT_URLS = (
 
 # URLError alone is not enough: the READ phase inside fetch() raises raw
 # socket.timeout / ConnectionResetError (OSError, NOT URLError) and
-# http.client.IncompleteRead (HTTPException) — left uncaught they exit 1 and the
-# workflow files a junk drift-titled issue from an empty report.
+# http.client.IncompleteRead (HTTPException) — left uncaught they abort every
+# check after them, the whole remainder filed as one transient line.
 FETCH_ERRORS = (urllib.error.URLError, OSError, http.client.HTTPException)
 
 # A permanent status means OUR pinned path is gone, so the watch is BLIND for that
@@ -928,7 +928,7 @@ def load_fragment(rel: str) -> dict:
 
 def read_our_names(report: Report) -> OurNames:
     """Read every depended name from the EMITTED drift surface. A gap here is the
-    MONITOR broken, so it files probe health (exit 1), never transient. Per-KEY
+    MONITOR broken, so it files probe health (actionable), never transient. Per-KEY
     isolation: a fragment that loads but lacks a row darkens exactly that field; one
     that fails to load darkens every field it feeds, honestly — it is generated as a
     whole, so it is never partially stale."""

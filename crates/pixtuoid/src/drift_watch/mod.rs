@@ -180,13 +180,13 @@ fn locate(project: &Project, at: &At) -> (String, String) {
 
 /// One run's documents: each is upstream's answer for the whole run, fetched
 /// once however many watches read it, and a missed anchor is filed once.
-struct Docs<'f> {
+struct Fetched<'f> {
     fetch: &'f dyn Fetch,
     texts: HashMap<String, Option<String>>,
     unanchored: HashSet<(String, &'static str)>,
 }
 
-impl<'f> Docs<'f> {
+impl<'f> Fetched<'f> {
     fn new(fetch: &'f dyn Fetch) -> Self {
         Self {
             fetch,
@@ -264,7 +264,13 @@ impl<'f> Docs<'f> {
     }
 }
 
-fn check_watch(source: &str, project: &Project, w: &Watch, docs: &mut Docs, report: &mut Report) {
+fn check_watch(
+    source: &str,
+    project: &Project,
+    w: &Watch,
+    fetched: &mut Fetched,
+    report: &mut Report,
+) {
     let located: Vec<_> = w
         .docs
         .iter()
@@ -277,7 +283,7 @@ fn check_watch(source: &str, project: &Project, w: &Watch, docs: &mut Docs, repo
     // would report it gone. Each miss has already filed its own line.
     let mut texts = Vec::new();
     for (url, label, doc) in &located {
-        texts.push(docs.anchored(url, label, doc, report));
+        texts.push(fetched.anchored(url, label, doc, report));
     }
     let Some(texts) = texts.into_iter().collect::<Option<Vec<String>>>() else {
         return;
@@ -306,24 +312,25 @@ fn check_watch(source: &str, project: &Project, w: &Watch, docs: &mut Docs, repo
             }
             present
         }
-        Read::JsonUnion { .. } => {
-            let read: Vec<Names> = texts
-                .iter()
-                .filter_map(|t| read::names(&w.read, t))
-                .collect();
-            if read.is_empty() {
-                report.add_blind(
-                    &format!("the names `{}` reads", w.id),
-                    &at,
-                    &format!(
-                        "The reader found no declaration, so `{}` was SKIPPED.",
-                        w.id
-                    ),
-                    false,
-                );
-                return;
+        Read::JsonUnion { def, prop } => {
+            let mut upstream = Names::new();
+            // Every document must yield, as every one must fetch: a union read
+            // off the rest would hide what changed in the one that did not.
+            for (text, (_, label, _)) in texts.iter().zip(&located) {
+                let Some(names) = read::json_union(text, def, prop) else {
+                    report.add_blind(
+                        &format!("the names `{}` reads", w.id),
+                        label,
+                        &format!(
+                            "The reader found no declaration, so `{}` was SKIPPED.",
+                            w.id
+                        ),
+                        false,
+                    );
+                    return;
+                };
+                upstream.extend(names);
             }
-            let upstream: Names = read.into_iter().flatten().collect();
             // Fewer names than we read means the reader degraded, not that most
             // of ours were renamed at once: #929's false ⛔ was that.
             if upstream.len() < ours.len() {
@@ -387,11 +394,11 @@ fn check_siblings(
 }
 
 /// An upstream name as the inside of a Markdown code span: the report becomes
-/// an issue body, and a backtick or line break in a fetched name would end the
-/// span and let upstream's text format the rest.
+/// an issue body and a terminal's output, so a backtick would end the span and
+/// a control or bidi character would drive what the reader sees.
 fn code_span(name: &str) -> String {
     name.chars()
-        .filter(|c| *c != '`' && !c.is_control())
+        .filter(|c| *c != '`' && !crate::is_terminal_unsafe(*c))
         .collect()
 }
 
@@ -401,11 +408,11 @@ pub fn run(report: &mut Report) {
 }
 
 fn check_all(fetch: &dyn Fetch, report: &mut Report) {
-    let mut docs = Docs::new(fetch);
+    let mut fetched = Fetched::new(fetch);
     for d in REGISTRY {
         for up in d.upstream {
             for w in up.watches {
-                check_watch(d.name, &up.project, w, &mut docs, report);
+                check_watch(d.name, &up.project, w, &mut fetched, report);
             }
         }
     }
@@ -419,20 +426,13 @@ pub fn run_legacy(report: &mut Report) {
         env!("CARGO_MANIFEST_DIR"),
         "/../../scripts/check_upstream_drift.py"
     );
-    let merged = std::process::Command::new("python3")
+    let stdout = std::process::Command::new("python3")
         .arg(script)
         .stderr(std::process::Stdio::inherit())
         .output()
-        .map_err(|e| e.to_string())
-        .and_then(|out| merge_legacy(report, &out.stdout).map_err(|e| e.to_string()));
-    if let Err(e) = merged {
-        report.add_blind(
-            &format!("the legacy watches ({e})"),
-            script,
-            "They were SKIPPED.",
-            true,
-        );
-    }
+        .map(|out| out.stdout)
+        .map_err(|e| e.to_string());
+    fold_legacy(report, script, stdout);
 }
 
 /// Every bucket is required and no other key is allowed: a renamed one on
@@ -446,13 +446,25 @@ struct Buckets {
     errors: Vec<String>,
 }
 
-fn merge_legacy(report: &mut Report, stdout: &[u8]) -> Result<(), serde_json::Error> {
-    let b: Buckets = serde_json::from_slice(stdout)?;
-    report.breaking.extend(b.breaking);
-    report.review.extend(b.review);
-    report.blind.extend(b.blind);
-    report.errors.extend(b.errors);
-    Ok(())
+/// A legacy run whose buckets cannot be read is every legacy watch gone dark,
+/// so it files probe health against ours rather than reading as no drift.
+fn fold_legacy(report: &mut Report, script: &str, stdout: Result<Vec<u8>, String>) {
+    let read =
+        stdout.and_then(|o| serde_json::from_slice::<Buckets>(&o).map_err(|e| e.to_string()));
+    match read {
+        Ok(b) => {
+            report.breaking.extend(b.breaking);
+            report.review.extend(b.review);
+            report.blind.extend(b.blind);
+            report.errors.extend(b.errors);
+        }
+        Err(e) => report.add_blind(
+            &format!("the legacy watches ({e})"),
+            script,
+            "They were SKIPPED.",
+            true,
+        ),
+    }
 }
 
 #[cfg(test)]

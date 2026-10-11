@@ -159,9 +159,10 @@ pub struct SourceDescriptor {
     /// `OPENCODE_CONFIG_DIR` and `REASONIX_HOME` are declared there. Where a CLI
     /// has several (omp), this names the most direct one.
     pub home_env: Option<&'static str>,
-    /// The upstream projects this source reads names from, its own first. A
-    /// field rather than a list beside the registry, so a new row fails the
-    /// test build until it decides what is watched.
+    /// The upstream projects this source reads names from, its own first, kept
+    /// on the row rather than in a list beside the registry. Empty means
+    /// unwatched: the census that every row declares one lands with the last
+    /// source's move off `check_upstream_drift.py`.
     #[cfg(any(test, feature = "upstream"))]
     pub upstream: &'static [Upstream],
     /// What KIND of source this is. Consumers read through the accessors so the
