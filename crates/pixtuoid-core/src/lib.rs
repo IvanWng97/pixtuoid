@@ -30,8 +30,8 @@
 //! assert_eq!(&*slot.label, "cc·repo");
 //! ```
 
-// Invariant #1: this crate is headless. `just arch` greps the dep tree for
-// ratatui/crossterm, but a raw `println!` pulls no dep and slips past it.
+// Invariant #1: this crate is headless. `just arch` allowlists the dep tree,
+// but a raw `println!` pulls no dep and slips past it.
 #![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
 // Scoped here rather than `[workspace.lints]` because only this PUBLISHED
 // crate's `pub` items are a semver surface.
