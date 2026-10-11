@@ -16,7 +16,10 @@ use crate::source::{
     kimi, omp, openclaw, opencode, reasonix,
 };
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::{acp, upstream::Upstream};
+use crate::source::{
+    acp,
+    upstream::{Upstream, Watch},
+};
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for a
 /// [`HookCustom::ClaimsAll`] source (its decoder builds its own AgentIds and the
@@ -159,12 +162,10 @@ pub struct SourceDescriptor {
     /// `OPENCODE_CONFIG_DIR` and `REASONIX_HOME` are declared there. Where a CLI
     /// has several (omp), this names the most direct one.
     pub home_env: Option<&'static str>,
-    /// The upstream projects this source reads names from, its own first, kept
-    /// on the row rather than in a list beside the registry. Empty means
-    /// unwatched: the census that every row declares one lands with the last
-    /// source's move off `check_upstream_drift.py`.
+    /// What this source reads off upstream, kept on the row rather than in a
+    /// list beside the registry.
     #[cfg(any(test, feature = "upstream"))]
-    pub upstream: &'static [Upstream],
+    pub upstream: Upstream,
     /// What KIND of source this is. Consumers read through the accessors so the
     /// enum shape stays an internal detail.
     pub(crate) kind: SourceKind,
@@ -351,6 +352,15 @@ pub fn registered_source_names() -> impl Iterator<Item = &'static str> {
     REGISTRY.iter().map(|d| d.name)
 }
 
+/// The watch declared under `id`, whichever source declares it.
+#[cfg(any(test, feature = "upstream"))]
+pub fn declared_watch(id: &str) -> Option<&'static Watch> {
+    REGISTRY
+        .iter()
+        .flat_map(|d| d.upstream.watches())
+        .find(|w| w.id == id)
+}
+
 /// The first-sight cwd extractor for the source being scanned: the walker calls
 /// this with the source it is scanning, so one source's head shape is never
 /// tried against another's transcript — a foreign-shaped line (a codex-style
@@ -413,7 +423,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["claude", "--version"]),
     home_env: Some("CLAUDE_CONFIG_DIR"),
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: Upstream::Watched(&[]),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: claude_code::decode_cc_line,
@@ -451,7 +461,7 @@ const CODEX: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["codex", "--version"]),
     home_env: Some("CODEX_HOME"),
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: Upstream::Watched(&[]),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: codex::decode_codex_line,
@@ -486,7 +496,10 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["agy", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: Upstream::Closed {
+        why: "a closed Google IDE with no fetchable schema: its decoder breadcrumbs a \
+              renamed step instead",
+    },
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: antigravity::decode_ag_line,
@@ -529,7 +542,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["reasonix", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: Upstream::Watched(&[]),
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -570,7 +583,7 @@ const DSH: SourceDescriptor = SourceDescriptor {
     // under it); hook-only, so core resolves no root to relocate.
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: Upstream::Watched(&[]),
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -616,7 +629,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["codewhale", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[codewhale::UPSTREAM],
+    upstream: Upstream::Watched(&[codewhale::UPSTREAM]),
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -645,7 +658,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["opencode", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[opencode::UPSTREAM],
+    upstream: Upstream::Watched(&[opencode::UPSTREAM]),
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -678,7 +691,7 @@ const OPENCLAW: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["openclaw", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: Upstream::Watched(&[]),
     kind: SourceKind::Daemon {
         presence_decoder: openclaw::decode_openclaw_hook_payload,
     },
@@ -695,7 +708,7 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["copilot", "--version"]),
     home_env: Some("COPILOT_HOME"),
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[copilot::UPSTREAM],
+    upstream: Upstream::Watched(&[copilot::UPSTREAM]),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: copilot::decode_copilot_line,
@@ -732,7 +745,7 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["cursor-agent", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: Upstream::Watched(&[]),
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -769,7 +782,7 @@ const HERMES: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["hermes", "--version"]),
     home_env: Some("HERMES_HOME"),
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: Upstream::Watched(&[]),
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -804,7 +817,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["grok", "--version"]),
     home_env: Some("GROK_HOME"),
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[acp::UPSTREAM],
+    upstream: Upstream::Watched(&[acp::UPSTREAM]),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: grok::decode_grok_line,
@@ -858,7 +871,7 @@ const OMP: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["omp", "--version"]),
     home_env: Some("PI_CODING_AGENT_DIR"),
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: Upstream::Watched(&[]),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: omp::decode_omp_line,
@@ -918,7 +931,7 @@ const KIMI: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["kimi", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: &[],
+    upstream: Upstream::Watched(&[]),
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {

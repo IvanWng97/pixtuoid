@@ -64,11 +64,6 @@ impl Fetch for Served {
     }
 }
 
-const REPO: Upstream = Upstream {
-    repo: "o/r",
-    watches: &[],
-};
-
 fn raw(path: &str) -> String {
     format!("{RAW_URL}/o/r/main/{path}")
 }
@@ -78,6 +73,7 @@ const ANCHORED: &str = r"(?m)^enum Events \{";
 const fn doc(path: &'static str) -> Doc {
     Doc {
         at: At::Path {
+            repo: "o/r",
             path,
             branch: "main",
         },
@@ -92,7 +88,8 @@ const fn each(docs: &'static [Doc], pattern: &'static str) -> Watch {
         ours: || vec!["a.b", "c"],
         docs,
         read: Read::Each { pattern },
-        vanish: "no sprite",
+        when: When::Vanishes,
+        finding: Finding::Breaking("no sprite"),
         siblings: None,
     }
 }
@@ -100,7 +97,7 @@ const fn each(docs: &'static [Doc], pattern: &'static str) -> Watch {
 fn check(served: &Served, w: &Watch) -> Report {
     let mut report = Report::default();
     let mut fetched = Fetched::new(served);
-    check_watch("src", &REPO, w, &mut fetched, &mut report);
+    check_watch("src", w, &mut fetched, &mut report);
     report
 }
 
@@ -159,8 +156,8 @@ fn a_missing_anchor_is_probe_health_filed_once_per_document() {
     let facade = Served::default().with(&raw("e.ts"), "export * from './events';");
     let mut report = Report::default();
     let mut fetched = Fetched::new(&facade);
-    check_watch("src", &REPO, &W1, &mut fetched, &mut report);
-    check_watch("src", &REPO, &W2, &mut fetched, &mut report);
+    check_watch("src", &W1, &mut fetched, &mut report);
+    check_watch("src", &W2, &mut fetched, &mut report);
     assert!(report.breaking.is_empty(), "{report:?}");
     assert_eq!(report.blind.len(), 1, "{report:?}");
     assert!(
@@ -181,6 +178,7 @@ fn a_reader_that_finds_no_declaration_is_probe_health() {
         ours: || vec!["c"],
         docs: &[Doc {
             at: At::Path {
+                repo: "o/r",
                 path: "s.json",
                 branch: "main",
             },
@@ -191,14 +189,15 @@ fn a_reader_that_finds_no_declaration_is_probe_health() {
             def: "Events",
             prop: None,
         },
-        vanish: "x",
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
         siblings: None,
     };
     // Anchored, and the union moved out from under the reader.
     let moved = Served::default().with(&raw("s.json"), r#"{"Events": 1}"#);
     let r = check(&moved, &W);
     assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
-    assert!(r.blind[0].contains("found no declaration"), "{r:?}");
+    assert!(r.blind[0].contains("found no `Events` union"), "{r:?}");
 }
 
 /// A union read off the documents that parsed would hide whatever changed in
@@ -207,6 +206,7 @@ fn a_reader_that_finds_no_declaration_is_probe_health() {
 fn one_unreadable_document_skips_the_whole_union() {
     const UNION: Doc = Doc {
         at: At::Path {
+            repo: "o/r",
             path: "a.json",
             branch: "main",
         },
@@ -220,6 +220,7 @@ fn one_unreadable_document_skips_the_whole_union() {
             UNION,
             Doc {
                 at: At::Path {
+                    repo: "o/r",
                     path: "b.json",
                     branch: "main",
                 },
@@ -230,7 +231,8 @@ fn one_unreadable_document_skips_the_whole_union() {
             def: "Events",
             prop: None,
         },
-        vanish: "x",
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
         siblings: None,
     };
     let served = Served::default()
@@ -257,7 +259,8 @@ fn a_broken_pattern_of_ours_blames_ours() {
         ours: || vec!["agent"],
         docs: &[doc("e.ts")],
         read: Read::Sole { pattern: "(" },
-        vanish: "x",
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
         siblings: None,
     };
     const ARMS: Watch = Watch {
@@ -268,7 +271,8 @@ fn a_broken_pattern_of_ours_blames_ours() {
             name: "parse",
             arm: "(",
         },
-        vanish: "x",
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
         siblings: None,
     };
     for w in [&EACH, &SOLE, &ARMS] {
@@ -294,8 +298,8 @@ fn a_failed_document_is_fetched_and_filed_once() {
     ] {
         let mut report = Report::default();
         let mut fetched = Fetched::new(&served);
-        check_watch("src", &REPO, &W1, &mut fetched, &mut report);
-        check_watch("src", &REPO, &W2, &mut fetched, &mut report);
+        check_watch("src", &W1, &mut fetched, &mut report);
+        check_watch("src", &W2, &mut fetched, &mut report);
         let filed = if gone { &report.blind } else { &report.errors };
         assert_eq!(filed.len(), 1, "{report:?}");
         assert_eq!(served.fetched(&raw("e.ts")), 1);
@@ -318,7 +322,8 @@ fn a_sole_read_names_what_upstream_declares_now() {
         read: Read::Sole {
             pattern: r#"fn name\(\) -> &str \{ "([^"]+)""#,
         },
-        vanish: "no delegation",
+        when: When::Vanishes,
+        finding: Finding::Breaking("no delegation"),
         siblings: None,
     };
     let renamed = Served::default().with(
@@ -335,6 +340,7 @@ fn the_floor_skips_a_degraded_parse_but_not_a_family_reader() {
     const SCHEMA: &str = r#"{"$defs": {"Events": {"oneOf": [{"const": "c"}]}}}"#;
     const DOC: Doc = Doc {
         at: At::Path {
+            repo: "o/r",
             path: "s.json",
             branch: "main",
         },
@@ -349,7 +355,8 @@ fn the_floor_skips_a_degraded_parse_but_not_a_family_reader() {
             def: "Events",
             prop: None,
         },
-        vanish: "x",
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
         siblings: None,
     };
     // One name back where we read two: the reader degraded, nothing is renamed.
@@ -366,7 +373,8 @@ fn the_floor_skips_a_degraded_parse_but_not_a_family_reader() {
             name: "parse",
             arm: r"Ok\(Go\)",
         },
-        vanish: "x",
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
         siblings: None,
     };
     let src = "enum Events {}\nfn parse() { match s { \"start\" => Ok(Go), _ => Err(()) } }";
@@ -390,6 +398,7 @@ fn a_sibling_in_the_family_is_reviewed_and_a_stale_ignore_is_reported() {
         ours: || vec!["tool_call", "tool_call_update"],
         docs: &[Doc {
             at: At::Path {
+                repo: "o/r",
                 path: "s.json",
                 branch: "main",
             },
@@ -400,7 +409,8 @@ fn a_sibling_in_the_family_is_reviewed_and_a_stale_ignore_is_reported() {
             def: "Events",
             prop: None,
         },
-        vanish: "x",
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
         siblings: Some(Siblings {
             family: Family::Prefix("tool_call"),
             ignored: &[
@@ -445,6 +455,7 @@ fn a_release_member_is_read_only_once_its_sums_vouch_for_it() {
         ours: || vec!["a.b"],
         docs: &[Doc {
             at: At::ReleaseAsset {
+                repo: "o/r",
                 asset: "cli-{version}-linux.tgz",
                 member: MEMBER,
                 sums: "SUMS.txt",
@@ -453,7 +464,8 @@ fn a_release_member_is_read_only_once_its_sums_vouch_for_it() {
             owns: "`Events`",
         }],
         read: Read::JsonKeys,
-        vanish: "x",
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
         siblings: None,
     };
     let schema = r#"{"Events": 1, "properties": {"a.b": {}}}"#;
@@ -604,6 +616,25 @@ fn page(w: &Watch, names: &[&str]) -> String {
                 anchors.join("\n")
             )
         }
+        // The declaration first: an anchor that names the enum would otherwise
+        // be read as its opening, attributes and all.
+        Read::RustEnum { name } => {
+            let variants: String = names
+                .iter()
+                .map(|n| format!("    {},\n", pascal(n)))
+                .collect();
+            format!(
+                "#[serde(tag = \"type\", rename_all = \"snake_case\")]\npub enum {name} {{\n{variants}}}\n{}\n",
+                anchors.join("\n")
+            )
+        }
+        Read::TsFields { name } => {
+            let fields: String = names.iter().map(|n| format!("  {n}: string;\n")).collect();
+            format!(
+                "{}\nexport interface {name} {{\n{fields}}}\n",
+                anchors.join("\n")
+            )
+        }
         // A JSON document's anchor renders as a key, so each one opens a member.
         Read::JsonUnion { def, prop } => {
             let members: Vec<serde_json::Value> = names
@@ -631,58 +662,77 @@ fn page(w: &Watch, names: &[&str]) -> String {
     }
 }
 
-/// #941's gate, generic: every watch fires when one of its names vanishes
-/// and stays silent while all are there. The vanished name leaves a decoy in
-/// its own shape, so a pattern loose enough to match the decoy (a bare
-/// substring where the declaration is quoted) cannot pass.
+/// The variant a snake_case wire name derives from.
+fn pascal(snake: &str) -> String {
+    snake
+        .split('_')
+        .map(|w| {
+            let mut c = w.chars();
+            c.next()
+                .map(|f| f.to_ascii_uppercase().to_string() + c.as_str())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// #941's gate, generic: every watch fires on its change and stays silent
+/// otherwise. A vanished name leaves a decoy in its own shape, so a pattern
+/// loose enough to match the decoy (a bare substring where the declaration is
+/// quoted) cannot pass.
 #[test]
-fn every_watch_fires_on_a_vanish_and_stays_silent_otherwise() {
+fn every_watch_fires_on_its_change_and_stays_silent_otherwise() {
     let mut proven = 0;
     for d in REGISTRY {
-        for up in d.upstream {
-            for w in up.watches {
-                let serve = |text: &str| {
-                    w.docs
-                        .iter()
-                        .fold(Served::default(), |s, doc| match locate(up, &doc.at).0 {
-                            Located::Raw { url } => s.with(&url, text),
-                            Located::Release {
-                                repo,
-                                asset,
-                                member,
-                                sums,
-                            } => s.release(repo, asset, member, sums, text),
-                        })
+        for w in d.upstream.watches() {
+            let serve = |text: &str| {
+                w.docs
+                    .iter()
+                    .fold(Served::default(), |s, doc| match locate(&doc.at).0 {
+                        Located::Raw { url } => s.with(&url, text),
+                        Located::Release {
+                            repo,
+                            asset,
+                            member,
+                            sums,
+                        } => s.release(repo, asset, member, sums, text),
+                    })
+            };
+            let run_on = |names: &[&str]| {
+                let served = serve(&page(w, names));
+                let mut report = Report::default();
+                let mut fetched = Fetched::new(&served);
+                check_watch(d.name, w, &mut fetched, &mut report);
+                report
+            };
+            let ours = (w.ours)();
+            let victim = ours[0];
+            let fired = |r: &Report| {
+                let filed = match w.finding {
+                    Finding::Breaking(_) => &r.breaking,
+                    Finding::Review(_) => &r.review,
                 };
-                let run_on = |text: &str| {
-                    let served = serve(text);
-                    let mut report = Report::default();
-                    let mut fetched = Fetched::new(&served);
-                    check_watch(d.name, up, w, &mut fetched, &mut report);
-                    report
-                };
-                let ours = (w.ours)();
-                let intact = run_on(&page(w, &ours));
-                assert!(
-                    intact.breaking.is_empty() && intact.blind.is_empty(),
-                    "{}: an intact document stays silent: {intact:?}",
-                    w.id
-                );
-                let victim = ours[0];
-                let decoy = format!("{victim}_pxd");
-                let mut kept: Vec<&str> = ours[1..].to_vec();
-                kept.push(&decoy);
-                let vanished = run_on(&page(w, &kept));
-                assert!(
-                    vanished
-                        .breaking
-                        .iter()
-                        .any(|l| l.contains(&format!("`{victim}`"))),
-                    "{}: a vanished `{victim}` fires: {vanished:?}",
-                    w.id
-                );
-                proven += 1;
-            }
+                filed.iter().any(|l| l.contains(&format!("`{victim}`")))
+            };
+            let decoy = format!("{victim}_pxd");
+            let (quiet, changed) = match w.when {
+                When::Vanishes => {
+                    let mut kept: Vec<&str> = ours[1..].to_vec();
+                    kept.push(&decoy);
+                    (run_on(&ours), run_on(&kept))
+                }
+                When::Appears => (run_on(&[]), run_on(&[victim])),
+            };
+            assert!(
+                quiet.breaking.is_empty() && quiet.blind.is_empty() && !fired(&quiet),
+                "{}: an unchanged document stays silent: {quiet:?}",
+                w.id
+            );
+            assert!(
+                fired(&changed),
+                "{}: a changed `{victim}` fires: {changed:?}",
+                w.id
+            );
+            proven += 1;
         }
     }
     assert!(proven > 0, "the registry declares watches");
@@ -730,11 +780,7 @@ fn the_report_title_carries_the_strongest_disposition_and_the_exit_code() {
 #[test]
 fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
     let mut watches = 0;
-    for w in REGISTRY
-        .iter()
-        .flat_map(|d| d.upstream)
-        .flat_map(|up| up.watches)
-    {
+    for w in REGISTRY.iter().flat_map(|d| d.upstream.watches()) {
         watches += 1;
         let ours = (w.ours)();
         for doc in w.docs {
@@ -749,9 +795,21 @@ fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
         }
         let compiled = match w.read {
             Read::Each { pattern } => Regex::new(&pattern.replace("{name}", "n")).map(drop),
-            Read::Sole { pattern } => Regex::new(pattern).map(drop),
-            Read::RustArms { name, arm } => read::rust_arms("", name, arm).map(drop),
-            Read::JsonUnion { .. } | Read::JsonKeys => Ok(()),
+            Read::Sole { pattern } => Regex::new(pattern).map(|re| {
+                assert!(
+                    re.captures_len() > 1,
+                    "{}: `{pattern}` captures no name",
+                    w.id
+                );
+            }),
+            Read::RustArms { name, arm } => match read::rust_arms("", name, arm) {
+                Err(Unread::Ours(e)) => Err(e),
+                _ => Ok(()),
+            },
+            Read::RustEnum { .. }
+            | Read::TsFields { .. }
+            | Read::JsonUnion { .. }
+            | Read::JsonKeys => Ok(()),
         };
         compiled.unwrap_or_else(|e| panic!("{}: {e}", w.id));
     }
@@ -847,7 +905,8 @@ fn every_name_a_family_reader_yields_beyond_ours_is_a_sibling() {
             name: "parse",
             arm: r"Ok\(Go\)",
         },
-        vanish: "x",
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
         siblings: Some(Siblings {
             family: Family::All,
             ignored: &[],
@@ -859,6 +918,114 @@ fn every_name_a_family_reader_yields_beyond_ours_is_a_sibling() {
     assert!(r.breaking.is_empty() && r.blind.is_empty(), "{r:?}");
     assert!(
         r.review.len() == 1 && r.review[0].contains("`begin`"),
+        "{r:?}"
+    );
+}
+
+/// An appearance is the finding when a premise rests on a name's absence, and
+/// a review finding files under review, never as breaking.
+#[test]
+fn an_appearing_name_files_its_finding_where_its_severity_says() {
+    const PAGE: &str = "https://docs.example/hooks.md";
+    const W: Watch = Watch {
+        id: "t.appears",
+        ours: || vec!["session_end", "procStart"],
+        docs: &[Doc {
+            at: At::Url(PAGE),
+            anchor: r"(?m)^# Hooks reference",
+            owns: "the hooks page",
+        }],
+        read: Read::Each { pattern: "{name}" },
+        when: When::Appears,
+        finding: Finding::Review("adopt it"),
+        siblings: None,
+    };
+    let absent = Served::default().with(PAGE, "# Hooks reference\nSessionEnd fires last.");
+    let r = check(&absent, &W);
+    assert!(
+        r.breaking.is_empty() && r.review.is_empty() && r.blind.is_empty(),
+        "{r:?}"
+    );
+    let landed = Served::default().with(PAGE, "# Hooks reference\nA `session_end` record.");
+    let r = check(&landed, &W);
+    assert!(
+        r.breaking.is_empty(),
+        "a review finding is never breaking: {r:?}"
+    );
+    assert_eq!(r.review.len(), 1, "{r:?}");
+    assert!(
+        r.review[0].contains("docs.example/hooks.md now declares `session_end`")
+            && r.review[0].contains("adopt it"),
+        "the page is named without its scheme: {r:?}"
+    );
+}
+
+/// A word family is read off ours: `custom_tool_call` is a sibling of
+/// `function_call` by its last word, `subagent_progress` of `subagent_spawned`
+/// by its first, and a name of ours with no `_` founds no family.
+#[test]
+fn a_word_family_is_the_word_ours_share() {
+    const DOC: Doc = Doc {
+        at: At::Path {
+            repo: "o/r",
+            path: "e.rs",
+            branch: "main",
+        },
+        anchor: r"pub enum Item\b",
+        owns: "`Item`",
+    };
+    const LAST: Watch = Watch {
+        id: "t.last",
+        ours: || vec!["function_call", "message"],
+        docs: &[DOC],
+        read: Read::RustEnum { name: "Item" },
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
+        siblings: Some(Siblings {
+            family: Family::LastWord,
+            ignored: &[],
+        }),
+    };
+    const FIRST: Watch = Watch {
+        id: "t.first",
+        ours: || vec!["subagent_spawned", "message"],
+        siblings: Some(Siblings {
+            family: Family::FirstWord,
+            ignored: &[],
+        }),
+        ..LAST
+    };
+    let item = "#[serde(rename_all = \"snake_case\")]\npub enum Item {\n    FunctionCall,\n    CustomToolCall,\n    SubagentSpawned,\n    SubagentProgress,\n    Message,\n    UserMessage,\n    MessageDelta,\n}\n";
+    for (w, sibling) in [(&LAST, "custom_tool_call"), (&FIRST, "subagent_progress")] {
+        let r = check(&Served::default().with(&raw("e.rs"), item), w);
+        assert!(r.breaking.is_empty() && r.blind.is_empty(), "{r:?}");
+        assert!(
+            r.review.len() == 1 && r.review[0].contains(&format!("`{sibling}`")),
+            "{}: {r:?}",
+            w.id
+        );
+    }
+}
+
+/// An enum serialized under another spelling is unread, never read wrong: its
+/// snake_case names would all report as gone.
+#[test]
+fn an_enum_off_snake_case_is_probe_health() {
+    const W: Watch = Watch {
+        id: "t.enum",
+        ours: || vec!["event_msg"],
+        docs: &[doc("e.rs")],
+        read: Read::RustEnum { name: "Item" },
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
+        siblings: None,
+    };
+    let camel =
+        "enum Events {}\n#[serde(rename_all = \"camelCase\")]\npub enum Item {\n    EventMsg,\n}\n";
+    let r = check(&Served::default().with(&raw("e.rs"), camel), &W);
+    assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
+    assert!(
+        r.blind[0].contains("found `enum Item` without `rename_all = \"snake_case\"`"),
         "{r:?}"
     );
 }

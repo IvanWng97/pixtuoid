@@ -2,12 +2,26 @@
 //! documents that declare those names, how to read them, and what a user loses
 //! when one goes. pixtuoid's `drift_watch` checks them against upstream.
 
-/// One public repository a source reads names from, which every [`At`]
-/// resolves against.
+/// Whether a source is watched upstream, and through what.
 #[derive(Debug)]
-pub struct Upstream {
-    pub repo: &'static str,
-    pub watches: &'static [Watch],
+pub enum Upstream {
+    /// One slice of watches per upstream project the source reads, its own
+    /// first. Empty means not yet moved off `check_upstream_drift.py`: the
+    /// census that every row is watched or closed lands with the last move.
+    Watched(&'static [&'static [Watch]]),
+    /// Nothing upstream publishes declares what the source reads.
+    Closed { why: &'static str },
+}
+
+impl Upstream {
+    /// Every watch the source declares; none when it is closed.
+    pub fn watches(&self) -> impl Iterator<Item = &'static Watch> + use<> {
+        let projects: &'static [&'static [Watch]] = match *self {
+            Self::Watched(projects) => projects,
+            Self::Closed { .. } => &[],
+        };
+        projects.iter().flat_map(|watches| watches.iter())
+    }
 }
 
 /// A document upstream declares names in.
@@ -25,19 +39,23 @@ pub struct Doc {
 /// Where a [`Doc`] is fetched from.
 #[derive(Debug)]
 pub enum At {
-    /// A file of the tree at `branch`.
+    /// A file of public repository `repo`'s tree at `branch`.
     Path {
-        path: &'static str,
+        repo: &'static str,
         branch: &'static str,
+        path: &'static str,
     },
-    /// `member` of the latest release's tarball `asset` (`{version}` = its
+    /// `member` of `repo`'s latest release tarball `asset` (`{version}` = its
     /// tag, `v`-stripped), admitted only when the release's `sums` file vouches
     /// for it.
     ReleaseAsset {
+        repo: &'static str,
         asset: &'static str,
         member: &'static str,
         sums: &'static str,
     },
+    /// A page a closed-source CLI publishes as its contract.
+    Url(&'static str),
 }
 
 /// How a document yields upstream's names.
@@ -54,6 +72,12 @@ pub enum Read {
         name: &'static str,
         arm: &'static str,
     },
+    /// Enum `name`'s serde wire names: each top-level variant in snake_case,
+    /// plus each variant's `rename`/`alias` literal. Read only under
+    /// `rename_all = "snake_case"`, the one spelling it derives.
+    RustEnum { name: &'static str },
+    /// The fields of the ONE `export interface name`.
+    TsFields { name: &'static str },
     /// JSON Schema: each member of `def`'s `oneOf`/`anyOf` union, as the
     /// const of its `prop` property, or its own const when `prop` is `None`.
     JsonUnion {
@@ -64,7 +88,7 @@ pub enum Read {
     JsonKeys,
 }
 
-/// Names we READ that upstream must keep declaring.
+/// Names we READ whose vanishing, or appearing, upstream is a finding.
 #[derive(Debug)]
 pub struct Watch {
     /// The report's key for this watch; unique across sources.
@@ -74,10 +98,28 @@ pub struct Watch {
     /// must fetch, or none is checked.
     pub docs: &'static [Doc],
     pub read: Read,
-    /// What a user loses when upstream stops declaring one of `ours`: a
-    /// vanish is breaking, since users are broken now.
-    pub vanish: &'static str,
+    pub when: When,
+    pub finding: Finding,
     pub siblings: Option<Siblings>,
+}
+
+/// Which change to one of a watch's names is the finding.
+#[derive(Debug)]
+pub enum When {
+    /// Upstream stops declaring it.
+    Vanishes,
+    /// Upstream starts declaring it: a premise we rely on broke, or a surface
+    /// we wait for landed.
+    Appears,
+}
+
+/// How hard a finding lands, with what it costs a user.
+#[derive(Debug)]
+pub enum Finding {
+    /// Users are broken now.
+    Breaking(&'static str),
+    /// Nothing is known broken; a maintainer re-verifies.
+    Review(&'static str),
 }
 
 /// Upstream names beside ours, in a family we already read, that no decoder
@@ -96,7 +138,11 @@ pub struct Siblings {
 pub enum Family {
     /// Starts with this.
     Prefix(&'static str),
-    /// Every name the reader yields: it reads only the family already.
+    /// Shares its word before the first `_` with one of ours that has one.
+    FirstWord,
+    /// Shares its word after the last `_` with one of ours that has one.
+    LastWord,
+    /// Every name the reader yields, which reads only the family already.
     All,
 }
 
@@ -106,14 +152,15 @@ mod tests {
     use crate::source::registry::REGISTRY;
 
     /// Every watch is one a checker can run: a blank name, or an `Each` pattern
-    /// without `{name}`, matches whatever upstream says, a `Sole` read yields
-    /// one name, and a sibling sweep needs a reader that yields upstream's
-    /// names rather than testing ours.
+    /// without `{name}`, matches whatever upstream says; a `Sole` read yields
+    /// one name; and a sibling sweep needs a vanish watch whose reader yields
+    /// upstream's names, all of them unless the family is `All`, which only a
+    /// reader confined to the family can mean.
     #[test]
     fn every_watch_is_one_a_checker_can_run() {
         let mut ids = std::collections::BTreeSet::new();
         for d in REGISTRY {
-            for w in d.upstream.iter().flat_map(|up| up.watches) {
+            for w in d.upstream.watches() {
                 assert!(ids.insert(w.id), "watch id {} is declared twice", w.id);
                 let ours = (w.ours)();
                 assert!(
@@ -135,12 +182,20 @@ mod tests {
                     w.id,
                     ours.len()
                 );
-                assert!(
-                    w.siblings.is_none()
-                        || !matches!(w.read, Read::Each { .. } | Read::Sole { .. }),
-                    "{} sweeps siblings off a reader that yields none",
-                    w.id
-                );
+                if let Some(sib) = &w.siblings {
+                    assert!(
+                        matches!(w.when, When::Vanishes)
+                            && !matches!(w.read, Read::Each { .. } | Read::Sole { .. }),
+                        "{} sweeps siblings off a reader that yields none",
+                        w.id
+                    );
+                    assert!(
+                        !matches!(sib.family, Family::All)
+                            || matches!(w.read, Read::RustArms { .. }),
+                        "{}: `Family::All` off a reader that yields more than the family",
+                        w.id
+                    );
+                }
             }
         }
     }

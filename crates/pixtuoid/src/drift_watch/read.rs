@@ -1,6 +1,6 @@
-//! The set readers: how a document yields upstream's names, one per
-//! [`Read`](pixtuoid_core::source::upstream::Read) variant that yields any. A
-//! reader returns `None` when it cannot find the declaration, which the watch
+//! The readers: how a document yields upstream's names, one per
+//! [`Read`](pixtuoid_core::source::upstream::Read) variant. A reader that
+//! cannot find its declaration says what it found instead, which the watch
 //! files as probe health, never as a rename.
 
 use std::collections::BTreeSet;
@@ -10,9 +10,40 @@ use serde_json::Value;
 
 pub(super) type Names = BTreeSet<String>;
 
+/// Why a reader yields no names.
+#[derive(Debug)]
+pub(super) enum Unread {
+    /// A pattern of ours does not compile.
+    Ours(regex::Error),
+    /// The document lacks what the reader reads: this is what it found
+    /// instead, worded to follow "the reader found".
+    Missing(String),
+}
+
+impl From<regex::Error> for Unread {
+    fn from(e: regex::Error) -> Self {
+        Self::Ours(e)
+    }
+}
+
+fn missing(what: impl Into<String>) -> Unread {
+    Unread::Missing(what.into())
+}
+
+/// The ones of `ours` that `pattern` finds, `{name}` standing for each.
+pub(super) fn each(text: &str, pattern: &str, ours: &BTreeSet<&str>) -> Result<Names, Unread> {
+    let mut found = Names::new();
+    for name in ours {
+        if Regex::new(&pattern.replace("{name}", &regex::escape(name)))?.is_match(text) {
+            found.insert((*name).to_owned());
+        }
+    }
+    Ok(found)
+}
+
 /// A Rust document is read with its comments stripped, so a commented-out
 /// declaration is not one.
-pub(super) fn sole(text: &str, path: &str, pattern: &str) -> Result<Option<Names>, regex::Error> {
+pub(super) fn sole(text: &str, path: &str, pattern: &str) -> Result<Names, Unread> {
     let src = if path.ends_with(".rs") {
         strip_rust_comments(text)
     } else {
@@ -20,60 +51,173 @@ pub(super) fn sole(text: &str, path: &str, pattern: &str) -> Result<Option<Names
     };
     let re = Regex::new(pattern)?;
     let mut all = re.captures_iter(&src);
-    Ok(match (all.next(), all.next()) {
-        (Some(one), None) => one.get(1).map(|m| [m.as_str().to_owned()].into()),
-        _ => None,
-    })
+    match (all.next(), all.next()) {
+        (Some(one), None) => one
+            .get(1)
+            .map(|m| [m.as_str().to_owned()].into())
+            .ok_or_else(|| missing("a match of its pattern with no name in it")),
+        (None, _) => Err(missing("no match of its pattern")),
+        (Some(_), Some(_)) => Err(missing("more than one match of its pattern")),
+    }
 }
 
-/// Off the brace-balanced, comment-stripped body of `fn name`; `None` when no
-/// such fn or arm is there.
-pub(super) fn rust_arms(text: &str, name: &str, arm: &str) -> Result<Option<Names>, regex::Error> {
+/// Off the brace-balanced, comment-stripped body of `fn name`.
+pub(super) fn rust_arms(text: &str, name: &str, arm: &str) -> Result<Names, Unread> {
     let opener = Regex::new(&format!(r"fn\s+{}\b[^{{]*\{{", regex::escape(name)))?;
     let heads = Regex::new(&format!(r#"((?:"[^"]*"\s*\|\s*)*"[^"]*")\s*=>\s*{arm}"#))?;
     let quoted = Regex::new(r#""([^"]*)""#)?;
-    Ok(
-        braced_body(&strip_rust_comments(text), &opener).and_then(|body| {
-            let found: Names = heads
-                .captures_iter(&body)
-                .flat_map(|h| {
-                    quoted
-                        .captures_iter(h.get(1).map_or("", |m| m.as_str()))
-                        .filter_map(|q| q.get(1).map(|m| m.as_str().to_owned()))
-                        .collect::<Vec<_>>()
-                })
-                .filter(|s| !s.is_empty())
-                .collect();
-            (!found.is_empty()).then_some(found)
-        }),
-    )
+    let body = braced_body(&strip_rust_comments(text), &opener)
+        .ok_or_else(|| missing(format!("no `fn {name}`")))?;
+    let found: Names = heads
+        .captures_iter(&body)
+        .flat_map(|h| {
+            quoted
+                .captures_iter(h.get(1).map_or("", |m| m.as_str()))
+                .filter_map(|q| q.get(1).map(|m| m.as_str().to_owned()))
+                .collect::<Vec<_>>()
+        })
+        .filter(|s| !s.is_empty())
+        .collect();
+    if found.is_empty() {
+        return Err(missing(format!(
+            "no arm of `fn {name}` yielding its target"
+        )));
+    }
+    Ok(found)
+}
+
+/// Comments go first, and a struct variant's own fields never name a variant,
+/// so only the top level is read.
+pub(super) fn rust_enum(text: &str, name: &str) -> Result<Names, Unread> {
+    let src = strip_rust_comments(text);
+    let opener = Regex::new(&format!(r"enum\s+{}\b[^{{;]*\{{", regex::escape(name)))?;
+    let decl = opener
+        .find(&src)
+        .ok_or_else(|| missing(format!("no `enum {name}`")))?;
+    // The item's own attributes: whatever follows the item before it.
+    let head = &src[..decl.start()];
+    let attrs = &head[head.rfind(['{', '}', ';']).map_or(0, |i| i + 1)..];
+    let snake = Regex::new(r#"#\[serde\([^\]]*\brename_all\s*=\s*"snake_case""#)?;
+    if !snake.is_match(attrs) {
+        return Err(missing(format!(
+            "`enum {name}` without `rename_all = \"snake_case\"`"
+        )));
+    }
+    let body =
+        braced_body(&src, &opener).ok_or_else(|| missing(format!("no end to `enum {name}`")))?;
+    let variants = top_level(&body, &['{']);
+    let serde = Regex::new(r"#\[serde\(([^\]]*)\)\]")?;
+    let literal = Regex::new(r#"\b(?:rename|alias)\s*=\s*"([^"]+)""#)?;
+    let mut names: Names = serde
+        .captures_iter(&variants)
+        .filter_map(|attr| attr.get(1))
+        .flat_map(|args| literal.captures_iter(args.as_str()))
+        .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
+        .collect();
+    let ident = Regex::new(r"\b([A-Z][A-Za-z0-9]*)\b")?;
+    names.extend(
+        ident
+            .captures_iter(&top_level(&variants, &['(']))
+            .filter_map(|c| c.get(1).map(|m| snake_case(m.as_str()))),
+    );
+    if names.is_empty() {
+        return Err(missing(format!("no variant in `enum {name}`")));
+    }
+    Ok(names)
+}
+
+/// serde's own `snake_case` (serde_derive's `internals/case.rs`): an `_`
+/// before every uppercase letter but the first, then all of it lowercase.
+fn snake_case(ident: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in ident.char_indices() {
+        if i > 0 && c.is_uppercase() {
+            out.push('_');
+        }
+        out.push(c.to_ascii_lowercase());
+    }
+    out
+}
+
+/// `src` without anything inside a bracket that opens with one of `opens`,
+/// nested ones included.
+fn top_level(src: &str, opens: &[char]) -> String {
+    let close = |o: char| match o {
+        '(' => ')',
+        '[' => ']',
+        _ => '}',
+    };
+    let mut depth = 0usize;
+    src.chars()
+        .filter(|c| {
+            if opens.contains(c) {
+                depth += 1;
+            } else if opens.iter().any(|o| close(*o) == *c) {
+                depth = depth.saturating_sub(1);
+                return false;
+            }
+            depth == 0
+        })
+        .collect()
+}
+
+/// A duplicate or restyled declaration is probe health, never a rename, so
+/// exactly one must match.
+pub(super) fn ts_fields(text: &str, name: &str) -> Result<Names, Unread> {
+    let decl = Regex::new(&format!(
+        r"(?ms)^export\s+interface\s+{}\b[^{{\n]*\{{(.*?)^\}}",
+        regex::escape(name)
+    ))?;
+    let mut all = decl.captures_iter(text);
+    let body = match (all.next(), all.next()) {
+        (Some(one), None) => one.get(1).map_or("", |m| m.as_str()),
+        _ => return Err(missing(format!("no single `export interface {name}`"))),
+    };
+    let field =
+        Regex::new(r#"(?m)^\s*(?:readonly\s+)?(?:"([^"]+)"|'([^']+)'|([A-Za-z_$][\w$]*))\??\s*:"#)?;
+    let names: Names = field
+        .captures_iter(body)
+        .filter_map(|c| c.get(1).or_else(|| c.get(2)).or_else(|| c.get(3)))
+        .map(|m| m.as_str().to_owned())
+        .collect();
+    if names.is_empty() {
+        return Err(missing(format!("no field in `{name}`")));
+    }
+    Ok(names)
 }
 
 /// Scoped to the union ON PURPOSE: every definition's `type` const also yields
 /// nested-content tags (`audio`, `text`) that no envelope carries.
-pub(super) fn json_union(text: &str, def: &str, prop: Option<&str>) -> Option<Names> {
-    let root: Value = serde_json::from_str(text).ok()?;
+pub(super) fn json_union(text: &str, def: &str, prop: Option<&str>) -> Result<Names, Unread> {
+    let root: Value = serde_json::from_str(text).map_err(|_| missing("no JSON"))?;
+    union_members(&root, def, prop)
+        .filter(|found| !found.is_empty())
+        .ok_or_else(|| missing(format!("no `{def}` union")))
+}
+
+fn union_members(root: &Value, def: &str, prop: Option<&str>) -> Option<Names> {
     let defs = root.get("$defs").or_else(|| root.get("definitions"))?;
     let union = defs.get(def)?;
     let members = union
         .get("oneOf")
         .or_else(|| union.get("anyOf"))?
         .as_array()?;
-    let found: Names = members
-        .iter()
-        .filter_map(|m| {
-            let node = match m.get("$ref").and_then(Value::as_str) {
-                Some(r) => defs.get(r.rsplit('/').next()?)?,
-                None => m,
-            };
-            let node = match prop {
-                Some(p) => node.get("properties")?.get(p)?,
-                None => node,
-            };
-            schema_const(node)
-        })
-        .collect();
-    (!found.is_empty()).then_some(found)
+    Some(
+        members
+            .iter()
+            .filter_map(|m| {
+                let node = match m.get("$ref").and_then(Value::as_str) {
+                    Some(r) => defs.get(r.rsplit('/').next()?)?,
+                    None => m,
+                };
+                let node = match prop {
+                    Some(p) => node.get("properties")?.get(p)?,
+                    None => node,
+                };
+                schema_const(node)
+            })
+            .collect(),
+    )
 }
 
 /// A schema node's pinned string: `const`, or a one-element `enum`.
@@ -88,7 +232,7 @@ fn schema_const(node: &Value) -> Option<String> {
     c.as_str().map(str::to_owned)
 }
 
-pub(super) fn json_keys(text: &str) -> Option<Names> {
+pub(super) fn json_keys(text: &str) -> Result<Names, Unread> {
     fn walk(v: &Value, out: &mut Names) {
         match v {
             Value::Object(o) => {
@@ -101,10 +245,13 @@ pub(super) fn json_keys(text: &str) -> Option<Names> {
             _ => {}
         }
     }
-    let root: Value = serde_json::from_str(text).ok()?;
+    let root: Value = serde_json::from_str(text).map_err(|_| missing("no JSON"))?;
     let mut out = Names::new();
     walk(&root, &mut out);
-    (!out.is_empty()).then_some(out)
+    if out.is_empty() {
+        return Err(missing("no `properties`"));
+    }
+    Ok(out)
 }
 
 /// Rust source without `//` and `/* */` comments, string literals kept. A
@@ -182,12 +329,18 @@ fn braced_body(src: &str, opener: &Regex) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn sole_of(pattern: &str, text: &str, path: &str) -> Option<Names> {
-        sole(text, path, pattern).expect("the test pattern compiles")
+    /// The names, or what the reader found instead; a pattern of ours that
+    /// fails to compile fails the test.
+    fn found(read: Result<Names, Unread>) -> Result<Vec<String>, String> {
+        match read {
+            Ok(names) => Ok(names.into_iter().collect()),
+            Err(Unread::Missing(what)) => Err(what),
+            Err(Unread::Ours(e)) => panic!("a test pattern does not compile: {e}"),
+        }
     }
 
-    fn set(xs: &[&str]) -> Option<Names> {
-        Some(xs.iter().map(|s| (*s).to_owned()).collect())
+    fn names(xs: &[&str]) -> Result<Vec<String>, String> {
+        Ok(xs.iter().map(|s| (*s).to_owned()).collect())
     }
 
     #[test]
@@ -204,33 +357,50 @@ mod tests {
             "Nested": {"properties": {"tag": {"const": "never_in_the_union"}}}
         }}"##;
         assert_eq!(
-            json_union(schema, "U", Some("tag")),
-            set(&["by_ref", "inline", "single"])
+            found(json_union(schema, "U", Some("tag"))),
+            names(&["by_ref", "inline", "single"])
         );
-        assert_eq!(json_union(schema, "S", None), set(&["done", "failed"]));
-        assert_eq!(json_union(schema, "Gone", None), None);
-        assert_eq!(json_union("not json", "U", Some("tag")), None);
+        assert_eq!(
+            found(json_union(schema, "S", None)),
+            names(&["done", "failed"])
+        );
+        assert_eq!(
+            found(json_union(schema, "Gone", None)),
+            Err("no `Gone` union".to_owned())
+        );
+        assert_eq!(
+            found(json_union("not json", "U", Some("tag"))),
+            Err("no JSON".to_owned())
+        );
         // The draft-07 spelling: `definitions` and `anyOf`.
         let draft7 = r##"{"definitions": {
             "U": {"anyOf": [{"$ref": "#/definitions/A"}]},
             "A": {"properties": {"tag": {"const": "by_ref"}}}
         }}"##;
-        assert_eq!(json_union(draft7, "U", Some("tag")), set(&["by_ref"]));
+        assert_eq!(
+            found(json_union(draft7, "U", Some("tag"))),
+            names(&["by_ref"])
+        );
     }
 
     #[test]
     fn a_sole_read_refuses_a_second_declaration() {
         let p = r#"const M: &str = "([^"]+)""#;
-        assert_eq!(sole_of(p, r#"const M: &str = "a";"#, "x.rs"), set(&["a"]));
+        let read = |text: &str, path: &str| found(sole(text, path, p));
+        assert_eq!(read(r#"const M: &str = "a";"#, "x.rs"), names(&["a"]));
         // A `#[cfg(test)]` twin above the real one would make a first match wrong.
         assert_eq!(
-            sole_of(p, "const M: &str = \"a\";\nconst M: &str = \"b\";", "x.rs"),
-            None
+            read("const M: &str = \"a\";\nconst M: &str = \"b\";", "x.rs"),
+            Err("more than one match of its pattern".to_owned())
+        );
+        assert_eq!(
+            read("const N: &str = \"a\";", "x.rs"),
+            Err("no match of its pattern".to_owned())
         );
         // A commented-out declaration is not one, but only in Rust.
         let old = "// const M: &str = \"old\";\nconst M: &str = \"a\";";
-        assert_eq!(sole_of(p, old, "x.rs"), set(&["a"]));
-        assert_eq!(sole_of(p, old, "x.ts"), None);
+        assert_eq!(read(old, "x.rs"), names(&["a"]));
+        assert!(read(old, "x.ts").is_err());
     }
 
     #[test]
@@ -247,18 +417,84 @@ mod tests {
                 }
             }
             fn other() { "x" => Ok(Action::Start) }"#;
-        let read = |t: &str| rust_arms(t, "parse", arm).expect("the test pattern compiles");
-        assert_eq!(read(src), set(&["spawn", "start", "wait"]));
-        assert_eq!(read("fn parsed() {}"), None);
+        let read = |t: &str| found(rust_arms(t, "parse", arm));
+        assert_eq!(read(src), names(&["spawn", "start", "wait"]));
+        assert_eq!(read("fn parsed() {}"), Err("no `fn parse`".to_owned()));
+        assert_eq!(
+            read("fn parse() { match a { \"list\" => Ok(Action::List) } }"),
+            Err("no arm of `fn parse` yielding its target".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_rust_enum_yields_its_serde_wire_names() {
+        let src = r#"
+            const X: u8 = 1;
+            /// Docs, and a `#[serde(rename_all = "camelCase")]` in a comment.
+            #[derive(Serialize)]
+            #[serde(tag = "type", rename_all = "snake_case")]
+            pub(super) enum Item<'a> {
+                EventMsg { payload: Cow<'a, Payload> },
+                #[serde(rename = "compaction_summary", alias = "compacted")]
+                Compaction(Summary),
+                HTTPCall,
+                Struct {
+                    #[serde(rename = "agentAddress")]
+                    agent_address: String,
+                    nested: Inner { Deep },
+                },
+                // Gone,
+            }
+            enum ItemKind { NotThisOne }"#;
+        assert_eq!(
+            found(rust_enum(src, "Item")),
+            names(&[
+                "compacted",
+                "compaction",
+                "compaction_summary",
+                "event_msg",
+                "h_t_t_p_call",
+                "struct"
+            ])
+        );
+        assert_eq!(
+            found(rust_enum(src, "ItemKind")).map(|_| ()).unwrap_err(),
+            "`enum ItemKind` without `rename_all = \"snake_case\"`"
+        );
+        assert_eq!(
+            found(rust_enum(src, "Missing")),
+            Err("no `enum Missing`".to_owned())
+        );
+        // Another spelling is never guessed at: its names would all be wrong.
+        let camel = "#[serde(rename_all = \"camelCase\")]\nenum E { OneTwo }";
+        assert!(found(rust_enum(camel, "E")).is_err());
+    }
+
+    #[test]
+    fn ts_fields_read_the_one_interface() {
+        let src = "export interface Entry extends Base {\n  readonly type: \"x\";\n  title?: string;\n  \"quoted-key\": number;\n  nested: {\n    inner: string;\n  };\n}\nexport interface Other {\n  title: string;\n}\n";
+        assert_eq!(
+            found(ts_fields(src, "Entry")),
+            names(&["inner", "nested", "quoted-key", "title", "type"])
+        );
+        assert_eq!(
+            found(ts_fields(src, "Gone")),
+            Err("no single `export interface Gone`".to_owned())
+        );
+        let twice = format!("{src}export interface Other {{\n  b: string;\n}}\n");
+        assert!(found(ts_fields(&twice, "Other")).is_err());
     }
 
     #[test]
     fn json_keys_walk_every_depth() {
         let schema = r#"{"properties": {"a": {}, "data": {"properties": {"b": {}}}},
                          "definitions": {"X": {"anyOf": [{"properties": {"c": {}}}]}}}"#;
-        assert_eq!(json_keys(schema), set(&["a", "b", "c", "data"]));
-        assert_eq!(json_keys(r#"{"type": "object"}"#), None);
-        assert_eq!(json_keys("not json"), None);
+        assert_eq!(found(json_keys(schema)), names(&["a", "b", "c", "data"]));
+        assert_eq!(
+            found(json_keys(r#"{"type": "object"}"#)),
+            Err("no `properties`".to_owned())
+        );
+        assert_eq!(found(json_keys("not json")), Err("no JSON".to_owned()));
     }
 
     #[test]
@@ -268,6 +504,9 @@ mod tests {
             strip_rust_comments(src),
             "let a = \"// kept\"; \nfn f<'a>(x: &'a str) {} "
         );
+        // An escaped quote does not end the string, so what follows it is kept.
+        let escaped = r#"let b = "a \" // kept"; // gone"#;
+        assert_eq!(strip_rust_comments(escaped), r#"let b = "a \" // kept"; "#);
     }
 
     #[test]

@@ -511,7 +511,7 @@ mod tests {
         }
         // The declared watches' names are carried too, read off the registry.
         for d in crate::source::registry::REGISTRY {
-            for w in d.upstream.iter().flat_map(|up| up.watches) {
+            for w in d.upstream.watches() {
                 carried.extend((w.ours)().into_iter().map(str::to_owned));
             }
         }

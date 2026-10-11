@@ -11,12 +11,12 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use pixtuoid_core::source::registry::REGISTRY;
-use pixtuoid_core::source::upstream::{At, Doc, Family, Read, Siblings, Upstream, Watch};
+use pixtuoid_core::source::upstream::{At, Doc, Family, Finding, Read, Siblings, Watch, When};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
 use net::Platform;
-use read::Names;
+use read::{Names, Unread};
 
 /// One stalled host must not hold the whole sweep.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -29,8 +29,8 @@ const API_URL: &str = "https://api.github.com/repos";
 /// Why a fetch returned nothing. Neither is ever a vanish.
 #[derive(Debug, PartialEq, Eq)]
 enum FetchError {
-    /// Our pin is gone, so the watch is dark for that document: `why` says
-    /// what is missing.
+    /// Our pin is gone, so the watch is dark for that document: `why` is the
+    /// status upstream answered, or what its release lacks.
     Gone { why: String },
     /// May pass on a retry.
     Transient(String),
@@ -194,16 +194,16 @@ enum Located {
 }
 
 /// `at`'s [`Located`], and the label the report names it by.
-fn locate(up: &Upstream, at: &At) -> (Located, String) {
-    let repo = up.repo;
+fn locate(at: &At) -> (Located, String) {
     match *at {
-        At::Path { path, branch } => (
+        At::Path { repo, branch, path } => (
             Located::Raw {
                 url: format!("{RAW_URL}/{repo}/{branch}/{path}"),
             },
             format!("{repo}@{branch}:{path}"),
         ),
         At::ReleaseAsset {
+            repo,
             asset,
             member,
             sums,
@@ -215,6 +215,12 @@ fn locate(up: &Upstream, at: &At) -> (Located, String) {
                 sums,
             },
             format!("{repo}'s latest release ({asset}: {member})"),
+        ),
+        At::Url(url) => (
+            Located::Raw {
+                url: url.to_owned(),
+            },
+            url.trim_start_matches("https://").to_owned(),
         ),
     }
 }
@@ -358,12 +364,12 @@ impl<'f> Fetched<'f> {
     }
 }
 
-fn check_watch(source: &str, up: &Upstream, w: &Watch, fetched: &mut Fetched, report: &mut Report) {
+fn check_watch(source: &str, w: &Watch, fetched: &mut Fetched, report: &mut Report) {
     let located: Vec<_> = w
         .docs
         .iter()
         .map(|doc| {
-            let (l, label) = locate(up, &doc.at);
+            let (l, label) = locate(&doc.at);
             (l, label, doc)
         })
         .collect();
@@ -389,132 +395,120 @@ fn check_watch(source: &str, up: &Upstream, w: &Watch, fetched: &mut Fetched, re
             let path = match doc.at {
                 At::Path { path, .. } => path,
                 At::ReleaseAsset { member, .. } => member,
+                At::Url(url) => url,
             };
             (label.as_str(), path, text.as_str())
         })
         .collect();
-    let upstream: Option<Names> = match w.read {
-        Read::Each { pattern } => {
-            let joined = texts.join("\n");
-            let mut present = Names::new();
-            for name in &ours {
-                match Regex::new(&pattern.replace("{name}", &regex::escape(name))) {
-                    Ok(re) if re.is_match(&joined) => {
-                        present.insert((*name).to_owned());
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        our_pattern_is_broken(w, source, &e, report);
-                        return;
-                    }
-                }
-            }
-            Some(present)
-        }
-        Read::Sole { pattern } => {
-            read_docs(w, source, &read_from, ours.len(), report, |t, path| {
-                read::sole(t, path, pattern)
-            })
-        }
-        Read::RustArms { name, arm } => {
-            read_docs(w, source, &read_from, ours.len(), report, |t, _| {
-                read::rust_arms(t, name, arm)
-            })
-        }
-        Read::JsonUnion { def, prop } => {
-            read_docs(w, source, &read_from, ours.len(), report, |t, _| {
-                Ok(read::json_union(t, def, prop))
-            })
-        }
-        Read::JsonKeys => read_docs(w, source, &read_from, ours.len(), report, |t, _| {
-            Ok(read::json_keys(t))
-        }),
-    };
-    let Some(upstream) = upstream else {
+    let Some(upstream) = read_docs(w, source, &read_from, &ours, report) else {
         return;
     };
-    let says = w.vanish;
-    let now = match w.read {
-        Read::Sole { .. } => format!(
-            " Upstream declares `{}` there now.",
-            upstream
-                .iter()
-                .map(|n| code_span(n))
-                .collect::<Vec<_>>()
-                .join("`, `")
-        ),
-        _ => String::new(),
+    let (says, file): (&str, fn(&mut Report, String)) = match w.finding {
+        Finding::Breaking(says) => (says, Report::add_breaking),
+        Finding::Review(says) => (says, Report::add_review),
     };
-    for name in ours.iter().filter(|n| !upstream.contains(**n)) {
-        report.add_breaking(format!(
-            "`{name}` ({source}: `{}`) is no longer declared in {at} — {says}.{now}",
-            w.id
-        ));
+    match w.when {
+        When::Vanishes => {
+            let now = match w.read {
+                Read::Sole { .. } => format!(
+                    " Upstream declares `{}` there now.",
+                    upstream
+                        .iter()
+                        .map(|n| code_span(n))
+                        .collect::<Vec<_>>()
+                        .join("`, `")
+                ),
+                _ => String::new(),
+            };
+            for name in ours.iter().filter(|n| !upstream.contains(**n)) {
+                file(
+                    report,
+                    format!(
+                        "`{name}` ({source}: `{}`) is no longer declared in {at} — {says}.{now}",
+                        w.id
+                    ),
+                );
+            }
+        }
+        When::Appears => {
+            for name in ours.iter().filter(|n| upstream.contains(**n)) {
+                file(
+                    report,
+                    format!(
+                        "{at} now declares `{name}` ({source}: `{}`) — {says}.",
+                        w.id
+                    ),
+                );
+            }
+        }
     }
     if let Some(sib) = &w.siblings {
         check_siblings(w.id, sib, &ours, &upstream, &at, report);
     }
 }
 
-/// Readers that yield only the family we read: a shrink there is the finding
-/// itself, so the floor that catches a degraded parse does not apply.
-fn yields_only_the_family(read: &Read) -> bool {
-    matches!(read, Read::RustArms { .. })
+/// Whether fewer names than ours means the reader degraded rather than that
+/// most of ours were renamed at once, #929's false ⛔: only for a vanish
+/// watch whose reader yields upstream's whole declaration. `Each` yields just
+/// the ones of ours it finds and a family reader just the family, so their
+/// shrink is the finding, and a shrunk parse cannot invent an appearance.
+fn floored(w: &Watch) -> bool {
+    matches!(w.when, When::Vanishes) && !matches!(w.read, Read::Each { .. } | Read::RustArms { .. })
 }
 
-fn our_pattern_is_broken(w: &Watch, source: &str, e: &regex::Error, report: &mut Report) {
-    report.add_blind(
-        &format!("`{}`'s pattern ({e})", w.id),
-        source,
-        &format!("`{}` was SKIPPED.", w.id),
-        true,
-    );
-}
-
-/// Upstream's names off every `(label, path, text)` document of `w`, each
-/// through `reader`; `None` once it has filed why it could not. Every
-/// document must yield, as every one must fetch: a union read off the rest
-/// would hide what changed in the one that did not.
+/// Upstream's names off every `(label, path, text)` document of `w`; `None`
+/// once it has filed why it could not. Every document must yield, as every
+/// one must fetch: a union read off the rest would hide what changed in the
+/// one that did not.
 fn read_docs(
     w: &Watch,
     source: &str,
     docs: &[(&str, &str, &str)],
-    ours: usize,
+    ours: &BTreeSet<&str>,
     report: &mut Report,
-    reader: impl Fn(&str, &str) -> Result<Option<Names>, regex::Error>,
 ) -> Option<Names> {
     let mut upstream = Names::new();
     for (label, path, text) in docs {
-        match reader(text, path) {
-            Ok(Some(names)) => upstream.extend(names),
-            Ok(None) => {
+        let read = match w.read {
+            Read::Each { pattern } => read::each(text, pattern, ours),
+            Read::Sole { pattern } => read::sole(text, path, pattern),
+            Read::RustArms { name, arm } => read::rust_arms(text, name, arm),
+            Read::RustEnum { name } => read::rust_enum(text, name),
+            Read::TsFields { name } => read::ts_fields(text, name),
+            Read::JsonUnion { def, prop } => read::json_union(text, def, prop),
+            Read::JsonKeys => read::json_keys(text),
+        };
+        match read {
+            Ok(names) => upstream.extend(names),
+            Err(Unread::Ours(e)) => {
+                report.add_blind(
+                    &format!("`{}`'s pattern ({e})", w.id),
+                    source,
+                    &format!("`{}` was SKIPPED.", w.id),
+                    true,
+                );
+                return None;
+            }
+            Err(Unread::Missing(what)) => {
                 report.add_blind(
                     &format!("the names `{}` reads", w.id),
                     label,
-                    &format!(
-                        "The reader found no declaration, so `{}` was SKIPPED.",
-                        w.id
-                    ),
+                    &format!("The reader found {what}, so `{}` was SKIPPED.", w.id),
                     false,
                 );
                 return None;
             }
-            Err(e) => {
-                our_pattern_is_broken(w, source, &e, report);
-                return None;
-            }
         }
     }
-    // Fewer names than we read means the reader degraded, not that most of
-    // ours were renamed at once: #929's false ⛔ was that.
-    if !yields_only_the_family(&w.read) && upstream.len() < ours {
+    if floored(w) && upstream.len() < ours.len() {
         let at: Vec<&str> = docs.iter().map(|(label, _, _)| *label).collect();
         report.add_blind(
             &format!("the names `{}` reads", w.id),
             &at.join(", "),
             &format!(
-                "The reader returned {} names (floor {ours}), so `{}` was SKIPPED.",
+                "The reader returned {} names (floor {}), so `{}` was SKIPPED.",
                 upstream.len(),
+                ours.len(),
                 w.id
             ),
             false,
@@ -534,13 +528,29 @@ fn check_siblings(
     at: &str,
     report: &mut Report,
 ) {
+    let first_word = |n: &str| n.split('_').next().unwrap_or(n).to_owned();
+    let last_word = |n: &str| n.rsplit('_').next().unwrap_or(n).to_owned();
+    let words = |word: &dyn Fn(&str) -> String| -> BTreeSet<String> {
+        ours.iter()
+            .filter(|o| o.contains('_'))
+            .map(|o| word(o))
+            .collect()
+    };
+    let in_family: Box<dyn Fn(&str) -> bool> = match sib.family {
+        Family::All => Box::new(|_| true),
+        Family::Prefix(p) => Box::new(move |n: &str| n.starts_with(p)),
+        Family::FirstWord => {
+            let kin = words(&first_word);
+            Box::new(move |n: &str| kin.contains(&first_word(n)))
+        }
+        Family::LastWord => {
+            let kin = words(&last_word);
+            Box::new(move |n: &str| kin.contains(&last_word(n)))
+        }
+    };
     let ignored: BTreeSet<&str> = sib.ignored.iter().map(|(name, _why)| *name).collect();
     for name in upstream.iter().map(String::as_str) {
-        let in_family = match sib.family {
-            Family::All => true,
-            Family::Prefix(p) => name.starts_with(p),
-        };
-        if in_family && !ours.contains(name) && !ignored.contains(name) {
+        if in_family(name) && !ours.contains(name) && !ignored.contains(name) {
             report.add_review(format!(
                 "{at} declares `{}` beside the names `{id}` reads, and nothing decodes it. \
                  Decode it, or add it to that watch's ignored siblings with the reason.",
@@ -574,10 +584,8 @@ pub fn run(report: &mut Report) {
 fn check_all(fetch: &dyn Fetch, report: &mut Report) {
     let mut fetched = Fetched::new(fetch);
     for d in REGISTRY {
-        for up in d.upstream {
-            for w in up.watches {
-                check_watch(d.name, up, w, &mut fetched, report);
-            }
+        for w in d.upstream.watches() {
+            check_watch(d.name, w, &mut fetched, report);
         }
     }
 }

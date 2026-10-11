@@ -24,7 +24,7 @@ use serde_json::Value;
 use crate::AgentId;
 use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{At, Doc, Read, Upstream, Watch};
+use crate::source::upstream::{At, Doc, Finding, Read, Watch, When};
 use crate::source::{AgentEvent, ToolDetail};
 
 #[cfg(feature = "native")]
@@ -151,6 +151,7 @@ pub(crate) const DECODED_FIELDS: &[&str] = &[
 #[cfg(any(test, feature = "upstream"))]
 const SESSION_EVENTS_SCHEMA: &[Doc] = &[Doc {
     at: At::ReleaseAsset {
+        repo: "github/copilot-cli",
         asset: "github-copilot-{version}-linux-x64.tgz",
         member: "package/schemas/session-events.schema.json",
         sums: "SHA256SUMS.txt",
@@ -160,33 +161,36 @@ const SESSION_EVENTS_SCHEMA: &[Doc] = &[Doc {
 }];
 
 #[cfg(any(test, feature = "upstream"))]
-pub(crate) const UPSTREAM: Upstream = Upstream {
-    repo: "github/copilot-cli",
-    watches: &[
-        Watch {
-            id: "copilot.kinds",
-            ours: || DECODED_KINDS.to_vec(),
-            docs: SESSION_EVENTS_SCHEMA,
-            read: Read::JsonUnion {
-                def: "SessionEvent",
-                prop: Some("type"),
-            },
-            vanish: "the transcript still carries it, but the decoder maps it to nothing \
-                 (no sprite, no activity)",
-            // `session.*` is a product-wide bus a sibling ledger would just mirror.
-            siblings: None,
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "copilot.kinds",
+        ours: || DECODED_KINDS.to_vec(),
+        docs: SESSION_EVENTS_SCHEMA,
+        read: Read::JsonUnion {
+            def: "SessionEvent",
+            prop: Some("type"),
         },
-        Watch {
-            id: "copilot.payload_fields",
-            ours: || DECODED_FIELDS.to_vec(),
-            docs: SESSION_EVENTS_SCHEMA,
-            read: Read::JsonKeys,
-            vanish: "the decoder reads None: a wrong register, no parent link, no tool \
-                 label, or a permission that never gates",
-            siblings: None,
-        },
-    ],
-};
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the transcript still carries it, but the decoder maps it to nothing \
+             (no sprite, no activity)",
+        ),
+        // `session.*` is a product-wide bus a sibling ledger would just mirror.
+        siblings: None,
+    },
+    Watch {
+        id: "copilot.payload_fields",
+        ours: || DECODED_FIELDS.to_vec(),
+        docs: SESSION_EVENTS_SCHEMA,
+        read: Read::JsonKeys,
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the decoder reads None: a wrong register, no parent link, no tool \
+             label, or a permission that never gates",
+        ),
+        siblings: None,
+    },
+];
 
 /// Decode one `events.jsonl` line into zero or more `AgentEvent`s. Unknown,
 /// ephemeral, or malformed shapes return `vec![]` and never panic — real files
