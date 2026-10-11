@@ -106,7 +106,7 @@ pub(super) fn rust_enum(text: &str, name: &str) -> Result<Names, Unread> {
     }
     let body =
         braced_body(&src, &opener).ok_or_else(|| missing(format!("no end to `enum {name}`")))?;
-    let variants = top_level(&body, &['{']);
+    let variants = top_level(&body, '{', '}');
     let rename = Regex::new(r#"#\[serde\([^\]]*\brename\s*=\s*"([^"]+)""#)?;
     let ident = Regex::new(r"\b([A-Z][A-Za-z0-9]*)\b")?;
     let names: Names = split_top_level(&variants)
@@ -114,7 +114,7 @@ pub(super) fn rust_enum(text: &str, name: &str) -> Result<Names, Unread> {
         .filter_map(|variant| match rename.captures(variant) {
             Some(renamed) => renamed.get(1).map(|m| m.as_str().to_owned()),
             None => ident
-                .captures(&top_level(variant, &['(', '[']))
+                .captures(&top_level(variant, '[', ']'))
                 .and_then(|c| c.get(1))
                 .map(|m| snake_case(m.as_str())),
         })
@@ -156,20 +156,15 @@ fn split_top_level(src: &str) -> Vec<&str> {
     out
 }
 
-/// `src` without anything inside a bracket that opens with one of `opens`,
-/// nested ones included.
-fn top_level(src: &str, opens: &[char]) -> String {
-    let close = |o: char| match o {
-        '(' => ')',
-        '[' => ']',
-        _ => '}',
-    };
+/// `src` without anything between `open` and its `close`, nested pairs
+/// included.
+fn top_level(src: &str, open: char, close: char) -> String {
     let mut depth = 0usize;
     src.chars()
-        .filter(|c| {
-            if opens.contains(c) {
+        .filter(|&c| {
+            if c == open {
                 depth += 1;
-            } else if opens.iter().any(|o| close(*o) == *c) {
+            } else if c == close {
                 depth = depth.saturating_sub(1);
                 return false;
             }
@@ -476,7 +471,7 @@ mod tests {
             Err("no `enum Missing`".to_owned())
         );
         // An attribute's own words never name the variant it sits on.
-        let attributed = "#[serde(rename_all = \"snake_case\")]\nenum A {\n    #[schemars(with = \"Other\")]\n    Plain,\n}";
+        let attributed = "#[serde(rename_all = \"snake_case\")]\nenum A {\n    #[doc = \"Other\"]\n    Plain,\n}";
         assert_eq!(found(rust_enum(attributed, "A")), names(&["plain"]));
         // Another spelling is never guessed at: its names would all be wrong.
         let camel = "#[serde(rename_all = \"camelCase\")]\nenum E { OneTwo }";
