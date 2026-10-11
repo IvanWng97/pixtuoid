@@ -33,6 +33,8 @@ pub(crate) mod shm;
 pub(crate) mod sixel;
 #[cfg(feature = "graphics")]
 pub(crate) mod tiles;
+#[cfg(feature = "graphics")]
+mod wire;
 
 #[cfg(all(feature = "graphics", unix))]
 pub(crate) use probe::probe;

@@ -8,10 +8,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use miniz_oxide::deflate::{CompressionLevel, compress_to_vec_zlib};
 use ratatui::style::Color;
-use ratatui_image::picker::cap_parser::Parser;
 
 use super::Medium;
 use super::tiles::{Tile, TileImage};
+use super::wire::Passthrough;
 
 pub(crate) const PLACEHOLDER: char = '\u{10EEEE}';
 
@@ -422,18 +422,18 @@ fn placement_keys(id: u32, image: &TileImage, transport_keys: &str) -> String {
 }
 
 fn chunked(keys: &str, payload: &[u8], tmux: bool) -> Vec<u8> {
-    let (start, esc, end) = Parser::tmux_start_escape_end(tmux);
+    let Passthrough { open, esc, close } = Passthrough::new(tmux);
     let chunks = payload.chunks(CHUNK);
     let last = chunks.len().saturating_sub(1);
     let mut out = Vec::with_capacity(payload.len() + 128);
     for (i, chunk) in chunks.enumerate() {
-        out.extend_from_slice(format!("{start}{esc}_G").as_bytes());
+        out.extend_from_slice(format!("{open}{esc}_G").as_bytes());
         if i == 0 {
             out.extend_from_slice(keys.as_bytes());
         }
         out.extend_from_slice(format!("q=2,m={};", u8::from(i < last)).as_bytes());
         out.extend_from_slice(chunk);
-        out.extend_from_slice(format!("{esc}\\{end}").as_bytes());
+        out.extend_from_slice(format!("{esc}\\{close}").as_bytes());
     }
     out
 }
@@ -467,9 +467,9 @@ pub(crate) fn unwind_for(ids: RangeInclusive<u32>, tmux: bool) -> Vec<u8> {
 /// Deletes the images `ids` names and frees their data ("Deleting images":
 /// `d=R` takes ids from `x` to `y`, both included).
 fn delete(ids: RangeInclusive<u32>, tmux: bool) -> Vec<u8> {
-    let (start, esc, end) = Parser::tmux_start_escape_end(tmux);
+    let Passthrough { open, esc, close } = Passthrough::new(tmux);
     format!(
-        "{start}{esc}_Ga=d,d=R,x={},y={},q=2{esc}\\{end}",
+        "{open}{esc}_Ga=d,d=R,x={},y={},q=2{esc}\\{close}",
         ids.start(),
         ids.end()
     )

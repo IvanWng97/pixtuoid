@@ -4,11 +4,16 @@
 //! decisions — which protocol, which cell — are pure and tested; only
 //! [`probe`] touches the terminal.
 
-use ratatui_image::picker::ProtocolType;
-use ratatui_image::picker::cap_parser::QueryStdioOptions;
-use ratatui_image::picker::cap_parser::{Parser, Response};
-
+use super::wire::{self, Answer, Passthrough, Question, Reader};
 use super::{CellSize, Detected, ImageProtocol, Probe, TermEnv, env_set, env_text};
+
+/// The capability query's kitty image: kitty's own example's id (kitty's
+/// graphics protocol, "Querying support and available transmission mediums").
+const KITTY_QUERY_ID: u32 = 31;
+const KITTY_QUERY: Question<'static> = Question::Kitty {
+    id: KITTY_QUERY_ID,
+    shm: None,
+};
 
 /// The terminal the environment names, as far as the cutaway's protocols go.
 ///
@@ -44,8 +49,7 @@ enum Pick {
     Kitty,
     /// SIXEL, listed in its DA1.
     Sixel,
-    /// iTerm2's images, which the query never asks about
-    /// (`cap_parser.rs:132-133`).
+    /// iTerm2's images, which no [`Question`] asks about.
     Iterm2(Iterm2Sign),
 }
 
@@ -69,19 +73,19 @@ impl Pick {
         }
     }
 
-    /// The query part whose answer shows it, if any.
-    fn asks(self) -> Option<ProtocolType> {
+    /// The question whose answer shows it, if any.
+    fn asks(self) -> Option<Question<'static>> {
         match self {
-            Self::Kitty => Some(ProtocolType::Kitty),
-            Self::Sixel | Self::Iterm2(Iterm2Sign::Sixel) => Some(ProtocolType::Sixel),
+            Self::Kitty => Some(KITTY_QUERY),
+            Self::Sixel | Self::Iterm2(Iterm2Sign::Sixel) => Some(Question::Attributes),
             Self::Iterm2(Iterm2Sign::Name) => None,
         }
     }
 
-    fn shown_by(self, responses: &[Response]) -> bool {
+    fn shown_by(self, answer: &Answer) -> bool {
         match self {
-            Self::Kitty => responses.contains(&Response::Kitty),
-            Self::Sixel | Self::Iterm2(Iterm2Sign::Sixel) => responses.contains(&Response::Sixel),
+            Self::Kitty => answer.kitty,
+            Self::Sixel | Self::Iterm2(Iterm2Sign::Sixel) => answer.sixel,
             Self::Iterm2(Iterm2Sign::Name) => true,
         }
     }
@@ -151,16 +155,12 @@ impl EnvHints {
     /// it, asking only for what the terminal animates.
     fn query(&self) -> String {
         let animates = self.terminal().animates();
-        Parser::query(
-            self.env.tmux(),
-            QueryStdioOptions {
-                blacklist_protocols: [ProtocolType::Kitty, ProtocolType::Sixel]
-                    .into_iter()
-                    .filter(|t| !animates.iter().any(|p| p.asks() == Some(*t)))
-                    .collect(),
-                ..QueryStdioOptions::default()
-            },
-        )
+        let questions: Vec<_> = [KITTY_QUERY, Question::Attributes]
+            .into_iter()
+            .filter(|q| animates.iter().any(|p| p.asks() == Some(*q)))
+            .chain([Question::CellSize])
+            .collect();
+        wire::ask(&questions, Passthrough::new(self.env.tmux()))
     }
 
     /// The terminal its own `TERM` names, else its `TERM_PROGRAM`, else,
@@ -225,17 +225,13 @@ impl EnvHints {
 /// What the terminal's answer and the environment together say: the first
 /// protocol the terminal [animates](Terminal::animates) with that its answer
 /// shows; the cell from its answer, else from the kernel's window size.
-fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSize>) -> Detected {
+fn detected(answer: &Answer, hints: &EnvHints, window_cell: Option<CellSize>) -> Detected {
     let animates = hints.terminal().animates();
-    let pick = animates.iter().copied().find(|p| p.shown_by(responses));
-    let answered_cell = responses.iter().find_map(|r| match r {
-        Response::CellSize(Some((w, h))) => Some(CellSize { w: *w, h: *h }),
-        _ => None,
-    });
+    let pick = animates.iter().copied().find(|p| p.shown_by(answer));
     Detected {
         protocol: pick.map(Pick::protocol),
         named: pick == Some(Pick::Iterm2(Iterm2Sign::Name)),
-        cell: answered_cell.or(window_cell),
+        cell: answer.cell.or(window_cell),
         tmux: hints.env.tmux(),
         unanimated: animates.is_empty(),
         shm: false,
@@ -247,26 +243,12 @@ fn detected(responses: &[Response], hints: &EnvHints, window_cell: Option<CellSi
 /// (ratatui-image 11.1.0 `picker.rs:156-166`); with nothing named, it is
 /// [`Probe::NoAnswer`].
 fn unanswered(hints: &EnvHints, window_cell: Option<CellSize>) -> Probe {
-    let d = detected(&[], hints, window_cell);
+    let d = detected(&Answer::default(), hints, window_cell);
     if d.protocol.is_some() {
         Probe::Answered(d)
     } else {
         Probe::NoAnswer
     }
-}
-
-/// Feed one chunk of the reply to `parser`, collecting its responses; `true`
-/// once the device-status reply that ends the query has arrived.
-fn take_reply(parser: &mut Parser, responses: &mut Vec<Response>, chunk: &[u8]) -> bool {
-    for &byte in chunk {
-        for response in parser.push(char::from(byte)) {
-            if response == Response::Status {
-                return true;
-            }
-            responses.push(response);
-        }
-    }
-    false
 }
 
 /// The most reply bytes read before a terminal that never sends the status
@@ -280,11 +262,7 @@ const MAX_REPLY_BYTES: usize = 4096;
 /// and a visualiser that refuses to start because it could not ask a question
 /// would be worse than one that draws the plain office.
 ///
-/// Through [`crate::term::query_tty`], not upstream's
-/// `Picker::from_query_stdio`, whose detached reader outlives its timeout and
-/// restores the mode only once a reply lands (ratatui-image 11.1.0
-/// `picker.rs:606-644`); and read-only: inside tmux it reads
-/// `allow-passthrough` where upstream turns it on (`picker.rs:349-355`).
+/// Read-only: inside tmux it reads `allow-passthrough`, never turns it on.
 pub(crate) fn probe(ask: bool) -> Probe {
     if !ask {
         return Probe::NotQueried;
@@ -294,18 +272,17 @@ pub(crate) fn probe(ask: bool) -> Probe {
         return Probe::TmuxPassthroughOff;
     }
     let query = hints.query();
-    let mut parser = Parser::new();
-    let mut responses = Vec::new();
+    let mut reader = Reader::new(KITTY_QUERY_ID);
     match crate::term::query_tty(
         query.as_bytes(),
         super::GRAPHICS_PROBE_TIMEOUT,
         MAX_REPLY_BYTES,
-        |chunk| take_reply(&mut parser, &mut responses, chunk),
+        |chunk| reader.feed(chunk),
     ) {
         None => Probe::NotQueried,
         Some(false) => unanswered(&hints, window_cell()),
         Some(true) => {
-            let mut d = detected(&responses, &hints, window_cell());
+            let mut d = detected(&reader.answer(), &hints, window_cell());
             // Never through tmux: see `resolve`.
             d.shm = super::Route::may_share(d.protocol, d.tmux) && reads_shared_memory();
             Probe::Answered(d)
@@ -314,46 +291,29 @@ pub(crate) fn probe(ask: bool) -> Probe {
 }
 
 /// Whether the terminal reads kitty images from this host's shared memory:
-/// `a=q` with `t=s` has it load a 1x1 image from an object we publish without
-/// storing it, and answer `OK` or an error (kitty's graphics protocol,
-/// "Querying support and available transmission mediums"); a device-status
-/// request ends the reply, as in [`probe`].
+/// asked to load an object we publish, it answers `OK` or an error.
 fn reads_shared_memory() -> bool {
-    let Ok(name) = super::shm::publish(&[0; 3], std::time::Instant::now()) else {
+    let Ok(name) = super::shm::publish(&wire::PIXEL, std::time::Instant::now()) else {
         return false;
     };
     let id = super::kitty::process_base();
-    let mut reply = Vec::new();
+    let query = wire::ask(
+        &[Question::Kitty {
+            id,
+            shm: Some(&name),
+        }],
+        Passthrough::new(false),
+    );
+    let mut reader = Reader::new(id);
     let answered = crate::term::query_tty(
-        shm_query(id, &name).as_bytes(),
+        query.as_bytes(),
         super::GRAPHICS_PROBE_TIMEOUT,
         MAX_REPLY_BYTES,
-        |chunk| {
-            reply.extend_from_slice(chunk);
-            reply.windows(DSR_OK.len()).any(|w| w == DSR_OK)
-        },
+        |chunk| reader.feed(chunk),
     );
     // The terminal unlinks what it read; this unlinks what it didn't.
     super::shm::unlink_all();
-    answered == Some(true) && shm_ok(id, &reply)
-}
-
-/// The device-status reply that ends [`shm_query`]'s answer.
-const DSR_OK: &[u8] = b"\x1b[0n";
-
-/// The query for a 1x1 RGB image from the shared-memory object `name`, as
-/// image `id`, then a device-status request.
-fn shm_query(id: u32, name: &str) -> String {
-    format!(
-        "\x1b_Gi={id},a=q,t=s,f=24,s=1,v=1,S=3;{}\x1b\\\x1b[5n",
-        base64_simd::STANDARD.encode_to_string(name)
-    )
-}
-
-/// Whether `reply` holds image `id`'s `OK`.
-fn shm_ok(id: u32, reply: &[u8]) -> bool {
-    let ok = format!("\x1b_Gi={id};OK\x1b\\");
-    reply.windows(ok.len()).any(|w| w == ok.as_bytes())
+    answered == Some(true) && reader.answer().kitty
 }
 
 /// Our pane's `allow-passthrough`, inherited value included (tmux(1)
@@ -414,59 +374,97 @@ mod tests {
         }
     }
 
-    /// A reply as a kitty-and-SIXEL terminal sends it, run through upstream's
-    /// own parser: the kitty acknowledgement, a DA1 with SIXEL (`4`), the cell
-    /// size (`CSI 6 ; h ; w t`), and the device-status reply that ends it.
-    const KITTY_SIXEL_REPLY: &[u8] = b"\x1b_Gi=31;OK\x1b\\\x1b[?62;4;22c\x1b[6;41;17t\x1b[0n";
+    const NOTHING: Answer = Answer {
+        kitty: false,
+        sixel: false,
+        cell: None,
+    };
+    const KITTY: Answer = Answer {
+        kitty: true,
+        ..NOTHING
+    };
+    const SIXEL: Answer = Answer {
+        sixel: true,
+        ..NOTHING
+    };
+    const BOTH: Answer = Answer {
+        kitty: true,
+        sixel: true,
+        cell: None,
+    };
 
     #[test]
-    fn a_full_reply_ends_at_the_status_reply_and_keeps_what_came_before() {
-        let (mut parser, mut responses) = (Parser::new(), Vec::new());
-        assert!(take_reply(&mut parser, &mut responses, KITTY_SIXEL_REPLY));
-        let d = detected(&responses, &EnvHints::default(), None);
+    fn kitty_is_taken_over_sixel_with_the_answered_cell() {
+        let cell = Some(CellSize { w: 17, h: 41 });
+        let d = detected(&Answer { cell, ..BOTH }, &EnvHints::default(), None);
         assert_eq!(d.protocol, Some(ImageProtocol::Kitty), "kitty over SIXEL");
-        assert_eq!(d.cell, Some(CellSize { w: 17, h: 41 }));
+        assert_eq!(d.cell, cell);
     }
 
-    /// A reply split across reads completes on the chunk that carries the
-    /// status reply, not before.
+    /// A cell-size reply in any form but xterm's leaves the cell to the
+    /// window, as no reply does.
     #[test]
-    fn a_reply_split_across_reads_completes_on_its_last_chunk() {
-        let (head, tail) = KITTY_SIXEL_REPLY.split_at(KITTY_SIXEL_REPLY.len() - 3);
-        let (mut parser, mut responses) = (Parser::new(), Vec::new());
-        assert!(!take_reply(&mut parser, &mut responses, head));
-        assert!(take_reply(&mut parser, &mut responses, tail));
+    fn a_cell_size_reply_led_by_another_number_leaves_the_window_s_cell() {
+        let mut reader = Reader::new(KITTY_QUERY_ID);
+        assert!(reader.feed(b"\x1b[?62;4c\x1b[4;800;1200t\x1b[0n"));
+        let window = Some(CellSize { w: 9, h: 18 });
+        let d = detected(&reader.answer(), &EnvHints::default(), window);
+        assert_eq!((d.protocol, d.cell), (Some(ImageProtocol::Sixel), window));
     }
 
-    /// Only the query's own id answering `OK` reads shared memory: an error,
-    /// or another image's `OK`, does not.
+    /// Against upstream's query for every terminal row, in and out of tmux.
     #[test]
-    fn shared_memory_is_read_only_where_the_query_s_own_id_answers_ok() {
-        assert!(shm_ok(7, b"\x1b_Gi=7;OK\x1b\\\x1b[0n"));
-        assert!(!shm_ok(
-            7,
-            b"\x1b_Gi=7;EBADF:Failed to read image\x1b\\\x1b[0n"
-        ));
-        assert!(!shm_ok(7, b"\x1b_Gi=31;OK\x1b\\\x1b[0n"));
-        assert!(!shm_ok(7, b"\x1b[0n"));
-        let query = shm_query(7, "/pxt1-0");
-        assert!(
-            query.starts_with("\x1b_Gi=7,a=q,t=s,f=24,s=1,v=1,S=3;"),
-            "{query:?}"
-        );
-        assert!(query.ends_with("\x1b\\\x1b[5n"));
+    fn the_query_is_upstream_s() {
+        use ratatui_image::picker::ProtocolType;
+        use ratatui_image::picker::cap_parser::{Parser, QueryStdioOptions};
+        let upstream = |hints: &EnvHints| {
+            let animates = hints.terminal().animates();
+            let asked = |t: ProtocolType| {
+                animates.iter().any(|p| {
+                    p.asks()
+                        == Some(match t {
+                            ProtocolType::Kitty => KITTY_QUERY,
+                            _ => Question::Attributes,
+                        })
+                })
+            };
+            Parser::query(
+                hints.env.tmux(),
+                QueryStdioOptions {
+                    blacklist_protocols: [ProtocolType::Kitty, ProtocolType::Sixel]
+                        .into_iter()
+                        .filter(|t| !asked(*t))
+                        .collect(),
+                    ..QueryStdioOptions::default()
+                },
+            )
+        };
+        let rows = [
+            hints("xterm-kitty", ""),
+            hints("xterm-256color", "iTerm.app"),
+            hints("xterm-256color", "WarpTerminal"),
+            hints("xterm-256color", "WezTerm"),
+            EnvHints {
+                konsole: true,
+                ..hints("xterm-256color", "")
+            },
+            hints("xterm-256color", "vscode"),
+            hints("xterm-256color", "mintty"),
+        ];
+        for row in rows {
+            assert_eq!(row.query(), upstream(&row), "{row:?}");
+            let tmux = client(row);
+            assert_eq!(tmux.query(), upstream(&tmux), "{tmux:?}");
+        }
     }
 
     #[test]
     fn a_terminal_that_answers_without_a_cell_size_falls_back_to_the_window() {
         let window = Some(CellSize { w: 9, h: 18 });
-        let d = detected(&[Response::Sixel], &EnvHints::default(), window);
+        let d = detected(&SIXEL, &EnvHints::default(), window);
         assert_eq!(d.protocol, Some(ImageProtocol::Sixel));
         assert_eq!(d.cell, window);
-        assert_eq!(
-            detected(&[Response::Sixel], &EnvHints::default(), None).cell,
-            None
-        );
+        assert_eq!(detected(&SIXEL, &EnvHints::default(), None).cell, None);
     }
 
     /// iTerm2's images are guessed from the environment, never over an
@@ -474,15 +472,15 @@ mod tests {
     #[test]
     fn iterm2_is_guessed_from_the_terminal_the_environment_names() {
         assert_eq!(
-            detected(&[], &hints("xterm-256color", "iTerm.app"), None).protocol,
+            detected(&NOTHING, &hints("xterm-256color", "iTerm.app"), None).protocol,
             Some(ImageProtocol::Iterm2)
         );
         assert_eq!(
-            detected(&[Response::Kitty], &hints("xterm-256color", "mintty"), None).protocol,
+            detected(&KITTY, &hints("xterm-256color", "mintty"), None).protocol,
             Some(ImageProtocol::Kitty)
         );
         assert_eq!(
-            detected(&[], &hints("xterm-256color", "mintty"), None).protocol,
+            detected(&NOTHING, &hints("xterm-256color", "mintty"), None).protocol,
             Some(ImageProtocol::Iterm2)
         );
         let lc = EnvHints {
@@ -512,13 +510,13 @@ mod tests {
     fn an_xterm_js_terminal_draws_iterm2_only_with_its_image_addon_loaded() {
         for program in ["vscode", "Tabby", "Hyper"] {
             let hints = hints("xterm-256color", program);
-            assert_eq!(detected(&[], &hints, None).protocol, None, "{program}");
+            assert_eq!(detected(&NOTHING, &hints, None).protocol, None, "{program}");
             assert_eq!(unanswered(&hints, None), Probe::NoAnswer, "{program}");
-            let kitty_only = detected(&[Response::Kitty], &hints, None).protocol;
+            let kitty_only = detected(&KITTY, &hints, None).protocol;
             assert_eq!(kitty_only, None, "{program}: no placeholders");
-            let sixel_only = detected(&[Response::Sixel], &hints, None).protocol;
+            let sixel_only = detected(&SIXEL, &hints, None).protocol;
             assert_eq!(sixel_only, Some(ImageProtocol::Iterm2), "{program}");
-            let loaded = detected(&[Response::Kitty, Response::Sixel], &hints, None);
+            let loaded = detected(&BOTH, &hints, None);
             assert_eq!(loaded.protocol, Some(ImageProtocol::Iterm2), "{program}");
             assert!(!loaded.named, "{program}: answered");
         }
@@ -529,9 +527,9 @@ mod tests {
     #[test]
     fn a_protocol_the_name_alone_picks_is_marked_named() {
         let iterm2 = hints("xterm-256color", "iTerm.app");
-        assert!(detected(&[], &iterm2, None).named);
-        assert!(!detected(&[Response::Sixel], &iterm2, None).named);
-        assert!(!detected(&[Response::Kitty], &EnvHints::default(), None).named);
+        assert!(detected(&NOTHING, &iterm2, None).named);
+        assert!(!detected(&SIXEL, &iterm2, None).named);
+        assert!(!detected(&KITTY, &EnvHints::default(), None).named);
     }
 
     /// iTerm2 answers kitty's query and lists SIXEL in its DA1 (3.7.3, live:
@@ -540,10 +538,9 @@ mod tests {
     /// lists no SIXEL keeps its kitty, whatever the environment names.
     #[test]
     fn iterm2_takes_its_sixel_over_its_kitty() {
-        let both = [Response::Kitty, Response::Sixel];
         let iterm2 = hints("xterm-256color", "iTerm.app");
         assert_eq!(
-            detected(&both, &iterm2, None).protocol,
+            detected(&BOTH, &iterm2, None).protocol,
             Some(ImageProtocol::Sixel)
         );
         let in_tmux = client(EnvHints {
@@ -551,11 +548,11 @@ mod tests {
             ..hints("tmux-256color", "tmux")
         });
         assert_eq!(
-            detected(&both, &in_tmux, None).protocol,
+            detected(&BOTH, &in_tmux, None).protocol,
             Some(ImageProtocol::Sixel)
         );
         assert_eq!(
-            detected(&[Response::Kitty], &iterm2, None).protocol,
+            detected(&KITTY, &iterm2, None).protocol,
             Some(ImageProtocol::Kitty),
             "no SIXEL listed"
         );
@@ -564,7 +561,7 @@ mod tests {
             ..hints("xterm-ghostty", "ghostty")
         };
         assert_eq!(
-            detected(&[Response::Kitty], &leaked, None).protocol,
+            detected(&KITTY, &leaked, None).protocol,
             Some(ImageProtocol::Kitty),
             "a terminal started from iTerm2's shell"
         );
@@ -573,7 +570,7 @@ mod tests {
             ..hints("xterm-ghostty", "ghostty")
         };
         assert_eq!(
-            detected(&both, &leaked_both, None).protocol,
+            detected(&BOTH, &leaked_both, None).protocol,
             Some(ImageProtocol::Kitty),
             "a terminal started from iTerm2's shell that lists SIXEL too"
         );
@@ -582,7 +579,7 @@ mod tests {
             ..hints("xterm-256color", "")
         };
         assert_eq!(
-            detected(&both, &over_ssh, None).protocol,
+            detected(&BOTH, &over_ssh, None).protocol,
             Some(ImageProtocol::Sixel),
             "over ssh only LC_TERMINAL arrives"
         );
@@ -591,7 +588,7 @@ mod tests {
             ..client(hints("tmux-256color", "tmux"))
         };
         assert_eq!(
-            detected(&both, &tmux_over_ssh, None).protocol,
+            detected(&BOTH, &tmux_over_ssh, None).protocol,
             Some(ImageProtocol::Sixel),
             "tmux names itself, not the terminal"
         );
@@ -603,12 +600,12 @@ mod tests {
             ..tmux_over_ssh.clone()
         };
         assert_eq!(
-            detected(&both, &started_in_iterm2, None).protocol,
+            detected(&BOTH, &started_in_iterm2, None).protocol,
             Some(ImageProtocol::Sixel),
             "attached from another terminal: the server's iTerm2 environment"
         );
         assert_eq!(
-            detected(&both, &hints("xterm-kitty", "kitty"), None).protocol,
+            detected(&BOTH, &hints("xterm-kitty", "kitty"), None).protocol,
             Some(ImageProtocol::Kitty)
         );
     }
@@ -620,7 +617,7 @@ mod tests {
     fn warp_answers_but_animates_no_protocol() {
         let warp = hints("xterm-256color", "WarpTerminal");
         let cell = CellSize { w: 8, h: 18 };
-        let d = detected(&[Response::Kitty], &warp, Some(cell));
+        let d = detected(&KITTY, &warp, Some(cell));
         assert_eq!((d.protocol, d.cell, d.unanimated), (None, Some(cell), true));
         assert_eq!(warp.terminal(), Terminal::Warp);
         assert!(!warp.query().contains("\x1b_G"), "kitty is never asked");
@@ -636,7 +633,7 @@ mod tests {
             ..client(hints("tmux-256color", "tmux"))
         };
         assert_eq!(tmux.terminal(), Terminal::Warp);
-        let d = detected(&[Response::Kitty], &tmux, Some(CellSize { w: 8, h: 18 }));
+        let d = detected(&KITTY, &tmux, Some(CellSize { w: 8, h: 18 }));
         assert_eq!((d.protocol, d.unanimated), (None, true));
         let started_from_warp = EnvHints {
             warp_client: true,
@@ -699,7 +696,7 @@ mod tests {
     #[test]
     fn a_tmux_client_is_inside_tmux_whatever_its_term() {
         let pane = client(hints("xterm-256color", ""));
-        assert!(detected(&[Response::Kitty], &pane, None).tmux);
+        assert!(detected(&KITTY, &pane, None).tmux);
         assert!(pane.env.link().tmux);
         assert!(pane.our_tmux_pane());
         assert!(pane.query().starts_with("\x1bPtmux;"), "{:?}", pane.query());
@@ -738,7 +735,7 @@ mod tests {
                 !query.contains("\x1b_G") && !query.contains("\x1b[c"),
                 "{query:?}"
             );
-            let d = detected(&[Response::Kitty, Response::Sixel], hints, None);
+            let d = detected(&BOTH, hints, None);
             assert_eq!(d.protocol, want);
         }
         assert!(EnvHints::default().query().contains("\x1b_G"));
@@ -759,7 +756,7 @@ mod tests {
             ..hints("xterm-kitty", "WezTerm")
         };
         assert_eq!(
-            detected(&[Response::Kitty], &kitty_from_wezterm, None).protocol,
+            detected(&KITTY, &kitty_from_wezterm, None).protocol,
             Some(ImageProtocol::Kitty)
         );
         let kitty_from_konsole = EnvHints {
@@ -767,10 +764,13 @@ mod tests {
             ..hints("xterm-kitty", "")
         };
         assert_eq!(
-            detected(&[Response::Kitty], &kitty_from_konsole, None).protocol,
+            detected(&KITTY, &kitty_from_konsole, None).protocol,
             Some(ImageProtocol::Kitty)
         );
         let alacritty_from_vscode = hints("alacritty", "vscode");
-        assert_eq!(detected(&[], &alacritty_from_vscode, None).protocol, None);
+        assert_eq!(
+            detected(&NOTHING, &alacritty_from_vscode, None).protocol,
+            None
+        );
     }
 }
