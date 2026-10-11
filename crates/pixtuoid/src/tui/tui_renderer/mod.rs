@@ -80,7 +80,7 @@ struct Chrome {
     pets: Vec<pixtuoid_scene::pet::Pet>,
     popup: PopupState,
     /// The panels the loop computed, which the frame paints: their
-    /// `version_popup` is `popup`'s target, its scale animated there.
+    /// `version_popup.open` is `popup`'s target, its scale animated there.
     frames: crate::panels::ui_state::RenderFrames,
     /// Ambient-audio gateway; inert unless installed.
     audio: crate::audio::AudioHandle,

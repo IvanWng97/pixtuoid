@@ -330,9 +330,9 @@ mod tests {
             crate::doctor::DriftSeen::default(),
         );
         k.ui.open_version_popup(&std::collections::HashSet::new(), &[]);
-        assert!(k.ui.modal().version_popup);
+        assert!(k.ui.modal().version_popup_open);
         assert!(!k.press(KeyCode::Esc), "Esc quit");
-        assert!(!k.ui.modal().version_popup, "the popup is still up");
+        assert!(!k.ui.modal().version_popup_open, "the popup is still up");
     }
 
     /// A previewed theme shows in the window at once, and only a commit

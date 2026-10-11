@@ -820,8 +820,6 @@ mod tests {
         height: 40,
     };
 
-    /// Each terminal kind's default motion: every loop on a local kitty image or
-    /// half-block grid, the calm pace for SIXEL, iTerm2, tmux or ssh.
     /// Only graphics left off reads as off: a run whose terminal refused the
     /// cutaway already asked for it, and one painting it has it.
     #[test]
@@ -836,6 +834,8 @@ mod tests {
         assert!(!painting.graphics_off());
     }
 
+    /// Each terminal kind's default motion: every loop on a local kitty image or
+    /// half-block grid, the calm pace for SIXEL, iTerm2, tmux or ssh.
     #[test]
     fn each_terminal_kind_paints_at_its_affordable_motion() {
         use pixtuoid_scene::anim::Motion;

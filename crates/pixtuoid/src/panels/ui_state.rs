@@ -83,7 +83,7 @@ pub(crate) struct UiState {
     onboarding_opened_at: Option<Instant>,
     /// `(fade start, the dim the open ramp was interrupted at)`.
     onboarding_closing_at: Option<(Instant, pixtuoid_scene::look::Dim)>,
-    version_popup: bool,
+    version_popup_open: bool,
     notices: Notices,
     help_open: bool,
     /// `[p]ause`: while paused, `now()` returns the frozen instant so every
@@ -211,7 +211,7 @@ impl UiState {
             onboarding_ui,
             onboarding_opened_at,
             onboarding_closing_at: None,
-            version_popup: false,
+            version_popup_open: false,
             notices: Notices::default(),
             help_open: false,
             pause: pixtuoid_scene::anim::PauseClock::default(),
@@ -232,7 +232,7 @@ impl UiState {
         ModalState {
             onboarding_open: self.onboarding_open(),
             help_open: self.help_open,
-            version_popup: self.version_popup,
+            version_popup_open: self.version_popup_open,
             theme_picker: self.theme_picker,
             dashboard_open: self.dashboard.open,
             connection_open: self.connection.open,
@@ -271,7 +271,7 @@ impl UiState {
     }
 
     pub(crate) fn dismiss_version_popup(&mut self) {
-        self.version_popup = false;
+        self.version_popup_open = false;
     }
 
     /// Open the version popup with the notices due while `connected` holds
@@ -287,7 +287,7 @@ impl UiState {
             cutaway: self.notices.cutaway,
         };
         self.notices.shown = crate::version::due(self.notices.versions.as_ref(), &facts).into();
-        self.version_popup = true;
+        self.version_popup_open = true;
     }
 
     /// The notices the version popup last opened with.
@@ -540,7 +540,7 @@ impl UiState {
         RenderFrames {
             theme_picker: self.theme_picker,
             version_popup: VersionPopupFrame {
-                open: self.version_popup,
+                open: self.version_popup_open,
                 upgraded: self.notices.upgraded,
                 notices: Arc::clone(&self.notices.shown),
             },
@@ -649,7 +649,7 @@ mod tests {
         assert!(
             !m.onboarding_open
                 && !m.help_open
-                && !m.version_popup
+                && !m.version_popup_open
                 && m.theme_picker.is_none()
                 && !m.dashboard_open
                 && !m.connection_open
@@ -798,7 +798,7 @@ mod tests {
         let boot = |path: &std::path::Path, welcome: WelcomeUi| {
             boot_at(path, welcome, env!("CARGO_PKG_VERSION"))
                 .modal()
-                .version_popup
+                .version_popup_open
         };
         let stamped =
             |path: &std::path::Path| crate::config::load(path, &mut Vec::new()).last_seen_version;
@@ -835,7 +835,7 @@ mod tests {
                 drawable: true,
             },
         );
-        assert!(ui.modal().version_popup);
+        assert!(ui.modal().version_popup_open);
         let shown = ui.version_notices();
         assert_eq!(shown.len(), 2, "{shown:?}");
         assert!(
@@ -856,7 +856,7 @@ mod tests {
             current: semver::Version::new(0, 20, 0),
         });
         ui.open_version_popup(&HashSet::new(), &["codex"]);
-        assert!(ui.modal().version_popup);
+        assert!(ui.modal().version_popup_open);
         let shown = ui.version_notices().to_vec();
         assert!(shown.iter().any(|n| n.contains("Codex")), "{shown:?}");
 
@@ -871,7 +871,7 @@ mod tests {
 
         let connected = HashSet::from(["codex".to_string()]);
         ui.open_version_popup(&connected, &["codex"]);
-        assert!(ui.modal().version_popup);
+        assert!(ui.modal().version_popup_open);
         assert!(
             ui.version_notices().is_empty(),
             "{:?}",

@@ -74,7 +74,7 @@ pub(crate) fn modal_press(
         let cell = Face::chrome(at);
         (cell_at(cursor, cell), panel_cells(window, cell))
     });
-    let popup_scale = crate::panels::ui_state::popup_whole(ui.modal().version_popup);
+    let popup_scale = crate::panels::ui_state::popup_whole(ui.modal().version_popup_open);
     crate::panels::modal_mouse(ui, popup_scale, cells.map(|(at, _)| at), || {
         cells.map(|(_, screen)| screen)
     })

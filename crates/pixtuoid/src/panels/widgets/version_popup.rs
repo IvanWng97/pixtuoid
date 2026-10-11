@@ -77,9 +77,7 @@ fn notice_rows(bounds: Rect, notices: &[String]) -> Vec<String> {
         return Vec::new();
     }
     // The tallest inner the bounds allow: the content rows saturate to it.
-    let Some(inner) =
-        PanelGeometry::compute(bounds, VERSION_POPUP_W, u16::MAX, Some(""), 1.0).inner()
-    else {
+    let Some(inner) = version_geometry(bounds, 1.0, usize::MAX).and_then(|g| g.inner()) else {
         return Vec::new();
     };
     let width = usize::from(inner.width).saturating_sub(INDENT.len());

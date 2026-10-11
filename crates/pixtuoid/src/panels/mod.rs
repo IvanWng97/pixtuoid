@@ -166,7 +166,7 @@ pub(crate) trait Host {
 pub(crate) struct ModalState {
     pub(crate) onboarding_open: bool,
     pub(crate) help_open: bool,
-    pub(crate) version_popup: bool,
+    pub(crate) version_popup_open: bool,
     pub(crate) theme_picker: Option<usize>,
     pub(crate) dashboard_open: bool,
     pub(crate) connection_open: bool,
@@ -182,7 +182,7 @@ impl ModalState {
         Self {
             onboarding_open: false,
             help_open: false,
-            version_popup: false,
+            version_popup_open: false,
             theme_picker: None,
             dashboard_open: false,
             connection_open: false,
@@ -198,7 +198,7 @@ impl ModalState {
         let &Self {
             onboarding_open,
             help_open,
-            version_popup,
+            version_popup_open,
             theme_picker,
             dashboard_open,
             connection_open,
@@ -207,7 +207,7 @@ impl ModalState {
         } = self;
         onboarding_open
             || help_open
-            || version_popup
+            || version_popup_open
             || theme_picker.is_some()
             || dashboard_open
             || connection_open
@@ -510,7 +510,7 @@ pub(crate) fn dispatch_key(
             _ => KeyAction::None,
         };
     }
-    if modal.version_popup {
+    if modal.version_popup_open {
         return match (code, mods) {
             (KeyCode::Enter, _) | (KeyCode::Esc, _) => KeyAction::DismissVersionPopup,
             _ if is_quit_chord(code, mods) => KeyAction::Quit,
@@ -933,7 +933,7 @@ mod dispatch_tests {
     fn help_overlay_has_priority_and_dismisses() {
         let c = ModalState {
             help_open: true,
-            version_popup: true,
+            version_popup_open: true,
             theme_picker: Some(2),
             ..modal()
         };
@@ -965,7 +965,7 @@ mod dispatch_tests {
         let on = ModalState {
             onboarding_open: true,
             help_open: true,
-            version_popup: true,
+            version_popup_open: true,
             connection_open: true,
             ..modal()
         };
@@ -1018,7 +1018,7 @@ mod dispatch_tests {
     #[test]
     fn version_popup_enter_and_esc_dismiss() {
         let c = ModalState {
-            version_popup: true,
+            version_popup_open: true,
             ..modal()
         };
         for dismiss in [KeyCode::Enter, KeyCode::Esc] {
@@ -1057,7 +1057,7 @@ mod dispatch_tests {
                 ..modal()
             },
             ModalState {
-                version_popup: true,
+                version_popup_open: true,
                 ..modal()
             },
             ModalState {
@@ -1087,7 +1087,7 @@ mod dispatch_tests {
     #[test]
     fn the_version_popup_binds_no_scroll_key() {
         let c = ModalState {
-            version_popup: true,
+            version_popup_open: true,
             ..modal()
         };
         for code in [
@@ -1293,7 +1293,7 @@ mod dispatch_tests {
         };
         assert_eq!(dispatch_key(KeyCode::Tab, NONE, h, nav()), KeyAction::None);
         let v = ModalState {
-            version_popup: true,
+            version_popup_open: true,
             ..modal()
         };
         assert_eq!(dispatch_key(KeyCode::Tab, NONE, v, nav()), KeyAction::None);
@@ -1428,7 +1428,7 @@ mod dispatch_tests {
             KeyAction::None
         );
         let v = ModalState {
-            version_popup: true,
+            version_popup_open: true,
             ..modal()
         };
         assert_eq!(

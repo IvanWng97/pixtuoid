@@ -770,7 +770,8 @@ mod tests {
     }
 
     /// A name alone says the cutaway draws only where its row vouches for a
-    /// protocol with no answer, and never inside tmux.
+    /// protocol with no answer, and never inside tmux, whether `$TMUX` or only
+    /// the `TERM`/`TERM_PROGRAM` tmux sets says so.
     #[test]
     fn a_cutaway_terminal_is_named_by_what_its_name_vouches_for() {
         let iterm2_in_tmux = EnvHints {
@@ -789,6 +790,14 @@ mod tests {
             (hints("xterm-256color", "vscode"), false),
             (iterm2_in_tmux, false),
             (client(hints("xterm-kitty", "")), false),
+            (hints("xterm-kitty", "tmux"), false),
+            (
+                EnvHints {
+                    iterm_session: true,
+                    ..hints("tmux-256color", "tmux")
+                },
+                false,
+            ),
         ] {
             assert_eq!(named.names_a_cutaway_terminal(), draws, "{named:?}");
         }

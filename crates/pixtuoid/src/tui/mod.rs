@@ -1290,7 +1290,7 @@ mod apply_key_action_tests {
         h.connected = crate::runtime::ConnectedSources::new(HashSet::from(["codex".to_string()]));
         h.installed = || vec!["codex", "reasonix"];
         assert!(!h.apply(KeyAction::OpenVersionPopup));
-        assert!(h.ui.modal().version_popup);
+        assert!(h.ui.modal().version_popup_open);
         let shown = h.ui.version_notices();
         assert!(
             shown
