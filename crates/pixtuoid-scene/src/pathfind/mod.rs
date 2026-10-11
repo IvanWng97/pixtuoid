@@ -36,10 +36,6 @@ pub trait Router: std::fmt::Debug {
         to: Point,
     ) -> Vec<Point>;
 
-    /// Drop any cached state — call when the static mask is replaced
-    /// (terminal resize, layout shape change).
-    fn invalidate(&mut self);
-
     /// Optional: bias the cost function toward a preferred zone (e.g. the office
     /// corridor) so paths hug the hallway instead of cutting across the cubicle
     /// floor. Default impl is a no-op.
@@ -117,10 +113,6 @@ impl Router for AStarRouter {
             }
             None => vec![from, to],
         }
-    }
-
-    fn invalidate(&mut self) {
-        self.paths.clear();
     }
 
     fn set_preferred_zone(&mut self, zone: Option<Bounds>) {

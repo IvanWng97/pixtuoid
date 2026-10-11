@@ -39,7 +39,6 @@ impl Router for StubRouter {
             self.path.clone()
         }
     }
-    fn invalidate(&mut self) {}
 }
 
 fn layout() -> SceneLayout {
@@ -71,7 +70,6 @@ impl Router for ChangingRouter {
             self.rest.clone()
         }
     }
-    fn invalidate(&mut self) {}
 }
 
 #[test]
@@ -2078,7 +2076,6 @@ impl Router for FlipRouter {
             self.a.clone()
         }
     }
-    fn invalidate(&mut self) {}
 }
 
 #[test]

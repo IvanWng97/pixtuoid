@@ -23,7 +23,6 @@ use pixtuoid_scene::floor::{
 };
 use pixtuoid_scene::layout::{SceneLayout, Size};
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
-use pixtuoid_scene::pathfind::Router;
 
 #[derive(Debug, Default)]
 struct PopupState {
@@ -377,8 +376,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.buf().map_or((0, 0), |b| (b.width(), b.height()))
     }
 
-    /// A frame laid out at a new extent — a resize — re-routes every floor and
-    /// lands any slide.
+    /// A frame laid out at a new extent — a resize — lands any slide.
     fn follow_resize(&mut self) {
         let extent = self.office_extent();
         if self
@@ -386,7 +384,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .replace(extent)
             .is_some_and(|was| was != extent)
         {
-            self.invalidate_routes();
             self.cancel_transition();
         }
     }
@@ -648,12 +645,6 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.session.office().coffee.map().contains_key(&id)
     }
 
-    fn invalidate_routes(&mut self) {
-        for pf in self.session.floors_mut() {
-            pf.ctx.router.invalidate();
-        }
-    }
-
     /// The slide the session just composed, as classic half-blocks, under the
     /// destination's footer.
     fn flush_classic_slide(&mut self, scene: &SceneState, now: SystemTime) -> Result<()> {
@@ -709,12 +700,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             now,
         );
         self.session.drew_no_office();
-        self.record_drawn(
-            scene,
-            crate::tui::renderer::DrawOut::default(),
-            popup_scale,
-            now,
-        );
+        self.record_drawn(crate::tui::renderer::DrawOut::default(), popup_scale);
         self.rest_floor(now);
         drawn
     }
@@ -737,24 +723,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     }
 
     /// What a floor frame leaves behind, whichever painter drew it: what the
-    /// mouse hit-tests and the floor's audio.
-    fn record_drawn(
-        &mut self,
-        scene: &SceneState,
-        out: crate::tui::renderer::DrawOut,
-        popup_scale: f32,
-        now: SystemTime,
-    ) {
+    /// mouse hit-tests.
+    fn record_drawn(&mut self, out: crate::tui::renderer::DrawOut, popup_scale: f32) {
         self.last_hovers = out.hovers;
         self.last_star = out.star;
         self.last_geometry = out.geometry;
-        // Ambient audio: one AudioFrame per rendered frame, floor-scoped (you hear
-        // the floor you're LOOKING AT; rain stays global), from the session's own
-        // last frame of it.
-        let office_floor = self.chrome.office_world(scene, &self.pack, now).floor;
-        let audio_frame = self.session.audio_frame(scene, office_floor, now);
-        // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
-        self.chrome.audio.frame(audio_frame);
         self.cached_layout = out.layout;
         // The popup's click rect derives from the terminal bounds — NOT the
         // office layout — so the painted scale IS the clickable one on both
@@ -781,7 +754,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         } else {
             Ok(())
         };
-        let drawn = redrawn.and_then(|()| self.draw_frame(scene, pack, now));
+        let drawn = redrawn.and_then(|()| {
+            let drawn = self.draw_frame(scene, pack, now);
+            self.feed_audio(scene, now);
+            drawn
+        });
         self.follow_resize();
         // Presented even when the draw failed, so nothing stays held.
         let presenting = std::time::Instant::now();
@@ -825,18 +802,23 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             .map(crate::tui::cutaway::TileCutaway::last_send);
         #[cfg(not(feature = "graphics"))]
         let send = None;
-        let note = self
-            .session
-            .floor(self.session.nav().current())
-            .and_then(|f| f.raster.note());
         self.jank.record(
             begun.elapsed(),
             present,
             send,
-            note,
+            self.session.note(),
             std::time::Instant::now(),
         );
         Ok(())
+    }
+
+    /// Feed the audio thread the floor showing's frame just drawn, whichever
+    /// path drew it, a held or sliding one's too, muted or not: the
+    /// every-world-frame contract of `AudioObserver::frame`.
+    fn feed_audio(&mut self, scene: &SceneState, now: SystemTime) {
+        let office_floor = self.chrome.office_world(scene, &self.pack, now).floor;
+        let frame = self.session.audio_frame(scene, office_floor, now);
+        self.chrome.audio.frame(frame);
     }
 
     fn draw_frame(&mut self, scene: &SceneState, pack: &OfficeArt, now: SystemTime) -> Result<()> {
@@ -923,7 +905,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         };
         let out = crate::tui::renderer::flush_classic(&mut self.terminal, &frame, layout, floor)?;
         self.flash.stage(flashes, term_size);
-        self.record_drawn(scene, out, popup_scale, now);
+        self.record_drawn(out, popup_scale);
         Ok(())
     }
 }
@@ -1053,7 +1035,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         })?;
         cutaway.after_flush(&carves, now);
         match shown {
-            Some((drawn, _)) => self.record_drawn(scene, drawn, popup_scale, now),
+            Some((drawn, _)) => self.record_drawn(drawn, popup_scale),
             None => self.chrome.popup.last_scale = popup_scale,
         }
         Ok(())

@@ -143,6 +143,36 @@ fn floor_switch_reprimes_without_a_chime_volley() {
     );
 }
 
+/// A floor slide's frames feed the audio thread too, one a frame, as the
+/// every-world-frame contract asks.
+#[test]
+fn every_frame_of_a_slide_feeds_the_audio_thread() {
+    let cap = 16;
+    let scene = scene_with(
+        vec![
+            active_on("/l/f0.jsonl", 0, 0),
+            active_on("/l/f1.jsonl", 1, cap),
+        ],
+        cap,
+    );
+    let mut r = build(80, 40, vec![]);
+    let (handle, rx) = AudioHandle::test_pair();
+    r.set_audio(handle);
+    let pack = pack();
+    let mut now = t0();
+    r.render(&scene, pack, now).expect("prime render");
+    drain_frames(&rx);
+    r.navigate_floor(1, now);
+    let mut frames = 0;
+    while r.transition().is_some() {
+        r.render(&scene, pack, now).expect("render");
+        frames += 1;
+        now += Duration::from_millis(PAINT_FRAME_MS);
+    }
+    assert!(frames > 1, "the slide ran over frames");
+    assert_eq!(drain_frames(&rx).len(), frames);
+}
+
 #[test]
 fn footer_note_glyph_tracks_effective_audibility() {
     let scene = scene_with(vec![active_on("/f/a.jsonl", 0, 0)], 16);

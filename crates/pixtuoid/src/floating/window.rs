@@ -524,11 +524,9 @@ impl FloatingApp {
             ),
         };
         self.overlays.update(next, at, (self.theme, &*self.pack));
-        let dirty = self.renderer.dirty();
-        let painted = crate::jank::Painted::from(dirty);
         let comp = super::compose::composition(
             office,
-            super::compose::Change::from(dirty),
+            super::compose::Change::from(self.renderer.dirty()),
             at,
             (win_w, win_h),
             &self.overlays,
@@ -560,16 +558,8 @@ impl FloatingApp {
             scale: at.scale().get(),
             ..crate::jank::Painter::default()
         });
-        self.jank.record(
-            now - started,
-            now - presenting,
-            Some(crate::jank::FrameSend {
-                dirty: painted,
-                ..crate::jank::FrameSend::default()
-            }),
-            None,
-            now,
-        );
+        self.renderer
+            .record(&mut self.jank, now - started, now - presenting, now);
     }
 }
 

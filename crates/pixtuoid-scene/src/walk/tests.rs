@@ -76,7 +76,6 @@ impl Router for Straight {
     ) -> Vec<Point> {
         vec![from, to]
     }
-    fn invalidate(&mut self) {}
 }
 
 /// Captures every `(from, to)` route request — pins WHICH goal the profile
@@ -96,7 +95,6 @@ impl Router for Recording {
         self.calls.push((from, to));
         vec![from, to]
     }
-    fn invalidate(&mut self) {}
 }
 
 /// Synthesises a horizontal path of the requested octile length starting at
@@ -124,7 +122,6 @@ impl Router for FixedLen {
         };
         vec![from, mid, end]
     }
-    fn invalidate(&mut self) {}
 }
 
 fn t0() -> SystemTime {

@@ -130,6 +130,22 @@ impl OfficeRenderer {
         self.session.buf()
     }
 
+    /// Count the frame on screen in `jank`, `total` long, `present` of it
+    /// presenting: what it repainted and was drawn under are the session's.
+    pub(crate) fn record(
+        &self,
+        jank: &mut crate::jank::Jank,
+        total: std::time::Duration,
+        present: std::time::Duration,
+        now: std::time::Instant,
+    ) {
+        let send = crate::jank::FrameSend {
+            dirty: crate::jank::Painted::from(self.session.dirty()),
+            ..crate::jank::FrameSend::default()
+        };
+        jank.record(total, present, Some(send), self.session.note(), now);
+    }
+
     /// The frame [`render_live`](Self::render_live) last handed out finished
     /// presenting just now.
     pub(crate) fn presented(&mut self) {
@@ -564,6 +580,24 @@ mod tests {
             }
             self.shown.clone()
         }
+    }
+
+    /// The window's frame report says what its frame repainted and was drawn
+    /// under, as the terminal's does: `pace-check --floating` reads both.
+    #[test]
+    fn the_windows_frame_report_says_what_its_frame_was_drawn_under() {
+        let strike = crate::test_flash::storm_strike();
+        let mut window = Window::new(strike.weather);
+        window.present(strike.start);
+        let logged = crate::test_capture::capture(|| {
+            let mut jank = crate::jank::Jank::new();
+            let slow = Duration::from_secs(1);
+            window
+                .renderer
+                .record(&mut jank, slow, Duration::ZERO, std::time::Instant::now());
+        });
+        assert!(logged.contains("strike=true"), "{logged}");
+        assert!(logged.contains("dirty=\"all\""), "{logged}");
     }
 
     /// A window resized under a hold gets its frame at once: a screen of a new

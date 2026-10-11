@@ -401,8 +401,8 @@ impl OfficeSession {
         Some((&mut view.floor, &mut self.office))
     }
 
-    /// Every floor grown so far, for what reaches all of them at once (a
-    /// resize's routes).
+    /// Every floor grown so far, for what reaches all of them at once (the
+    /// pacing bench's whole repaint).
     pub fn floors_mut(&mut self) -> impl Iterator<Item = &mut PerFloor> {
         self.views.iter_mut().map(|view| &mut view.floor)
     }
@@ -529,6 +529,13 @@ impl OfficeSession {
                     .unwrap_or_default(),
             ),
         }
+    }
+
+    /// What the floor showing's last frame was drawn under, for a painter's
+    /// jank report; `None` before its first.
+    #[doc(hidden)]
+    pub fn note(&self) -> Option<crate::look::FrameNote> {
+        self.floor(self.nav.current())?.raster.note()
     }
 
     /// What the last frame shows a pointer over `area`, in layout units; none
