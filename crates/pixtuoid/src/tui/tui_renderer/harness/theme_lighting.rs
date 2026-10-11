@@ -23,26 +23,26 @@ fn theme_switch_recolors_floor() {
     );
 }
 
+/// A typing sitter's glow is the one theme input to its cached sprite
+/// ([`FrameKey::glow_tint`](pixtuoid_scene::frame_cache::FrameKey)), so a
+/// renderer that rendered under the old theme paints the new one
+/// pixel-for-pixel as a fresh one would, with no flush on a switch.
 #[test]
-fn set_theme_with_same_theme_is_a_noop() {
-    let scene = scene_with(vec![idle("/t/same.jsonl", 0, t0())], 16);
-    let mut r = build(100, 40, vec![]); // built with normal_theme()
+fn theme_switch_paints_as_a_fresh_renderer_would() {
+    let started = t0() - Duration::from_secs(300);
+    let scene = scene_with(vec![active("/t/fresh.jsonl", 0, "Edit x", started)], 16);
     let now = t0();
-    r.render(&scene, pack(), now).unwrap();
-    let before = r.buf().expect("a frame").clone();
-    r.set_theme(normal_theme());
-    r.render(&scene, pack(), now).unwrap();
-    let d = region_diff(
-        &before,
-        r.buf().expect("a frame"),
-        0,
-        0,
-        before.width(),
-        before.height(),
-    );
+    let mut switched = build(100, 40, vec![]);
+    switched.render(&scene, pack(), now).unwrap();
+    switched.set_theme(dark_theme());
+    switched.render(&scene, pack(), now).unwrap();
+    let mut fresh = build(100, 40, vec![]);
+    fresh.set_theme(dark_theme());
+    fresh.render(&scene, pack(), now).unwrap();
     assert_eq!(
-        d, 0,
-        "re-setting the identical theme must not recolor (cache not flushed), diff={d}"
+        switched.buf().expect("a frame").as_slice(),
+        fresh.buf().expect("a frame").as_slice(),
+        "a stale cached sprite survived the theme switch"
     );
 }
 

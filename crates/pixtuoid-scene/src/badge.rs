@@ -131,7 +131,7 @@ pub(crate) fn tone_of(agent: &AgentSlot) -> BadgeTone {
 /// The plate a badge drawn in pixels sits on, so its text keeps one contrast
 /// whatever the room behind it
 /// (`every_badge_ink_reads_on_its_plate_in_every_theme`).
-pub(crate) fn badge_plate(theme: &Theme) -> Rgb {
+pub(crate) fn badge_plate_colour(theme: &Theme) -> Rgb {
     theme.ui.tooltip_bg
 }
 
@@ -452,14 +452,14 @@ mod tests {
     /// 2.05:1, straight on the floor.
     #[test]
     fn every_badge_ink_reads_on_its_plate_in_every_theme() {
-        use super::{badge_ink, badge_plate};
+        use super::{badge_ink, badge_plate_colour};
         let labels: Vec<String> = pixtuoid_core::source::registry::REGISTRY
             .iter()
             .map(|s| format!("{}\u{b7}repo", s.label_prefix))
             .chain(["bare".to_owned()])
             .collect();
         for theme in crate::theme::ALL_THEMES {
-            let plate = badge_plate(theme);
+            let plate = badge_plate_colour(theme);
             for tone in [
                 BadgeTone::Active,
                 BadgeTone::Waiting,
