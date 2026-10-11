@@ -17,6 +17,8 @@ pub(crate) mod doctor;
 
 #[cfg(test)]
 mod drift_surface;
+#[cfg(any(test, feature = "upstream"))]
+mod drift_watch;
 pub(crate) mod floating;
 pub(crate) mod focus;
 pub(crate) mod graphics;
@@ -41,6 +43,11 @@ pub mod dev {
     pub use crate::audio::demote_to_utility;
     pub use crate::config::{FLOATING_DEFAULT_H, FLOATING_DEFAULT_W};
     pub use crate::doctor::footer_warning;
+    /// The upstream drift watch, apart from [`crate::run`], the program.
+    #[cfg(any(test, feature = "upstream"))]
+    pub mod drift {
+        pub use crate::drift_watch::{Report, run, run_legacy};
+    }
     pub use crate::floating::compose::{Change, XrgbSurface, composite, composition};
     pub use crate::floating::geometry::{Zoom, window_geometry};
     pub use crate::floating::offscreen::{OfficeRenderer, Pressing, WindowFrame};

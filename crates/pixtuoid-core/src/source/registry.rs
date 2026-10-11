@@ -15,6 +15,8 @@ use crate::source::{
     AgentEvent, antigravity, claude_code, codewhale, codex, copilot, cursor, dsh, grok, hermes,
     kimi, omp, openclaw, opencode, reasonix,
 };
+#[cfg(any(test, feature = "upstream"))]
+use crate::source::{acp, upstream::Upstream};
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for a
 /// [`HookCustom::ClaimsAll`] source (its decoder builds its own AgentIds and the
@@ -157,6 +159,12 @@ pub struct SourceDescriptor {
     /// `OPENCODE_CONFIG_DIR` and `REASONIX_HOME` are declared there. Where a CLI
     /// has several (omp), this names the most direct one.
     pub home_env: Option<&'static str>,
+    /// The upstream projects this source reads names from, its own first, kept
+    /// on the row rather than in a list beside the registry. Empty means
+    /// unwatched: the census that every row declares one lands with the last
+    /// source's move off `check_upstream_drift.py`.
+    #[cfg(any(test, feature = "upstream"))]
+    pub upstream: &'static [Upstream],
     /// What KIND of source this is. Consumers read through the accessors so the
     /// enum shape stays an internal detail.
     pub(crate) kind: SourceKind,
@@ -404,6 +412,8 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     verified_version: "2.1.278",
     version_probe: Some(&["claude", "--version"]),
     home_env: Some("CLAUDE_CONFIG_DIR"),
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: claude_code::decode_cc_line,
@@ -440,6 +450,8 @@ const CODEX: SourceDescriptor = SourceDescriptor {
     verified_version: "0.155.1",
     version_probe: Some(&["codex", "--version"]),
     home_env: Some("CODEX_HOME"),
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: codex::decode_codex_line,
@@ -473,6 +485,8 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
     verified_version: "unknown",
     version_probe: Some(&["agy", "--version"]),
     home_env: None,
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: antigravity::decode_ag_line,
@@ -514,6 +528,8 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
     verified_version: "1.38.7",
     version_probe: Some(&["reasonix", "--version"]),
     home_env: None,
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -553,6 +569,8 @@ const DSH: SourceDescriptor = SourceDescriptor {
     // `DSH_HOME` is honored INSTALLER-side (the plugin file + patch row live
     // under it); hook-only, so core resolves no root to relocate.
     home_env: None,
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -597,6 +615,8 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
     verified_version: "0.10.1",
     version_probe: Some(&["codewhale", "--version"]),
     home_env: None,
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -624,6 +644,8 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
     verified_version: "1.18.30",
     version_probe: Some(&["opencode", "--version"]),
     home_env: None,
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -655,6 +677,8 @@ const OPENCLAW: SourceDescriptor = SourceDescriptor {
     verified_version: "2026.10.1",
     version_probe: Some(&["openclaw", "--version"]),
     home_env: None,
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Daemon {
         presence_decoder: openclaw::decode_openclaw_hook_payload,
     },
@@ -670,6 +694,8 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
     verified_version: "unknown",
     version_probe: Some(&["copilot", "--version"]),
     home_env: Some("COPILOT_HOME"),
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: copilot::decode_copilot_line,
@@ -705,6 +731,8 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
     verified_version: "2026.09.18",
     version_probe: Some(&["cursor-agent", "--version"]),
     home_env: None,
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -740,6 +768,8 @@ const HERMES: SourceDescriptor = SourceDescriptor {
     verified_version: "0.21.0",
     version_probe: Some(&["hermes", "--version"]),
     home_env: Some("HERMES_HOME"),
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -773,6 +803,8 @@ const GROK: SourceDescriptor = SourceDescriptor {
     verified_version: "1.0.25",
     version_probe: Some(&["grok", "--version"]),
     home_env: Some("GROK_HOME"),
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[acp::UPSTREAM],
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: grok::decode_grok_line,
@@ -825,6 +857,8 @@ const OMP: SourceDescriptor = SourceDescriptor {
     verified_version: "18.2.6",
     version_probe: Some(&["omp", "--version"]),
     home_env: Some("PI_CODING_AGENT_DIR"),
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: omp::decode_omp_line,
@@ -883,6 +917,8 @@ const KIMI: SourceDescriptor = SourceDescriptor {
     verified_version: "2.0.1",
     version_probe: Some(&["kimi", "--version"]),
     home_env: None,
+    #[cfg(any(test, feature = "upstream"))]
+    upstream: &[],
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {

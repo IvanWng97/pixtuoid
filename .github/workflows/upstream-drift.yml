@@ -22,11 +22,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-just
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          # A weekly interval meets GitHub's idle eviction
+          # (docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching),
+          # so a saved target dir would rarely be restored.
+          enable-cache: 'false'
 
-      # Guards the parsers before the live check trusts them. Duplicates
+      # Guards the legacy parsers before the live check trusts them. Duplicates
       # ci-lint.yml's `hygiene` job because ci-lint does not run on the cron.
-      - name: Self-test the watcher
+      - name: Self-test the legacy watches
         run: just drift-selftest
 
       - name: Check upstream drift
@@ -34,7 +39,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python3 scripts/check_upstream_drift.py | tee drift-report.md
+          just drift-watch | tee drift-report.md
           echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Open or update tracking issue
@@ -47,7 +52,7 @@ jobs:
             --description "Upstream CLI wire-format drift" 2>/dev/null || true
           # The checker owns the title and emits it as the report's H1; read it
           # back rather than re-deriving it. Re-deriving would be an unpinned
-          # second copy of strings in check_upstream_drift.py, and rewording one
+          # second copy of strings in drift_watch's `Report`, and rewording one
           # there would silently title a confirmed rename "could not verify".
           title=$(head -1 drift-report.md | sed 's/^# //')
           num=$(gh issue list --label upstream-drift --state open \
@@ -77,12 +82,12 @@ jobs:
 
       - name: Fail on an unexpected checker exit
         # exit 0 = no findings; 1 = actionable; 2 = transient fetch trouble
-        # (warn-only by design). ANY other code — 127 (python missing), 137
-        # (OOM-kill), a crash before the classifier ran — is a dead watcher, and
-        # without this it reads as healthy.
+        # (warn-only by design). ANY other code — 101 (a panic or a failed
+        # build), 137 (OOM-kill) — is a dead watcher, and without this it reads
+        # as healthy.
         if: ${{ !contains(fromJSON('["0","1","2"]'), steps.check.outputs.exit) }}
         env:
           CODE: ${{ steps.check.outputs.exit }}
         run: |
-          echo "::error::check_upstream_drift.py exited with unexpected code '${CODE}'"
+          echo "::error::drift-watch exited with unexpected code '${CODE}'"
           exit 1

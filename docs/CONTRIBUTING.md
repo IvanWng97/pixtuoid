@@ -257,7 +257,7 @@ proving a real CLI's output becomes a sprite — sources with no invocation
 entry are listed `NOT COVERED`, never skipped silently).
 
 Advisory backstops that surface risk but never gate:
-`scripts/check_upstream_drift.py` (wire-format drift) · `just fixture-age`
+`just drift-watch` (wire-format drift) · `just fixture-age`
 (which recorded fixtures a local CLI has moved past; LOCAL-only) ·
 `just bench` / `just bench-pacing` / CodSpeed (local numbers authoritative; CI benches advisory).
 
@@ -433,12 +433,12 @@ step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
 10. **Add the per-source badge hue** — a `SourceColors` field + value in EVERY
     theme file + `badge_color` in the manifest row; the coverage, legibility
     and site-bridge tests fail until it exists.
-11. **Drift-watch in the same PR**: a `check_upstream_drift.py` row where one
-    is owed — which surfaces owe
-    one is `source/drift.rs`'s header, read it there. A row is four steps: the
-    const, the `insert` in that crate's `src/drift_surface.rs`,
-    `just gen-drift-surface` (commit both fragments), and the `SURFACE_ROWS`
-    row plus its selftest case (the case census fails without it).
+11. **Drift-watch in the same PR**: the module's `UPSTREAM`, named in its
+    registry row — a `Watch` beside each decoded set; the types are in
+    `source/upstream.rs`, and `just drift-watch` runs it. A registered hook set is still a
+    `check_upstream_drift.py` row: the const, the `insert` in that crate's
+    `src/drift_surface.rs`, `just gen-drift-surface` (commit both fragments),
+    and the `SURFACE_ROWS` row plus its selftest case.
 12. **Three roster literals in three test binaries** (a scoped run misses
     them): the row-by-row byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN`
     in `tests/sources/captures.rs`; a case row + `#[test]` in

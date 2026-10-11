@@ -143,8 +143,10 @@ modules nor examples).
 - **Siblings** — a guard/cap/validation added to some of a sibling set
   (per-source decoders, install targets, platform arms, twin call sites) or to
   one caller of a shared fn: `rg` and verify the full set and every call site.
-- **Wire format** — a decoder or drift-watch row vs the recorded upstream
-  shape; whether a source owes a row is `source/drift.rs`'s header.
+- **Wire format** — a decoder or drift watch vs the recorded upstream
+  shape; every name a decoder reads owes a drift watch, a breadcrumb, or an
+  adjudicated `EXEMPT` row (`drift_surface.rs`'s census); `just drift-watch`
+  runs the watches.
 - **Manifest bridge** — `site/src/*.json` and generated schemas vs their Rust
   source of truth.
 - **Unwired additions** — every new field/flag/parameter/asset/gate has a live

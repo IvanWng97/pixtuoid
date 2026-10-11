@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Upstream wire-format drift watch: every name we decode still exists upstream.
+"""The upstream drift watches not yet declared beside their source in Rust.
 
-Agent-CLI wire names change with no notice — the `Task` -> `Agent` rename shipped
-undocumented and silently disabled subagent suppression. WHICH surfaces owe a
-VANISH row is stated only in `crates/pixtuoid-core/src/source/drift.rs`'s header."""
+pixtuoid's `drift_watch` example runs this and files its buckets into the one
+report, so each watch has one checker until it moves."""
 
 from __future__ import annotations
 
@@ -209,8 +208,8 @@ OPENCODE_EVENT_URLS = (
 
 # URLError alone is not enough: the READ phase inside fetch() raises raw
 # socket.timeout / ConnectionResetError (OSError, NOT URLError) and
-# http.client.IncompleteRead (HTTPException) — left uncaught they exit 1 and the
-# workflow files a junk drift-titled issue from an empty report.
+# http.client.IncompleteRead (HTTPException) — left uncaught they abort every
+# check after them, the whole remainder filed as one transient line.
 FETCH_ERRORS = (urllib.error.URLError, OSError, http.client.HTTPException)
 
 # A permanent status means OUR pinned path is gone, so the watch is BLIND for that
@@ -368,19 +367,6 @@ KIMI_HOOKS_URL = (
     "docs/en/customization/hooks.md"
 )
 
-# grok pins `features = ["unstable"]`, so its real ACP surface is the UNION of v1
-# stable + unstable — hence two fetches. v2 is a separate, partly non-overlapping
-# line grok does NOT speak; fetching it emits false "adopt terminal_update" noise.
-ACP_V1_SCHEMA_URL = (
-    "https://raw.githubusercontent.com/agentclientprotocol/"
-    "agent-client-protocol/main/schema/v1/schema.json"
-)
-
-ACP_V1_SCHEMA_UNSTABLE_URL = (
-    "https://raw.githubusercontent.com/agentclientprotocol/"
-    "agent-client-protocol/main/schema/v1/schema.unstable.json"
-)
-
 class Anchor(typing.NamedTuple):
     """The declaration that OWNS the names we check a fetched document for.
 
@@ -396,13 +382,11 @@ class Anchor(typing.NamedTuple):
     also: str | None = None
 
 
-# The three JSON Schemas, and the release record the Copilot one is found
-# through, are parsed STRUCTURALLY, so a text anchor would add nothing a failed
-# parse does not already say. Every OTHER swept document is prose
-# and must declare one — `every_swept_url_declares_an_anchor` is that gate.
-UNANCHORED_BY_DESIGN: frozenset[str] = frozenset(
-    {ACP_V1_SCHEMA_URL, ACP_V1_SCHEMA_UNSTABLE_URL, COPILOT_SCHEMA_SOURCE, COPILOT_RELEASE_URL}
-)
+# The Copilot JSON Schema, and the release record it is found through, are
+# parsed STRUCTURALLY, so a text anchor would add nothing a failed parse does
+# not already say. Every OTHER swept document is prose and must declare one —
+# `every_swept_url_declares_an_anchor` is that gate.
+UNANCHORED_BY_DESIGN: frozenset[str] = frozenset({COPILOT_SCHEMA_SOURCE, COPILOT_RELEASE_URL})
 
 # The value must be read from upstream's DECLARATION, never scanned for as a
 # substring: a rename leaves the old literal standing in a `///` and a
@@ -533,69 +517,6 @@ class Report:
             f"could not verify {what} at {where} — {cause} {consequence} {action}"
         )
 
-    def title(self) -> str:
-        """The report's H1, which IS the GitHub issue title: upstream-drift.yml
-        reads it back off the rendered report rather than keeping a second,
-        unpinned copy. Ordered by disposition so the issue list itself carries the
-        strongest finding."""
-        if self.breaking:
-            return "Upstream CLI wire-format drift detected"
-        if self.review:
-            return "New upstream events to review"
-        if self.blind:
-            return "Upstream drift watch could not verify — repin needed"
-        return "Upstream wire-format watch: no drift"
-
-    def render(self) -> str:
-        out = [f"# {self.title()}", ""]
-        if self.breaking:
-            out.append("## ⛔ Verified upstream change — decoder will silently drop events")
-            out.append("")
-            out.append(
-                "Each line was read off the upstream surface that OWNS the name: the "
-                "declaration is present and the name is gone. Fix the decoder."
-            )
-            out.append("")
-            out += [f"- {b}" for b in self.breaking]
-            out.append("")
-        if self.review:
-            out.append("## 🔎 New upstream events to review")
-            out += [f"- {r}" for r in self.review]
-            out.append("")
-        if self.blind:
-            out.append("## 🩺 Probe could NOT verify — this is not evidence of upstream change")
-            out.append("")
-            out.append(
-                "A lookup missed, so all the watcher knows is that **its own probe "
-                "failed**. A stale pin, a moved declaration, or a refactor that left a "
-                "re-export facade at the old path all land here, and every check "
-                "riding the affected surface was SKIPPED rather than reported as "
-                "drift. **Verify upstream by hand and repin — do NOT change a decoder "
-                "on these lines alone** (#793 did, against three working env vars)."
-            )
-            out.append("")
-            out += [f"- {b}" for b in self.blind]
-            out.append("")
-        if self.errors:
-            out.append("## ⚠️ Could not verify (transient network/HTTP — not drift)")
-            out += [f"- {e}" for e in self.errors]
-            out.append("")
-        if not (self.breaking or self.review or self.blind or self.errors):
-            out.append("✅ No drift. Every name we depend on is present upstream.")
-        return "\n".join(out)
-
-    def exit_code(self) -> int:
-        """0 no findings / 1 actionable (the workflow opens an issue) / 2 transient.
-
-        `blind` is actionable — the watch is DARK until someone repins. Drop it
-        from this condition and a dark-watch report exits 0: both `exit == '1'`
-        steps in upstream-drift.yml skip and the weekly run goes green (#454)."""
-        if self.breaking or self.review or self.blind:
-            return 1
-        if self.errors:
-            return 2
-        return 0
-
 
 # One stalled host must not hold the ~60-document sweep; only the Copilot
 # release tarball (~72 MB) earns the long bound.
@@ -704,39 +625,6 @@ def fetch_anchored(url: str, label: str, report: Report) -> str | None:
     return text
 
 
-def upstream_acp_session_update_tags(text: str) -> set[str] | None:
-    """The ACP `SessionUpdate` discriminator tags from a v1 JSON schema. Returns
-    None if the schema won't parse or the union is absent → the caller files probe
-    health and SKIPS the check."""
-    try:
-        root = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    defs = root.get("$defs") or root.get("definitions") or {}
-    if not isinstance(defs, dict):
-        return None
-    su = defs.get("SessionUpdate")
-    members = su.get("oneOf") or su.get("anyOf") if isinstance(su, dict) else None
-    if not isinstance(members, list):
-        return None
-    tags: set[str] = set()
-    for member in members:
-        if not isinstance(member, dict):
-            continue
-        node = member
-        ref = member.get("$ref", "")
-        if ref:
-            node = defs.get(ref.rsplit("/", 1)[-1], {})
-        const = (
-            node.get("properties", {}).get("sessionUpdate", {}).get("const")
-            if isinstance(node, dict)
-            else None
-        )
-        if isinstance(const, str):
-            tags.add(const)
-    return tags or None
-
-
 # Codex variants we know about and deliberately do not decode — read by BOTH
 # the ResponseItem and RolloutItem sweeps, so one name exempts either enum;
 # each entry's value is its own WHY. For the two `*_call` entries the cost is
@@ -783,24 +671,6 @@ def sibling_families(decoded: set[str]) -> set[str]:
     suffix is no real family: codex's `EventMsg` suffixes are generic lifecycle words
     shared across unrelated subsystems."""
     return {n.rsplit("_", 1)[-1] for n in decoded if "_" in n}
-
-
-def upstream_acp_tool_call_statuses(text: str) -> set[str] | None:
-    """The `ToolCallStatus` values a v1 schema declares, as `oneOf` consts."""
-    try:
-        root = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    defs = root.get("$defs") or root.get("definitions") or {}
-    members = defs.get("ToolCallStatus", {}).get("oneOf") if isinstance(defs, dict) else None
-    if not isinstance(members, list):
-        return None
-    out = {
-        m["const"]
-        for m in members
-        if isinstance(m, dict) and isinstance(m.get("const"), str)
-    }
-    return out or None
 
 
 def upstream_cursor_hook_events(text: str) -> set[str] | None:
@@ -942,8 +812,6 @@ class OurNames:
     `None` means that reader failed; every consumer guards on `is not None`, so a
     stale parser darkens exactly what it fed and nothing else."""
 
-    acp_decoded_tags: set[str] | None = None
-    acp_terminal_statuses: set[str] | None = None
     cc: set[str] | None = None
     dispatch_names: set[str] | None = None
     codex: set[str] | None = None
@@ -1045,8 +913,6 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("reasonix", CORE_BIN_FRAGMENT, "registered", "reasonix"),
     ("opencode", CORE_LIB_FRAGMENT, "decoded", "opencode.hook_events"),
     ("opencode_part_statuses", CORE_LIB_FRAGMENT, "decoded", "opencode.part_statuses"),
-    ("acp_decoded_tags", CORE_LIB_FRAGMENT, "decoded", "acp.session_update_tags"),
-    ("acp_terminal_statuses", CORE_LIB_FRAGMENT, "decoded", "acp.terminal_statuses"),
     ("copilot", CORE_LIB_FRAGMENT, "decoded", "copilot.kinds"),
     ("copilot_fields", CORE_LIB_FRAGMENT, "decoded", "copilot.payload_fields"),
     ("dispatch_names", CORE_LIB_FRAGMENT, "decoded", "decoder.dispatch_names"),
@@ -1062,7 +928,7 @@ def load_fragment(rel: str) -> dict:
 
 def read_our_names(report: Report) -> OurNames:
     """Read every depended name from the EMITTED drift surface. A gap here is the
-    MONITOR broken, so it files probe health (exit 1), never transient. Per-KEY
+    MONITOR broken, so it files probe health (actionable), never transient. Per-KEY
     isolation: a fragment that loads but lacks a row darkens exactly that field; one
     that fails to load darkens every field it feeds, honestly — it is generated as a
     whole, so it is never partially stale."""
@@ -1493,80 +1359,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     partial report intact. No `read_*` here — an inline read unwinds to that
     catch-all and is filed TRANSIENT, a green-run warning where `read_our_names`
     would have filed probe health."""
-    up_acp: set[str] = set()
-    up_acp_status: set[str] = set()
-    acp_method_surface = False
-    acp_method_declared = False
-    acp_parsed = False
-    for url, label in (
-        (ACP_V1_SCHEMA_URL, "ACP v1 schema"),
-        (ACP_V1_SCHEMA_UNSTABLE_URL, "ACP v1 unstable schema"),
-    ):
-        acp_text = try_fetch(url, label, report)
-        if acp_text is None:
-            continue
-        tags = upstream_acp_session_update_tags(acp_text)
-        if tags is None:
-            report.add_blind(
-                "the ACP `SessionUpdate` oneOf union",
-                label,
-                "The ACP decoded-tag watch was SKIPPED.",
-            )
-        else:
-            up_acp |= tags
-            up_acp_status |= upstream_acp_tool_call_statuses(acp_text) or set()
-            acp_parsed = True
-            # `"x-method"` OWNS the method names and is generator-emitted, so a
-            # codegen change moves it wholesale: absent is probe health, not a rename.
-            acp_method_surface |= '"x-method"' in acp_text
-            acp_method_declared |= '"session/update"' in acp_text
-    if acp_parsed and not acp_method_surface:
-        report.add_blind(
-            "the ACP `x-method` declarations",
-            "the ACP v1 schemas",
-            "The ACP method watch was SKIPPED — the schema parses but declares no "
-            "methods at all, so this is a restructure, NOT evidence of a rename.",
-        )
-    elif acp_parsed and not acp_method_declared:
-        report.add_breaking(
-            "the ACP method `session/update` is GONE from the ACP schema — renamed; "
-            "`decode_grok_line` gates whether the tag is INTERPRETED, so every "
-            "ACP-standard activity event is silently lost (`_ => Ok(vec![])`, no "
-            "breadcrumb)."
-        )
-    if acp_parsed and ours.acp_terminal_statuses is not None:
-        if up_acp_status:
-            for st in sorted(ours.acp_terminal_statuses):
-                if st not in up_acp_status:
-                    report.add_breaking(
-                        f"ACP `ToolCallStatus` value `{st}` (read by "
-                        f"decode_session_update) is GONE from the ACP schema — "
-                        f"renamed; the tool_call_update arm falls through to "
-                        f"`_ => vec![]` and every ACP tool call stays Active forever."
-                    )
-        else:
-            report.add_blind(
-                "the ACP `ToolCallStatus` union",
-                "the ACP v1 schemas",
-                "The terminal-status watch was SKIPPED.",
-            )
-
-    if acp_parsed:
-        for tag in sorted(up_acp - set(ours.acp_decoded_tags or ())):
-            if tag.startswith("tool_call"):
-                report.add_review(
-                    f"ACP grew `{tag}`, a `tool_call` sibling decode_session_update "
-                    f"does not handle — every ACP-speaking source decodes it to "
-                    f"nothing."
-                )
-        for tag in sorted(ours.acp_decoded_tags or ()):
-            if tag not in up_acp:
-                report.add_breaking(
-                    f"ACP v1 `sessionUpdate` tag `{tag}` (decoded in source/acp.rs) is "
-                    f"GONE from the ACP schema — renamed; every ACP-speaking source "
-                    f"loses that half of its activity decode."
-                )
-
     if ours.copilot is not None:
         text = try_fetch(COPILOT_SCHEMA_SOURCE, "Copilot schema", report)
         up_ns = upstream_copilot_namespaces(text) if text is not None else None
@@ -2211,8 +2003,9 @@ def main() -> int:
             f"covers only the checks that completed (traceback on stderr)"
         )
 
-    print(report.render())
-    return report.exit_code()
+    buckets = ("breaking", "review", "blind", "errors")
+    print(json.dumps({b: getattr(report, b) for b in buckets}))
+    return 0
 
 
 if __name__ == "__main__":

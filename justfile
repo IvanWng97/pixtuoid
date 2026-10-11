@@ -1232,13 +1232,19 @@ compare-selftest:
     if [ -x .venv/bin/python3 ]; then py=.venv/bin/python3; else py=python3; fi
     "$py" scripts/compare-screenshots.py --selftest
 
-# The upstream-drift watcher's ONLY test. A regex-parser regression is a silent
-# monitor death (the script returns empty / raises, the weekly job alarms on junk
-# or watches nothing). Pure Python, no deps, no network.
-[doc('Self-test the upstream-drift watcher (parsers + fetch classifier)')]
+# The legacy watches' ONLY test. A regex-parser regression is a silent monitor
+# death (the script returns empty / raises, the weekly job alarms on junk or
+# watches nothing). Pure Python, no deps, no network.
+[doc('Self-test the legacy upstream-drift watches (parsers + fetch classifier)')]
 [group('meta')]
 drift-selftest:
     python3 scripts/check_upstream_drift_selftest.py
+
+# Default features off: the watch plays no audio, so the runner needs no ALSA.
+[doc('Check every name the sources read against upstream (network)')]
+[group('meta')]
+drift-watch:
+    cargo run -q -p pixtuoid --no-default-features --features upstream --example drift_watch
 
 # The pty driver's pure halves — the ANSI stripper, the composer comparison, the
 # gate/menu wording. Each fails silently, at the price of a BILLED turn: a broken

@@ -1,7 +1,8 @@
 //! This crate's half of the **drift surface** — the names our decoders read,
-//! emitted as data for `check_upstream_drift.py`.
+//! emitted as data for `check_upstream_drift.py`, the watches not yet
+//! declared beside their source (`source/upstream.rs`).
 //!
-//! The watcher is a separate program that cannot call us, and until #942 it
+//! That watcher is a separate program that cannot call us, and until #942 it
 //! REGEX-PARSED this crate's source instead. That fails SILENTLY: rename a
 //! const and the parser returns a smaller set, so the watch narrows with
 //! nothing to show for it. Emitting makes it a test failure HERE.
@@ -26,14 +27,6 @@ fn surface() -> Value {
     // A BTreeMap so the emitted order is the key order, not a hash order — the
     // committed file has to be byte-stable or the gate flaps.
     let mut decoded: BTreeMap<&str, Value> = BTreeMap::new();
-    decoded.insert(
-        "acp.session_update_tags",
-        json!(crate::source::acp::DECODED_TAGS),
-    );
-    decoded.insert(
-        "acp.terminal_statuses",
-        json!(crate::source::acp::DECODED_TERMINAL_STATUSES),
-    );
     decoded.insert(
         "codex.event_msg",
         json!([EM_TURN_START, EM_RESUME, EM_SEARCH, EM_TURN_END, EM_TOKENS].concat()),
@@ -407,9 +400,10 @@ mod tests {
     }
 
     /// Every wire literal a decoder equality-compares is carried by the drift
-    /// surface or exempted below with its adjudicated reason (#943's gate).
+    /// surface or a declared watch, or exempted below with its adjudicated
+    /// reason (#943's gate).
     ///
-    /// Three accepted loosenesses, adjudicated on #943: fragment membership is
+    /// Three accepted loosenesses, adjudicated on #943: membership is
     /// global across sets, so a cross-source spelling collision passes; a
     /// literal behind a non-exported const escapes the scan; and the scan is
     /// `==`/`!=`-shaped only — a MATCH ARM pattern, a `.starts_with` prefix
@@ -539,6 +533,12 @@ mod tests {
             }
             walk(&frag, &mut carried);
         }
+        // The declared watches' names are carried too, read off the registry.
+        for d in crate::source::registry::REGISTRY {
+            for w in d.upstream.iter().flat_map(|up| up.watches) {
+                carried.extend((w.ours)().into_iter().map(str::to_owned));
+            }
+        }
         let sources: std::collections::BTreeSet<&str> =
             crate::source::registry::registered_source_names().collect();
 
@@ -601,7 +601,7 @@ mod tests {
         assert!(
             unaccounted.is_empty(),
             "a decoder equality-compares wire literals the drift surface never \
-             carries — export them (a `DECODED_*` const + a fragment row), \
+             carries — watch them (a `Watch` in the source's `UPSTREAM`), \
              breadcrumb the miss, or exempt them here with the adjudicated \
              reason:\n  {}",
             unaccounted.join("\n  "),

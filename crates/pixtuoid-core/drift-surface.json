@@ -1,13 +1,5 @@
 {
   "decoded": {
-    "acp.session_update_tags": [
-      "tool_call",
-      "tool_call_update"
-    ],
-    "acp.terminal_statuses": [
-      "completed",
-      "failed"
-    ],
     "codewhale.delegating_actions": [
       "start",
       "spawn",

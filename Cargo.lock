@@ -2755,6 +2755,7 @@ dependencies = [
  "pollster",
  "proc-macro2",
  "ratatui",
+ "regex",
  "rodio",
  "rustix 1.1.5",
  "saphyr",

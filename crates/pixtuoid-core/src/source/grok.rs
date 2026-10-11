@@ -376,7 +376,7 @@ pub(crate) fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec
     let str_field = |key: &str| update.get(key).and_then(|s| s.as_str());
 
     let decoded: Result<Vec<AgentEvent>> = match method {
-        "session/update" => Ok(crate::source::acp::decode_session_update(
+        crate::source::acp::SESSION_UPDATE_METHOD => Ok(crate::source::acp::decode_session_update(
             agent_id,
             update,
             grok_transcript_tool_detail,
@@ -1481,7 +1481,7 @@ mod tests {
 
     /// Nothing on grok's TRANSCRIPT axis breadcrumbs — not a new method, not a
     /// new ACP tag, not a per-token chunk. A name we never read is noise on both
-    /// sides; the ones we DO read are watched by `check_upstream_drift.py`.
+    /// sides; the ones we DO read are drift-watched (`just drift-watch`).
     #[test]
     fn no_transcript_line_breadcrumbs_however_new_its_method_or_tag() {
         for v in [

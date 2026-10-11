@@ -12,6 +12,8 @@
 use serde_json::{Map, Value};
 
 use crate::AgentId;
+#[cfg(any(test, feature = "upstream"))]
+use crate::source::upstream::{Doc, Read, Siblings, Upstream, Watch};
 use crate::source::{AgentEvent, ToolDetail};
 
 const TOOL_CALL: &str = "tool_call";
@@ -20,23 +22,87 @@ const TOOL_CALL_UPDATE: &str = "tool_call_update";
 const STATUS_COMPLETED: &str = "completed";
 const STATUS_FAILED: &str = "failed";
 
-/// The `ToolCallStatus` values that END a tool call. Exported for the drift
-/// surface because the arm reading them falls through to `_ => vec![]`: rename
-/// either upstream and every ACP tool call stays Active forever, with no
-/// breadcrumb. Pinned to the arms by
-/// `the_terminal_status_set_is_exactly_what_ends_a_call`.
-#[cfg(test)]
+/// The `ToolCallStatus` values that END a tool call. Pinned to the arms by
+/// `tool_call_starts_and_terminal_update_ends_keyed_by_tool_call_id`.
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_TERMINAL_STATUSES: &[&str] = &[STATUS_COMPLETED, STATUS_FAILED];
 
-/// The `sessionUpdate` tags this decoder turns into events — this module's row
-/// in the drift surface. Pinned to the arms below by
-/// `the_decoded_tag_set_is_exactly_what_the_arms_match`.
+/// The `sessionUpdate` tags this decoder turns into events. Pinned to the arms
+/// below by `the_decoded_tag_set_is_exactly_what_the_arms_match`.
 ///
-/// Test-gated because the surface emitter is the only reader: the ARMS are what
+/// Off shipped builds: only the drift watch and tests read it. The ARMS are what
 /// production dispatches on, and a second copy of the vocabulary must not be
 /// something the shipped crate can read and drift against.
-#[cfg(test)]
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_TAGS: &[&str] = &[TOOL_CALL, TOOL_CALL_UPDATE];
+
+/// The notification [`decode_session_update`] decodes; a source gates its
+/// call on this method.
+pub(crate) const SESSION_UPDATE_METHOD: &str = "session/update";
+
+/// Both v1 schemas, each proven by the declaration a watch reads: grok pins
+/// `features = ["unstable"]`, so its ACP surface is the UNION of stable and
+/// unstable; v2 is a separate line grok does not speak.
+#[cfg(any(test, feature = "upstream"))]
+const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
+    [
+        Doc {
+            path: "schema/v1/schema.json",
+            anchor,
+            owns,
+        },
+        Doc {
+            path: "schema/v1/schema.unstable.json",
+            anchor,
+            owns,
+        },
+    ]
+}
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: Upstream = Upstream {
+    repo: "agentclientprotocol/agent-client-protocol",
+    branch: "main",
+    watches: &[
+        Watch {
+            id: "acp.method",
+            ours: || vec![SESSION_UPDATE_METHOD],
+            docs: &v1_schemas(r#""x-method"\s*:"#, "the schema's method declarations"),
+            read: Read::Each {
+                pattern: r#""x-method"\s*:\s*"{name}""#,
+            },
+            vanish: "a source gates the ACP decode on this method, so every ACP-standard \
+                 activity event is lost with no breadcrumb",
+            siblings: None,
+        },
+        Watch {
+            id: "acp.session_update_tags",
+            ours: || DECODED_TAGS.to_vec(),
+            docs: &v1_schemas(r#""SessionUpdate"\s*:"#, "the `SessionUpdate` union"),
+            read: Read::JsonUnion {
+                def: "SessionUpdate",
+                prop: Some("sessionUpdate"),
+            },
+            vanish: "every ACP-speaking source loses that half of its activity decode",
+            siblings: Some(Siblings {
+                prefix: TOOL_CALL,
+                ignored: &[],
+            }),
+        },
+        Watch {
+            id: "acp.terminal_statuses",
+            ours: || DECODED_TERMINAL_STATUSES.to_vec(),
+            docs: &v1_schemas(r#""ToolCallStatus"\s*:"#, "the `ToolCallStatus` union"),
+            read: Read::JsonUnion {
+                def: "ToolCallStatus",
+                prop: None,
+            },
+            vanish: "the `tool_call_update` arm falls through to `_ => vec![]`, so every \
+                 ACP tool call stays Active forever",
+            siblings: None,
+        },
+    ],
+};
 
 /// Decode one ACP `session/update` notification's `update` object into activity
 /// events; the caller injects `agent_id` and its own `tool_detail` (invariant #3).
@@ -124,7 +190,8 @@ mod tests {
             }
         }
         // The negative half binds the export's WIDTH: an added member would have
-        // to break one of these, so the drift row cannot quietly grow.
+        // to break one of these, so the `acp.terminal_statuses` watch cannot
+        // quietly grow.
         for status in ["in_progress", "pending"] {
             assert!(
                 !DECODED_TERMINAL_STATUSES.contains(&status),
