@@ -3,9 +3,8 @@
 // opencode has no config-level shell hook, so pixtuoid integrates as a tiny plugin
 // (auto-discovered from `<config>/plugins/*.ts`) that pipes the session lifecycle /
 // tool / permission events into the `pixtuoid-hook` shim on stdin. It NEVER blocks
-// or breaks opencode (the shim is best-effort, its send is bounded by
-// pixtuoid-hook's `transport::WRITE_TIMEOUT` watchdog, and every error here is
-// swallowed — invariant #5).
+// or breaks opencode (the shim is best-effort, self-bounds at 200ms, and every
+// error here is swallowed — invariant #5).
 //
 // HOOK_PATH is baked in at install time (a JSON-encoded absolute path). Safe to
 // delete — disconnecting opencode in pixtuoid's Sources panel replaces this
@@ -62,7 +61,7 @@ export const PixtuoidOpencode = async () => ({
         stderr: "ignore",
       })
       // opencode does NOT await this hook (`void hook.event(...)`), so awaiting
-      // the (send-bounded, always-exit-0) shim here can't stall opencode — it
+      // the (200ms-bounded, always-exit-0) shim here can't stall opencode — it
       // just keeps a burst of events from orphaning a pile of spawns.
       await proc.exited
     } catch {
