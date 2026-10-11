@@ -154,8 +154,8 @@ a lint to dodge the bump.
    jobs each wait for an approval from the `release` environment's reviewer,
    crates.io first. The tag also starts a homebrew-core autobump.
 4. **If the dispatch's run summary listed an owed homebrew-core test update**,
-   open `pixtuoid: update test` there once the tag exists, its block
-   packaging-build's replay.
+   open `pixtuoid: update test` there once the tag exists, carrying
+   packaging-build's replay as its test block.
 
 The crates.io upload happens in the `release` job on the merge push, which
 first waits for that commit's own `ci-gate`: a failure or timeout publishes
