@@ -8,6 +8,7 @@ dependency on purpose — the repo has no Python test harness."""
 from __future__ import annotations
 
 import ast
+import contextlib
 import hashlib
 import io
 import json
@@ -533,18 +534,13 @@ def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
     """Two one-line edits reopen the gate with every other test still green:
     dropping `also=` makes the half-anchor check SKIP rather than fail, and
     `UNANCHORED_BY_DESIGN` membership IS the exemption."""
-    # The three schemas, and the Copilot release record, are parsed
-    # STRUCTURALLY, so a failed parse already says what a text anchor would;
-    # nothing else may join them without saying why.
+    # The Copilot schema, and its release record, are parsed STRUCTURALLY, so a
+    # failed parse already says what a text anchor would; nothing else may join
+    # them without saying why.
     check(
         d.UNANCHORED_BY_DESIGN
-        == frozenset({
-            d.ACP_V1_SCHEMA_URL,
-            d.ACP_V1_SCHEMA_UNSTABLE_URL,
-            d.COPILOT_SCHEMA_SOURCE,
-            d.COPILOT_RELEASE_URL,
-        }),
-        f"the anchor requirement is waived only for the JSON Schemas, got "
+        == frozenset({d.COPILOT_SCHEMA_SOURCE, d.COPILOT_RELEASE_URL}),
+        f"the anchor requirement is waived only for the JSON Schema, got "
         f"{sorted(d.UNANCHORED_BY_DESIGN)}",
     )
     # Pinned BY URL: with `also` gone the loop in the anchor test just skips, which
@@ -672,12 +668,27 @@ def test_a_multi_document_check_is_all_or_nothing() -> None:
         d.fetch = real
 
 
-def test_report_is_the_only_way_to_file_a_finding() -> None:
-    """`Report` owns the buckets, their wording, their order, and the exit code."""
-    empty = d.Report()
-    check(empty.exit_code() == 0, f"an empty report exits 0, got {empty.exit_code()}")
-    check("✅ No drift" in empty.render(), f"an empty report says so:\n{empty.render()}")
+def test_main_prints_exactly_the_four_buckets() -> None:
+    """`drift_watch`'s `Buckets` requires these four keys and refuses any other,
+    so a rename here fails the run instead of dropping findings."""
+    real = d.fetch
+    try:
+        d.fetch = lambda _u: (_ for _ in ()).throw(urllib.error.URLError("offline"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            d.main()
+        got = json.loads(out.getvalue())
+        check(
+            set(got) == {"breaking", "review", "blind", "errors"},
+            f"main() prints the four buckets, got {sorted(got)}",
+        )
+        check(bool(got["errors"]), f"an offline run files its fetches as errors: {got}")
+    finally:
+        d.fetch = real
 
+
+def test_report_is_the_only_way_to_file_a_finding() -> None:
+    """`Report` owns the buckets and the blind line's wording."""
     r = d.Report()
     r.add_breaking("B-LINE")
     r.add_review("R-LINE")
@@ -705,30 +716,6 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
         and "Fix the script" in our_line,
         f"our_source=True blames the script, not upstream: {our_line!r}",
     )
-
-    out = r.render()
-    offsets = [out.find(x) for x in ("B-LINE", "R-LINE", "WHAT", "E-LINE")]
-    check(
-        all(x >= 0 for x in offsets) and offsets == sorted(offsets),
-        f"every bucket renders, in disposition order (offsets {offsets}):\n{out}",
-    )
-
-    # errors-ONLY is exit 2 (transient) — the one case `main()` cannot reach
-    # without faking the network.
-    for adder, want in (("add_breaking", 1), ("add_review", 1), ("add_error", 2)):
-        one = d.Report()
-        getattr(one, adder)("LINE")
-        check(
-            one.exit_code() == want,
-            f"a {adder}-only report exits {want}, got {one.exit_code()}",
-        )
-    blind_only = d.Report()
-    blind_only.add_blind("w", "where", "c")
-    check(blind_only.exit_code() == 1, f"a blind-only report exits 1, got {blind_only.exit_code()}")
-    both = d.Report()
-    both.add_error("E")
-    both.add_blind("w", "where", "c")
-    check(both.exit_code() == 1, f"actionable outranks transient, got {both.exit_code()}")
 
     # An AST walk, not a regex: a regex also fires on prose QUOTING the spelling.
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
@@ -761,103 +748,6 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
         f"bucket — and no local list outside `Report` may borrow a bucket's name "
         f"(call it `findings`): {stray}",
     )
-
-
-def test_the_acp_method_check_separates_a_rename_from_a_restructure() -> None:
-    """The `x-method` surface is this check's anchor, because `schema.json` is
-    GENERATED and the key is a generator-emitted vendor extension: absent means the
-    probe landed on a schema that declares no methods (probe health), NOT that ours
-    was renamed. Collapsing those is what made #793 report five phantom renames."""
-    real = d.fetch
-    tags = (
-        '"$defs":{"SessionUpdate":{"oneOf":['
-        '{"properties":{"sessionUpdate":{"const":"tool_call"}}},'
-        '{"properties":{"sessionUpdate":{"const":"tool_call_update"}}}]}}'
-    )
-
-    def drive(body: str) -> tuple[list[str], list[str]]:
-        def stub(url: str) -> str:
-            if url in (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL):
-                return body
-            raise urllib.error.URLError("not stubbed")
-
-        d.fetch = stub
-        rep = d.Report()
-        d.run_checks(d.OurNames(acp_decoded_tags={"tool_call", "tool_call_update"}), report=rep)
-        pick = lambda xs: [x for x in xs if "session/update" in x or "x-method" in x]  # noqa: E731
-        return pick(rep.breaking), pick(rep.blind)
-
-    br, bl = drive('{"x-method":"session/update",' + tags + "}")
-    check(not br and not bl, f"an intact schema is silent, got {br} {bl}")
-
-    br, bl = drive('{"x-method":"session/updateV2",' + tags + "}")
-    check(len(br) == 1, f"a RENAMED method is breaking drift, got {br}")
-    check(not bl, f"and not probe health, got {bl}")
-
-    br, bl = drive('{"x-side":"client",' + tags + "}")
-    check(not br, f"a RESTRUCTURE must claim no rename, got {br}")
-    check(len(bl) == 1, f"a RESTRUCTURE is one probe-health line, got {bl}")
-    d.fetch = real
-
-
-def test_report_separates_verified_change_from_probe_health() -> None:
-    """The two dispositions must not share a heading: the heading is the
-    instruction, and a reader who trusts a wrong one edits a decoder (#793).
-    """
-    real_run = d.run_checks
-    try:
-        def fake(*a: object, report: d.Report, **k: object) -> None:
-            report.add_breaking("VERIFIED-CHANGE-LINE")
-            report.add_blind("PROBE-HEALTH-LINE", "somewhere", "Checks were SKIPPED.")
-
-        d.run_checks = fake
-        buf = io.StringIO()
-        real_stdout, sys.stdout = sys.stdout, buf
-        try:
-            code = d.main()
-        finally:
-            sys.stdout = real_stdout
-        out = buf.getvalue()
-
-        check(code == 1, f"either bucket is actionable, exit 1 (got {code})")
-        verified_hd = "## ⛔ Verified upstream change"
-        probe_hd = "## 🩺 Probe could NOT verify"
-        check(verified_hd in out and probe_hd in out, f"both headings present:\n{out}")
-        order = [
-            out.find(verified_hd),
-            out.find("VERIFIED-CHANGE-LINE"),
-            out.find(probe_hd),
-            out.find("PROBE-HEALTH-LINE"),
-        ]
-        check(
-            all(x >= 0 for x in order) and order == sorted(order),
-            f"each line filed under its own heading (offsets {order}):\n{out}",
-        )
-        check(
-            "do NOT change a decoder" in out,
-            "the probe-health section says what NOT to do",
-        )
-
-        def blind_only(*a: object, report: d.Report, **k: object) -> None:
-            """The case above cannot test this: with a breaking line injected,
-            `breaking` carries the exit code and `blind`'s is never exercised."""
-            report.add_blind("PROBE-HEALTH-ONLY", "somewhere", "Checks were SKIPPED.")
-
-        d.run_checks = blind_only
-        buf = io.StringIO()
-        real_stdout, sys.stdout = sys.stdout, buf
-        try:
-            code = d.main()
-        finally:
-            sys.stdout = real_stdout
-        check(code == 1, f"a blind-ONLY report is actionable and exits 1, got {code}")
-        check(
-            "Probe could NOT verify" in buf.getvalue()
-            and "Verified upstream change" not in buf.getvalue(),
-            "a blind-only report renders ONLY the probe-health section",
-        )
-    finally:
-        d.run_checks = real_run
 
 
 def test_the_hermes_blocking_watch_fires_on_an_appearance_not_a_vanish() -> None:
@@ -1146,7 +1036,7 @@ def test_a_ledger_row_upstream_deleted_is_reported_once_every_doc_was_fetched() 
 
 
 def test_the_prefix_sweeps_flag_a_family_sibling_and_ignore_a_stranger() -> None:
-    """The grok/acp twin of the codex suffix sweep, same four directions."""
+    """The grok twin of the codex suffix sweep, same four directions."""
     real = d.fetch
     saved = dict(d.GROK_XAI_KNOWN_OMITTED)
     try:
@@ -1179,36 +1069,6 @@ def test_the_prefix_sweeps_flag_a_family_sibling_and_ignore_a_stranger() -> None
         check(not drive(["pxd_stranger"]).review, "a family-less addition stays silent")
         d.GROK_XAI_KNOWN_OMITTED[sib] = "test"
         check(not drive([sib]).review, "a ledgered sibling goes quiet")
-        # The ACP twin: a new `tool_call_*` tag must flag, a stranger must not.
-        acp_tags = sorted(ours.acp_decoded_tags or ())
-        statuses = sorted(ours.acp_terminal_statuses or ())
-
-        def acp(extra: list[str]) -> d.Report:
-            doc = json.dumps({
-                "x-method": "session/update",
-                "$defs": {
-                    "SessionUpdate": {"oneOf": [
-                        {"properties": {"sessionUpdate": {"const": t}}}
-                        for t in acp_tags + extra]},
-                    "ToolCallStatus": {"oneOf": [{"const": c} for c in statuses]},
-                },
-            })
-
-            def stub(u: str, _d: str = doc) -> str:
-                if u in (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL):
-                    return _d
-                raise urllib.error.URLError("offline: not this case's document")
-
-            d.fetch = stub
-            rep = d.Report()
-            d.run_checks(d.read_our_names(rep), report=rep)
-            return rep
-
-        check(not acp([]).review, "the intact ACP schema stays silent")
-        loud = acp(["tool_call_confirmation"])
-        check(any("tool_call_confirmation" in x for x in loud.review),
-              f"a new tool_call_* tag must flag; got {loud.review}")
-        check(not acp(["pxd_stranger"]).review, "a non-tool_call addition stays silent")
     finally:
         d.fetch = real
         d.GROK_XAI_KNOWN_OMITTED.clear()
@@ -1234,48 +1094,6 @@ def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
     stripped = d.strip_rust_comments(nested)
     check("PxGhost" not in stripped, f"a nested comment leaks: {stripped}")
     check("A," in stripped and "B," in stripped, f"code around it survives: {stripped}")
-
-
-def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
-    """The H1 is a CROSS-FILE contract: upstream-drift.yml titles the GitHub issue
-    with `head -1 | sed 's/^# //'` rather than keeping its own copy of these strings.
-    """
-    real = d.run_checks
-    cases = [
-        ("breaking", "Upstream CLI wire-format drift detected"),
-        ("review", "New upstream events to review"),
-        ("blind", "Upstream drift watch could not verify — repin needed"),
-        ("clean", "Upstream wire-format watch: no drift"),
-    ]
-    try:
-        for name, want in cases:
-            def fake(*a: object, report: d.Report, _n: str = name, **k: object) -> None:
-                if _n == "blind":
-                    report.add_blind("LINE", "somewhere", "Checks were SKIPPED.")
-                elif _n != "clean":
-                    getattr(report, f"add_{_n}")("LINE")
-
-            d.run_checks = fake
-            buf = io.StringIO()
-            real_stdout, sys.stdout = sys.stdout, buf
-            try:
-                d.main()
-            finally:
-                sys.stdout = real_stdout
-            got = buf.getvalue().splitlines()[0]
-            check(got == f"# {want}", f"{name}: H1 is {want!r}, got {got!r}")
-    finally:
-        d.run_checks = real
-
-    wf = (pathlib.Path(__file__).parents[1] / ".github/workflows/upstream-drift.yml").read_text()
-    check(
-        "head -1 drift-report.md" in wf and "s/^# //" in wf,
-        "upstream-drift.yml still titles the issue from the report's H1",
-    )
-    check(
-        "Verified upstream change" not in wf and "could not verify — repin" not in wf,
-        "upstream-drift.yml keeps NO second copy of the report's strings",
-    )
 
 
 def test_the_floor_is_what_we_already_handle() -> None:
@@ -1391,7 +1209,7 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         rep = d.Report()
         ours = d.read_our_names(rep)
         check(ours.copilot is None, f"the holed field is dark, got {ours.copilot!r}")
-        for other in ("cc", "cursor", "kimi", "acp_decoded_tags", "dispatch_names"):
+        for other in ("cc", "cursor", "kimi", "grok_xai_tags", "dispatch_names"):
             check(getattr(ours, other), f"{other} must survive a sibling's gap")
         named = [b for b in rep.blind if "copilot" in b]
         check(len(named) == 1, f"exactly one probe-health line names copilot: {rep.blind}")
@@ -1631,20 +1449,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             )
             return f"pub enum {enum} {{\n{rows}}}\n"
 
-        def acp_schema(tags: list[str], statuses: list[str] | None = None) -> str:
-            # `x-method` present + the method literal are the ACP arm's own anchor.
-            return json.dumps({
-                "x-method": "session/update",
-                "$defs": {
-                    "SessionUpdate": {"oneOf": [
-                        {"properties": {"sessionUpdate": {"const": t}}} for t in tags]},
-                    "ToolCallStatus": {"oneOf": [
-                        {"const": c} for c in (
-                            statuses if statuses is not None else full["acp_terminal_statuses"]
-                        )]},
-                },
-            })
-
         def copilot_schema(events: list[str], fields: list[str]) -> str:
             defs: dict = {f"E{i}": {"properties": {"type": {"const": e}}}
                           for i, e in enumerate(events)}
@@ -1853,11 +1657,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 + "".join(f"| `{n}` | x |\n" for n in ns)}),
             ("dispatch_names", str, lambda ns: {
                 d.CC_TOOLS_URL: "# Tools reference\n\n" + "".join(f"| `{n}` | x |\n" for n in ns)}),
-            ("acp_decoded_tags", str, lambda ns: dict.fromkeys(
-                (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL), acp_schema(ns))),
-            ("acp_terminal_statuses", str, lambda ns: dict.fromkeys(
-                (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL),
-                acp_schema(full["acp_decoded_tags"], ns))),
             ("dsh_plugin_events", str, lambda ns: {
                 d.DSH_RUNTIME_TYPES_URL:
                     "declare module '@deepseek-ai/cordis' {\n  interface Events {\n"

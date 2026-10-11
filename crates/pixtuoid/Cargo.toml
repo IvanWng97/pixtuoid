@@ -56,6 +56,7 @@ anyhow             = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 which              = "8"
+regex              = { workspace = true, optional = true }
 # clock feature gives us Local::now() w/ system timezone for the wall clock.
 chrono             = { workspace = true, features = ["clock"] }
 open               = "5"
@@ -99,6 +100,9 @@ default = ["audio", "portable"]
 portable = []
 # Ambient sound (config-OFF at runtime regardless; this gates the DEPENDENCY).
 audio = ["dep:rodio"]
+# The `drift_watch` example's checker, with every source's upstream
+# declarations; no shipped build enables it.
+upstream = ["pixtuoid-core/upstream", "dep:regex"]
 
 # termios/select for `term::query_tty` (the truecolor and graphics probes),
 # O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs.
@@ -146,7 +150,9 @@ windows-sys = { workspace = true, features = [
 [dev-dependencies]
 # `tests/wire_to_pixels.rs` drives real fixture bytes through the shared
 # `pixtuoid_core::harness` pipeline, which is behind core's dev-only feature.
-pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", features = ["harness"] }
+# `upstream`: the drift watch's tests read every source's declarations.
+pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", features = ["harness", "upstream"] }
+regex = { workspace = true }
 tempfile = { workspace = true }
 temp-env = { workspace = true }
 # tests/text_coverage.rs parses the source of everything that renders text.
@@ -173,6 +179,10 @@ criterion  = { workspace = true }
 name = "snapshot"
 path = "examples/snapshot/main.rs"
 test = true
+
+[[example]]
+name = "drift_watch"
+required-features = ["upstream"]
 
 [package.metadata.deb]
 section = "utils"

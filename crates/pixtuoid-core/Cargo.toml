@@ -46,6 +46,9 @@ native  = ["dep:tokio", "dep:notify"]
 # The recorder writes captured lines back; without insertion order every
 # rewritten object would come out alphabetized, an edit past the sanctioned one.
 harness = ["serde_json/preserve_order"]
+# What each source depends on upstream, for pixtuoid's `drift_watch` example
+# alone: no shipped build reads it.
+upstream = []
 
 [dependencies]
 tokio       = { workspace = true, features = ["sync", "rt", "macros", "fs", "net", "time", "io-util"], optional = true }

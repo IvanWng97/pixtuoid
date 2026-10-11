@@ -153,3 +153,6 @@ tempfile           = "3"
 # Dev-only: every test that sets or unsets an env var goes through it, behind
 # one process-wide lock.
 temp-env           = "0.3"
+# The drift watch's patterns (pixtuoid's `upstream` feature), already in the
+# tree through criterion.
+regex              = "1"
