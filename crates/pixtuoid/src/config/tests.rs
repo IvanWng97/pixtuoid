@@ -864,13 +864,10 @@ fn floating_config_defaults_and_explicit_roundtrip() {
         (FLOATING_DEFAULT_W, FLOATING_DEFAULT_H)
     );
     assert_eq!(f.position, None);
-    assert!((f.opacity - 1.0).abs() < f32::EPSILON);
     let cfg: AppConfig =
-        toml::from_str("[floating]\nwidth = 480\nheight = 300\nx = 10\ny = 20\nopacity = 0.8\n")
-            .unwrap();
+        toml::from_str("[floating]\nwidth = 480\nheight = 300\nx = 10\ny = 20\n").unwrap();
     let f = resolve_floating(&cfg);
     assert_eq!((f.width, f.height, f.position), (480, 300, Some((10, 20))));
-    assert!((f.opacity - 0.8).abs() < 1e-6);
     let cfg: AppConfig = toml::from_str("[floating]\nx = 10\n").unwrap();
     assert_eq!(
         resolve_floating(&cfg).position,
@@ -993,13 +990,32 @@ fn save_floating_writes_a_zoom_and_drops_a_reset_one() {
     );
 }
 
+/// A release that still wrote `[floating] opacity` left it in the file: it
+/// loads, reads no setting, and a geometry save keeps it.
 #[test]
-fn floating_opacity_is_bounded() {
-    let cfg: AppConfig = toml::from_str("[floating]\nopacity = 9.0\n").unwrap();
-    let f = resolve_floating(&cfg);
-    assert!((f.opacity - 1.0).abs() < f32::EPSILON);
-    let cfg: AppConfig = toml::from_str("[floating]\nopacity = 0.0\n").unwrap();
-    assert!((resolve_floating(&cfg).opacity - 0.2).abs() < 1e-6);
+fn an_old_floating_opacity_key_loads_and_survives_a_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[floating]\nwidth = 500\nheight = 310\nopacity = 0.5\n",
+    )
+    .unwrap();
+    let f = resolve_floating(&load(&path, &mut Vec::new()));
+    assert_eq!((f.width, f.height), (500, 310));
+    save_floating(
+        &path,
+        &FloatingSave {
+            width: 520,
+            height: 330,
+            position: None,
+            zoom: Zoom::default(),
+        },
+    )
+    .unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("opacity = 0.5"), "{text}");
+    assert!(text.contains("width = 520"), "{text}");
 }
 
 #[test]

@@ -70,6 +70,6 @@ ignore:
   - "crates/pixtuoid/src/floating/mod.rs"       # floating run(): tokio runtime + winit EventLoop glue (the floating twin of driver.rs)
   - "crates/pixtuoid/src/floating/window.rs"    # winit ApplicationHandler: creates the real OS window + its GPU surface
   # The testable floating logic IS counted: offscreen.rs, overlays.rs,
-  # compose.rs, gpu.rs, geometry.rs, input.rs, cadence.rs. Keeps the % honest:
+  # compose.rs, gpu.rs, geometry.rs, input.rs, cadence.rs, lifecycle.rs. Keeps the % honest:
   # "of the code we CAN test headlessly, X% is tested", rather than dragging it
   # down with paths no test can reach.

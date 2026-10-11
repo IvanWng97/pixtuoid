@@ -23,8 +23,6 @@ pub struct OfficeRenderer {
     audio: crate::audio::AudioHandle,
     /// The flashes the window shows.
     flash: FlashHold<(u32, u32)>,
-    /// The walkable debug layer, the TUI's `w`; not persisted.
-    pub(super) debug_walkable: bool,
 }
 
 impl OfficeRenderer {
@@ -36,13 +34,7 @@ impl OfficeRenderer {
             pointer: Pointer::default(),
             audio: crate::audio::AudioHandle::disabled(),
             flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
-            debug_walkable: false,
         }
-    }
-
-    /// Show or hide the walkable debug layer.
-    pub(crate) fn toggle_walkable_debug(&mut self) {
-        self.debug_walkable = !self.debug_walkable;
     }
 
     /// The pets each floor picks its own from.
@@ -101,7 +93,7 @@ impl OfficeRenderer {
                 theme,
                 size: at.logical(),
                 place,
-                debug_walkable: self.debug_walkable,
+                debug_walkable: false,
             },
             &self.pets,
             gap,
@@ -880,14 +872,14 @@ mod tests {
         // Under a panel a carry still sets down, and a click lands nowhere.
         let open = crate::panels::ModalState {
             help_open: true,
-            ..closed_modal()
+            ..crate::panels::ModalState::closed()
         };
-        assert!(renderer.tooltip_shows(true, &closed_modal()));
+        assert!(renderer.tooltip_shows(true, &crate::panels::ModalState::closed()));
         assert!(
             !renderer.tooltip_shows(true, &open),
             "no tooltip under a panel"
         );
-        assert!(!renderer.tooltip_shows(false, &closed_modal()));
+        assert!(!renderer.tooltip_shows(false, &crate::panels::ModalState::closed()));
         let press = |renderer: &mut OfficeRenderer| {
             renderer.press_at(
                 on_agent,
@@ -903,7 +895,7 @@ mod tests {
         press(&mut renderer);
         assert!(renderer.pointer_moved(away, at));
         assert!(
-            !renderer.tooltip_shows(true, &closed_modal()),
+            !renderer.tooltip_shows(true, &crate::panels::ModalState::closed()),
             "nor in hand"
         );
         assert_eq!(renderer.release_under(away, at, &open), None);
@@ -916,7 +908,7 @@ mod tests {
         press(&mut renderer);
         assert!(
             renderer
-                .release_under(on_agent, at, &closed_modal())
+                .release_under(on_agent, at, &crate::panels::ModalState::closed())
                 .is_some(),
             "with no panel the click lands"
         );
@@ -1298,10 +1290,10 @@ mod tests {
     fn the_cursor_reads_the_frame_on_screen() {
         use winit::window::CursorIcon;
         let (mut renderer, at, size, now, _) = one_agent_office();
-        let closed = closed_modal();
+        let closed = crate::panels::ModalState::closed();
         let open = crate::panels::ModalState {
             help_open: true,
-            ..closed_modal()
+            ..crate::panels::ModalState::closed()
         };
         let icon = |r: &OfficeRenderer, cursor, modal: &crate::panels::ModalState| {
             r.cursor_icon(cursor, size, at, modal, None, now)
@@ -1387,18 +1379,5 @@ mod tests {
                 )
             })
             .expect("the frame drew the agent")
-    }
-
-    fn closed_modal() -> crate::panels::ModalState {
-        crate::panels::ModalState {
-            onboarding_open: false,
-            help_open: false,
-            version_popup: false,
-            theme_picker: None,
-            dashboard_open: false,
-            connection_open: false,
-            connection_confirm: false,
-            n_themes: pixtuoid_scene::theme::ALL_THEMES.len(),
-        }
     }
 }
