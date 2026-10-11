@@ -1,4 +1,3 @@
-#[cfg(feature = "graphics")]
 pub(crate) mod cutaway;
 pub(crate) mod geometry;
 pub(crate) mod hit_test;
@@ -313,7 +312,7 @@ pub(crate) fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
 ) -> Result<()> {
-    #[cfg(all(feature = "graphics", unix))]
+    #[cfg(unix)]
     crate::graphics::shm::unlink_all();
     unwind_after(&crate::graphics::unwind_prelude(), out, disable_raw)
 }
@@ -454,7 +453,6 @@ fn paint_plan<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
 ) {
     let (terminal, tmux_env) = crate::graphics::terminal_and_tmux();
     match plan {
-        #[cfg(feature = "graphics")]
         crate::graphics::Plan::Cutaway {
             fit, route, cell, ..
         } => {
@@ -877,7 +875,7 @@ mod teardown_tests {
     use super::unwind_after;
     use std::cell::Cell;
 
-    #[cfg(all(feature = "graphics", unix))]
+    #[cfg(unix)]
     #[test]
     fn the_unwind_unlinks_every_shared_memory_object() {
         use crate::graphics::shm;
@@ -956,7 +954,7 @@ mod teardown_tests {
         );
     }
 
-    #[cfg(all(unix, feature = "graphics"))]
+    #[cfg(unix)]
     #[test]
     fn our_images_go_before_the_alt_screen_that_holds_them() {
         let prelude = crate::graphics::kitty::unwind_for(65536..=65541, false);

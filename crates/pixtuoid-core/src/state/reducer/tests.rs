@@ -681,3 +681,45 @@ fn desks_full_warn_escapes_the_wire_session_id_and_cwd() {
         );
     }
 }
+
+/// A label carries its cwd's basename, wire content, so the stale sweep logs it
+/// as a `?` field.
+#[test]
+fn the_stale_sweep_logs_the_wire_label_escaped() {
+    use super::STALE_IDLE_TIMEOUT;
+    use crate::source::{AgentEvent, Transport};
+    use crate::test_capture::capture_logs;
+    use crate::{AgentId, Reducer, SceneState};
+    use std::time::{Duration, SystemTime};
+    let mut scene = SceneState::uniform(1);
+    let mut r = Reducer::new();
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: AgentId::from_parts("claude-code", "s"),
+            source: "claude-code".into(),
+            session_id: "s".into(),
+            cwd: "/w/re\u{1b}]0;pwned\u{7}po\u{202e}Z".into(),
+            parent_id: None,
+        },
+        SystemTime::UNIX_EPOCH,
+        Transport::Hook,
+    );
+    let out = capture_logs(|| {
+        r.tick(
+            &mut scene,
+            SystemTime::UNIX_EPOCH + STALE_IDLE_TIMEOUT + Duration::from_secs(1),
+        );
+    });
+    assert!(out.contains("stale agent"), "got {out:?}");
+    for raw in ['\u{1b}', '\u{7}', '\u{202e}'] {
+        assert!(
+            !out.contains(raw),
+            "{raw:?} must not reach the log raw: {out:?}"
+        );
+    }
+    assert!(
+        out.contains(r"re\u{1b}]0;pwned\u{7}po\u{202e}Z"),
+        "escaped, not dropped: {out:?}"
+    );
+}

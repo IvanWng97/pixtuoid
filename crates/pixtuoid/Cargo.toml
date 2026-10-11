@@ -24,26 +24,17 @@ pixtuoid-core  = { path = "../pixtuoid-core", version = "0.19.0" }
 pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.19.0" }
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
 ratatui            = { workspace = true }
-# Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway profile — only its
-# terminal query (`picker::cap_parser` and the `picker::ProtocolType` it
-# filters by): the capability and cell-size query, the reply parser, and tmux's
-# passthrough wrapping; the encoders are ours (`src/graphics/`). In the ratatui
-# org, so it tracks ratatui's own releases. `default-features = false` is
-# LOAD-BEARING: the default set turns on `chafa-dyn`, which dynamically links
-# libchafa.so and needs it at RUNTIME too — that would break the musl/cross
-# Linux prebuilds exactly the way ALSA already does (see the `audio` feature).
-# Its sixel backend is `icy_sixel`, pure Rust, so the trimmed set has no C dep.
-ratatui-image      = { version = "11", default-features = false, features = ["crossterm"], optional = true }
-# The kitty encoder's base64: ratatui-image's own, so no second crate.
-base64-simd        = { version = "0.8", optional = true }
-# iTerm2's PNG and kitty's zlib: what ratatui-image's `image` already builds.
-png                = { version = "0.18", optional = true }
+# The base64 of kitty's transmits and of the probe's queries.
+base64-simd        = "0.8"
+# iTerm2's PNG.
+png                = "0.18"
 # SIXEL's per-tile palette map, hot in its encode.
-foldhash           = { workspace = true, optional = true }
+foldhash           = { workspace = true }
 # SIXEL's numbers, written a run at a time without `core::fmt`'s machinery.
 # Already in the graph through ratatui-core's compact_str.
-itoa               = { version = "1", optional = true }
-miniz_oxide        = { version = "0.8", optional = true }
+itoa               = "1"
+# kitty's zlib: png's own copy, so no second crate.
+miniz_oxide        = "0.8"
 # `event-stream`: the TUI loop awaits input beside its frame clock and signals.
 crossterm          = { workspace = true, features = ["event-stream"] }
 futures-util       = { version = "0.3", default-features = false }
@@ -105,17 +96,9 @@ rodio = { version = "0.22.2", default-features = false, features = ["playback", 
 # `build-target` builds the Linux release artifacts with `portable` alone, so a
 # new default feature goes in `portable` unless it can't build on those targets.
 default = ["audio", "portable"]
-portable = ["graphics"]
+portable = []
 # Ambient sound (config-OFF at runtime regardless; this gates the DEPENDENCY).
 audio = ["dep:rodio"]
-# Terminal image-protocol detection. Gates the DEPENDENCY, not a runtime switch:
-# `ratatui-image` (no feature of its own drops the sixel backend) brings, on
-# Windows, a SECOND binding family (`windows 0.58` beside the existing 0.62)
-# with its proc-macro crates. Every one of those
-# transitive crates reaches `cargo install` and homebrew-core's from-source
-# build. Off is a build whose `doctor` says it cannot ask
-# (`ClassicReason::Unsupported`) and whose runs paint classic.
-graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide", "dep:foldhash", "dep:itoa", "dep:rustix"]
 
 # termios/select for `term::query_tty` (the truecolor and graphics probes),
 # O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs.
@@ -123,7 +106,7 @@ graphics = ["dep:ratatui-image", "dep:base64-simd", "dep:png", "dep:miniz_oxide"
 libc = { workspace = true }
 # The kitty `t=s` objects (graphics/shm.rs), whose `shm_open` libc types
 # differently on each Unix.
-rustix = { workspace = true, features = ["shm", "mm"], optional = true }
+rustix = { workspace = true, features = ["shm", "mm"] }
 
 # Focus-jump activation (focus/macos.rs). Pinned to the SAME objc2 stack winit
 # already pulls so the bindings don't double-compile. This MUST track winit's
@@ -202,11 +185,6 @@ assets = [
 ]
 extended-description = "Terminal-native, multi-agent pixel-art visualizer for AI coding agents. Each running Claude Code session appears as an animated sprite in a top-down ASCII office."
 
-[[example]]
-name              = "pacing"
-required-features = ["graphics"]
-
 [[bench]]
 name              = "render_tiles"
 harness           = false
-required-features = ["graphics"]

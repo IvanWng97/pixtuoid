@@ -76,7 +76,7 @@ jobs:
       - name: Build instrumented benchmarks
         run: |
           cargo codspeed build -p pixtuoid-scene -p pixtuoid-core
-          cargo codspeed build -p pixtuoid --no-default-features --features graphics
+          cargo codspeed build -p pixtuoid --no-default-features
           for pkg in pixtuoid-scene pixtuoid-core pixtuoid; do
             compgen -G "target/codspeed/*/$pkg/*" >/dev/null || { echo "::error::no $pkg bench suite was kept"; exit 1; }
           done
