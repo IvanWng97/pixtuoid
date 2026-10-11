@@ -833,7 +833,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::WorldText
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::WorldText
 pub struct pixtuoid_scene::look::ClassicDrawn<'a>
 pub pixtuoid_scene::look::ClassicDrawn::hovers: &'a crate::display::Hovers
-pub pixtuoid_scene::look::ClassicDrawn::pixels: &'a mut pixtuoid_core::sprite::RgbBuffer
+pub pixtuoid_scene::look::ClassicDrawn::pixels: &'a pixtuoid_core::sprite::RgbBuffer
 pub pixtuoid_scene::look::ClassicDrawn::text: crate::display::HostText<'a>
 impl<'a> core::fmt::Debug for pixtuoid_scene::look::ClassicDrawn<'a>
 pub fn pixtuoid_scene::look::ClassicDrawn<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -843,7 +843,30 @@ impl<'a> core::marker::Sync for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> core::marker::Unpin for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> core::marker::UnsafeUnpin for pixtuoid_scene::look::ClassicDrawn<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::ClassicDrawn<'a>
-impl<'a> !core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::ClassicDrawn<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::ClassicDrawn<'a>
+pub struct pixtuoid_scene::look::Dim(_)
+impl pixtuoid_scene::look::Dim
+pub const pixtuoid_scene::look::Dim::NONE: Self
+pub fn pixtuoid_scene::look::Dim::brightness(self) -> f32
+pub fn pixtuoid_scene::look::Dim::from_brightness(f32) -> Self
+pub fn pixtuoid_scene::look::Dim::of(self, pixtuoid_core::sprite::Rgb) -> pixtuoid_core::sprite::Rgb
+impl core::clone::Clone for pixtuoid_scene::look::Dim
+pub fn pixtuoid_scene::look::Dim::clone(&self) -> pixtuoid_scene::look::Dim
+impl core::cmp::PartialEq for pixtuoid_scene::look::Dim
+pub fn pixtuoid_scene::look::Dim::eq(&self, &pixtuoid_scene::look::Dim) -> bool
+impl core::default::Default for pixtuoid_scene::look::Dim
+pub fn pixtuoid_scene::look::Dim::default() -> Self
+impl core::fmt::Debug for pixtuoid_scene::look::Dim
+pub fn pixtuoid_scene::look::Dim::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_scene::look::Dim
+impl core::marker::StructuralPartialEq for pixtuoid_scene::look::Dim
+impl core::marker::Freeze for pixtuoid_scene::look::Dim
+impl core::marker::Send for pixtuoid_scene::look::Dim
+impl core::marker::Sync for pixtuoid_scene::look::Dim
+impl core::marker::Unpin for pixtuoid_scene::look::Dim
+impl core::marker::UnsafeUnpin for pixtuoid_scene::look::Dim
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::Dim
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::Dim
 pub struct pixtuoid_scene::look::OfficeRaster
 impl core::default::Default for pixtuoid_scene::look::OfficeRaster
 pub fn pixtuoid_scene::look::OfficeRaster::default() -> pixtuoid_scene::look::OfficeRaster
@@ -875,7 +898,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::Place
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::Place
 pub struct pixtuoid_scene::look::Raster
 impl pixtuoid_scene::look::Raster
-pub fn pixtuoid_scene::look::Raster::classic_drawn(&mut self) -> core::option::Option<pixtuoid_scene::look::ClassicDrawn<'_>>
+pub fn pixtuoid_scene::look::Raster::classic_drawn(&self) -> core::option::Option<pixtuoid_scene::look::ClassicDrawn<'_>>
 pub fn pixtuoid_scene::look::Raster::host_text(&self) -> core::option::Option<crate::display::HostText<'_>>
 pub fn pixtuoid_scene::look::Raster::hovers(&self) -> core::option::Option<&Hovers>
 pub fn pixtuoid_scene::look::Raster::pixels(&self) -> core::option::Option<&pixtuoid_core::sprite::RgbBuffer>
@@ -891,6 +914,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::look::Raster
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::look::Raster
 pub struct pixtuoid_scene::look::RenderInputs<'a>
 pub pixtuoid_scene::look::RenderInputs::debug_walkable: bool
+pub pixtuoid_scene::look::RenderInputs::dim: pixtuoid_scene::look::Dim
 pub pixtuoid_scene::look::RenderInputs::place: pixtuoid_scene::look::Place
 pub pixtuoid_scene::look::RenderInputs::size: pixtuoid_scene::layout::Size
 pub pixtuoid_scene::look::RenderInputs::theme: &'static pixtuoid_scene::theme::Theme

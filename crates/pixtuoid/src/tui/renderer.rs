@@ -284,6 +284,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 floor: footer.context.floor,
             },
             debug_walkable: ctx.debug_walkable,
+            dim: overlays.onboarding.dim,
         },
     );
     let Some(Rendered { layout, .. }) = rendered else {
@@ -321,7 +322,7 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     frame: &ClassicFrame<'_>,
     layout: Arc<SceneLayout>,
-    floor: &mut PerFloor,
+    floor: &PerFloor,
 ) -> Result<DrawOut> {
     let &ClassicFrame {
         footer,
@@ -351,18 +352,13 @@ pub(crate) fn flush_classic<B: Backend<Error: Send + Sync + 'static>>(
         _ => None,
     };
 
-    // The dim is decoupled from `onboarding.open`, so the office keeps fading back
-    // up for a beat AFTER the card is gone.
-    apply_dim(pixels, overlays.onboarding.dim);
-
-    let buf = &*pixels;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
         // terminal resize between term.size() and term.draw().
         let actual_full = f.area();
         let actual_scene = crate::tui::renderer::scene_rect(actual_full);
         paint_footer(f, footer, actual_full, theme);
-        flush_buffer_to_term(f, buf, actual_scene);
+        flush_buffer_to_term(f, pixels, actual_scene);
         paint_host_text(f, text, (actual_scene, CellMap::HALF_BLOCK), hovered);
         let at = mouse_pos.map(|(mx, my)| TooltipAt {
             mx,
@@ -419,38 +415,11 @@ fn set_half_block(
     cell.bg = Color::Rgb(bottom.r, bottom.g, bottom.b);
 }
 
-/// Multiply every pixel of `buf` down by `factor` — the modal-backdrop dim.
-pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
-    const UNDIMMED: f32 = 0.999;
-    if factor >= UNDIMMED {
-        return;
-    }
-    for px in buf.as_mut_slice() {
-        px.r = (f32::from(px.r) * factor) as u8;
-        px.g = (f32::from(px.g) * factor) as u8;
-        px.b = (f32::from(px.b) * factor) as u8;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::panels::clip_widget_rect;
     use crate::tui::geometry::CellArea;
-
-    #[test]
-    fn an_undimmed_frame_is_left_untouched() {
-        let px = pixtuoid_core::sprite::Rgb {
-            r: 201,
-            g: 103,
-            b: 7,
-        };
-        let mut buf = RgbBuffer::filled(3, 2, px);
-        apply_dim(&mut buf, 0.9995);
-        assert!(buf.as_slice().iter().all(|p| *p == px));
-        apply_dim(&mut buf, 0.5);
-        assert!(buf.as_slice().iter().all(|p| *p != px));
-    }
 
     #[test]
     fn an_offscreen_still_shows_its_scenes_gateway() {

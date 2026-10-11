@@ -75,49 +75,45 @@ impl WelcomeUi {
 /// The per-frame render snapshot the event loop hands the renderer. `open` (paint
 /// the CARD) is decoupled from `dim` (the office backdrop) so the CLOSE fade-out
 /// keeps dimming the office for a beat AFTER the card is gone.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OnboardingFrame {
     pub open: bool,
     pub rows: Vec<WelcomeRow>,
     pub selected: usize,
     pub elapsed_ms: u64,
-    /// Office brightness multiplier: 1.0 = no dim, `DIM_FLOOR` = fully dimmed.
-    pub dim: f32,
+    /// The brightness the backdrop leaves the office: `DIM_FLOOR` fully
+    /// dimmed.
+    pub dim: pixtuoid_scene::look::Dim,
 }
 
-impl Default for OnboardingFrame {
-    fn default() -> Self {
-        // `dim: 1.0` (NOT the f32 default 0.0, which would render the office black).
-        Self {
-            open: false,
-            rows: Vec::new(),
-            selected: 0,
-            elapsed_ms: 0,
-            dim: 1.0,
-        }
-    }
-}
-
-/// Office brightness the backdrop dims to (0 = black, 1 = unchanged) and the ramp
-/// times — the shorter fade-out "lights up" a touch quicker than it went down.
+/// Office brightness the backdrop dims to and the ramp times — the shorter
+/// fade-out "lights up" a touch quicker than it went down.
 pub(crate) const DIM_FLOOR: f32 = 0.4;
 pub(crate) const DIM_RAMP_MS: u64 = 450;
 pub(crate) const DIM_FADE_OUT_MS: u64 = 300;
 
-/// Dim factor `elapsed_ms` after the overlay OPENED — ramps `1.0 → DIM_FLOOR`.
-pub fn dim_opening(elapsed_ms: u64) -> f32 {
+/// The dim `elapsed_ms` after the overlay OPENED — ramps from
+/// [`Dim::NONE`](pixtuoid_scene::look::Dim::NONE) to `DIM_FLOOR`.
+pub fn dim_opening(elapsed_ms: u64) -> pixtuoid_scene::look::Dim {
     let t = elapsed_ms.min(DIM_RAMP_MS) as f32 / DIM_RAMP_MS as f32;
-    1.0 - t * (1.0 - DIM_FLOOR)
+    pixtuoid_scene::look::Dim::from_brightness(1.0 - t * (1.0 - DIM_FLOOR))
 }
 
-/// Dim factor `elapsed_ms` into the CLOSE fade — ramps `from → 1.0`, then `None`
-/// once fully restored. `from` is the dim the OPEN ramp was INTERRUPTED at, not
+/// The dim `elapsed_ms` into the CLOSE fade — ramps `from` to
+/// [`Dim::NONE`](pixtuoid_scene::look::Dim::NONE), then `None` once fully
+/// restored. `from` is the dim the OPEN ramp was INTERRUPTED at, not
 /// `DIM_FLOOR`: an overlay skipped mid-ramp would otherwise snap the whole office
 /// darker for a frame before climbing back.
-pub(crate) fn dim_closing(from: f32, elapsed_ms: u64) -> Option<f32> {
+pub(crate) fn dim_closing(
+    from: pixtuoid_scene::look::Dim,
+    elapsed_ms: u64,
+) -> Option<pixtuoid_scene::look::Dim> {
     if elapsed_ms >= DIM_FADE_OUT_MS {
         return None;
     }
     let t = elapsed_ms as f32 / DIM_FADE_OUT_MS as f32;
-    Some(from + t * (1.0 - from))
+    let from = from.brightness();
+    Some(pixtuoid_scene::look::Dim::from_brightness(
+        from + t * (1.0 - from),
+    ))
 }

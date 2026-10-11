@@ -81,6 +81,7 @@ impl OfficeRenderer {
             world,
             theme,
             place,
+            dim,
         } = frame;
         let FloorInputs {
             scene, floor, now, ..
@@ -94,6 +95,7 @@ impl OfficeRenderer {
                 size: at.logical(),
                 place,
                 debug_walkable: false,
+                dim,
             },
             &self.pets,
             gap,
@@ -405,13 +407,14 @@ pub struct WindowFrame<'a> {
     pub world: FloorInputs<'a>,
     pub theme: &'static pixtuoid_scene::theme::Theme,
     pub place: pixtuoid_scene::look::Place,
+    pub dim: pixtuoid_scene::look::Dim,
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::SystemTime;
 
-    use super::super::fixtures::{active_on, cutaway, density, scene_with};
+    use super::super::fixtures::{active_on, cutaway, density, frame, scene_with};
     use super::super::geometry::{Zoom, window_geometry};
     use super::super::overlays::footer_budget;
     use super::*;
@@ -445,6 +448,7 @@ mod tests {
                     },
                     theme,
                     place: pixtuoid_scene::look::Place::default(),
+                    dim: pixtuoid_scene::look::Dim::NONE,
                 },
             )
             .expect("a frame");
@@ -463,6 +467,31 @@ mod tests {
                 .any(|p| *p != Rgb { r: 0, g: 0, b: 0 } && *p != bg),
             "the painter draws office content beyond the cleared background"
         );
+    }
+
+    /// The window's office darkens under its modal's dim, as the TUI's does.
+    #[test]
+    fn the_window_dims_its_office_under_a_modal() {
+        let scene = SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]);
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme exists");
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let mut renderer = OfficeRenderer::new(crate::test_flash::pack_arc());
+        let mut lit = |dim| -> u64 {
+            let at = WindowFrame {
+                dim,
+                ..frame(&scene, crate::test_flash::pack(), theme, now)
+            };
+            renderer
+                .render(cutaway(Size { w: 160, h: 96 }), at)
+                .expect("a frame")
+                .as_slice()
+                .iter()
+                .map(|p| u64::from(p.r) + u64::from(p.g) + u64::from(p.b))
+                .sum()
+        };
+        let bright = lit(pixtuoid_scene::look::Dim::NONE);
+        let dimmed = lit(pixtuoid_scene::look::Dim::from_brightness(0.4));
+        assert!(2 * dimmed < bright, "dimmed={dimmed} vs bright={bright}");
     }
 
     /// An empty office's window, under `weather`, moving fully, its flashes
@@ -524,6 +553,7 @@ mod tests {
                     },
                     theme,
                     place: pixtuoid_scene::look::Place::default(),
+                    dim: pixtuoid_scene::look::Dim::NONE,
                 },
                 self.px,
             );
@@ -986,6 +1016,7 @@ mod tests {
                 },
                 theme,
                 place: pixtuoid_scene::look::Place::default(),
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
         let text: String = renderer
@@ -1029,6 +1060,7 @@ mod tests {
                 },
                 theme,
                 place: pixtuoid_scene::look::Place::default(),
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
         let frames = crate::audio::drain_frames(&rx);
@@ -1102,6 +1134,7 @@ mod tests {
                     },
                     theme,
                     place: pixtuoid_scene::look::Place::default(),
+                    dim: pixtuoid_scene::look::Dim::NONE,
                 },
             );
             heard.extend(
@@ -1150,6 +1183,7 @@ mod tests {
                 },
                 theme,
                 place: pixtuoid_scene::look::Place::default(),
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
         crate::audio::drain_frames(&rx); // discard the priming frames
@@ -1169,6 +1203,7 @@ mod tests {
                 },
                 theme,
                 place: pixtuoid_scene::look::Place::default(),
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
         let off_floor: Vec<_> = crate::audio::drain_frames(&rx)
@@ -1195,6 +1230,7 @@ mod tests {
                 },
                 theme,
                 place: pixtuoid_scene::look::Place::default(),
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
         let on_floor: Vec<_> = crate::audio::drain_frames(&rx)
@@ -1352,6 +1388,7 @@ mod tests {
                     },
                     theme,
                     place: pixtuoid_scene::look::Place::default(),
+                    dim: pixtuoid_scene::look::Dim::NONE,
                 },
             )
             .expect("a frame");

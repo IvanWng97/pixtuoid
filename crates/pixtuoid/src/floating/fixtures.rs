@@ -91,5 +91,6 @@ pub(super) fn frame<'a>(
         },
         theme,
         place: pixtuoid_scene::look::Place::default(),
+        dim: pixtuoid_scene::look::Dim::NONE,
     }
 }

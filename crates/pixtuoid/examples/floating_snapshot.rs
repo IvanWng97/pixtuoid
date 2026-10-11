@@ -248,6 +248,7 @@ fn main() -> Result<()> {
                     gateway: pixtuoid_scene::tally::office_gateway(&scene),
                     floor: None,
                 },
+                dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
     };
