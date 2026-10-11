@@ -29,7 +29,7 @@ use crate::walk::WalkState;
 mod office;
 use office::FloorView;
 #[doc(hidden)]
-pub use office::{FloorNav, Frame, OfficeSession};
+pub use office::{Feed, FloorNav, OfficeSession};
 
 pub use pixtuoid_core::state::MAX_FLOORS;
 

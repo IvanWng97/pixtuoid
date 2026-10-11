@@ -288,13 +288,18 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     Ok(Some(picture.hits.clone()))
 }
 
-/// Where `picture`'s half-blocks lie under the cells of a terminal `size`
-/// big, and the cells of the star its host text sets there.
+/// Where the half-blocks lie under the cells of a terminal `size` big.
+pub(crate) fn classic_geometry(size: ratatui::layout::Size) -> SceneGeometry {
+    SceneGeometry::half_block(scene_rect(Rect::new(0, 0, size.width, size.height)))
+}
+
+/// [`classic_geometry`], and the cells of the star `picture`'s host text
+/// sets there.
 pub(crate) fn classic_placement(
     size: ratatui::layout::Size,
     picture: &FloorPicture<'_>,
 ) -> (SceneGeometry, Option<pixtuoid_scene::layout::Bounds>) {
-    let geometry = SceneGeometry::half_block(scene_rect(Rect::new(0, 0, size.width, size.height)));
+    let geometry = classic_geometry(size);
     let star = picture
         .text
         .and_then(|text| star_area(text.signs, geometry.map()));

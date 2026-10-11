@@ -653,12 +653,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         let Some(picture) = self.session.picture() else {
             return Ok(());
         };
-        let geometry = crate::tui::geometry::SceneGeometry::half_block(scene_rect(Rect::new(
-            0,
-            0,
-            term_size.width,
-            term_size.height,
-        )));
+        let geometry = crate::tui::renderer::classic_geometry(term_size);
         if !self
             .screen
             .admit(&picture, term_size, geometry, None)

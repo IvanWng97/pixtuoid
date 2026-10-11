@@ -334,9 +334,7 @@ fn the_drawn_geometry_answers_every_cell_as_the_half_block_does() {
         let drawn = draw_scene(&mut term, &mut ctx)
             .expect("draw")
             .expect("drawn");
-        let geometry = crate::tui::geometry::SceneGeometry::half_block(
-            crate::tui::renderer::scene_rect(Rect::new(0, 0, cols, rows)),
-        );
+        let geometry = crate::tui::renderer::classic_geometry(term.size().expect("a size"));
         let hits = |at: CellArea| drawn.at(at.bounds(), None);
         let mut seen = [false; 5];
         for (col, row) in (0..rows).flat_map(|row| (0..cols).map(move |col| (col, row))) {

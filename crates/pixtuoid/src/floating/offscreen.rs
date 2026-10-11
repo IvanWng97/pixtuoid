@@ -151,7 +151,7 @@ impl OfficeRenderer {
 
     /// The fit the frame on screen was drawn at; `None` before one shows.
     pub(crate) fn shown_fit(&self) -> Option<PixelFit> {
-        self.screen.shown().map(|shown| *shown.geometry)
+        self.screen.shown().map(|shown| shown.geometry)
     }
 
     /// A left press at `cursor` (physical px) in a `window`-sized window, at
@@ -349,7 +349,7 @@ fn hit_in(
     cursor: (f64, f64),
 ) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
     let shown = screen.shown()?;
-    shown.hit_at(unit_bounds(unit_at(cursor, *shown.geometry)))
+    shown.hit_at(unit_bounds(unit_at(cursor, shown.geometry)))
 }
 
 /// What a press on `under` affords, as its cursor, in CSS UI 3's names
@@ -658,6 +658,24 @@ mod tests {
             ),
             "the held frame drew no agent, but the window still shows it"
         );
+        assert_eq!(
+            window.renderer.drawn_hit_at(on_agent, at),
+            None,
+            "the tooltip reads the frame rendered, which drew none"
+        );
+    }
+
+    /// The tooltip set over a frame reads that frame: the one just rendered.
+    #[test]
+    fn the_tooltip_reads_the_frame_rendered() {
+        use pixtuoid_scene::display::HoverTarget;
+        use pixtuoid_scene::hit::SceneHit;
+        let (renderer, at, _, now, id) = one_agent_office();
+        let on_agent = agent_point(&renderer, at, now);
+        assert!(matches!(
+            renderer.drawn_hit_at(on_agent, at),
+            Some(SceneHit::Figure(HoverTarget::Agent(a))) if *a == id
+        ));
     }
 
     /// A window resized under a hold gets its frame at once: a screen of a new

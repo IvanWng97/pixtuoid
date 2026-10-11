@@ -161,6 +161,9 @@ pub struct Office {
     weather: WeatherPolicy,
     /// What the page shows: the frame `step` leaves is the one it draws.
     screen: Screen<(u16, u16), ()>,
+    /// The badges of the frame the page shows, which its labels sit over: a
+    /// held frame keeps the last's.
+    shown_badges: Vec<pixtuoid_scene::display::Badge>,
     /// The WebAudio engine — `None` until the visitor clicks ♩ (browser autoplay
     /// policy: no sound without a gesture).
     audio: Option<audio::WebAudioDriver>,
@@ -201,6 +204,7 @@ impl Office {
             caps_size: None,
             weather: WeatherPolicy::Clock,
             screen: Screen::on(page_clock()),
+            shown_badges: Vec::new(),
             audio: None,
             adopting: None,
         })
@@ -238,6 +242,7 @@ impl Office {
             // Too small to lay out: the canvas still takes a frame its size,
             // the raster's backdrop.
             self.screen.blank((buf_w, buf_h));
+            self.shown_badges.clear();
             if let Some(backdrop) = self.session.floor().raster.pixels() {
                 expand_rgba(&mut self.rgba, backdrop);
             }
@@ -253,6 +258,13 @@ impl Office {
             return;
         }
         expand_rgba(&mut self.rgba, picture.pixels());
+        self.shown_badges = picture
+            .hits()
+            .and(match &picture {
+                pixtuoid_scene::look::Picture::Floor(floor) => floor.text,
+                pixtuoid_scene::look::Picture::Slide(_) => None,
+            })
+            .map_or_else(Vec::new, |text| text.badges.to_vec());
         // The page draws what `step` leaves in the same task, straight after.
         self.screen.landed();
     }
@@ -329,12 +341,7 @@ impl Office {
             .board(&self.scene, self.floor_meta().motion, now);
 
         let mut out = String::from("{\"labels\":[");
-        let badges = self
-            .session
-            .picture()
-            .and_then(|picture| picture.text)
-            .map_or(&[][..], |text| text.badges);
-        for (i, badge) in badges.iter().enumerate() {
+        for (i, badge) in self.shown_badges.iter().enumerate() {
             let pixtuoid_scene::display::Badge {
                 at, marker, name, ..
             } = badge;
@@ -1012,6 +1019,30 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The page's labels are those of the frame it shows: a held frame
+    /// keeps the last frame's, however the office moved since.
+    #[test]
+    fn a_held_frame_keeps_the_labels_of_the_one_shown() {
+        use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS as FLOOR_MS;
+        let strike = storm_strike();
+        let second = strike.changes[1];
+        let (mut o, screen) = storm_on_screen();
+        step_at(&mut o, &screen, strike.changes[0] - 2 * FLOOR_MS);
+        step_at(&mut o, &screen, second - FLOOR_MS / 4);
+        let labels = |o: &mut Office| {
+            let v: serde_json::Value =
+                serde_json::from_str(&o.overlay_json()).expect("overlay_json is valid JSON");
+            v["labels"].as_array().expect("labels").len()
+        };
+        let shown = labels(&mut o);
+        assert!(shown > 0, "premise: the cast is on the page");
+        let before = o.frame().to_vec();
+        o.scene.agents.clear();
+        step_at(&mut o, &screen, second);
+        assert!(o.frame() == before.as_slice(), "premise: held");
+        assert_eq!(labels(&mut o), shown);
     }
 
     /// A canvas shrunk too small for the office and grown back inside a

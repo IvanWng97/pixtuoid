@@ -52,7 +52,7 @@ pub(crate) struct FloatingApp {
     /// The modifier keys held, which a key is read with.
     modifiers: winit::keyboard::ModifiersState,
     /// What the frame on screen shows beside the office.
-    screen: super::compose::Screen,
+    presented: super::compose::Presented,
     /// The frames' times and janks, reported as the TUI's are.
     jank: crate::jank::Jank,
     /// How the office moves.
@@ -181,7 +181,7 @@ impl FloatingApp {
             modifiers: winit::keyboard::ModifiersState::empty(),
             // Until `resumed` names the platform: presenting every frame is
             // safe on any.
-            screen: super::compose::Screen::new(false),
+            presented: super::compose::Presented::new(false),
             jank: crate::jank::Jank::new(),
             motion,
             renderer,
@@ -388,7 +388,7 @@ impl FloatingApp {
                 host: &mut super::input::WindowHost {
                     renderer: &mut self.renderer,
                     theme: &mut self.theme,
-                    screen: &mut self.screen,
+                    presented: &mut self.presented,
                 },
                 audio_ctl: &mut self.audio_ctl,
                 config_path: &self.config_path,
@@ -470,7 +470,7 @@ impl FloatingApp {
         else {
             // Nothing rendered, or held: the window keeps the last frame, which
             // the next one's dirt is no longer measured against.
-            self.screen.stale();
+            self.presented.stale();
             return;
         };
         let cursor = (self.cursor.x, self.cursor.y);
@@ -519,22 +519,22 @@ impl FloatingApp {
             (win_w, win_h),
             &self.overlays,
         );
-        if !self.screen.needs(&comp) {
+        if !self.presented.needs(&comp) {
             drop(comp);
             // The frame on screen is this one: its flash phase shows.
             self.renderer.presented();
             return;
         }
-        let in_sync = self.screen.in_sync();
+        let in_sync = self.presented.in_sync();
         // Until this one presents, the screen matches no frame rendered.
-        self.screen.stale();
+        self.presented.stale();
         let Some(gpu) = self.gpu.as_mut() else {
             return;
         };
         let presenting = Instant::now();
         let shown = gpu.present(&comp, in_sync);
         if shown {
-            self.screen.shown(&comp);
+            self.presented.shown(&comp);
         }
         drop(comp);
         if shown {
@@ -662,7 +662,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 self.zoom,
             ));
         }
-        self.screen = super::compose::Screen::of_window(
+        self.presented = super::compose::Presented::of_window(
             winit::raw_window_handle::HasWindowHandle::window_handle(&*window)
                 .ok()
                 .map(|h| h.as_raw()),

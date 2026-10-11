@@ -125,7 +125,7 @@ impl FloorView {
 #[doc(hidden)]
 #[must_use]
 #[derive(Debug)]
-pub struct Frame {
+pub struct Feed {
     /// Its audio intent.
     pub audio: AudioFrame,
     /// What the floor showing was drawn under, for a painter's jank report.
@@ -448,7 +448,7 @@ impl OfficeSession {
         inputs: crate::look::RenderInputs<'_>,
         pets: &[crate::pet::Pet],
         gap: Rgb,
-    ) -> Frame {
+    ) -> Feed {
         let scene = inputs.world.scene;
         let now = inputs.world.now;
         self.prepare(scene, now);
@@ -501,7 +501,7 @@ impl OfficeSession {
             draw(&mut self.views, &mut self.office, current, look);
         }
         let current = self.nav.current();
-        Frame {
+        Feed {
             audio: self.audio_frame(scene, inputs.world.floor, now),
             note: self.views[current].floor.raster.note(),
         }
@@ -532,10 +532,15 @@ impl OfficeSession {
         office_floor: FloorMeta,
         now: SystemTime,
     ) -> AudioFrame {
-        if let Some(view) = self.views.get_mut(self.nav.current()) {
+        let current = self.nav.current().min(self.n_floors - 1);
+        if let Some(view) = self.views.get_mut(current) {
             view.forget();
         }
-        self.audio_frame(scene, office_floor, now)
+        // The empty floor's by construction, whatever the view still holds.
+        let floor = floor_meta(office_floor, current, self.n_floors);
+        self.office
+            .audio
+            .frame(scene, &HashSet::new(), |_| None, floor, now)
     }
 
     /// The waypoints the floor showing's audio reads as occupied.

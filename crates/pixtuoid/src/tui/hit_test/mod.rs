@@ -1,5 +1,5 @@
-//! Mouse hit-testing at a terminal cell: the engine's [`pixtuoid_scene::hit`]
-//! over the office pixels the cell shows.
+//! [`SceneHit`] for the terminal, and the bare-office probes the layout tests
+//! read a cell through.
 
 #[cfg(test)]
 use pixtuoid_scene::display::Hovers;

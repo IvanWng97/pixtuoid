@@ -931,7 +931,10 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
         session.floor().ctx.door_anim_max_ms > 0,
         "the epilogue ran headlessly: the in-flight entry drives the door clamp"
     );
-    assert!(session.picture().is_none(), "no pixel buffer was bought");
+    assert!(
+        session.floor().raster.pixels().is_none(),
+        "no pixel buffer was bought"
+    );
 
     assert!(
         session

@@ -162,37 +162,31 @@ impl Admit {
 pub struct Screen<S, G> {
     hold: FlashHold<S>,
     /// The write under way, shown once it [`landed`](Self::landed).
-    staged: Option<Showing<G>>,
-    shown: Option<Showing<G>>,
-}
-
-#[derive(Debug)]
-struct Showing<G> {
-    /// `None` for a slide, which shows no one floor's figures where they stand.
-    hits: Option<crate::look::Hits>,
-    geometry: G,
-    /// The board's star where the painter set the text itself.
-    host_star: Option<crate::layout::Bounds>,
+    staged: Option<Shown<G>>,
+    shown: Option<Shown<G>>,
 }
 
 /// The picture a [`Screen`] shows, as its painter's geometry maps onto it.
 #[derive(Debug)]
-pub struct Shown<'a, G> {
+pub struct Shown<G> {
     /// How a pointer maps onto it.
-    pub geometry: &'a G,
-    showing: &'a Showing<G>,
+    pub geometry: G,
+    /// `None` for a slide, which shows no one floor's figures where they stand.
+    hits: Option<crate::look::Hits>,
+    /// The board's star where the painter set the text itself.
+    host_star: Option<crate::layout::Bounds>,
 }
 
-impl<'a, G> Shown<'a, G> {
+impl<G> Shown<G> {
     /// What it shows a pointer over `area`, in layout units: nothing on a
     /// slide.
-    pub fn hit_at(&self, area: crate::layout::Bounds) -> Option<crate::hit::SceneHit<'a>> {
-        self.showing.hits.as_ref()?.at(area, self.showing.host_star)
+    pub fn hit_at(&self, area: crate::layout::Bounds) -> Option<crate::hit::SceneHit<'_>> {
+        self.hits.as_ref()?.at(area, self.host_star)
     }
 
     /// What it answers a pointer with; `None` for a slide.
-    pub fn hits(&self) -> Option<&'a crate::look::Hits> {
-        self.showing.hits.as_ref()
+    pub fn hits(&self) -> Option<&crate::look::Hits> {
+        self.hits.as_ref()
     }
 }
 
@@ -226,9 +220,9 @@ impl<S: Copy + PartialEq, G> Screen<S, G> {
             Admit::Same
         };
         self.hold.stage(flashes, shape);
-        self.staged = Some(Showing {
-            hits: picture.hits().cloned(),
+        self.staged = Some(Shown {
             geometry,
+            hits: picture.hits().cloned(),
             host_star,
         });
         admit
@@ -258,12 +252,8 @@ impl<S: Copy + PartialEq, G> Screen<S, G> {
 
     /// What the screen shows; `None` before its first write lands, and while
     /// blank.
-    pub fn shown(&self) -> Option<Shown<'_, G>> {
-        let showing = self.shown.as_ref()?;
-        Some(Shown {
-            geometry: &showing.geometry,
-            showing,
-        })
+    pub fn shown(&self) -> Option<&Shown<G>> {
+        self.shown.as_ref()
     }
 }
 

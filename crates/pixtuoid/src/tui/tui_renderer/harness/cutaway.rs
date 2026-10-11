@@ -863,9 +863,9 @@ fn a_held_slide_frame_sends_nothing() {
     assert!(r.transition().is_some(), "still sliding");
 }
 
-/// A pointer hits the frame the terminal shows: while a strike phase holds
-/// the cutaway's next frame back, agents that frame no longer draws are
-/// still hit where their tiles show them.
+/// A held cutaway frame writes nothing, its text and chrome as well as its
+/// tiles, and a pointer hits the frame the terminal shows: agents the held
+/// frame no longer draws are still hit where their tiles show them.
 #[test]
 fn a_held_cutaway_frame_leaves_the_pointer_hitting_the_one_on_screen() {
     use crate::test_flash::{held_frames, storm_strike};
@@ -885,10 +885,16 @@ fn a_held_cutaway_frame_leaves_the_pointer_hitting_the_one_on_screen() {
         .find_map(|(col, row)| Some((col, row, r.hit_test_agent_at(col, row)?)))
         .expect("the cutaway shows an agent");
     wire.take();
+    let before = r.frame_buffer().clone();
     screen.at(held);
     r.render(&scene_with(vec![], 16), pack(), held)
         .expect("render");
     assert!(!wire.take().contains(TRANSMIT), "premise: held");
+    assert_eq!(
+        *r.frame_buffer(),
+        before,
+        "nothing drawn over the held tiles"
+    );
     assert_eq!(r.hit_test_agent_at(col, row), Some(id));
 }
 
