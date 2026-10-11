@@ -36,8 +36,7 @@ fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
 
 /// A new layout drops the router's cached paths, a height-only resize's too:
 /// `route` revalidates a cached path against the overlay alone, never the
-/// mask, so a stale one would walk through the new layout's walls. No painter
-/// re-routes on a resize, so this is the one guard.
+/// mask, so a stale one would walk through the new layout's walls.
 #[test]
 fn a_new_layout_drops_the_routers_cached_paths() {
     use crate::pathfind::Router;

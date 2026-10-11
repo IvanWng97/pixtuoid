@@ -798,9 +798,9 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         Ok(())
     }
 
-    /// Feed the audio thread the floor showing's frame just drawn, whichever
-    /// path drew it, a held or sliding one's too, muted or not: the
-    /// every-world-frame contract of `AudioObserver::frame`.
+    /// Feed the audio thread the frame just drawn, whichever path drew it, a
+    /// slide's and a held one's too: `AudioObserver::frame`'s every-world-frame
+    /// contract.
     fn feed_audio(&mut self, scene: &SceneState, now: SystemTime) {
         let office_floor = self.chrome.office_world(scene, &self.pack, now).floor;
         let frame = self.session.audio_frame(scene, office_floor, now);

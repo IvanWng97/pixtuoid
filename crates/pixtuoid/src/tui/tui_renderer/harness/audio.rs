@@ -143,8 +143,8 @@ fn floor_switch_reprimes_without_a_chime_volley() {
     );
 }
 
-/// A floor slide's frames feed the audio thread too, one a frame, as the
-/// every-world-frame contract asks.
+/// A floor slide's frames feed the audio thread too, one a frame, as
+/// `AudioObserver::frame`'s every-world-frame contract asks.
 #[test]
 fn every_frame_of_a_slide_feeds_the_audio_thread() {
     let cap = 16;

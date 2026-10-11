@@ -57,7 +57,6 @@ impl OfficeRenderer {
         self.session.n_floors()
     }
 
-    /// Slide to floor `target`.
     pub(crate) fn navigate(&mut self, target: usize, now: std::time::SystemTime) {
         self.session.navigate(target, now);
     }
@@ -130,8 +129,8 @@ impl OfficeRenderer {
         self.session.buf()
     }
 
-    /// Count the frame on screen in `jank`, `total` long, `present` of it
-    /// presenting: what it repainted and was drawn under are the session's.
+    /// Count the frame just painted in `jank`, `total` long, `present` of it
+    /// presenting, with the session's dirt and note.
     pub(crate) fn record(
         &self,
         jank: &mut crate::jank::Jank,
