@@ -94,7 +94,7 @@ pub(crate) fn resolve_pid(
     table: &impl ProcessTable,
 ) -> Option<i32> {
     if slot.exiting_at.is_some() {
-        tracing::debug!(agent = %slot.label, "focus: refused — agent is exiting");
+        tracing::debug!(agent = ?&*slot.label, "focus: refused — agent is exiting");
         return None;
     }
     if let Some(cached) = slot.pid {
@@ -102,7 +102,7 @@ pub(crate) fn resolve_pid(
             && table.start_time(cached.pid) != Some(stamped)
         {
             tracing::debug!(
-                agent = %slot.label,
+                agent = ?&*slot.label,
                 pid = cached.pid,
                 "focus: refused — cached pid gone or recycled (start marker mismatch)"
             );
@@ -164,15 +164,15 @@ pub(crate) fn focus_agent(
     activate: impl FnOnce(i32) -> bool,
 ) {
     let Some(pid) = resolve_pid(slot, paths, table) else {
-        tracing::debug!(agent = %slot.label, "focus: no pid resolved");
+        tracing::debug!(agent = ?&*slot.label, "focus: no pid resolved");
         return;
     };
     let Some(app_pid) = ancestor_walk(table, pid) else {
-        tracing::debug!(agent = %slot.label, pid, "focus: no focusable ancestor");
+        tracing::debug!(agent = ?&*slot.label, pid, "focus: no focusable ancestor");
         return;
     };
     if !activate(app_pid) {
-        tracing::debug!(agent = %slot.label, app_pid, "focus: activation declined");
+        tracing::debug!(agent = ?&*slot.label, app_pid, "focus: activation declined");
     }
 }
 
@@ -457,6 +457,52 @@ mod tests {
             },
         );
         assert_eq!(activated, None, "no focusable ancestor ⇒ nothing activated");
+    }
+
+    /// A label carries a cwd's basename or a subagent's name, wire content, so
+    /// every focus refusal logs it as a `?` field.
+    #[test]
+    fn each_focus_refusal_logs_the_wire_label_escaped() {
+        let hostile = |pid| AgentSlot {
+            label: "re\u{1b}]0;pwned\u{7}po\u{202e}Z".into(),
+            ..slot("opencode", "s", pid)
+        };
+        let mut exiting = hostile(Some(pid_id(4242, None)));
+        exiting.exiting_at = Some(std::time::SystemTime::UNIX_EPOCH);
+        let declines = MockTable {
+            parents: HashMap::from([(4242, 100)]),
+            focusable: vec![100],
+            started: HashMap::new(),
+        };
+        let out = crate::test_capture::capture(|| {
+            focus_agent(&exiting, &NO_PATHS, &empty_table(), |_| true);
+            let recycled = hostile(Some(pid_id(4242, Some(1_000))));
+            focus_agent(&recycled, &NO_PATHS, &empty_table(), |_| true);
+            let orphan = hostile(Some(pid_id(4242, None)));
+            focus_agent(&orphan, &NO_PATHS, &empty_table(), |_| true);
+            focus_agent(&orphan, &NO_PATHS, &declines, |_| false);
+        });
+        for refusal in [
+            "agent is exiting",
+            "start marker mismatch",
+            "no pid resolved",
+            "no focusable ancestor",
+            "activation declined",
+        ] {
+            assert!(out.contains(refusal), "{refusal:?} not logged: {out:?}");
+        }
+        for raw in ['\u{1b}', '\u{7}', '\u{202e}'] {
+            assert!(
+                !out.contains(raw),
+                "{raw:?} must not reach the log raw: {out:?}"
+            );
+        }
+        for line in out.lines() {
+            assert!(
+                line.contains(r"re\u{1b}]0;pwned\u{7}po\u{202e}Z"),
+                "escaped, not dropped: {line:?}"
+            );
+        }
     }
 }
 

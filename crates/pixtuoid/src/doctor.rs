@@ -173,7 +173,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for DriftSeen {
     fn on_event(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) {
         struct Source(Option<&'static registry::SourceDescriptor>);
         impl tracing::field::Visit for Source {
-            // A breadcrumb records `source = %source`, whose Debug is its Display.
+            // A breadcrumb's `source` is a `%` field, whose Debug is its Display.
             fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
                 if field.name() == drift::SOURCE_FIELD {
                     self.0 = registry::descriptor_for(&format!("{value:?}"));

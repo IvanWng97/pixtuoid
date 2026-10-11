@@ -20,10 +20,10 @@
 //! A decoder ending in a bare `_ => vec![]` is silent even when the line does
 //! arrive; grep the decoders for that shape rather than keeping a list here.
 //!
-//! `source` is a static registry name (safe). The free-form values
-//! (`name`/`field`/`tool`/`detail`) are untrusted wire content, made display-safe
-//! HERE at emission: the non-TUI `tracing` stream writes to RAW stderr, which no
-//! cell buffer clips and no presenter sanitizes, and is on by default at `warn`.
+//! Every value is untrusted wire content, `source` included (a hook envelope's
+//! `_pixtuoid_source` need not be a registry name), made display-safe HERE at
+//! emission: the non-TUI `tracing` stream writes to RAW stderr, which no cell
+//! buffer clips and no presenter sanitizes, and is on by default at `warn`.
 
 /// The `tracing` target every drift breadcrumb shares; consumers key on it.
 pub const TARGET: &str = "pixtuoid::drift";
@@ -72,7 +72,7 @@ use crate::source::decoder::display_safe;
 /// A hook/transcript event we don't handle and that isn't a registered custom
 /// event — for a renamed event WE depend on, this is the signal.
 pub fn unknown_event(source: &str, name: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = <&str>::from(DriftKind::UnknownEvent), name = %display_safe(name));
+    tracing::warn!(target: TARGET, source = %display_safe(source), kind = <&str>::from(DriftKind::UnknownEvent), name = %display_safe(name));
 }
 
 /// A REQUIRED field of an event we DO handle is absent — the decode degrades to
@@ -80,19 +80,19 @@ pub fn unknown_event(source: &str, name: &str) {
 /// committed to decoding: on a type-discriminator read a missing value just
 /// means "a line we ignore", and breadcrumbing those would flood.
 pub fn missing_field(source: &str, event: &str, field: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = <&str>::from(DriftKind::MissingField), event = %display_safe(event), field = %display_safe(field));
+    tracing::warn!(target: TARGET, source = %display_safe(source), kind = <&str>::from(DriftKind::MissingField), event = %display_safe(event), field = %display_safe(field));
 }
 
 /// The subagent-dispatch tool ran under a name we don't recognise — semantic
 /// `subagent_type` detection still handled it, but upstream renamed the tool.
 pub fn unknown_dispatch(source: &str, tool: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = <&str>::from(DriftKind::UnknownDispatch), tool = %display_safe(tool));
+    tracing::warn!(target: TARGET, source = %display_safe(source), kind = <&str>::from(DriftKind::UnknownDispatch), tool = %display_safe(tool));
 }
 
 /// A consumed upstream data SHAPE drifted — a registry/transcript field that
 /// still parses but lost a key we read. `detail` carries the specifics.
 pub fn shape_drift(source: &str, detail: &str) {
-    tracing::warn!(target: TARGET, source = %source, kind = <&str>::from(DriftKind::ShapeDrift), detail = %display_safe(detail));
+    tracing::warn!(target: TARGET, source = %display_safe(source), kind = <&str>::from(DriftKind::ShapeDrift), detail = %display_safe(detail));
 }
 
 #[cfg(test)]
@@ -131,11 +131,12 @@ mod tests {
         // Cf bidi overrides are checked alongside Cc because
         // `char::is_control` is Cc-only, and Trojan Source (CVE-2021-42574)
         // rode exactly that gap.
+        let source = "so\u{1b}]0;PWNED\u{7}ur\u{202e}ceZ";
         let out = capture(|| {
-            unknown_event("codex", "ev\u{1b}]0;PWNED\u{7}il\u{202e}Z");
-            unknown_dispatch("claude-code", "De\u{1b}[31mlegateZ");
-            missing_field("copilot", "to\u{1b}olZ", "na\u{202e}meZ");
-            shape_drift("claude-code", &"x".repeat(1000));
+            unknown_event(source, "ev\u{1b}]0;PWNED\u{7}il\u{202e}Z");
+            unknown_dispatch(source, "De\u{1b}[31mlegateZ");
+            missing_field(source, "to\u{1b}olZ", "na\u{202e}meZ");
+            shape_drift(source, &"x".repeat(1000));
         });
         for bad in ['\u{1b}', '\u{7}', '\u{202e}'] {
             assert!(
@@ -145,7 +146,13 @@ mod tests {
             );
         }
         // Sanitizing is not dropping.
-        for needle in ["ev]0;PWNEDilZ", "De[31mlegateZ", "toolZ", "nameZ"] {
+        for needle in [
+            "so]0;PWNEDurceZ",
+            "ev]0;PWNEDilZ",
+            "De[31mlegateZ",
+            "toolZ",
+            "nameZ",
+        ] {
             assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
         }
         assert!(
