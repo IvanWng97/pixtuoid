@@ -24,6 +24,7 @@ const SHORTCUTS: &[Shortcut] = &[
     ("PgUp / PgDn", "switch floor"),
     ("click agent", "focus its terminal"),
     ("f (dashboard)", "focus selected agent's terminal"),
+    ("v", "what's new (version popup)"),
     ("Enter / Esc", "dismiss popup"),
 ];
 

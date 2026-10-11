@@ -529,7 +529,19 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<Option<QuitSignal>> {
     // the device thread it owns.
     let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());
     renderer.set_audio(audio_ctl.handle().clone());
-    let mut ui = ui_state::UiState::boot(theme, first_run, &config_path, socket_path, log, drift);
+    let mut ui = ui_state::UiState::boot(ui_state::Boot {
+        theme,
+        first_run,
+        config_path: &config_path,
+        socket_path,
+        log,
+        drift,
+        connected: &connected.snapshot(),
+        cutaway: crate::version::Cutaway {
+            off: plan.graphics_off(),
+            drawable: crate::graphics::names_a_cutaway_terminal(),
+        },
+    });
     renderer.warm(&scene_rx.borrow().clone(), &pack, ui.now());
     let mut cap_sweep = FloorCapacitySweep::new();
 
@@ -1280,6 +1292,7 @@ mod apply_key_action_tests {
             KeyAction::ToggleHelp,
             KeyAction::CloseHelp,
             KeyAction::DismissVersionPopup,
+            KeyAction::OpenVersionPopup,
             KeyAction::OpenThemePicker,
             KeyAction::ToggleDashboard,
             KeyAction::DashboardClose,

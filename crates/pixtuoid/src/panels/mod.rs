@@ -62,6 +62,8 @@ pub struct OverlayFrame<'a> {
     pub(crate) connection: &'a crate::panels::connection::ConnectionFrame,
     /// The version popup's scale: 0.0 hidden, 1.0 whole.
     pub(crate) popup_scale: f32,
+    /// The notices the version popup lists.
+    pub(crate) notices: &'a [String],
     pub(crate) help_open: bool,
     /// Shortcuts the host adds to the help, after the shared ones.
     pub(crate) host_keys: &'a [widgets::Shortcut],
@@ -87,6 +89,7 @@ impl OverlayFrame<'_> {
             dashboard,
             connection,
             popup_scale,
+            notices: _,
             help_open,
             host_keys: _,
             onboarding,
@@ -115,6 +118,7 @@ pub(crate) fn paint_overlays(
         dashboard,
         connection,
         popup_scale,
+        notices,
         help_open,
         host_keys,
         onboarding,
@@ -129,7 +133,14 @@ pub(crate) fn paint_overlays(
         widgets::paint_connection_panel(f, connection, now, bounds, theme);
     }
     if popup_scale > 0.0 {
-        widgets::paint_version_popup(f, env!("CARGO_PKG_VERSION"), bounds, theme, popup_scale);
+        widgets::paint_version_popup(
+            f,
+            env!("CARGO_PKG_VERSION"),
+            notices,
+            bounds,
+            theme,
+            popup_scale,
+        );
     }
     if help_open {
         widgets::paint_help_overlay(f, bounds, theme, host_keys);
@@ -239,8 +250,10 @@ pub(crate) fn modal_mouse(
         return ModalMouse::Took;
     }
     if popup_scale > 0.0 {
+        let notices = ui.version_notices();
         let on_url = left_down.is_some_and(|(col, row)| {
-            screen().is_some_and(|size| version_popup_url_clicked(col, row, popup_scale, size))
+            screen()
+                .is_some_and(|size| version_popup_url_clicked(col, row, popup_scale, size, notices))
         });
         if !on_url {
             return ModalMouse::Inert;
@@ -256,10 +269,16 @@ pub(crate) fn modal_mouse(
 
 /// Whether a left-click at `(col, row)` landed on the version popup's URL, hit-tested
 /// against the full surface, not the scene rect. `scale` is the popup's last painted
-/// scale.
-fn version_popup_url_clicked(col: u16, row: u16, scale: f32, screen: (u16, u16)) -> bool {
+/// scale, and `notices` the ones it lists.
+fn version_popup_url_clicked(
+    col: u16,
+    row: u16,
+    scale: f32,
+    screen: (u16, u16),
+    notices: &[String],
+) -> bool {
     let bounds = Rect::new(0, 0, screen.0, screen.1);
-    widgets::version_popup_url_rect(bounds, scale)
+    widgets::version_popup_url_rect(bounds, notices, scale)
         .is_some_and(|rect| rect.contains(ratatui::layout::Position { x: col, y: row }))
 }
 
@@ -278,6 +297,8 @@ pub(crate) enum KeyAction {
     ToggleHelp,
     CloseHelp,
     DismissVersionPopup,
+    /// Reopen the version popup, its notices due again.
+    OpenVersionPopup,
     OpenThemePicker,
     /// The index is pre-clamped by the dispatch.
     ThemePreview(usize),
@@ -548,6 +569,7 @@ pub(crate) fn dispatch_key(
         KeyCode::Char('-') | KeyCode::Char('_') => KeyAction::AdjustVolume(false),
         KeyCode::Char('t') => KeyAction::OpenThemePicker,
         KeyCode::Char('?') => KeyAction::ToggleHelp,
+        KeyCode::Char('v') => KeyAction::OpenVersionPopup,
         KeyCode::Tab => KeyAction::ToggleDashboard,
         KeyCode::Char('s') => KeyAction::ToggleConnection,
         KeyCode::PageUp | KeyCode::Up | KeyCode::Char('k') => {
@@ -600,6 +622,7 @@ pub(crate) fn apply_key_action<H: Host>(action: KeyAction, cx: &mut KeyCtx<'_, H
         KeyAction::ToggleHelp => cx.ui.toggle_help(),
         KeyAction::CloseHelp => cx.ui.close_help(),
         KeyAction::DismissVersionPopup => cx.ui.dismiss_version_popup(),
+        KeyAction::OpenVersionPopup => cx.ui.open_version_popup(&cx.connected.snapshot()),
         KeyAction::OpenThemePicker => cx.ui.open_theme_picker(),
         KeyAction::ThemePreview(i) => {
             cx.ui.preview_theme(i);
@@ -1007,7 +1030,51 @@ mod dispatch_tests {
         assert_eq!(dispatch_key(KeyCode::Up, NONE, c, nav()), KeyAction::None);
     }
 
-    /// The popup is DISMISS-ONLY: a fixed body and a link, nothing to scroll.
+    /// `v` reopens the popup from the office only: every panel's own key map
+    /// leaves it unbound, so it never acts behind an open panel.
+    #[test]
+    fn v_reopens_the_version_popup_from_the_office_only() {
+        let v = KeyCode::Char('v');
+        assert_eq!(
+            dispatch_key(v, NONE, modal(), nav()),
+            KeyAction::OpenVersionPopup
+        );
+        for open in [
+            ModalState {
+                onboarding_open: true,
+                ..modal()
+            },
+            ModalState {
+                help_open: true,
+                ..modal()
+            },
+            ModalState {
+                version_popup: true,
+                ..modal()
+            },
+            ModalState {
+                connection_open: true,
+                ..modal()
+            },
+            ModalState {
+                connection_open: true,
+                connection_confirm: true,
+                ..modal()
+            },
+            ModalState {
+                dashboard_open: true,
+                ..modal()
+            },
+            ModalState {
+                theme_picker: Some(0),
+                ..modal()
+            },
+        ] {
+            assert_eq!(dispatch_key(v, NONE, open, nav()), KeyAction::None);
+        }
+    }
+
+    /// The popup is DISMISS-ONLY: its notices are cut to fit, never scrolled.
     /// A scroll key bound here would promise rows that do not exist.
     #[test]
     fn the_version_popup_binds_no_scroll_key() {
@@ -1598,19 +1665,30 @@ mod mouse_tests {
         use crate::panels::widgets::version_popup_url_rect;
         let term = (120u16, 44u16);
         let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
-        let rect = version_popup_url_rect(bounds, 1.0)
+        let notices = ["a notice above the link".to_string()];
+        let rect = version_popup_url_rect(bounds, &notices, 1.0)
             .expect("a URL rect at scale 1.0, or the misses below pass vacuously");
 
         assert!(
-            super::version_popup_url_clicked(rect.x, rect.y, 1.0, term),
+            super::version_popup_url_clicked(rect.x, rect.y, 1.0, term, &notices),
             "a click inside the URL rect at full scale must hit"
         );
         assert!(
-            !super::version_popup_url_clicked(rect.x, rect.y.saturating_sub(1), 1.0, term),
+            !super::version_popup_url_clicked(rect.x, rect.y, 1.0, term, &[]),
+            "the link sits lower with a notice above it"
+        );
+        assert!(
+            !super::version_popup_url_clicked(
+                rect.x,
+                rect.y.saturating_sub(1),
+                1.0,
+                term,
+                &notices
+            ),
             "a click one row above the URL must miss"
         );
         assert!(
-            !super::version_popup_url_clicked(rect.x, rect.y, 0.5, term),
+            !super::version_popup_url_clicked(rect.x, rect.y, 0.5, term, &notices),
             "mid-animation (below the clickable scale) there is no rect, so no hit"
         );
     }

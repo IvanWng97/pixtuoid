@@ -34,8 +34,8 @@ fn body_row(version: &str, inner_w: usize) -> String {
     )
 }
 
-/// The left indent the body and the link are both painted at, and the column the
-/// link's click target starts at.
+/// The left indent every painted row sits at, and the column the link's click
+/// target starts at.
 const INDENT: &str = "  ";
 
 /// The clickable link's VISIBLE text — a compact label decouples display width
@@ -52,21 +52,77 @@ const VERSION_POPUP_W: u16 = 56;
 /// below that the painted cell is smaller than the settled label.
 const LINK_CLICKABLE_SCALE: f32 = 0.7;
 
-/// The popup's rows: a leading blank, the body, a trailing blank, and the link.
-const CONTENT_ROWS: u16 = 4;
+/// The popup's rows besides its notices: a leading blank, the body, a trailing
+/// blank, and the link.
+const FRAME_ROWS: u16 = 4;
 
-/// 0-indexed content row (below the title) the link sits on.
-const LINK_ROW: u16 = 3;
+/// What a notice's first row starts with, and the indent its wrapped rows hang
+/// at, both after [`INDENT`].
+const BULLET: &str = "\u{2022} ";
+const HANG: &str = "  ";
+
+/// The blank between the notices and the release, there only with a notice.
+const NOTICE_GAP: u16 = 1;
+
+/// The notices as painted: wrapped to the settled panel, and cut to the rows
+/// its height leaves beside [`FRAME_ROWS`] and [`NOTICE_GAP`], so the link
+/// always survives. Laid out at full scale, so the entrance animation
+/// clips the rows rather than reflowing them.
+fn notice_rows(bounds: Rect, notices: &[String]) -> Vec<String> {
+    if notices.is_empty() {
+        return Vec::new();
+    }
+    // The tallest inner the bounds allow: the content rows saturate to it.
+    let Some(inner) =
+        PanelGeometry::compute(bounds, VERSION_POPUP_W, u16::MAX, Some(""), 1.0).inner()
+    else {
+        return Vec::new();
+    };
+    let width = usize::from(inner.width).saturating_sub(INDENT.len());
+    let wrap = textwrap::Options::new(width)
+        .initial_indent(BULLET)
+        .subsequent_indent(HANG);
+    let mut rows: Vec<String> = notices
+        .iter()
+        .flat_map(|n| textwrap::wrap(n, &wrap))
+        .map(std::borrow::Cow::into_owned)
+        .collect();
+    let budget = usize::from(inner.height.saturating_sub(FRAME_ROWS + NOTICE_GAP));
+    if rows.len() > budget {
+        rows.truncate(budget);
+        if let Some(last) = rows.last_mut() {
+            *last = truncate(&format!("{last}\u{2026}"), width);
+        }
+    }
+    rows
+}
+
+/// The content rows with `notice_rows` rows of notices painted.
+fn content_rows(notice_rows: usize) -> u16 {
+    if notice_rows == 0 {
+        return FRAME_ROWS;
+    }
+    let notices = u16::try_from(notice_rows).unwrap_or(u16::MAX);
+    FRAME_ROWS
+        .saturating_add(notices)
+        .saturating_add(NOTICE_GAP)
+}
 
 /// THE version-popup geometry authority. BOTH `paint_version_popup` and
-/// `version_popup_url_rect` ride this with the same `(bounds, scale)`, so the
-/// painted link and its click target can't drift apart. The row count is
-/// constant — the body is always one (truncated) row — so the geometry needs no
-/// version.
-fn version_geometry(bounds: Rect, scale: f32) -> Option<PanelGeometry> {
+/// `version_popup_url_rect` ride this with the same `(bounds, scale)` and the
+/// same [`notice_rows`], so the painted link and its click target can't drift
+/// apart. The URL row is always one (truncated) row, so only the notice rows
+/// vary the height.
+fn version_geometry(bounds: Rect, scale: f32, notice_rows: usize) -> Option<PanelGeometry> {
     // The title TEXT is irrelevant to geometry — only the reserved title row
     // (is_some) matters here; the painter draws the real title into it.
-    let geom = PanelGeometry::compute(bounds, VERSION_POPUP_W, CONTENT_ROWS, Some(""), scale);
+    let geom = PanelGeometry::compute(
+        bounds,
+        VERSION_POPUP_W,
+        content_rows(notice_rows),
+        Some(""),
+        scale,
+    );
     geom.inner()?;
     Some(geom)
 }
@@ -83,15 +139,19 @@ fn version_title(version: &str, inner_w: usize) -> String {
     truncate(&format!("v{version} \u{2014} Enter to close"), inner_w)
 }
 
+/// The popup for `version`, with `notices` (each one paragraph) above its
+/// release.
 pub(crate) fn paint_version_popup(
     f: &mut ratatui::Frame<'_>,
     version: &str,
+    notices: &[String],
     bounds: Rect,
     theme: &pixtuoid_scene::theme::Theme,
     scale: f32,
 ) {
     let scale = scale.clamp(0.0, 1.0);
-    let Some(geom) = version_geometry(bounds, scale) else {
+    let rows = notice_rows(bounds, notices);
+    let Some(geom) = version_geometry(bounds, scale, rows.len()) else {
         return;
     };
     let outer = geom
@@ -102,8 +162,16 @@ pub(crate) fn paint_version_popup(
         .expect("version_geometry guarantees a rendered geom")
         .width;
 
-    let items = vec![
-        Line::from(""),
+    let notice = Style::default().fg(to_color(theme.ui.tooltip_text));
+    let mut items = vec![Line::from("")];
+    if !rows.is_empty() {
+        items.extend(
+            rows.into_iter()
+                .map(|row| Line::from(Span::styled(format!("{INDENT}{row}"), notice))),
+        );
+        items.push(Line::from(""));
+    }
+    items.extend([
         Line::from(Span::styled(
             format!("{INDENT}{}", body_row(version, inner_w as usize)),
             Style::default().fg(to_color(theme.ui.label_idle)),
@@ -118,7 +186,7 @@ pub(crate) fn paint_version_popup(
                     .add_modifier(Modifier::UNDERLINED),
             ),
         ]),
-    ];
+    ]);
 
     let title = version_title(version, inner_w as usize);
     // `borderless_panel(outer)` returns the SAME rect `geom.inner()` and
@@ -128,15 +196,17 @@ pub(crate) fn paint_version_popup(
 }
 
 /// The screen rect of the clickable link, or `None` when it isn't
-/// rendered/clickable. Derived from the SAME `version_geometry` the painter uses,
-/// so a click can never land where the link isn't painted.
-pub(crate) fn version_popup_url_rect(bounds: Rect, scale: f32) -> Option<Rect> {
+/// rendered/clickable. Derived from the SAME `version_geometry` and
+/// `notice_rows` the painter uses, so a click can never land where the link
+/// isn't painted.
+pub(crate) fn version_popup_url_rect(bounds: Rect, notices: &[String], scale: f32) -> Option<Rect> {
     let scale = scale.clamp(0.0, 1.0);
     if scale < LINK_CLICKABLE_SCALE {
         return None;
     }
-    version_geometry(bounds, scale)?.cell_rect(
-        LINK_ROW,
+    let rows = notice_rows(bounds, notices).len();
+    version_geometry(bounds, scale, rows)?.cell_rect(
+        content_rows(rows) - 1,
         INDENT.len() as u16,
         LINK_LABEL.chars().count() as u16,
     )
@@ -153,7 +223,7 @@ mod tests {
     /// The width the PAINTER lays out against, so a test never measures against
     /// a second derivation of it.
     fn inner_width(bounds: Rect) -> usize {
-        version_geometry(bounds, 1.0)
+        version_geometry(bounds, 1.0, 0)
             .and_then(|g| g.inner())
             .expect("renders")
             .width as usize
@@ -206,21 +276,21 @@ mod tests {
 
     #[test]
     fn link_click_rect_is_the_painted_link_cell() {
-        let geom = version_geometry(wide(), 1.0).expect("renders");
+        let geom = version_geometry(wide(), 1.0, 0).expect("renders");
         let inner = geom.inner().expect("rendered ⇒ inner Some");
         let expected = Rect::new(
             inner.x + INDENT.len() as u16,
-            inner.y + LINK_ROW,
+            inner.y + FRAME_ROWS - 1,
             LINK_LABEL.chars().count() as u16,
             1,
         );
-        assert_eq!(version_popup_url_rect(wide(), 1.0), Some(expected));
+        assert_eq!(version_popup_url_rect(wide(), &[], 1.0), Some(expected));
     }
 
     #[test]
     fn link_fits_where_the_old_url_clipped() {
         // 50 cols is where the old ~46-char raw URL hard-clipped.
-        let rect = version_popup_url_rect(Rect::new(0, 0, 50, 30), 1.0).expect("fits");
+        let rect = version_popup_url_rect(Rect::new(0, 0, 50, 30), &[], 1.0).expect("fits");
         assert_eq!(rect.width, LINK_LABEL.chars().count() as u16);
     }
 
@@ -231,7 +301,7 @@ mod tests {
     #[test]
     fn the_popup_renders_whole_on_a_narrow_terminal() {
         let bounds = Rect::new(0, 0, 32, 31);
-        let geom = version_geometry(bounds, 1.0).expect("renders");
+        let geom = version_geometry(bounds, 1.0, 0).expect("renders");
         let inner = geom.inner().expect("rendered ⇒ inner Some");
         let row = body_row("1.2.3", inner.width as usize);
         assert!(
@@ -239,15 +309,15 @@ mod tests {
             "a painted row wider than {} cols clips silently: {row:?}",
             inner.width
         );
-        assert!(CONTENT_ROWS <= inner.height);
-        assert!(version_popup_url_rect(bounds, 1.0).is_some());
+        assert!(FRAME_ROWS <= inner.height);
+        assert!(version_popup_url_rect(bounds, &[], 1.0).is_some());
     }
 
     #[test]
     fn url_rect_none_below_clickable_scale_and_tiny_bounds() {
-        assert!(version_popup_url_rect(wide(), 0.5).is_none());
-        assert!(version_popup_url_rect(wide(), 0.0).is_none());
-        assert!(version_popup_url_rect(Rect::new(0, 0, 3, 60), 1.0).is_none());
+        assert!(version_popup_url_rect(wide(), &[], 0.5).is_none());
+        assert!(version_popup_url_rect(wide(), &[], 0.0).is_none());
+        assert!(version_popup_url_rect(Rect::new(0, 0, 3, 60), &[], 1.0).is_none());
     }
 
     #[test]
@@ -266,6 +336,105 @@ mod tests {
         assert_eq!(wide_title, "Updated to v0.16.0 \u{2014} Enter to close");
     }
 
+    fn notices() -> Vec<String> {
+        vec![
+            "This upgrade disconnected Claude Code, Codex and Reasonix. \
+             Reconnect what you use in Sources (s)."
+                .to_string(),
+            "This terminal can draw the cutaway office: try \
+             `pixtuoid run --graphics auto`, or set graphics = \"auto\" in the config."
+                .to_string(),
+        ]
+    }
+
+    /// The popup painted whole, one string per screen row.
+    fn painted(bounds: Rect, notices: &[String]) -> Vec<String> {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let mut term = Terminal::new(TestBackend::new(bounds.width, bounds.height)).unwrap();
+        term.draw(|f| {
+            paint_version_popup(
+                f,
+                "1.2.3",
+                notices,
+                bounds,
+                &pixtuoid_scene::theme::NORMAL,
+                1.0,
+            );
+        })
+        .unwrap();
+        let buf = term.backend().buffer();
+        (0..bounds.height)
+            .map(|y| (0..bounds.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect()
+    }
+
+    /// Each notice wraps inside the panel with a bullet and a hanging indent,
+    /// losing no word.
+    #[test]
+    fn a_notice_wraps_inside_the_panel_and_keeps_every_word() {
+        let inner_w = inner_width(wide());
+        let rows = notice_rows(wide(), &notices());
+        assert!(rows.len() > notices().len(), "the notices wrap: {rows:?}");
+        for row in &rows {
+            assert!(
+                textwrap::core::display_width(row) + INDENT.len() <= inner_w,
+                "{row:?} overruns {inner_w} cols"
+            );
+            assert!(row.starts_with(BULLET) || row.starts_with(HANG), "{row:?}");
+        }
+        assert_eq!(
+            rows.iter().filter(|r| r.starts_with(BULLET)).count(),
+            notices().len()
+        );
+        let words = |s: &str| {
+            s.split_whitespace()
+                .filter(|w| *w != "\u{2022}")
+                .map(String::from)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(words(&rows.join(" ")), words(&notices().join(" ")));
+    }
+
+    /// The notices sit above the release, and the link's click rect is the
+    /// cell it is painted on, however many rows they took.
+    #[test]
+    fn the_link_is_clicked_where_it_paints_below_the_notices() {
+        let bounds = Rect::new(0, 0, 80, 30);
+        let screen = painted(bounds, &notices());
+        let row_of = |needle: &str| {
+            screen
+                .iter()
+                .position(|r| r.contains(needle))
+                .unwrap_or_else(|| panic!("{needle:?} is painted: {screen:#?}"))
+        };
+        let link = row_of(LINK_LABEL);
+        assert!(row_of("This upgrade disconnected") < row_of("releases/tag/v1.2.3"));
+        let rect = version_popup_url_rect(bounds, &notices(), 1.0).expect("clickable");
+        assert_eq!(usize::from(rect.y), link);
+        let col = screen[link]
+            .chars()
+            .position(|c| c == '\u{2197}')
+            .expect("the label");
+        assert_eq!(usize::from(rect.x), col);
+    }
+
+    /// A terminal too short for every notice cuts them with `…` and keeps the
+    /// link, the popup's call to action.
+    #[test]
+    fn a_short_terminal_cuts_the_notices_and_keeps_the_link() {
+        let bounds = Rect::new(0, 0, 60, 12);
+        let rows = notice_rows(bounds, &notices());
+        let whole = notice_rows(wide(), &notices()).len();
+        assert!(!rows.is_empty() && rows.len() < whole, "{rows:?}");
+        assert!(
+            rows.last().is_some_and(|r| r.ends_with('\u{2026}')),
+            "{rows:?}"
+        );
+        let rect = version_popup_url_rect(bounds, &notices(), 1.0).expect("the link survives");
+        assert!(painted(bounds, &notices())[usize::from(rect.y)].contains(LINK_LABEL));
+    }
+
     #[test]
     fn version_popup_skips_render_when_fully_dismissed() {
         use ratatui::Terminal;
@@ -275,6 +444,7 @@ mod tests {
             paint_version_popup(
                 f,
                 "1.2.3",
+                &[],
                 Rect::new(0, 0, 80, 30),
                 &pixtuoid_scene::theme::NORMAL,
                 0.0,

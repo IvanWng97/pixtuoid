@@ -162,14 +162,16 @@ impl FloatingApp {
         renderer.set_pets(pets);
         let focus_roots = boot.focus_roots();
         let proxy = boot.proxy.clone();
-        let ui = crate::panels::ui_state::UiState::boot(
+        let ui = crate::panels::ui_state::UiState::boot(crate::panels::ui_state::Boot {
             theme,
             first_run,
-            &config_path,
-            boot.socket_path.clone(),
+            config_path: &config_path,
+            socket_path: boot.socket_path.clone(),
             log,
-            boot.drift.clone(),
-        );
+            drift: boot.drift.clone(),
+            connected: &boot.connected.snapshot(),
+            cutaway: crate::version::Cutaway::default(),
+        });
         let connected = boot.connected.clone();
         Self {
             cfg,

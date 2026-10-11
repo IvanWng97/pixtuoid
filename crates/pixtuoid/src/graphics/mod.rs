@@ -32,7 +32,7 @@ pub(crate) mod tiles;
 mod wire;
 
 #[cfg(unix)]
-pub(crate) use probe::probe;
+pub(crate) use probe::{names_a_cutaway_terminal, probe};
 
 /// [`ImageProtocol::image_budget`]'s for kitty: what Ghostty, re-scanning
 /// every placement per image, keeps up with at the paint rate.
@@ -147,6 +147,12 @@ pub(crate) enum ImageProtocol {
 }
 
 impl ImageProtocol {
+    /// Whether its images are drawn through tmux when `tmux`
+    /// ([`ClassicReason::TmuxNeedsKitty`] says why only kitty's are).
+    pub(crate) fn survives(self, tmux: bool) -> bool {
+        !tmux || self == Self::Kitty
+    }
+
     /// The protocol's name as a user would search for it.
     pub(crate) fn name(self) -> &'static str {
         match self {
@@ -563,7 +569,7 @@ pub(crate) fn resolve(
     let Some(fit) = cutaway_fit(cell, area, max_density) else {
         return classic(ClassicReason::CellTooSmall { cell, max_density });
     };
-    if d.tmux && protocol != ImageProtocol::Kitty {
+    if !protocol.survives(d.tmux) {
         return classic(ClassicReason::TmuxNeedsKitty(protocol));
     }
     Plan::Cutaway {
@@ -674,7 +680,20 @@ pub(crate) fn probe(_ask: bool) -> Probe {
     Probe::Unsupported
 }
 
+/// Off Unix no terminal draws the cutaway, whatever it is named.
+#[cfg(not(unix))]
+pub(crate) fn names_a_cutaway_terminal() -> bool {
+    false
+}
+
 impl Plan {
+    /// Whether the run paints classic only because the user left graphics off.
+    pub(crate) fn graphics_off(self) -> bool {
+        self == Self::Classic {
+            reason: ClassicReason::Disabled,
+        }
+    }
+
     /// The office's logical extent on a terminal `term` cells big: what the
     /// plan's painter lays out there.
     pub(crate) fn office_extent(self, term: TermSize) -> Size {
