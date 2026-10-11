@@ -205,7 +205,10 @@ fn only_a_popup_edge_restarts_its_animation() {
     let t1 = t0 + Duration::from_millis(50);
     let tick = Duration::from_millis(1);
     let popup = |open| RenderFrames {
-        version_popup: open,
+        version_popup: pixtuoid::dev::VersionPopupFrame {
+            open,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -273,7 +276,10 @@ fn version_popup_animation_starts_small_then_grows() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     renderer.set_frames(
         RenderFrames {
-            version_popup: true,
+            version_popup: pixtuoid::dev::VersionPopupFrame {
+                open: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
         t0,
@@ -331,7 +337,10 @@ fn dismiss_mid_entrance_does_not_snap_to_full() {
     // 100ms is mid-entrance: EaseOutCubic(0.5) ≈ 0.875.
     renderer.set_frames(
         RenderFrames {
-            version_popup: true,
+            version_popup: pixtuoid::dev::VersionPopupFrame {
+                open: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
         t0,

@@ -390,7 +390,10 @@ fn version_popup_paints_when_open() {
     // Render past the 200ms entrance animation so the popup is at full scale.
     r.set_frames(
         RenderFrames {
-            version_popup: true,
+            version_popup: crate::panels::ui_state::VersionPopupFrame {
+                open: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
         t0(),

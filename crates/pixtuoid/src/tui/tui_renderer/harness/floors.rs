@@ -304,7 +304,10 @@ fn version_popup_active_during_floor_transition() {
     r.render(&scene, pack(), now).unwrap();
     r.set_frames(
         RenderFrames {
-            version_popup: true,
+            version_popup: crate::panels::ui_state::VersionPopupFrame {
+                open: true,
+                ..Default::default()
+            },
             ..Default::default()
         },
         now,

@@ -60,6 +60,9 @@ which              = "8"
 chrono             = { workspace = true, features = ["clock"] }
 open               = "5"
 semver             = "1"
+# The version popup's notices, wrapped by display width. No line-break or
+# optimal-fit tables: first-fit at spaces is all a short notice needs.
+textwrap           = { version = "0.16", default-features = false, features = ["std", "unicode-width"] }
 # The `pixtuoid floating` desktop window (binary-only — pixtuoid-core stays
 # window-free): winit is the frameless always-on-top window + main-thread event
 # loop, wgpu draws each frame's layers into it (`floating/gpu.rs`).

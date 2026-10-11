@@ -263,7 +263,6 @@ mod tests {
                 ui: crate::panels::ui_state::UiState::new(
                     theme,
                     crate::panels::welcome::WelcomeUi::from_detected(&[]),
-                    false,
                     tmp.path().join("sock"),
                     None,
                     crate::doctor::DriftSeen::default(),
@@ -307,6 +306,7 @@ mod tests {
                     focus_roots: &self.focus_roots,
                     now: SystemTime::UNIX_EPOCH,
                     respawn: no_respawn,
+                    installed: Vec::new,
                 },
             )
         }
@@ -325,14 +325,14 @@ mod tests {
         k.ui = crate::panels::ui_state::UiState::new(
             pixtuoid_scene::theme::ALL_THEMES[0],
             crate::panels::welcome::WelcomeUi::from_detected(&[]),
-            true,
             k._tmp.path().join("sock"),
             None,
             crate::doctor::DriftSeen::default(),
         );
-        assert!(k.ui.modal().version_popup);
+        k.ui.open_version_popup(&std::collections::HashSet::new(), &[]);
+        assert!(k.ui.modal().version_popup_open);
         assert!(!k.press(KeyCode::Esc), "Esc quit");
-        assert!(!k.ui.modal().version_popup, "the popup is still up");
+        assert!(!k.ui.modal().version_popup_open, "the popup is still up");
     }
 
     /// A previewed theme shows in the window at once, and only a commit

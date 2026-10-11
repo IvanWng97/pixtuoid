@@ -80,7 +80,7 @@ struct Chrome {
     pets: Vec<pixtuoid_scene::pet::Pet>,
     popup: PopupState,
     /// The panels the loop computed, which the frame paints: their
-    /// `version_popup` is `popup`'s target, its scale animated there.
+    /// `version_popup.open` is `popup`'s target, its scale animated there.
     frames: crate::panels::ui_state::RenderFrames,
     /// Ambient-audio gateway; inert unless installed.
     audio: crate::audio::AudioHandle,
@@ -574,7 +574,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     /// The loop's panels for the next frames, the version popup animating
     /// toward theirs.
     pub fn set_frames(&mut self, frames: crate::panels::ui_state::RenderFrames, now: SystemTime) {
-        if frames.version_popup != self.chrome.frames.version_popup {
+        if frames.version_popup.open != self.chrome.frames.version_popup.open {
             self.chrome.popup.scale_at_edge = self.version_popup_scale(now);
             self.chrome.popup.started_at = Some(now);
         }
@@ -584,7 +584,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
     pub fn version_popup_scale(&self, now: SystemTime) -> f32 {
         self.chrome
             .popup
-            .scale(self.chrome.frames.version_popup, now)
+            .scale(self.chrome.frames.version_popup.open, now)
     }
 
     pub(crate) fn last_popup_scale(&self) -> f32 {

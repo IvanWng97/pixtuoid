@@ -382,7 +382,6 @@ where
     let mut ui = crate::panels::ui_state::UiState::new(
         normal_theme(),
         crate::panels::welcome::WelcomeUi::from_detected(&[]),
-        false,
         std::path::PathBuf::from("/tmp/sock"),
         None,
         crate::doctor::DriftSeen::default(),

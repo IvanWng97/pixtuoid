@@ -32,7 +32,7 @@ pub(crate) mod tiles;
 mod wire;
 
 #[cfg(unix)]
-pub(crate) use probe::probe;
+pub(crate) use probe::{names_a_cutaway_terminal, probe};
 
 /// [`ImageProtocol::image_budget`]'s for kitty: what Ghostty, re-scanning
 /// every placement per image, keeps up with at the paint rate.
@@ -674,7 +674,20 @@ pub(crate) fn probe(_ask: bool) -> Probe {
     Probe::Unsupported
 }
 
+/// Off Unix no terminal draws the cutaway, whatever it is named.
+#[cfg(not(unix))]
+pub(crate) fn names_a_cutaway_terminal() -> bool {
+    false
+}
+
 impl Plan {
+    /// Whether the run paints classic only because the user left graphics off.
+    pub(crate) fn graphics_off(self) -> bool {
+        self == Self::Classic {
+            reason: ClassicReason::Disabled,
+        }
+    }
+
     /// The office's logical extent on a terminal `term` cells big: what the
     /// plan's painter lays out there.
     pub(crate) fn office_extent(self, term: TermSize) -> Size {
@@ -806,6 +819,20 @@ mod tests {
         width: 120,
         height: 40,
     };
+
+    /// Only graphics left off reads as off: a run whose terminal refused the
+    /// cutaway already asked for it, and one painting it has it.
+    #[test]
+    fn graphics_is_off_only_when_the_user_left_it_off() {
+        assert!(resolve(GraphicsMode::Off, Probe::NotQueried, BUNDLED, AREA).graphics_off());
+        let refused = resolve(GraphicsMode::Auto, Probe::NoAnswer, BUNDLED, AREA);
+        assert!(matches!(refused, Plan::Classic { .. }));
+        assert!(!refused.graphics_off());
+        let probe = answered(Some(ImageProtocol::Kitty), CELL_8X16, false);
+        let painting = resolve(GraphicsMode::Auto, probe, BUNDLED, AREA);
+        assert!(matches!(painting, Plan::Cutaway { .. }));
+        assert!(!painting.graphics_off());
+    }
 
     /// Each terminal kind's default motion: every loop on a local kitty image or
     /// half-block grid, the calm pace for SIXEL, iTerm2, tmux or ssh.

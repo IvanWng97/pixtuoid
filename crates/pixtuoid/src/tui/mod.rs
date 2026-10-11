@@ -529,7 +529,19 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<Option<QuitSignal>> {
     // the device thread it owns.
     let mut audio_ctl = crate::audio::AudioController::new(audio_cfg, config_path.clone());
     renderer.set_audio(audio_ctl.handle().clone());
-    let mut ui = ui_state::UiState::boot(theme, first_run, &config_path, socket_path, log, drift);
+    let mut ui = ui_state::UiState::boot(ui_state::Boot {
+        theme,
+        first_run,
+        config_path: &config_path,
+        socket_path,
+        log,
+        drift,
+        connected: &connected.snapshot(),
+        cutaway: crate::version::CutawayTip {
+            off: plan.graphics_off(),
+            drawable: crate::graphics::names_a_cutaway_terminal(),
+        },
+    });
     renderer.warm(&scene_rx.borrow().clone(), &pack, ui.now());
     let mut cap_sweep = FloorCapacitySweep::new();
 
@@ -579,6 +591,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<Option<QuitSignal>> {
                                 focus_roots: &focus_roots,
                                 now,
                                 respawn: crate::audio::respawn,
+                                installed: crate::sources::detect,
                             },
                         );
                         if quit {
@@ -1149,6 +1162,7 @@ mod apply_key_action_tests {
         connected: crate::runtime::ConnectedSources,
         snapshot: pixtuoid_core::state::SceneState,
         focus_roots: (Option<std::path::PathBuf>, Option<std::path::PathBuf>),
+        installed: fn() -> Vec<&'static str>,
         _tmp: tempfile::TempDir,
         config_path: std::path::PathBuf,
     }
@@ -1161,7 +1175,6 @@ mod apply_key_action_tests {
                 ui: super::ui_state::UiState::new(
                     &theme::NORMAL,
                     crate::panels::welcome::WelcomeUi::from_detected(&[]),
-                    false,
                     tmp.path().join("sock"),
                     None,
                     crate::doctor::DriftSeen::default(),
@@ -1187,6 +1200,7 @@ mod apply_key_action_tests {
                 connected: crate::runtime::ConnectedSources::new(HashSet::new()),
                 snapshot: pixtuoid_core::state::SceneState::uniform(4),
                 focus_roots: (None, None),
+                installed: Vec::new,
                 _tmp: tmp,
                 config_path,
             }
@@ -1226,6 +1240,7 @@ mod apply_key_action_tests {
                     focus_roots: &self.focus_roots,
                     now: SystemTime::UNIX_EPOCH,
                     respawn: no_respawn,
+                    installed: self.installed,
                 },
             )
         }
@@ -1238,7 +1253,6 @@ mod apply_key_action_tests {
             h.ui = super::ui_state::UiState::new(
                 &theme::NORMAL,
                 crate::panels::welcome::WelcomeUi::from_detected(detected),
-                false,
                 h._tmp.path().join("sock"),
                 None,
                 crate::doctor::DriftSeen::default(),
@@ -1267,6 +1281,25 @@ mod apply_key_action_tests {
         assert_eq!(cfg.sources, [("antigravity".to_string(), true)].into());
     }
 
+    /// `v` reopens the popup with the notices due against the LIVE connections:
+    /// a host connected since boot is not named.
+    #[test]
+    fn v_reopens_the_popup_with_the_notices_still_due() {
+        let mut h = Harness::new();
+        h.ui = super::ui_state::UiState::upgraded_from("0.19.0", "0.20.0");
+        h.connected = crate::runtime::ConnectedSources::new(HashSet::from(["codex".to_string()]));
+        h.installed = || vec!["codex", "reasonix"];
+        assert!(!h.apply(KeyAction::OpenVersionPopup));
+        assert!(h.ui.modal().version_popup_open);
+        let shown = h.ui.version_notices();
+        assert!(
+            shown
+                .iter()
+                .any(|n| n.contains("Reasonix") && !n.contains("Codex")),
+            "{shown:?}"
+        );
+    }
+
     /// The highest-blast-radius pair: `Quit` must be the ONLY action that ends
     /// the loop. A mutant returning a constant makes every keypress quit (or
     /// makes `q` inert), and nothing else in the suite would notice.
@@ -1280,6 +1313,7 @@ mod apply_key_action_tests {
             KeyAction::ToggleHelp,
             KeyAction::CloseHelp,
             KeyAction::DismissVersionPopup,
+            KeyAction::OpenVersionPopup,
             KeyAction::OpenThemePicker,
             KeyAction::ToggleDashboard,
             KeyAction::DashboardClose,

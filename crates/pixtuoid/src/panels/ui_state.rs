@@ -7,6 +7,8 @@
 //! connect/disconnect, the onboarding apply) stay at the loop as brief inline
 //! stalls.
 
+use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use pixtuoid_core::source::manager::SourceDeath;
@@ -23,12 +25,22 @@ use welcome::{OnboardingFrame, WelcomeUi};
 #[derive(Debug, Default)]
 pub struct RenderFrames {
     pub theme_picker: Option<usize>,
-    pub version_popup: bool,
+    pub version_popup: VersionPopupFrame,
     pub help_open: bool,
     pub source_warning: Option<String>,
     pub dashboard: DashboardFrame,
     pub connection: ConnectionFrame,
     pub onboarding: OnboardingFrame,
+}
+
+/// The version popup: whether it is open, and what it last opened with,
+/// kept past its close so the shrinking popup still shows it.
+#[derive(Debug, Default, Clone)]
+pub struct VersionPopupFrame {
+    pub open: bool,
+    /// This run's boot crossed an upgrade, which the title says.
+    pub upgraded: bool,
+    pub notices: Arc<[String]>,
 }
 
 impl RenderFrames {
@@ -47,6 +59,7 @@ impl RenderFrames {
             dashboard: &self.dashboard,
             connection: &self.connection,
             popup_scale,
+            version_popup: &self.version_popup,
             help_open: self.help_open,
             host_keys,
             onboarding: &self.onboarding,
@@ -70,7 +83,8 @@ pub(crate) struct UiState {
     onboarding_opened_at: Option<Instant>,
     /// `(fade start, the dim the open ramp was interrupted at)`.
     onboarding_closing_at: Option<(Instant, pixtuoid_scene::look::Dim)>,
-    version_popup: bool,
+    version_popup_open: bool,
+    notices: Notices,
     help_open: bool,
     /// `[p]ause`: while paused, `now()` returns the frozen instant so every
     /// clock-driven animation (and the dashboard marquee) holds still.
@@ -89,6 +103,33 @@ pub(crate) struct UiState {
     socket_path: std::path::PathBuf,
     /// Where the warn-floor log lives, for the Sources panel (`None` = no log).
     log: Option<crate::run_log::LogLocation>,
+}
+
+/// The version popup's notices: what they are measured against, and what it
+/// last opened with.
+#[derive(Default)]
+struct Notices {
+    versions: Option<crate::version::Versions>,
+    /// [`crate::version::BootDecision::should_show_popup`], before the
+    /// onboarding could hold the popup back.
+    upgraded: bool,
+    cutaway: crate::version::CutawayTip,
+    shown: Arc<[String]>,
+}
+
+/// What a painter's loop hands its panels at boot.
+pub(crate) struct Boot<'a> {
+    pub(crate) theme: &'static theme::Theme,
+    /// Whether the onboarding may open ([`crate::sources::is_first_run`]).
+    pub(crate) first_run: bool,
+    pub(crate) config_path: &'a std::path::Path,
+    pub(crate) socket_path: std::path::PathBuf,
+    pub(crate) log: Option<crate::run_log::LogLocation>,
+    pub(crate) drift: crate::doctor::DriftSeen,
+    /// The sources connected at boot, for the notices a version popup opens
+    /// with.
+    pub(crate) connected: &'a HashSet<String>,
+    pub(crate) cutaway: crate::version::CutawayTip,
 }
 
 /// `$PIXTUOID_FAKE_NOW`'s clock, said once at warn: a stray export would
@@ -110,56 +151,53 @@ fn fake_now() -> Option<(Instant, SystemTime)> {
 impl UiState {
     /// The panels a run opens with: the onboarding on a first run that finds
     /// an agent CLI to connect, else the version popup when this version is
-    /// new to the config at `config_path`.
-    pub(crate) fn boot(
-        boot_theme: &'static theme::Theme,
-        first_run: bool,
-        config_path: &std::path::Path,
-        socket_path: std::path::PathBuf,
-        log: Option<crate::run_log::LogLocation>,
-        drift: crate::doctor::DriftSeen,
-    ) -> Self {
-        let detected = if first_run {
+    /// new to the config at `boot.config_path`.
+    pub(crate) fn boot(boot: Boot<'_>) -> Self {
+        let detected = if boot.first_run {
             crate::sources::detect()
         } else {
             Vec::new()
         };
         Self::boot_with(
-            boot_theme,
+            boot,
             WelcomeUi::from_detected(&detected),
-            config_path,
-            (socket_path, log, drift),
+            crate::sources::detect,
+            env!("CARGO_PKG_VERSION"),
         )
     }
 
+    /// [`Self::boot`] with the onboarding, the installed-CLI probe and this
+    /// build's version injected.
     fn boot_with(
-        boot_theme: &'static theme::Theme,
+        boot: Boot<'_>,
         onboarding_ui: WelcomeUi,
-        config_path: &std::path::Path,
-        (socket_path, log, drift): (
-            std::path::PathBuf,
-            Option<crate::run_log::LogLocation>,
-            crate::doctor::DriftSeen,
-        ),
+        installed: impl FnOnce() -> Vec<&'static str>,
+        current: &str,
     ) -> Self {
+        let decision = resolve_version_popup(boot.config_path, current);
         // Yields to the onboarding but still STAMPS `last_seen_version`: gated on
         // the overlay SHOWING, not on `first_run`, which a no-CLI user carries
         // forever.
-        let version_popup = resolve_version_popup(config_path) && onboarding_ui.is_empty();
-        Self::new(
-            boot_theme,
+        let pops_up = decision.should_show_popup && onboarding_ui.is_empty();
+        let mut ui = Self::new(
+            boot.theme,
             onboarding_ui,
-            version_popup,
-            socket_path,
-            log,
-            drift,
-        )
+            boot.socket_path,
+            boot.log,
+            boot.drift,
+        );
+        ui.notices.versions = decision.versions;
+        ui.notices.upgraded = decision.should_show_popup;
+        ui.notices.cutaway = boot.cutaway;
+        if pops_up {
+            ui.open_version_popup(boot.connected, &installed());
+        }
+        ui
     }
 
     pub(crate) fn new(
         boot_theme: &'static theme::Theme,
         onboarding_ui: WelcomeUi,
-        version_popup: bool,
         socket_path: std::path::PathBuf,
         log: Option<crate::run_log::LogLocation>,
         drift: crate::doctor::DriftSeen,
@@ -173,7 +211,8 @@ impl UiState {
             onboarding_ui,
             onboarding_opened_at,
             onboarding_closing_at: None,
-            version_popup,
+            version_popup_open: false,
+            notices: Notices::default(),
             help_open: false,
             pause: pixtuoid_scene::anim::PauseClock::default(),
             fake_now: fake_now(),
@@ -193,7 +232,7 @@ impl UiState {
         ModalState {
             onboarding_open: self.onboarding_open(),
             help_open: self.help_open,
-            version_popup: self.version_popup,
+            version_popup_open: self.version_popup_open,
             theme_picker: self.theme_picker,
             dashboard_open: self.dashboard.open,
             connection_open: self.connection.open,
@@ -232,7 +271,28 @@ impl UiState {
     }
 
     pub(crate) fn dismiss_version_popup(&mut self) {
-        self.version_popup = false;
+        self.version_popup_open = false;
+    }
+
+    /// Open the version popup with the notices due while `connected` holds
+    /// and the agent CLIs `installed` here are.
+    pub(crate) fn open_version_popup(
+        &mut self,
+        connected: &HashSet<String>,
+        installed: &[&'static str],
+    ) {
+        let facts = crate::version::Facts {
+            installed,
+            connected,
+            cutaway: self.notices.cutaway,
+        };
+        self.notices.shown = crate::version::due(self.notices.versions.as_ref(), &facts).into();
+        self.version_popup_open = true;
+    }
+
+    /// The notices the version popup last opened with.
+    pub(crate) fn version_notices(&self) -> &[String] {
+        &self.notices.shown
     }
 
     pub(crate) fn open_theme_picker(&mut self) {
@@ -479,7 +539,11 @@ impl UiState {
 
         RenderFrames {
             theme_picker: self.theme_picker,
-            version_popup: self.version_popup,
+            version_popup: VersionPopupFrame {
+                open: self.version_popup_open,
+                upgraded: self.notices.upgraded,
+                notices: Arc::clone(&self.notices.shown),
+            },
             help_open: self.help_open,
             source_warning,
             dashboard: dashboard_frame,
@@ -495,12 +559,33 @@ impl UiState {
     }
 }
 
-/// Whether this version's popup shows, stamping `last_seen_version` in the
-/// config at `config_path` at boot, so the popup shows at most once per
-/// upgrade however the run exits. The config's warnings are dropped: `main`'s
-/// pre-altscreen pass already surfaced them.
-fn resolve_version_popup(config_path: &std::path::Path) -> bool {
-    let current_ver = env!("CARGO_PKG_VERSION");
+#[cfg(test)]
+impl UiState {
+    /// A run an upgrade from `previous` to `current` booted, with its popup
+    /// closed.
+    pub(crate) fn upgraded_from(previous: &str, current: &str) -> Self {
+        let mut ui = Self::new(
+            &theme::NORMAL,
+            WelcomeUi::from_detected(&[]),
+            std::path::PathBuf::new(),
+            None,
+            crate::doctor::DriftSeen::default(),
+        );
+        let decision = crate::version::boot_decision(current, Some(previous));
+        ui.notices.versions = decision.versions;
+        ui.notices.upgraded = decision.should_show_popup;
+        ui
+    }
+}
+
+/// Whether this version's popup shows, and the version before it, stamping
+/// `current_ver` as `last_seen_version` in the config at `config_path` at boot, so the popup
+/// shows at most once per upgrade however the run exits. The config's warnings
+/// are dropped: `main`'s pre-altscreen pass already surfaced them.
+fn resolve_version_popup(
+    config_path: &std::path::Path,
+    current_ver: &str,
+) -> crate::version::BootDecision {
     let cfg = crate::config::load(config_path, &mut Vec::new());
     let decision = crate::version::boot_decision(current_ver, cfg.last_seen_version.as_deref());
     if decision.should_persist
@@ -508,7 +593,7 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
     {
         tracing::warn!(error = ?e, "failed to persist version");
     }
-    decision.should_show_popup
+    decision
 }
 
 #[cfg(test)]
@@ -520,7 +605,6 @@ mod tests {
         UiState::new(
             ALL_THEMES[0],
             WelcomeUi::from_detected(&[]),
-            false,
             std::path::PathBuf::from("/tmp/sock"),
             None,
             crate::doctor::DriftSeen::default(),
@@ -565,7 +649,7 @@ mod tests {
         assert!(
             !m.onboarding_open
                 && !m.help_open
-                && !m.version_popup
+                && !m.version_popup_open
                 && m.theme_picker.is_none()
                 && !m.dashboard_open
                 && !m.connection_open
@@ -611,7 +695,6 @@ mod tests {
         let mut ui = UiState::new(
             ALL_THEMES[0],
             WelcomeUi::from_detected(&["codex"]),
-            false,
             std::path::PathBuf::from("sock"),
             None,
             crate::doctor::DriftSeen::default(),
@@ -637,7 +720,6 @@ mod tests {
         let mut ui = UiState::new(
             ALL_THEMES[0],
             WelcomeUi::from_detected(&["codex", "claude-code"]),
-            false,
             std::path::PathBuf::from("/tmp/sock"),
             None,
             crate::doctor::DriftSeen::default(),
@@ -668,24 +750,55 @@ mod tests {
         assert_ne!(a, ui.now(), "unpaused: live time again");
     }
 
+    /// The replugged hosts, installed.
+    const INSTALLED: [&str; 3] = ["claude-code", "codex", "reasonix"];
+
+    /// A run of `current` booted over the config at `path`, with `welcome`'s
+    /// onboarding and nothing connected.
+    fn boot_at(path: &std::path::Path, welcome: WelcomeUi, current: &str) -> UiState {
+        boot_into(
+            path,
+            welcome,
+            current,
+            &HashSet::new(),
+            crate::version::CutawayTip::default(),
+        )
+    }
+
+    /// [`boot_at`] with `connected` at boot and the TUI's `cutaway`.
+    fn boot_into(
+        path: &std::path::Path,
+        welcome: WelcomeUi,
+        current: &str,
+        connected: &HashSet<String>,
+        cutaway: crate::version::CutawayTip,
+    ) -> UiState {
+        UiState::boot_with(
+            Boot {
+                theme: &theme::NORMAL,
+                first_run: false,
+                config_path: path,
+                socket_path: path.with_extension("sock"),
+                log: None,
+                drift: crate::doctor::DriftSeen::default(),
+                connected,
+                cutaway,
+            },
+            welcome,
+            || INSTALLED.to_vec(),
+            current,
+        )
+    }
+
     /// A version new to the config shows its popup once, and stamps it; an
     /// open onboarding holds the popup back but still stamps.
     #[test]
     fn a_new_version_pops_up_once_and_yields_to_the_onboarding() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let boot = |path: &std::path::Path, welcome: WelcomeUi| {
-            UiState::boot_with(
-                &theme::NORMAL,
-                welcome,
-                path,
-                (
-                    tmp.path().join("sock"),
-                    None,
-                    crate::doctor::DriftSeen::default(),
-                ),
-            )
-            .modal()
-            .version_popup
+            boot_at(path, welcome, env!("CARGO_PKG_VERSION"))
+                .modal()
+                .version_popup_open
         };
         let stamped =
             |path: &std::path::Path| crate::config::load(path, &mut Vec::new()).last_seen_version;
@@ -702,5 +815,132 @@ mod tests {
         crate::config::save_version(&path, "0.0.1").expect("seed an old version");
         assert!(!boot(&path, WelcomeUi::from_detected(&["codex"])));
         assert_eq!(stamped(&path).as_deref(), Some(env!("CARGO_PKG_VERSION")));
+    }
+
+    /// The popup an upgrade boots with lists the notices due from the version
+    /// the config recorded to the one running, against the boot's connections,
+    /// the CLIs installed and the TUI's cutaway.
+    #[test]
+    fn an_upgrade_boots_the_popup_with_its_notices() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("config.toml");
+        crate::config::save_version(&path, "0.19.0").expect("seed the release before");
+        let ui = boot_into(
+            &path,
+            WelcomeUi::from_detected(&[]),
+            "0.20.0",
+            &HashSet::from(["codex".to_string()]),
+            crate::version::CutawayTip {
+                off: true,
+                drawable: true,
+            },
+        );
+        assert!(ui.modal().version_popup_open);
+        let shown = ui.version_notices();
+        assert_eq!(shown.len(), 2, "{shown:?}");
+        assert!(
+            shown[0].contains("Claude Code and Reasonix as"),
+            "the connected Codex is not named: {shown:?}"
+        );
+        assert!(shown[1].contains("cutaway"), "{shown:?}");
+    }
+
+    /// Reopened, the popup lists only what is still due: a host reconnected
+    /// since has resolved its notice. Closed, it keeps the notices it showed,
+    /// for the frames of its shrink.
+    #[test]
+    fn the_popup_reopens_with_only_the_notices_still_due() {
+        let mut ui = ui();
+        ui.notices.versions = Some(crate::version::Versions {
+            previous: semver::Version::new(0, 19, 0),
+            current: semver::Version::new(0, 20, 0),
+        });
+        ui.open_version_popup(&HashSet::new(), &["codex"]);
+        assert!(ui.modal().version_popup_open);
+        let shown = ui.version_notices().to_vec();
+        assert!(shown.iter().any(|n| n.contains("Codex")), "{shown:?}");
+
+        ui.dismiss_version_popup();
+        let frames = ui.build_frames(SystemTime::now(), &SceneState::new([0; 10]), &[]);
+        assert!(!frames.version_popup.open);
+        assert_eq!(
+            &*frames.version_popup.notices,
+            shown.as_slice(),
+            "the shrink still shows them"
+        );
+
+        let connected = HashSet::from(["codex".to_string()]);
+        ui.open_version_popup(&connected, &["codex"]);
+        assert!(ui.modal().version_popup_open);
+        assert!(
+            ui.version_notices().is_empty(),
+            "{:?}",
+            ui.version_notices()
+        );
+    }
+
+    /// A press meets the link where the popup paints it below the notices
+    /// it holds: one where the link would sit without them is swallowed.
+    #[test]
+    fn a_press_meets_the_link_below_the_notices() {
+        use crate::panels::widgets::version_popup_url_rect;
+        let mut ui = ui();
+        ui.notices.versions = Some(crate::version::Versions {
+            previous: semver::Version::new(0, 19, 0),
+            current: semver::Version::new(0, 20, 0),
+        });
+        ui.open_version_popup(&HashSet::new(), &["codex"]);
+        let screen = (120, 44);
+        let bounds = ratatui::layout::Rect::new(0, 0, screen.0, screen.1);
+        let bare = version_popup_url_rect(bounds, &[], 1.0).expect("a link");
+        let held = version_popup_url_rect(bounds, ui.version_notices(), 1.0).expect("a link");
+        assert_ne!(bare, held, "the notices move the link");
+        assert_eq!(
+            crate::panels::modal_mouse(&mut ui, 1.0, Some((bare.x, bare.y)), || Some(screen)),
+            crate::panels::ModalMouse::Inert
+        );
+    }
+
+    /// Only the run an upgrade booted says it updated, even on a `v` after
+    /// the onboarding held its popup back; a later run, or a first install,
+    /// does not.
+    #[test]
+    fn only_the_run_an_upgrade_booted_says_it_updated() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let upgraded = |name: &str, seed: Option<&str>, welcome: WelcomeUi| {
+            let path = tmp.path().join(name);
+            if let Some(seed) = seed {
+                crate::config::save_version(&path, seed).expect("seed a version");
+            }
+            let mut ui = boot_at(&path, welcome, "0.20.0");
+            ui.open_version_popup(&HashSet::new(), &[]);
+            let frames = ui.build_frames(SystemTime::now(), &SceneState::new([0; 10]), &[]);
+            frames.version_popup.upgraded
+        };
+        assert!(upgraded(
+            "up.toml",
+            Some("0.19.0"),
+            WelcomeUi::from_detected(&[])
+        ));
+        assert!(
+            upgraded(
+                "held.toml",
+                Some("0.19.0"),
+                WelcomeUi::from_detected(&["codex"])
+            ),
+            "the onboarding held the popup back"
+        );
+        assert!(
+            !upgraded("later.toml", Some("0.20.0"), WelcomeUi::from_detected(&[])),
+            "a later run"
+        );
+        assert!(
+            !upgraded("fresh.toml", None, WelcomeUi::from_detected(&[])),
+            "a first install"
+        );
+        assert!(
+            !upgraded("down.toml", Some("0.21.0"), WelcomeUi::from_detected(&[])),
+            "a downgrade"
+        );
     }
 }
