@@ -331,7 +331,7 @@ pub(crate) fn derive_with_routing(
     // A pointer's hold, and the walk home after it, outrank all but the exit,
     // and stand in for the re-entry of a walkout they cancel.
     if let Some(pose) = lifted_pose(slot, now, layout, desk, rctx) {
-        return pose;
+        return Some(pose);
     }
 
     // ENTRY_ANIMATION_MS bounds only how long we try to ROUTE; the physics
@@ -578,8 +578,7 @@ pub(crate) fn derive_with_routing(
 }
 
 /// `slot`'s pose while a pointer holds it, or on its walk home from where it
-/// was set down, `desk` its desk (the inner `None` where routing yields no
-/// pose); `None` once home, or never lifted. Home, its wander restarts seated
+/// was set down, `desk` its desk; `None` once home, or never lifted. Home, its wander restarts seated
 /// from `now`, so the timeline it missed cannot teleport it.
 fn lifted_pose(
     slot: &AgentSlot,
@@ -587,12 +586,12 @@ fn lifted_pose(
     layout: &SceneLayout,
     desk: Point,
     rctx: &mut RouteCtx<'_>,
-) -> Option<Option<Pose>> {
+) -> Option<Pose> {
     let (home, chair_settle) = desk_leg_endpoint(desk, layout);
     let settle = chair_settle.map_or(Settle::None, Settle::End);
     let walk = rctx.walks.get_mut(&slot.agent_id)?;
     match walk.lifted {
-        Some(Lifted::Held(at)) => return Some(Some(Pose::Held { at })),
+        Some(Lifted::Held(at)) => return Some(Pose::Held { at }),
         Some(Lifted::Dropped(at)) => {
             let from = landing(at, home, layout);
             let profile = snapshot_leg_profile(
@@ -636,9 +635,9 @@ fn lifted_pose(
         progress: walk_progress(&leg.profile, elapsed_ms),
         carrying_coffee: false,
     };
-    Some(Some(route_walking_pose(
+    Some(route_walking_pose(
         slot, now, layout, rctx, leg_pose, settle,
-    )))
+    ))
 }
 
 /// Where an agent set down at `at` lands: on the nearest floor its legs

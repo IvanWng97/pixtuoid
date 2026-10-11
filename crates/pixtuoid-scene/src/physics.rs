@@ -234,8 +234,9 @@ mod progress {
             Self(steps(done, total))
         }
 
-        /// `done` of `total` to the nearest step; a ratio out of range or not
-        /// finite saturates.
+        /// `done` of `total` to the nearest step; a ratio below zero or NaN
+        /// (0/0 too) is [`LegProgress::ZERO`], one past one or infinite is
+        /// [`LegProgress::DONE`].
         pub(crate) fn nearest(done: f32, total: f32) -> Self {
             Self(((f32::from(SCALE) * done / total).round() as u16).min(SCALE))
         }
@@ -248,8 +249,6 @@ mod progress {
     }
 
     impl SegmentProgress {
-        const DONE: Self = Self(SCALE);
-
         /// `done` of `total`, in [`steps`].
         fn of(done: u64, total: u64) -> Self {
             Self(steps(done, total))
@@ -280,13 +279,13 @@ mod progress {
     /// each once: the progress values where either axis's truncated offset steps.
     pub(crate) fn segment_pixels(from: Point, to: Point) -> impl Iterator<Item = Point> {
         let scale = u32::from(SCALE);
-        let steps = |a: u16, b: u16| {
+        let axis_steps = |a: u16, b: u16| {
             let d = u32::from(a.abs_diff(b));
             (1..=d)
                 .map(move |k| SegmentProgress((k * scale).div_ceil(d) as u16))
                 .peekable()
         };
-        let (mut xs, mut ys) = (steps(from.x, to.x), steps(from.y, to.y));
+        let (mut xs, mut ys) = (axis_steps(from.x, to.x), axis_steps(from.y, to.y));
         let mut next = Some(SegmentProgress(0));
         std::iter::from_fn(move || {
             let t = next?;
@@ -363,33 +362,24 @@ mod progress {
             }
         }
 
-        /// `progress` of the whole leg along `path` (two or more points).
+        /// `progress` of the whole leg along `path` (two or more points), its
+        /// last segment taking the end.
         pub(crate) fn on_route(path: &[Point], progress: LegProgress) -> Self {
-            Self::along(path, distance_at(progress, octile_path_len(path)))
-        }
-
-        /// `travelled` along `path` (two or more points), its last segment's end
-        /// past the whole of it.
-        fn along(path: &[Point], travelled: u32) -> Self {
-            let mut acc: u32 = 0;
-            for w in path.windows(2) {
-                let len = octile_distance(w[0], w[1]);
-                if acc + len >= travelled {
-                    return Segment {
-                        from: w[0],
-                        to: w[1],
-                        progress: SegmentProgress::of(u64::from(travelled - acc), u64::from(len)),
-                        travelled,
-                    };
-                }
-                acc += len;
+            let travelled = distance_at(progress, octile_path_len(path));
+            let (mut acc, mut i) = (0, 0);
+            while i + 2 < path.len() && acc + octile_distance(path[i], path[i + 1]) < travelled {
+                acc += octile_distance(path[i], path[i + 1]);
+                i += 1;
             }
-            let last = path.len().saturating_sub(1);
+            let (from, to) = (path[i], path[i + 1]);
             Segment {
-                from: path[last.saturating_sub(1)],
-                to: path[last],
-                progress: SegmentProgress::DONE,
-                travelled: acc,
+                from,
+                to,
+                progress: SegmentProgress::of(
+                    u64::from(travelled - acc),
+                    u64::from(octile_distance(from, to)),
+                ),
+                travelled,
             }
         }
 
@@ -434,6 +424,16 @@ mod progress {
         }
 
         #[test]
+        fn nearest_saturates_what_is_not_a_ratio() {
+            let nearest = LegProgress::nearest;
+            assert_eq!(nearest(f32::NAN, 1.0), LegProgress::ZERO, "NaN");
+            assert_eq!(nearest(0.0, 0.0), LegProgress::ZERO, "0/0");
+            assert_eq!(nearest(-1.0, 4.0), LegProgress::ZERO, "negative");
+            assert_eq!(nearest(f32::INFINITY, 1.0), LegProgress::DONE, "infinite");
+            assert_eq!(nearest(1.0, 0.0), LegProgress::DONE, "x/0");
+        }
+
+        #[test]
         fn of_survives_a_total_the_scale_would_overflow() {
             assert!(LegProgress::of(u64::MAX - 1, u64::MAX) < LegProgress::DONE);
         }
@@ -445,6 +445,7 @@ mod progress {
                 (Point { x: 20, y: 4 }, Point { x: 13, y: 15 }),
                 (Point { x: 8, y: 8 }, Point { x: 8, y: 1 }),
                 (Point { x: 2, y: 2 }, Point { x: 2, y: 2 }),
+                (Point { x: 0, y: 3 }, Point { x: 2500, y: 4 }),
             ];
             for (a, b) in legs {
                 let mut walked: Vec<Point> = (0..=SCALE)

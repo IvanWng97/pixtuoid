@@ -346,7 +346,7 @@ fn reconstruct(
         .iter()
         .map(|&(cx, cy)| cell_anchor(mask, cx, cy))
         .collect();
-    // A raw endpoint stands in for its own cell's anchor only where the leg it
+    // A raw endpoint stands in for its own cell's anchor only where the segment it
     // shortens stays on open floor: its cell can be up to half wall, and the
     // straight segment past it then crosses the wall.
     let mut pts = vec![from];
@@ -369,18 +369,18 @@ fn reconstruct(
     }
     pts.push(to);
     let mut turned = Vec::with_capacity(pts.len() * 2);
-    for leg in pts.windows(2) {
-        turned.push(leg[0]);
-        turned.extend(leg_corners(mask, leg[0], leg[1]));
+    for segment in pts.windows(2) {
+        turned.push(segment[0]);
+        turned.extend(segment_corners(mask, segment[0], segment[1]));
     }
     turned.push(to);
     simplify_polyline(mask, turned)
 }
 
-/// The corners a leg from `a` to `b` turns on to stay on open floor: none
+/// The corners a segment from `a` to `b` turns on to stay on open floor: none
 /// when the straight segment does, an [`elbow`] when an L does, else a
-/// [`pixel_detour`]. A leg neither clears stays straight.
-fn leg_corners(mask: &WalkableMask, a: Point, b: Point) -> Vec<Point> {
+/// [`pixel_detour`]. A segment neither clears stays straight.
+fn segment_corners(mask: &WalkableMask, a: Point, b: Point) -> Vec<Point> {
     if segment_clear(mask, a, b) {
         return Vec::new();
     }
@@ -390,13 +390,13 @@ fn leg_corners(mask: &WalkableMask, a: Point, b: Point) -> Vec<Point> {
         .unwrap_or_default()
 }
 
-/// How far past the box a leg spans [`pixel_detour`] searches: the gap
+/// How far past the box a segment spans [`pixel_detour`] searches: the gap
 /// joining two half-open routing cells can lie beside either.
 const DETOUR_MARGIN: u16 = CELL_SIZE;
 
 /// The corners of a shortest walk from `a` to `b` over open pixels, stepping
 /// orthogonally inside the box the two span grown by [`DETOUR_MARGIN`], pulled
-/// straight wherever a leg stays on open floor; `None` when the box holds no
+/// straight wherever a segment stays on open floor; `None` when the box holds no
 /// such walk. Two routing cells are walkable at half open, so the gap joining
 /// them can be a pixel wide, where neither the straight segment nor an L fits.
 fn pixel_detour(mask: &WalkableMask, a: Point, b: Point) -> Option<Vec<Point>> {
@@ -475,9 +475,9 @@ fn segment_clear(mask: &WalkableMask, a: Point, b: Point) -> bool {
         .all(|p| mask.is_walkable(p.x, p.y))
 }
 
-/// Drop each corner collinear with its neighbours, unless the merged leg would
+/// Drop each corner collinear with its neighbours, unless the merged segment would
 /// cross blocked floor its two halves step around: a walk truncates toward its
-/// start, so one long leg lands on different pixels than its halves.
+/// start, so one long segment lands on different pixels than its halves.
 fn simplify_polyline(mask: &WalkableMask, pts: Vec<Point>) -> Vec<Point> {
     if pts.len() < 3 {
         return pts;

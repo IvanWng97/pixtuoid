@@ -907,7 +907,7 @@ fn a_route_turns_on_the_open_pixel_nearest_a_blocked_centre() {
 }
 
 /// At 127x45 the anchors of two half-open cells beside a door's wall stub
-/// share a column the stub stands in, so neither the straight leg nor an L
+/// share a column the stub stands in, so neither the straight segment nor an L
 /// clears it; the route steps through the one-pixel gap instead.
 #[test]
 fn a_route_through_a_one_pixel_gap_stays_on_open_floor() {
