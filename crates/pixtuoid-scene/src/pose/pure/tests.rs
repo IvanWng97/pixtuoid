@@ -1,4 +1,6 @@
 use super::*;
+use crate::physics::distance_at;
+use crate::pose::Segment;
 use pixtuoid_core::sprite::format::{Piece, Walk};
 use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
 use std::path::PathBuf;
@@ -124,8 +126,12 @@ fn idle_phase_1_is_walking_out() {
     let l = layout();
     match derive(&s, now, &l).expect("pose") {
         Pose::Walking {
-            progress,
-            travelled,
+            segment:
+                Segment {
+                    progress,
+                    travelled,
+                    ..
+                },
             ..
         } => {
             assert!(
@@ -163,7 +169,10 @@ fn idle_phase_3_is_walking_back() {
     let (s, now) = slot(ActivityState::Idle, midpoint);
     let l = layout();
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking { progress, .. } => {
+        Pose::Walking {
+            segment: Segment { progress, .. },
+            ..
+        } => {
             assert!((Progress::of(2, 5)..=Progress::of(3, 5)).contains(&progress));
         }
         other => panic!("expected Walking, got {other:?}"),
@@ -201,7 +210,10 @@ fn pantry_walk_destination_is_walkable() {
     s.agent_id = id; // desk_index 0 is valid for the 4-agent layout
 
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking { to, .. } => assert!(
+        Pose::Walking {
+            segment: Segment { to, .. },
+            ..
+        } => assert!(
             l.walkable.is_walkable(to.x, to.y),
             "pantry walk dest {to:?} is not walkable (center={:?})",
             l.waypoints[pantry_idx].pos
@@ -379,7 +391,10 @@ fn entry_animation_overrides_normal_pose_for_first_4s() {
     let probe = now0 + Duration::from_millis(1500);
     let l = layout();
     match derive(&s, probe, &l).expect("pose") {
-        Pose::Walking { progress, .. } => {
+        Pose::Walking {
+            segment: Segment { progress, .. },
+            ..
+        } => {
             // 1500/4000 = 0.375
             assert!(
                 (Progress::of(3, 10)..=Progress::of(9, 20)).contains(&progress),
@@ -404,7 +419,10 @@ fn exit_override_walks_desk_to_door_within_window() {
     let l = layout();
     let desk = l.home_desks[s.desk_index.0];
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking { from, to, .. } => {
+        Pose::Walking {
+            segment: Segment { from, to, .. },
+            ..
+        } => {
             assert_eq!(
                 from,
                 desk_walk_anchor_facing(desk, l.desk_facing_at(desk)),
@@ -743,7 +761,10 @@ fn walk_out_intact_when_gate_releases_during_the_seated_phase() {
     let mid_walk_out = seated_dwell_ms(id) + WANDER_WALK_EST_MS / 2;
     let now = s.state_started_at + Duration::from_millis(mid_walk_out);
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking { from, progress, .. } => {
+        Pose::Walking {
+            segment: Segment { from, progress, .. },
+            ..
+        } => {
             assert_eq!(from, desk, "cycle-0 walk-out starts from the desk");
             assert!(
                 (Progress::of(2, 5)..=Progress::of(3, 5)).contains(&progress),
@@ -767,7 +788,10 @@ fn cycle_after_a_suppressed_release_walks_out_from_its_beginning() {
     let mid_walk_out = cycle + seated_dwell_ms(id) + WANDER_WALK_EST_MS / 2;
     let now = s.state_started_at + Duration::from_millis(mid_walk_out);
     match derive(&s, now, &l).expect("pose") {
-        Pose::Walking { from, progress, .. } => {
+        Pose::Walking {
+            segment: Segment { from, progress, .. },
+            ..
+        } => {
             assert_eq!(from, desk, "cycle-1 walk-out starts from the desk");
             assert!(
                 (Progress::of(2, 5)..=Progress::of(3, 5)).contains(&progress),
@@ -878,7 +902,11 @@ fn a_walking_person_never_slides() {
             },
         );
         let turns = steps(ENTRY_ANIMATION_MS, &|ms| {
-            let Pose::Walking { travelled, .. } = linear_walk_pose(ms, from, to) else {
+            let Pose::Walking {
+                segment: Segment { travelled, .. },
+                ..
+            } = linear_walk_pose(ms, from, to)
+            else {
                 panic!("a walk");
             };
             travelled

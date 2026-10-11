@@ -21,7 +21,7 @@ use crate::layout::{Point, SceneLayout};
 use crate::pathfind::{OCTILE_STRAIGHT_COST, Router, snap_point_to_walkable, snap_point_where};
 use crate::pet::PetKind;
 use crate::physics::{
-    Gait, WALK_ACCEL, WalkProfile, distance_at, walk_arrived, walk_profile_for, walk_progress,
+    Gait, WALK_ACCEL, WalkProfile, walk_arrived, walk_profile_for, walk_progress,
 };
 use crate::pose::{STALE_RESUME_GAP_BASE_MS, Segment};
 use crate::walk::octile_path_len;
@@ -211,10 +211,8 @@ impl Walk {
     /// Where on its path it is at `now`; `None` once it has arrived.
     fn segment(&self, now: SystemTime) -> Option<Segment> {
         let elapsed = elapsed_ms(now, self.started_at);
-        (!walk_arrived(&self.profile, elapsed)).then(|| {
-            let t = walk_progress(&self.profile, elapsed);
-            Segment::along(&self.path, distance_at(t, self.profile.path_len_octile))
-        })
+        (!walk_arrived(&self.profile, elapsed))
+            .then(|| Segment::on_route(&self.path, walk_progress(&self.profile, elapsed)))
     }
 }
 

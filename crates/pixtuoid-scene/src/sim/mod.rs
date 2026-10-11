@@ -30,8 +30,7 @@ use crate::floor::{CoffeeState, FloorInputs, FloorMeta, PetInputs, VacancyDim};
 use crate::layout::{Facing, Pivot, Point, SceneLayout, Size, WALKING_Y_OFF};
 use crate::pathfind::Router;
 use crate::pet::PetKind;
-use crate::physics::walking_position;
-use crate::pose::{self, Pose, PoseHistory};
+use crate::pose::{self, Pose, PoseHistory, Segment};
 use crate::walk::WalkState;
 
 use crate::layout::CHARACTER_SPRITE_W;
@@ -1030,12 +1029,15 @@ pub(crate) fn resolve_characters(
                 ));
             }
             Pose::Walking {
-                from,
-                to,
-                progress,
-                travelled,
+                segment,
                 mut carrying_coffee,
             } => {
+                let Segment {
+                    from,
+                    to,
+                    travelled,
+                    ..
+                } = segment;
                 // Exit walks: core sets carrying_coffee=false (it holds no
                 // render-side state), but the coffee map knows better.
                 if agent.exiting_at.is_some() && coffee.contains_key(&agent.agent_id) {
@@ -1044,8 +1046,7 @@ pub(crate) fn resolve_characters(
                 if carrying_coffee {
                     new_coffee_carriers.push(agent.agent_id);
                 }
-                let pos = walking_position(from, to, progress);
-                let walker_top_left = walking_top_left(pos, CHARACTER_SPRITE_W);
+                let walker_top_left = walking_top_left(segment.at(), CHARACTER_SPRITE_W);
                 let dx = i32::from(to.x) - i32::from(from.x);
                 let dy = i32::from(to.y) - i32::from(from.y);
                 // A glide on/off a seat (`to` is a foot-cell sitting down,

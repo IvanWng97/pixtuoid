@@ -3260,7 +3260,10 @@ fn sim_step_advances_walks_without_painting() {
     let mut stores = owned.stores();
 
     let walk_t = |f: &SimFrame| match f.poses.get(&id) {
-        Some(Some(Pose::Walking { travelled, .. })) => *travelled,
+        Some(Some(Pose::Walking {
+            segment: crate::pose::Segment { travelled, .. },
+            ..
+        })) => *travelled,
         other => panic!("expected an entry walk pose, got {other:?}"),
     };
     let f1 = sim_step(
@@ -5410,7 +5413,15 @@ fn only_a_placement_that_breathes_takes_the_breath() {
         let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
         p
     };
-    let walker = place(Pose::walking(mid, mid, Progress::ZERO, false));
+    let walker = place(
+        crate::pose::LegPose {
+            from: mid,
+            to: mid,
+            progress: Progress::ZERO,
+            carrying_coffee: false,
+        }
+        .straight(),
+    );
     let idler = place(Pose::AimlessAt { dest: mid });
     let sitter = place(Pose::SeatedThinking);
     assert!(!walker.breathes && idler.breathes && sitter.breathes);

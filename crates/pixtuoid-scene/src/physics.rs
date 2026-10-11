@@ -272,7 +272,7 @@ mod progress {
     }
 
     /// The distance `t` along a leg `length` long is, both in
-    /// [`travelled`](crate::pose::Pose::Walking::travelled)'s unit.
+    /// [`travelled`](crate::pose::Segment::travelled)'s unit.
     pub(crate) fn distance_at(t: Progress, length: u32) -> u32 {
         // At most `length`, as t <= DONE.
         (u64::from(t.0) * u64::from(length) / u64::from(SCALE)) as u32
