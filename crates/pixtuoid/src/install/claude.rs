@@ -378,11 +378,7 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
     }
 }
 
-pub(crate) fn render_owned(primary: &Path, hook_cmd: &str) -> Result<Vec<(PathBuf, String)>> {
-    Ok(vec![(primary.to_path_buf(), render_hooks(hook_cmd)?)])
-}
-
-fn render_hooks(hook_cmd: &str) -> Result<String> {
+pub(crate) fn render_hooks(hook_cmd: &str) -> Result<String> {
     let want = json!({
         "hooks": EVENTS
             .iter()
@@ -674,34 +670,6 @@ mod tests {
                 "registered CC hook {ev:?} has no decoder arm — it would bail as \
                  unsupported. Add an arm in pixtuoid-core (decoder.rs shared arms \
                  or claude_code.rs's custom decoder)."
-            );
-        }
-    }
-
-    #[test]
-    fn reinstall_adds_newly_registered_events_to_an_older_install() {
-        let old_events = [
-            "SessionStart",
-            "PreToolUse",
-            "PostToolUse",
-            "Notification",
-            "SessionEnd",
-        ];
-        let mut old = json!({ "hooks": {} });
-        for ev in old_events {
-            old["hooks"][ev] = json!([managed_entry("pixtuoid-hook")]);
-        }
-        let out = render_hooks("pixtuoid-hook").unwrap();
-        assert_ne!(
-            out,
-            old.to_string(),
-            "adding the Subagent events is a real change"
-        );
-        let v: Value = serde_json::from_str(&out).unwrap();
-        for ev in EVENTS {
-            assert!(
-                v["hooks"][*ev][0]["hooks"][0]["command"].is_string(),
-                "event {ev} must be installed after the upgrade re-run"
             );
         }
     }

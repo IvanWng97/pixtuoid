@@ -1,11 +1,11 @@
 //! OpenClaw install target — the TWO-OWNERSHIP hybrid: a plugin DIR wholly owned
-//! by pixtuoid (`<openclaw-home>/plugins/pixtuoid/`, rendered `beside` the config
+//! by pixtuoid (`<openclaw-home>/plugins/pixtuoid/`, the target's `beside` files,
 //! with the shim path baked into `index.js`) PLUS a config merge into
 //! `<openclaw-home>/openclaw.json`; neither alone loads the plugin. The install is a
-//! pure `ConfigLock` write, since a bare `plugins.load.paths` entry follows the
-//! normal policy, unlike `plugins install --link`, which needs capability consent
-//! (openclaw `docs/cli/plugins/install.md:318-320`,
-//! `docs/plugins/manage-plugins.md:216-218` @ v2026.10.1). The
+//! pure `ConfigLock` write: a bare `plugins.load.paths` entry follows the normal
+//! policy for its origin (openclaw `docs/cli/plugins/install.md:318-320` @
+//! v2026.10.1), while `plugins install --link` creates a managed install record that
+//! requires capability consent (`docs/plugins/manage-plugins.md:216-218`). The
 //! `allowConversationAccess` grant un-gates `before_agent_run`/`agent_end` (the busy
 //! tell) and UNINSTALL REVOKES it; the plugin FILES are left in place (the config
 //! un-merge stops the gateway loading them).
@@ -229,12 +229,12 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::merge::hook_path_str(resolved).map(str::to_string)
 }
 
-pub(crate) fn plugin_artifacts(_config: &Path, hook_path: &str) -> Result<Vec<(PathBuf, String)>> {
+pub(crate) fn plugin_artifacts(hook_path: &str) -> Result<Vec<(PathBuf, String)>> {
     let dir = plugin_dir()?;
     Ok(vec![
-        (dir.join("index.js"), render_plugin(hook_path)?),
         (dir.join("openclaw.plugin.json"), MANIFEST.to_string()),
         (dir.join("package.json"), PACKAGE.to_string()),
+        (dir.join("index.js"), render_plugin(hook_path)?),
     ])
 }
 
@@ -242,8 +242,7 @@ fn render_plugin(hook_path: &str) -> Result<String> {
     crate::install::merge::bake_hook_path(PLUGIN_TEMPLATE, HOOK_PLACEHOLDER, hook_path, "openclaw")
 }
 
-/// The advice the JSON5 refusal and the schema notes point at — OpenClaw's OWN
-/// commands, which edit a JSON5 config without dropping its comments.
+/// The advice the JSON5 refusal and the schema notes point at.
 const OWNER_CLI_ADVICE: &str = "register it with OpenClaw's own CLI instead: \
      `openclaw plugins install --link <dir>` + `openclaw plugins enable pixtuoid`, \
      then set plugins.entries.pixtuoid.hooks.allowConversationAccess = true";
@@ -725,7 +724,7 @@ mod tests {
         // Serialized with the tests that unset HOME and USERPROFILE, under which
         // `home_first_dir()` returns None.
         temp_env::with_vars(Vec::<(&str, Option<&str>)>::new(), || {
-            let arts = plugin_artifacts(Path::new(""), "/opt/bin/pixtuoid-hook").unwrap();
+            let arts = plugin_artifacts("/opt/bin/pixtuoid-hook").unwrap();
             assert_eq!(arts.len(), 3, "manifest + package.json + index.js");
             let index = &arts
                 .iter()

@@ -1,8 +1,8 @@
 use super::*;
 use crate::install::target::{CLAUDE, CODEX, MergeOutcome, OPENCLAW, Primary, Target};
 
-/// Claude's hooks-file merge without its plugin registration or presence probe,
-/// for the tests of the config-write path itself.
+/// Claude's owned hooks file without its plugin registration or presence probe,
+/// for the tests of the primary-write path itself.
 const CLAUDE_FILE: Target = Target {
     host: None,
     presence_probe: None,
@@ -136,7 +136,7 @@ static FAKE_NO_HOME: Target = Target {
 };
 
 /// The files a target owns beside its config, `None` for every other target.
-fn beside_of(t: &Target) -> Option<target::RenderOwned> {
+fn beside_of(t: &Target) -> Option<target::RenderBeside> {
     match t.primary {
         Primary::Config { beside, .. } => beside,
         Primary::Owned { .. } => None,
@@ -795,7 +795,7 @@ fn verify_target_hard_flags_a_missing_beside_file_for_every_beside_target() {
                     "{}: a fresh install must verify sound",
                     t.name
                 );
-                for (p, _) in make(std::path::Path::new(""), exe.to_str().unwrap()).unwrap() {
+                for (p, _) in make(exe.to_str().unwrap()).unwrap() {
                     let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir_all(&p));
                 }
                 let v = verify_target(t, Some(cfg));
@@ -841,17 +841,11 @@ fn verify_target_flags_code_drift_and_not_comment_drift_in_every_beside_target()
                 let Some(make) = beside_of(t) else {
                     continue;
                 };
-                for (idx, _) in make(std::path::Path::new(""), exe.to_str().unwrap())
-                    .unwrap()
-                    .iter()
-                    .enumerate()
-                {
+                for (idx, _) in make(exe.to_str().unwrap()).unwrap().iter().enumerate() {
                     let tmp = tempfile::TempDir::new().unwrap();
                     let cfg = tmp.path().join("config");
                     install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
-                    let (p, _) = make(std::path::Path::new(""), exe.to_str().unwrap())
-                        .unwrap()
-                        .swap_remove(idx);
+                    let (p, _) = make(exe.to_str().unwrap()).unwrap().swap_remove(idx);
                     let body = std::fs::read_to_string(&p).unwrap();
                     std::fs::write(&p, comment_only_edit(&body)).unwrap();
                     let v = verify_target(t, Some(cfg.clone()));
@@ -1096,7 +1090,7 @@ fn reinstall_heals_a_deleted_beside_file_even_on_a_config_no_op() {
                 let cfg = tmp.path().join("config");
                 install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
 
-                let (victim, want) = make(std::path::Path::new(""), exe.to_str().unwrap())
+                let (victim, want) = make(exe.to_str().unwrap())
                     .unwrap()
                     .into_iter()
                     .next()
@@ -1108,13 +1102,13 @@ fn reinstall_heals_a_deleted_beside_file_even_on_a_config_no_op() {
                     t.name
                 );
 
-                let r = install_target_from(t, Some(cfg), Some(exe.clone())).unwrap();
+                let r = install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
                 assert!(
                     matches!(r.outcome, InstallOutcome::AlreadyUpToDate),
                     "{}: config already current — the heal must fire despite the no-op",
                     t.name
                 );
-                // `write_owned` runs before the primary's `changed` gate; moving it
+                // `write_beside` runs before the primary's `changed` gate; moving it
                 // after would leave the deleted file gone.
                 assert!(
                     victim.exists(),
@@ -1125,6 +1119,23 @@ fn reinstall_heals_a_deleted_beside_file_even_on_a_config_no_op() {
                     std::fs::read_to_string(&victim).unwrap(),
                     want,
                     "{}: the healed artifact must carry the correct baked content",
+                    t.name
+                );
+
+                std::fs::write(&victim, format!("{want}\n")).unwrap();
+                install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+                assert_eq!(
+                    std::fs::read_to_string(&victim).unwrap(),
+                    want,
+                    "{}: a re-install must refresh a drifted plugin file",
+                    t.name
+                );
+                let stamp = write_stamp(&victim);
+                install_target_from(t, Some(cfg), Some(exe.clone())).unwrap();
+                assert_eq!(
+                    write_stamp(&victim),
+                    stamp,
+                    "{}: a re-install must not rewrite an identical plugin file",
                     t.name
                 );
                 covered += 1;
@@ -1203,7 +1214,7 @@ fn verify_target_flags_codewhale_disabled() {
 fn json_value_equality_ignores_key_order_under_preserve_order() {
     // `preserve_order` swaps serde_json's `Map` to IndexMap so a merge re-emits the
     // user's key order. `Value: PartialEq` must therefore stay order-INDEPENDENT:
-    // every target's `changed` flag is a semantic diff, so order-SENSITIVE equality
+    // every Config target's `changed` flag is a semantic diff, so order-SENSITIVE equality
     // would report `changed` for a mere re-order — rewriting the file and
     // flipping `has_hooks` on every single connect.
     let a: serde_json::Value = serde_json::from_str(r#"{"b":1,"a":{"y":2,"x":3}}"#).unwrap();
@@ -1641,4 +1652,40 @@ fn claude_uninstall_leaves_no_live_hooks_when_deregistering_fails() {
         assert!(uninstall_target(&CLAUDE, Some(hooks.clone())).is_err());
         assert!(!has_hooks(&CLAUDE, Some(hooks)), "the plugin is left inert");
     });
+}
+
+/// `(inode, mtime)` on Unix, `mtime` elsewhere: what a rewrite always changes.
+fn write_stamp(p: &std::path::Path) -> (u64, std::time::SystemTime) {
+    let m = std::fs::metadata(p).unwrap();
+    #[cfg(unix)]
+    let ino = std::os::unix::fs::MetadataExt::ino(&m);
+    #[cfg(not(unix))]
+    let ino = 0;
+    (ino, m.modified().unwrap())
+}
+
+/// An older pixtuoid's hooks.json, two registrations short, is rewritten whole by a
+/// re-install: the owned primary is compared with this binary's render, not merged.
+#[test]
+fn reinstall_adds_newly_registered_events_to_an_older_claude_hooks_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cfg = tmp.path().join("hooks.json");
+    let hook = || Some(PathBuf::from("/fake/pixtuoid-hook"));
+    install_target_from(&CLAUDE_FILE, Some(cfg.clone()), hook()).unwrap();
+    let mut older: serde_json::Value =
+        serde_json::from_str(&io::read_config(&cfg).unwrap()).unwrap();
+    for ev in ["SubagentStart", "SubagentStop"] {
+        older["hooks"].as_object_mut().unwrap().remove(ev);
+    }
+    std::fs::write(&cfg, serde_json::to_string_pretty(&older).unwrap()).unwrap();
+
+    let r = install_target_from(&CLAUDE_FILE, Some(cfg.clone()), hook()).unwrap();
+    assert!(matches!(r.outcome, InstallOutcome::Installed));
+    let v: serde_json::Value = serde_json::from_str(&io::read_config(&cfg).unwrap()).unwrap();
+    for ev in crate::install::claude::EVENTS {
+        assert!(
+            v["hooks"][*ev][0]["hooks"][0]["command"].is_string(),
+            "event {ev} must be installed after the upgrade re-run"
+        );
+    }
 }

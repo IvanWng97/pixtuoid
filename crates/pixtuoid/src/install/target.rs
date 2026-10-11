@@ -2,11 +2,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-/// Every file a target owns whole, each with its absolute path, `hook_cmd` baked in.
-/// `primary` is the path the target is keyed on (its default or a caller's override);
-/// a target whose files sit beside it derives them from it, others from the CLI's own
-/// state resolver, which a test must redirect too or it writes the developer's real plugin.
-pub(crate) type RenderOwned = fn(primary: &Path, hook_cmd: &str) -> Result<Vec<(PathBuf, String)>>;
+/// Each file pixtuoid owns beside a config, at its absolute path with `hook_cmd` baked
+/// in. The paths come from the CLI's OWN state resolver, not the config path a test
+/// isolates itself with, so a test must redirect that resolver too or it writes the
+/// developer's real plugin.
+pub(crate) type RenderBeside = fn(hook_cmd: &str) -> Result<Vec<(PathBuf, String)>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryStrategy {
@@ -80,13 +80,13 @@ pub enum Primary {
         /// content, extracting the shim path for `install::verify_target` to stat.
         /// Per-source format knowledge stays here, like the merge fns.
         verify_schema: fn(content: &str) -> crate::install::verify::SchemaParse,
-        /// Files pixtuoid owns beside the config. Left in place on uninstall (the
-        /// config un-merge disables loading).
-        beside: Option<RenderOwned>,
+        /// Files pixtuoid owns beside the config, where [`RenderBeside`] says they
+        /// live. Left in place on uninstall (the config un-merge disables loading).
+        beside: Option<RenderBeside>,
     },
     Owned {
-        /// The primary first, then any file that ships with it.
-        render: RenderOwned,
+        /// The primary's whole content, `hook_cmd` baked in.
+        render: fn(hook_cmd: &str) -> Result<String>,
         /// The primary as a disconnect leaves it; `changed` iff it was ours. Same
         /// empty rule as `merge_uninstall`.
         disconnect: fn(content: &str) -> Result<MergeOutcome>,
@@ -151,7 +151,7 @@ pub(crate) const CLAUDE: Target = Target {
     default_config_path: crate::install::claude::default_config_path,
     hook_command: crate::install::claude::hook_command,
     primary: Primary::Owned {
-        render: crate::install::claude::render_owned,
+        render: crate::install::claude::render_hooks,
         disconnect: crate::install::claude::disconnect,
         verify: crate::install::claude::verify_schema,
     },
@@ -228,7 +228,7 @@ pub(crate) const OPENCODE: Target = Target {
     default_config_path: crate::install::opencode::default_config_path,
     hook_command: crate::install::opencode::hook_command,
     primary: Primary::Owned {
-        render: crate::install::opencode::render_owned,
+        render: crate::install::opencode::render_plugin,
         disconnect: crate::install::opencode::disconnect,
         verify: crate::install::opencode::verify_schema,
     },
@@ -367,7 +367,7 @@ pub(crate) const OMP: Target = Target {
     default_config_path: crate::install::omp::default_config_path,
     hook_command: crate::install::omp::hook_command,
     primary: Primary::Owned {
-        render: crate::install::omp::render_owned,
+        render: crate::install::omp::render_extension,
         disconnect: crate::install::omp::disconnect,
         verify: crate::install::omp::verify_schema,
     },
