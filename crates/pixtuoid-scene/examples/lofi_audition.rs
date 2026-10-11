@@ -18,8 +18,8 @@ use pixtuoid_scene::audio::synth::{Lane, render_lane};
 
 /// Audition mix gains per mood, in [`Lane::ALL`] order
 /// (pad, sparkle, keys, drums, texture, bass).
-const DAY_MIX: [f32; 6] = [0.70, 0.60, 0.55, 0.45, 0.84, 0.62];
-const NIGHT_MIX: [f32; 6] = [0.75, 0.55, 0.50, 0.30, 0.84, 0.68];
+const DAY_MIX: [f32; Lane::ALL.len()] = [0.70, 0.60, 0.55, 0.45, 0.84, 0.62];
+const NIGHT_MIX: [f32; Lane::ALL.len()] = [0.75, 0.55, 0.50, 0.30, 0.84, 0.68];
 
 /// Soak length target per take — long enough to hear the loop breathe.
 const SOAK_SECS: f32 = 90.0;
@@ -28,7 +28,7 @@ const SOAK_SECS: f32 = 90.0;
 const TARGET_RMS_DBFS: f32 = -16.0;
 
 /// The soloable lanes, in [`Lane::ALL`] order — the ONE spelling `--solo` accepts.
-const SOLO_LANES: [&str; 6] = ["pad", "sparkle", "keys", "drums", "texture", "bass"];
+const SOLO_LANES: [&str; Lane::ALL.len()] = ["pad", "sparkle", "keys", "drums", "texture", "bass"];
 
 /// The `--mood` vocabulary paired with its [`Mood`], so the parse and the error
 /// message can't list different spellings.

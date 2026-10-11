@@ -1159,7 +1159,11 @@ mod tests {
                     assert_eq!(bed.len(), n, "{mood:?} seed {seed} {name} length");
                 }
                 match mood {
-                    Mood::Day => assert_eq!(texture.len(), BED_LOOP_SAMPLES),
+                    Mood::Day => assert_eq!(
+                        texture.len(),
+                        1 << 19,
+                        "the ratified texture loop; a new length is a new sound"
+                    ),
                     Mood::Night => assert_eq!(texture.len(), n),
                 }
                 let low = band_energy_share(drums, 62.5, 125.0);
