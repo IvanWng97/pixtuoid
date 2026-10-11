@@ -43,8 +43,8 @@ use crate::source::{AgentEvent, ToolDetail};
 ///
 /// homebrew-core contract: the id packaging-build's replay of the formula's
 /// `test do` connects, since it connects with no agent CLI installed. The formula
-/// must connect it too; a rename needs a core PR there first, or Homebrew's CI
-/// breaks on the next autobump.
+/// must connect it too, so a rename owes a test update there right after the
+/// release that ships it (CONTRIBUTING.md#releasing).
 pub const SOURCE_NAME: &str = "codewhale";
 
 /// CodeWhale's one sub-agent tool; its `action` picks the verb

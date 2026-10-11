@@ -68,40 +68,45 @@ jobs:
       - uses: ./.github/actions/setup-cargo-just
         with:
           enable-cache: 'false'
-      # homebrew-core's `test do` runs against every release on its autobump
-      # and changes only by a PR there, so a subcommand it still calls that
-      # this tree dropped, or a source it connects that this tree can no longer,
-      # breaks a CI we never see. Checked before a release PR exists, so that PR
-      # waits for homebrew-core's (CONTRIBUTING.md#releasing).
+      # homebrew-core's `test do` runs against every release on its autobump,
+      # and Homebrew changes it only once a release needs the change, so a miss
+      # can't hold the release: it names the test update owed there right after
+      # the tag (CONTRIBUTING.md#releasing).
       - name: homebrew-core's test calls only what this tree can run
         run: |
           set -euo pipefail
-          formula="$(curl -fsSL --retry 3 \
-            https://raw.githubusercontent.com/Homebrew/homebrew-core/HEAD/Formula/p/pixtuoid.rb)"
-          subs="$(sed -n '/^  test do/,/^  end/p' <<<"$formula" \
-            | { grep -oE 'pixtuoid("?, "| )[a-z][a-z0-9-]*' || true; } \
+          owe() {
+            if [ -z "${owed:-}" ]; then
+              owed=1
+              printf '### homebrew-core test update owed after the tag (CONTRIBUTING.md#releasing)\n\n' >>"$GITHUB_STEP_SUMMARY"
+            fi
+            echo "::warning::$1"
+            echo "- $1" >>"$GITHUB_STEP_SUMMARY"
+          }
+          if ! formula="$(curl -fsSL --retry 3 \
+            https://raw.githubusercontent.com/Homebrew/homebrew-core/HEAD/Formula/p/pixtuoid.rb)"; then
+            owe "could not fetch homebrew-core's formula; check its test block by hand"
+            exit 0
+          fi
+          block="$(sed -n '/^  test do/,/^  end/p' <<<"$formula")"
+          subs="$({ grep -oE 'pixtuoid("?, "| )[a-z][a-z0-9-]*' <<<"$block" || true; } \
             | sed -E 's/^pixtuoid("?, "| )//' | sort -u)"
           if [ -z "$subs" ]; then
-            echo "::error::found no pixtuoid subcommand in homebrew-core's test block; its shape changed"
-            exit 1
+            owe "found no pixtuoid subcommand in homebrew-core's test block; its shape changed"
+            exit 0
           fi
           cargo build --locked -q -p pixtuoid --bin pixtuoid
           for sub in $subs; do
-            if ! ./target/debug/pixtuoid "$sub" --help >/dev/null 2>&1; then
-              echo "::error::homebrew-core's test calls \`pixtuoid $sub\`, which this tree dropped: change the formula there first"
-              exit 1
-            fi
+            ./target/debug/pixtuoid "$sub" --help >/dev/null 2>&1 \
+              || owe "homebrew-core's test calls \`pixtuoid $sub\`, which this tree dropped"
           done
           # Its sandbox has no agent CLI, which a plugin host's connect needs.
-          ids="$(sed -n '/^  test do/,/^  end/p' <<<"$formula" \
-            | { grep -oE 'pixtuoid("?, "| )connect("?, "| )[a-z][a-z0-9-]*' || true; } \
+          ids="$({ grep -oE 'pixtuoid("?, "| )connect("?, "| )[a-z][a-z0-9-]*' <<<"$block" || true; } \
             | sed -E 's/.*connect("?, "| )//' | sort -u)"
           for id in $ids; do
             out="$(env -i HOME="$(mktemp -d)" PATH=/usr/bin:/bin PIXTUOID_HOOK=/usr/bin/true \
-              ./target/debug/pixtuoid connect "$id" --json 2>&1)" || {
-              echo "::error::homebrew-core's test connects \`$id\`, which must be registered and connect with no agent CLI installed: change the formula there first. It failed: $out"
-              exit 1
-            }
+              ./target/debug/pixtuoid connect "$id" --json 2>&1)" \
+              || owe "homebrew-core's test connects \`$id\`, which fails with no agent CLI installed: ${out//$'\n'/ }"
           done
       # SHA-pinned: the step sees the PAT (release-plz's security.md), and the
       # SHA also pins the release-plz binary the action installs. Dependabot
