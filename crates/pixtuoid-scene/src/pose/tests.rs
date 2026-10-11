@@ -1,7 +1,7 @@
 use super::*;
 use crate::anim::PAINT_FRAME_MS;
-use crate::physics::walk_profile;
-use crate::walk::{octile_path_len, settle_len};
+use crate::physics::{LegProgress, octile_distance, octile_path_len, walk_profile};
+use crate::walk::settle_len;
 use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::WalkableMask;
 use std::path::PathBuf;
@@ -185,7 +185,8 @@ fn snap_back_walks_from_history_when_state_just_flipped() {
     rig.history
         .record(slot.agent_id, prev, now - Duration::from_millis(50));
     match derive_with_routing(&slot, now, &l, &mut rig.rctx()) {
-        Some(Pose::Walking { from, .. }) => {
+        Some(Pose::Walking { segment, .. }) => {
+            let from = segment.from();
             assert_eq!(from, prev, "snap-back walk should start from recorded prev");
         }
         other => panic!("expected snap-back Walking pose, got {other:?}"),
@@ -236,8 +237,9 @@ fn seated_waypoint_snap_back_starts_from_the_seat_not_the_approach_cell() {
     let active = active_slot(now, now - Duration::from_secs(60));
     let then = now + Duration::from_millis(50);
     match derive_with_routing(&active, then, &l, &mut rig.rctx()) {
-        Some(Pose::Walking { from, .. }) => assert_eq!(
-            from, seat,
+        Some(Pose::Walking { segment, .. }) => assert_eq!(
+            segment.from(),
+            seat,
             "snap-back must start from the rendered seat {seat:?}, not the approach cell {approach:?}"
         ),
         other => panic!("expected snap-back Walking pose, got {other:?}"),
@@ -269,7 +271,7 @@ fn snap_back_origin_is_frozen_across_frames() {
     for i in 0..8u64 {
         let t = now0 + Duration::from_millis(i * PAINT_FRAME_MS);
         match derive_with_routing(&slot, t, &l, &mut rig.rctx()) {
-            Some(Pose::Walking { from, .. }) => origins.push((i, from)),
+            Some(Pose::Walking { segment, .. }) => origins.push((i, segment.from())),
             other => panic!("frame {i}: expected Walking pose mid snap-back, got {other:?}"),
         }
     }
@@ -585,7 +587,7 @@ fn snap_back_skipped_without_recent_history() {
 }
 
 #[test]
-fn multi_segment_path_maps_t_to_segment_via_octile_distance() {
+fn multi_segment_path_maps_progress_to_segment_via_octile_distance() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();
     let slot = entry_slot(now - Duration::from_millis(400));
@@ -598,14 +600,15 @@ fn multi_segment_path_maps_t_to_segment_via_octile_distance() {
     let mut rig = RouteRig::new(StubRouter::corners(vec![door, mid, desk]));
     let p = derive_with_routing(&slot, now, &l, &mut rig.rctx());
     match p {
-        Some(Pose::Walking {
-            from, to, t_x1000, ..
-        }) => {
+        Some(Pose::Walking { segment, .. }) => {
+            let from = segment.from();
+            let to = segment.to();
             assert_eq!(from, door, "first segment starts at door, got {from:?}");
             assert_eq!(to, mid, "first segment ends at mid, got {to:?}");
             assert!(
-                (0..=500).contains(&t_x1000),
-                "expected first-segment seg_t in [0,500], got t_x1000={t_x1000}"
+                segment.travelled()
+                    <= Segment::straight(door, mid, LegProgress::of(1, 2)).travelled(),
+                "expected first-segment progress in [0,half], got {segment:?}"
             );
             assert!(rig.history.recent(slot.agent_id, 1_000, now).is_some());
         }
@@ -710,6 +713,7 @@ fn snap_back_progress_is_physics_eased_not_linear() {
         .expect("snap_back profile stored")
         .profile;
     let dur_ms = profile.duration_ms;
+    let path_len = profile.path_len_octile;
     assert!(
         dur_ms > 0,
         "profile duration must be > 0 for a non-trivial distance"
@@ -728,10 +732,17 @@ fn snap_back_progress_is_physics_eased_not_linear() {
     let p = derive_with_routing(&slot_q, quarter_now, &l, &mut rig.rctx());
 
     match p {
-        Some(Pose::Walking { t_x1000, .. }) => {
+        Some(Pose::Walking { segment, .. }) => {
+            let travelled = segment.travelled();
+            let route = &rig.walks[&slot_q.agent_id]
+                .walk_path
+                .as_ref()
+                .expect("the chair settle corners the route, so it is frozen")
+                .path;
+            let linear = Segment::on_route(route, LegProgress::of(dur_ms / 4, dur_ms)).travelled();
             assert!(
-                t_x1000 < 250,
-                "physics ease-in: expected t_x1000 < 250 at 25% of duration, got {t_x1000}"
+                travelled < linear,
+                "physics ease-in: expected behind a linear walk at 25% of duration, got {travelled} of {path_len}, linear {linear}"
             );
         }
         other => panic!("expected Walking pose at 25% of snap-back duration, got {other:?}"),
@@ -1052,10 +1063,19 @@ fn exit_far_completes_before_grace_window_no_vanish() {
     match derive_with_routing(&slot, now, &l, &mut rig.rctx()) {
         // Walking at the end of the path, or already arrived (None, GC
         // imminent) — either way NOT stuck mid-corridor.
-        Some(Pose::Walking { t_x1000, .. }) => assert!(
-            t_x1000 >= 950,
-            "far exit must reach the door by the grace window (no mid-corridor vanish), got t_x1000={t_x1000}"
-        ),
+        Some(Pose::Walking { segment, .. }) => {
+            let travelled = segment.travelled();
+            let route_len = rig.walks[&slot.agent_id]
+                .exit
+                .as_ref()
+                .expect("exit profile snapshotted")
+                .profile
+                .path_len_octile;
+            assert!(
+                u64::from(travelled) * 20 >= 19 * u64::from(route_len),
+                "far exit must reach the door by the grace window (no mid-corridor vanish), got {travelled} of {route_len}"
+            );
+        }
         None => {}
         other => panic!("expected Walking near the door or None (arrived), got {other:?}"),
     }
@@ -2134,11 +2154,10 @@ fn frozen_leg_anchor_continuous_across_router_shape_change() {
         }
         let slot = entry_slot(now - Duration::from_millis(200));
         let t = now + Duration::from_millis(i * PAINT_FRAME_MS);
-        if let Some(Pose::Walking {
-            from, to, t_x1000, ..
-        }) = derive_with_routing(&slot, t, &l, &mut rig.rctx())
+        if let Some(Pose::Walking { segment, .. }) =
+            derive_with_routing(&slot, t, &l, &mut rig.rctx())
         {
-            let pos = walking_position(from, to, t_x1000);
+            let pos = segment.at();
             if let Some(p) = prev {
                 let step = (i32::from(pos.x) - i32::from(p.x))
                     .abs()
@@ -2231,19 +2250,22 @@ fn route_walking_pose_straight_leg_records_lerp_and_clears_walk_path() {
         now,
         &l,
         &mut rig.rctx(),
-        Pose::walking(from, to, 500, false),
+        LegPose {
+            from,
+            to,
+            progress: LegProgress::of(1, 2),
+            carrying_coffee: false,
+        },
         Settle::None,
     );
 
     match p {
-        Some(Pose::Walking {
-            from: f,
-            to: t,
-            t_x1000,
-            ..
-        }) => {
-            assert_eq!((f, t), (from, to), "straight leg keeps original endpoints");
-            assert_eq!(t_x1000, 500, "straight leg passes t_x1000 through");
+        Pose::Walking { segment, .. } => {
+            assert_eq!(
+                segment,
+                Segment::straight(from, to, LegProgress::of(1, 2)),
+                "straight leg keeps original endpoints and passes progress through"
+            );
         }
         other => panic!("expected straight Walking, got {other:?}"),
     }
@@ -2259,79 +2281,8 @@ fn route_walking_pose_straight_leg_records_lerp_and_clears_walk_path() {
         .expect("history");
     assert_eq!(
         recorded,
-        walking_position(from, to, 500),
+        Segment::straight(from, to, LegProgress::of(1, 2)).at(),
         "straight leg records the lerped position"
-    );
-}
-
-#[test]
-fn route_walking_pose_coincident_path_returns_input_pose() {
-    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let l = layout();
-    let slot = unit_slot(now);
-    let p = Point { x: 40, y: 40 };
-
-    let mut rig = RouteRig::new(StubRouter::corners(vec![p, p, p]));
-    // 3 coincident points: len > 2 (so not the straight branch), total length 0.
-
-    let input = Pose::Walking {
-        from: p,
-        to: p,
-        t_x1000: 500,
-        travelled: 2,
-        carrying_coffee: false,
-    };
-    let out = route_walking_pose(&slot, now, &l, &mut rig.rctx(), input, Settle::None);
-    assert_eq!(
-        out,
-        Some(input),
-        "a zero-length (coincident) polyline returns the input pose unchanged"
-    );
-}
-
-#[test]
-fn route_walking_pose_records_at_waypoint_and_aimless_history() {
-    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let l = layout();
-    assert!(!l.waypoints.is_empty(), "layout must have waypoints");
-    let slot = unit_slot(now);
-
-    let mut rig = RouteRig::new(StubRouter::straight());
-
-    let wp0 = l.waypoints[0];
-    let out = route_walking_pose(
-        &slot,
-        now,
-        &l,
-        &mut rig.rctx(),
-        Pose::AtWaypoint {
-            wp: 0,
-            kind: wp0.kind,
-        },
-        Settle::None,
-    );
-    assert!(matches!(out, Some(Pose::AtWaypoint { wp: 0, .. })));
-    assert_eq!(
-        rig.history.recent(slot.agent_id, 1_000, now),
-        Some(wp0.pos),
-        "AtWaypoint must record the waypoint pos to history"
-    );
-
-    let dest = Point { x: 55, y: 60 };
-    let later = now + Duration::from_millis(10);
-    let out2 = route_walking_pose(
-        &slot,
-        later,
-        &l,
-        &mut rig.rctx(),
-        Pose::AimlessAt { dest },
-        Settle::None,
-    );
-    assert!(matches!(out2, Some(Pose::AimlessAt { .. })));
-    assert_eq!(
-        rig.history.recent(slot.agent_id, 1_000, later),
-        Some(dest),
-        "AimlessAt must record its dest to history"
     );
 }
 
@@ -2386,65 +2337,65 @@ fn route_walking_pose_measures_travelled_along_the_whole_route() {
     let a = Point { x: 10, y: 10 };
     let b = Point { x: 30, y: 10 };
     let c = Point { x: 30, y: 30 };
-    let total = octile_path_len(&[a, b, c]);
     let mut rig = RouteRig::new(StubRouter::corners(vec![a, b, c]));
-    for t in [0, 250, 500, 750, 1000] {
+    for t in (0..=4).map(|q| LegProgress::of(q, 4)) {
         let out = route_walking_pose(
             &slot,
             now,
             &l,
             &mut rig.rctx(),
-            Pose::walking(a, c, t, false),
+            LegPose {
+                from: a,
+                to: c,
+                progress: t,
+                carrying_coffee: false,
+            },
             Settle::None,
         );
-        let Some(Pose::Walking { travelled, .. }) = out else {
-            panic!("a walk at {t}, got {out:?}");
+        let Pose::Walking { segment, .. } = out else {
+            panic!("a walk at {t:?}, got {out:?}");
         };
-        assert_eq!(travelled, pure::distance_at(t, total), "at {t}");
+        assert_eq!(segment, Segment::on_route(&[a, b, c], t), "at {t:?}");
     }
 }
 
 #[test]
-fn route_walking_pose_t_overshoot_snaps_to_final_segment() {
-    // The "past the last segment" fall-through fires only when `travelled` exceeds
-    // the summed leg lengths, which in-tree callers never do — hence the
-    // out-of-range t_x1000=2000 below.
-    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let l = layout();
-    let slot = unit_slot(now);
+fn on_route_starts_and_ends_where_the_leg_does() {
     let a = Point { x: 10, y: 10 };
     let b = Point { x: 30, y: 10 };
     let c = Point { x: 30, y: 30 };
+    let path = [a, b, c];
 
-    let mut rig = RouteRig::new(StubRouter::corners(vec![a, b, c]));
-
-    let out = route_walking_pose(
-        &slot,
-        now,
-        &l,
-        &mut rig.rctx(),
-        Pose::walking(a, c, 2000, false),
-        Settle::None,
-    );
-
-    match out {
-        Some(Pose::Walking {
-            from, to, t_x1000, ..
-        }) => {
-            assert_eq!(from, b, "snap-to-final uses path[last-1] as `from`");
-            assert_eq!(to, c, "snap-to-final uses path[last] as `to`");
-            assert_eq!(
-                t_x1000, 1000,
-                "snap-to-final pins t_x1000 to the segment end"
-            );
-        }
-        other => panic!("expected final-segment Walking, got {other:?}"),
-    }
+    let start = Segment::on_route(&path, LegProgress::ZERO);
+    assert_eq!((start.at(), start.travelled()), (a, 0));
+    let end = Segment::on_route(&path, LegProgress::DONE);
     assert_eq!(
-        rig.history.recent(slot.agent_id, 1_000, now),
-        Some(c),
-        "snap-to-final records the final polyline point to history"
+        (end.from(), end.to(), end.at(), end.travelled()),
+        (b, c, c, octile_path_len(&path)),
     );
+}
+
+#[test]
+fn on_route_never_walks_back() {
+    let path = [
+        Point { x: 10, y: 10 },
+        Point { x: 30, y: 10 },
+        Point { x: 50, y: 30 },
+        Point { x: 50, y: 60 },
+    ];
+    let mut last = (0, 0);
+    for q in 0..=64 {
+        let segment = Segment::on_route(&path, LegProgress::of(q, 64));
+        let index = path
+            .iter()
+            .position(|&p| p == segment.from())
+            .expect("a segment starts on a route point");
+        assert!(
+            segment.travelled() >= last.0 && index >= last.1,
+            "step {q}: {segment:?} walked back from {last:?}"
+        );
+        last = (segment.travelled(), index);
+    }
 }
 
 #[test]
@@ -2479,8 +2430,9 @@ fn a_resurrect_after_the_walkout_arrived_re_enters_through_the_door() {
 
     let p = derive_with_routing(&slot, arrived, &l, &mut rig.rctx());
     match p {
-        Some(Pose::Walking { from, .. }) => assert_eq!(
-            from, door,
+        Some(Pose::Walking { segment, .. }) => assert_eq!(
+            segment.from(),
+            door,
             "a resurrect past its walkout must re-enter from the door"
         ),
         other => panic!("expected a fresh entry walk, got {other:?}"),

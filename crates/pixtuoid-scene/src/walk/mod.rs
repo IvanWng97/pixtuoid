@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
-use crate::physics::{WalkIntent, WalkProfile, walk_arrived, walk_profile};
+use crate::physics::{
+    LegProgress, WalkIntent, WalkProfile, octile_distance, octile_path_len, walk_arrived,
+    walk_profile,
+};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::state::AgentSlot;
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
@@ -14,7 +17,7 @@ use crate::pose::{
     SpotClaims, WANDER_DWELL_EST_MS, dwell_ms, est_wander_cycle_ms, seated_dwell_ms,
     stale_resume_gap_ms, takes_trip,
 };
-use crate::pose::{desk_leg_endpoint, octile_distance, route_jittered};
+use crate::pose::{desk_leg_endpoint, route_jittered};
 
 /// Frozen A* polyline for one in-flight walk leg. Snapshotted when the leg's
 /// `(from, to)` first appear and reused unchanged: per-frame occupancy churn
@@ -50,9 +53,9 @@ pub(crate) enum WanderPhase {
 pub(crate) struct WanderFrame {
     /// The resolved phase this frame — selects the pose builder's arm.
     pub phase: WanderPhase,
-    /// Physics walk progress, `0..=`[`PROGRESS_SCALE`](crate::physics::PROGRESS_SCALE),
-    /// meaningful ONLY in `WalkingOut`/`WalkingBack` (0 otherwise).
-    pub t_x1000: u16,
+    /// Physics walk progress, meaningful ONLY in `WalkingOut`/`WalkingBack`
+    /// ([`LegProgress::ZERO`] otherwise).
+    pub progress: LegProgress,
     /// The current trip's destination cell (the walk `to` / waypoint `dest`).
     pub dest: Point,
     /// The current trip's kind — the seat cell + waypoint identity the walk /
@@ -368,22 +371,19 @@ pub(crate) fn advance_wander(
                         .unwrap_or(now);
                 }
             }
-            (walk.wander.phase, 0)
+            (walk.wander.phase, LegProgress::ZERO)
         }
 
         WanderPhase::WalkingOut(profile) => {
             match poll_walk_leg(&profile, elapsed_phase, may_transition) {
                 WalkLegStatus::InFlight(t) => (WanderPhase::WalkingOut(profile), t),
-                WalkLegStatus::Arrived {
-                    t_x1000,
-                    walk_total,
-                } => {
+                WalkLegStatus::Arrived { walk_total } => {
                     // Snapshot the walk-back profile now — the overlay may differ
                     // by the time the dwell ends.
                     let back = snapshot_back_profile(slot, walk, layout, router, overlay);
                     walk.wander.phase = WanderPhase::AtWaypoint(back);
                     advance_phase_clock(walk, walk_total, now);
-                    (WanderPhase::AtWaypoint(back), t_x1000)
+                    (WanderPhase::AtWaypoint(back), LegProgress::ZERO)
                 }
             }
         }
@@ -397,20 +397,20 @@ pub(crate) fn advance_wander(
                     .checked_add(Duration::from_millis(dwell_dur))
                     .unwrap_or(now);
             }
-            (walk.wander.phase, 0)
+            (walk.wander.phase, LegProgress::ZERO)
         }
 
         WanderPhase::WalkingBack(profile) => {
             match poll_walk_leg(&profile, elapsed_phase, may_transition) {
                 WalkLegStatus::InFlight(t) => (WanderPhase::WalkingBack(profile), t),
-                WalkLegStatus::Arrived { walk_total, .. } => {
+                WalkLegStatus::Arrived { walk_total } => {
                     // `target.dest` is deliberately left as-is: the Seated arm
                     // never reads it and the next WalkingOut overwrites it.
                     walk.wander.cycle_n += 1;
                     walk.wander.target.kind = WanderKind::Aimless;
                     walk.wander.phase = WanderPhase::Seated;
                     advance_phase_clock(walk, walk_total, now);
-                    (WanderPhase::Seated, 0)
+                    (WanderPhase::Seated, LegProgress::ZERO)
                 }
             }
         }
@@ -422,34 +422,33 @@ pub(crate) fn advance_wander(
 
     // `result.0` == `walk.wander.phase` in every arm, so the frame's
     // `dest`/`kind` always describe the returned phase.
-    let (phase, t_x1000) = result;
+    let (phase, progress) = result;
     WanderFrame {
         phase,
-        t_x1000,
+        progress,
         dest: walk.wander.target.dest,
         kind: walk.wander.target.kind,
     }
 }
 
 enum WalkLegStatus {
-    /// Still walking: the physics progress `t_x1000`, `0..=`[`PROGRESS_SCALE`](crate::physics::PROGRESS_SCALE).
-    InFlight(u16),
+    /// Still walking: the physics progress.
+    InFlight(LegProgress),
     /// The walk and its pause have completed; `walk_total` = `duration_ms +
     /// pause_ms`.
-    Arrived { t_x1000: u16, walk_total: u64 },
+    Arrived { walk_total: u64 },
 }
 
 /// The progress/arrival check the `WalkingOut` and `WalkingBack` arms share;
 /// each arm runs its OWN divergent on-arrival cleanup.
 fn poll_walk_leg(profile: &WalkProfile, elapsed_phase: u64, may_transition: bool) -> WalkLegStatus {
-    let t_x1000 = crate::physics::walk_progress(profile, elapsed_phase);
+    let progress = crate::physics::walk_progress(profile, elapsed_phase);
     if may_transition && walk_arrived(profile, elapsed_phase) {
         WalkLegStatus::Arrived {
-            t_x1000,
             walk_total: profile.duration_ms + profile.pause_ms,
         }
     } else {
-        WalkLegStatus::InFlight(t_x1000)
+        WalkLegStatus::InFlight(progress)
     }
 }
 
@@ -555,7 +554,7 @@ pub(crate) struct LegPlan {
 
 /// Freeze one walk leg's timing profile. Measuring the ROUTED (not raw)
 /// polyline is load-bearing: the duration must cover the whole path or `t`
-/// reaches [`PROGRESS_SCALE`](crate::physics::PROGRESS_SCALE) before the sprite
+/// reaches [`LegProgress::DONE`] before the sprite
 /// arrives and it pops.
 pub(crate) fn snapshot_leg_profile(
     router: &mut dyn Router,
@@ -595,15 +594,6 @@ fn snapshot_back_profile(
             intent: WalkIntent::WanderBack,
         },
     )
-}
-
-/// Octile length of a routed polyline — the same metric A* uses, so the
-/// snapshotted length is consistent with per-segment timing. 0 below 2 points.
-pub(crate) fn octile_path_len(path: &[Point]) -> u32 {
-    if path.len() < 2 {
-        return 0;
-    }
-    path.windows(2).map(|w| octile_distance(w[0], w[1])).sum()
 }
 
 /// Octile length of the settle segment `approach → seat`, or 0 when there is no

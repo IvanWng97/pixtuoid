@@ -11,6 +11,7 @@ use crate::floor::{FloorInputs, PetInputs};
 use crate::layout::CHARACTER_SPRITE_W;
 use crate::layout::{Point, Size, sort_row_at};
 use crate::pack::desk_art_top;
+use crate::physics::LegProgress;
 use crate::pose;
 use crate::sim::anchors::{
     back_couch_top_left, compute_door_frame_idx, seated_top_left, walking_top_left,
@@ -3258,8 +3259,8 @@ fn sim_step_advances_walks_without_painting() {
     let mut owned = OwnedSimStores::new();
     let mut stores = owned.stores();
 
-    let walk_t = |f: &SimFrame| match f.poses.get(&id) {
-        Some(Some(Pose::Walking { t_x1000, .. })) => *t_x1000,
+    let travelled = |f: &SimFrame| match f.poses.get(&id) {
+        Some(Some(Pose::Walking { segment, .. })) => segment.travelled(),
         other => panic!("expected an entry walk pose, got {other:?}"),
     };
     let f1 = sim_step(
@@ -3293,10 +3294,10 @@ fn sim_step_advances_walks_without_painting() {
         },
     );
     assert!(
-        walk_t(&f2) > walk_t(&f1),
+        travelled(&f2) > travelled(&f1),
         "entry walk must progress between ticks: {} -> {}",
-        walk_t(&f1),
-        walk_t(&f2)
+        travelled(&f1),
+        travelled(&f2)
     );
     assert!(
         f2.characters
@@ -5409,7 +5410,15 @@ fn only_a_placement_that_breathes_takes_the_breath() {
         let [p] = <[_; 1]>::try_from(placements).expect("one agent, one placement");
         p
     };
-    let walker = place(Pose::walking(mid, mid, 0, false));
+    let walker = place(
+        crate::pose::LegPose {
+            from: mid,
+            to: mid,
+            progress: LegProgress::ZERO,
+            carrying_coffee: false,
+        }
+        .straight(),
+    );
     let idler = place(Pose::AimlessAt { dest: mid });
     let sitter = place(Pose::SeatedThinking);
     assert!(!walker.breathes && idler.breathes && sitter.breathes);

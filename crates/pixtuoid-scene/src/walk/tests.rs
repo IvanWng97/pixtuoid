@@ -113,7 +113,7 @@ impl Router for FixedLen {
         from: Point,
         _to: Point,
     ) -> Vec<Point> {
-        let steps = (self.octile_len / crate::pathfind::OCTILE_STRAIGHT_COST) as u16;
+        let steps = (self.octile_len / crate::physics::OCTILE_STRAIGHT_COST) as u16;
         let mid = Point {
             x: from.x + steps / 2,
             y: from.y,

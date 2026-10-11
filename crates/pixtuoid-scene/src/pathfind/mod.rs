@@ -17,6 +17,7 @@ use crate::layout::{
     Bounds, COARSE_CELL_SIZE, CoarseGrid, Point, cell_anchor, cell_center, cell_walkable, snap,
     snap_where,
 };
+use crate::physics::{OCTILE_DIAGONAL_COST, OCTILE_STRAIGHT_COST, octile_cost};
 
 /// Cell size in pixels — the coarse routing-grid edge, the SHARED
 /// `layout::coarse` one, so router coarsening can't drift from reachability
@@ -174,19 +175,7 @@ impl PartialOrd for Node {
     }
 }
 
-/// Octile-distance step costs, integer so A* needs no floats — a diagonal
-/// about √2 straights. Shared with `pose::octile_distance` so the heuristic
-/// and the path metric can't drift; [`heuristic`] ignores the preferred-zone
-/// discount, so a zone-biased route is not guaranteed shortest.
-pub(crate) const OCTILE_STRAIGHT_COST: u32 = 10;
-pub(crate) const OCTILE_DIAGONAL_COST: u32 = 14;
-
-/// The octile distance for deltas `(dx, dy)` — THE combining formula shared by
-/// the A* [`heuristic`] (coarse cells) and `pose::octile_distance` (pixel Points).
-pub(crate) fn octile_cost(dx: u32, dy: u32) -> u32 {
-    OCTILE_DIAGONAL_COST * dx.min(dy) + OCTILE_STRAIGHT_COST * (dx.max(dy) - dx.min(dy))
-}
-
+/// Ignores the preferred-zone discount, so a zone-biased route is not guaranteed shortest.
 fn heuristic(a: (u16, u16), b: (u16, u16)) -> u32 {
     let dx = (i32::from(a.0) - i32::from(b.0)).unsigned_abs();
     let dy = (i32::from(a.1) - i32::from(b.1)).unsigned_abs();
@@ -357,22 +346,22 @@ fn reconstruct(
         .iter()
         .map(|&(cx, cy)| cell_anchor(mask, cx, cy))
         .collect();
-    // A raw endpoint stands in for its own cell's anchor only where the leg it
+    // A raw endpoint stands in for its own cell's anchor only where the segment it
     // shortens stays on open floor: its cell can be up to half wall, and the
-    // straight leg past it then crosses the wall.
+    // straight segment past it then crosses the wall.
     let mut pts = vec![from];
     match anchors[..] {
         [only] => {
-            if !leg_clear(mask, from, to) {
+            if !segment_clear(mask, from, to) {
                 pts.push(only);
             }
         }
         [first, ref inner @ .., last] => {
-            if !leg_clear(mask, from, inner.first().copied().unwrap_or(last)) {
+            if !segment_clear(mask, from, inner.first().copied().unwrap_or(last)) {
                 pts.push(first);
             }
             pts.extend_from_slice(inner);
-            if pts.last().is_some_and(|&p| !leg_clear(mask, p, to)) {
+            if pts.last().is_some_and(|&p| !segment_clear(mask, p, to)) {
                 pts.push(last);
             }
         }
@@ -380,19 +369,19 @@ fn reconstruct(
     }
     pts.push(to);
     let mut turned = Vec::with_capacity(pts.len() * 2);
-    for leg in pts.windows(2) {
-        turned.push(leg[0]);
-        turned.extend(leg_corners(mask, leg[0], leg[1]));
+    for segment in pts.windows(2) {
+        turned.push(segment[0]);
+        turned.extend(segment_corners(mask, segment[0], segment[1]));
     }
     turned.push(to);
     simplify_polyline(mask, turned)
 }
 
-/// The corners a leg from `a` to `b` turns on to stay on open floor: none
-/// when the straight leg does, an [`elbow`] when an L does, else a
-/// [`pixel_detour`]. A leg neither clears stays straight.
-fn leg_corners(mask: &WalkableMask, a: Point, b: Point) -> Vec<Point> {
-    if leg_clear(mask, a, b) {
+/// The corners a segment from `a` to `b` turns on to stay on open floor: none
+/// when the straight segment does, an [`elbow`] when an L does, else a
+/// [`pixel_detour`]. A segment neither clears stays straight.
+fn segment_corners(mask: &WalkableMask, a: Point, b: Point) -> Vec<Point> {
+    if segment_clear(mask, a, b) {
         return Vec::new();
     }
     elbow(mask, a, b)
@@ -401,15 +390,15 @@ fn leg_corners(mask: &WalkableMask, a: Point, b: Point) -> Vec<Point> {
         .unwrap_or_default()
 }
 
-/// How far past the box a leg spans [`pixel_detour`] searches: the gap
+/// How far past the box a segment spans [`pixel_detour`] searches: the gap
 /// joining two half-open routing cells can lie beside either.
 const DETOUR_MARGIN: u16 = CELL_SIZE;
 
 /// The corners of a shortest walk from `a` to `b` over open pixels, stepping
 /// orthogonally inside the box the two span grown by [`DETOUR_MARGIN`], pulled
-/// straight wherever a leg stays on open floor; `None` when the box holds no
+/// straight wherever a segment stays on open floor; `None` when the box holds no
 /// such walk. Two routing cells are walkable at half open, so the gap joining
-/// them can be a pixel wide, where neither the straight leg nor an L fits.
+/// them can be a pixel wide, where neither the straight segment nor an L fits.
 fn pixel_detour(mask: &WalkableMask, a: Point, b: Point) -> Option<Vec<Point>> {
     let lo = |p: u16, q: u16| p.min(q).saturating_sub(DETOUR_MARGIN);
     let hi = |p: u16, q: u16, end: u16| {
@@ -456,7 +445,7 @@ fn pixel_detour(mask: &WalkableMask, a: Point, b: Point) -> Option<Vec<Point>> {
     while i + 1 < walk.len() {
         i = (i + 1..walk.len())
             .rev()
-            .find(|&j| leg_clear(mask, walk[i], walk[j]))
+            .find(|&j| segment_clear(mask, walk[i], walk[j]))
             .unwrap_or(i + 1);
         corners.extend(walk.get(i).filter(|_| i + 1 < walk.len()));
     }
@@ -464,29 +453,31 @@ fn pixel_detour(mask: &WalkableMask, a: Point, b: Point) -> Option<Vec<Point>> {
 }
 
 /// The corner an axis-aligned L from `a` to `b` turns on, when the
-/// straight leg crosses blocked floor and one of the two L-shaped ones doesn't.
-/// Two adjacent routing cells are walkable at half open, so the straight leg
+/// straight segment crosses blocked floor and one of the two L-shaped ones doesn't.
+/// Two adjacent routing cells are walkable at half open, so the straight segment
 /// between their anchors can clip the corner of a wall standing in either.
 fn elbow(mask: &WalkableMask, a: Point, b: Point) -> Option<Point> {
-    if leg_clear(mask, a, b) {
+    if segment_clear(mask, a, b) {
         return None;
     }
     [Point { x: b.x, y: a.y }, Point { x: a.x, y: b.y }]
         .into_iter()
-        .find(|&c| mask.is_walkable(c.x, c.y) && leg_clear(mask, a, c) && leg_clear(mask, c, b))
+        .find(|&c| {
+            mask.is_walkable(c.x, c.y) && segment_clear(mask, a, c) && segment_clear(mask, c, b)
+        })
 }
 
 /// Does every pixel a walker passes strictly between `a` and `b` stand on the
 /// static `mask`? The ends are exempt: a raw endpoint may sit in a routing pad.
-fn leg_clear(mask: &WalkableMask, a: Point, b: Point) -> bool {
-    crate::physics::leg_pixels(a, b)
+fn segment_clear(mask: &WalkableMask, a: Point, b: Point) -> bool {
+    crate::physics::segment_pixels(a, b)
         .filter(|&p| p != a && p != b)
         .all(|p| mask.is_walkable(p.x, p.y))
 }
 
-/// Drop each corner collinear with its neighbours, unless the merged leg would
+/// Drop each corner collinear with its neighbours, unless the merged segment would
 /// cross blocked floor its two halves step around: a walk truncates toward its
-/// start, so one long leg lands on different pixels than its halves.
+/// start, so one long segment lands on different pixels than its halves.
 fn simplify_polyline(mask: &WalkableMask, pts: Vec<Point>) -> Vec<Point> {
     if pts.len() < 3 {
         return pts;
@@ -502,8 +493,8 @@ fn simplify_polyline(mask: &WalkableMask, pts: Vec<Point>) -> Vec<Point> {
         let dx_out = i32::from(next.x) - i32::from(here.x);
         let dy_out = i32::from(next.y) - i32::from(here.y);
         let collinear = dx_in * dy_out == dy_in * dx_out;
-        let crossed_clean = leg_clear(mask, prev, here) && leg_clear(mask, here, next);
-        if !collinear || (crossed_clean && !leg_clear(mask, prev, next)) {
+        let crossed_clean = segment_clear(mask, prev, here) && segment_clear(mask, here, next);
+        if !collinear || (crossed_clean && !segment_clear(mask, prev, next)) {
             out.push(here);
         }
     }

@@ -10,7 +10,7 @@ use crate::layout::{
     Bounds, DwellWindow, Point, SceneLayout, WaypointKind, desk_furniture_def,
     desk_walk_anchor_facing, furniture_def,
 };
-use crate::physics::PROGRESS_SCALE;
+use crate::physics::LegProgress;
 use crate::walk::{WanderKind, WanderTarget};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::sprite::Sprite;
@@ -49,23 +49,12 @@ pub(crate) fn typing_frame(slot: &AgentSlot, beat: crate::anim::Beat, anim: &Spr
     (crate::pack::looping_frame_index(anim, beat) + phase) % frames
 }
 
-/// The frame walk `anim` shows [`travelled`](Pose::Walking::travelled) along
+/// The frame walk `anim` shows [`travelled`](crate::physics::Segment::travelled) along
 /// its leg: a full cycle each `stride`.
 pub(crate) fn walk_frame(travelled: u32, anim: &Sprite, stride: NonZeroU16) -> usize {
     let frames = anim.frames().len() as u64;
-    let per_cycle = u64::from(stride.get()) * u64::from(crate::pathfind::OCTILE_STRAIGHT_COST);
+    let per_cycle = u64::from(stride.get()) * u64::from(crate::physics::OCTILE_STRAIGHT_COST);
     ((u64::from(travelled) * frames / per_cycle) % frames) as usize
-}
-
-/// The distance `t_x1000` along a leg `length` long is, both in
-/// [`travelled`](Pose::Walking::travelled)'s unit.
-pub(crate) fn distance_at(t_x1000: u16, length: u32) -> u32 {
-    u32::from(t_x1000) * length / u32::from(PROGRESS_SCALE)
-}
-
-/// How far `t_x1000` along the straight leg `from`→`to` is.
-pub(crate) fn travelled_on(from: Point, to: Point, t_x1000: u16) -> u32 {
-    distance_at(t_x1000, super::octile_distance(from, to))
 }
 
 /// Spawn-window guard for entry routing in `pose::derive_with_routing`: the
@@ -179,17 +168,9 @@ pub(crate) enum Pose {
         /// Kind of the target waypoint (selects the concrete sprite).
         kind: WaypointKind,
     },
-    /// Walking along the current leg between two points.
+    /// Walking along the current leg, drawn on the segment it is on.
     Walking {
-        /// Leg start point (layout pixels).
-        from: Point,
-        /// Leg end point (layout pixels).
-        to: Point,
-        /// Progress along the leg, `0..=PROGRESS_SCALE`.
-        t_x1000: u16,
-        /// How far into the whole leg the walker is, in octile units: the
-        /// tenths of a layout pixel A* measures by.
-        travelled: u32,
+        segment: crate::physics::Segment,
         /// Whether the agent renders holding a coffee on this leg.
         carrying_coffee: bool,
     },
@@ -205,15 +186,22 @@ pub(crate) enum Pose {
     },
 }
 
-impl Pose {
-    /// Walking `t_x1000` along the straight leg `from`→`to`, as far as that is.
-    pub(crate) fn walking(from: Point, to: Point, t_x1000: u16, carrying_coffee: bool) -> Self {
+/// A walk stated on its whole leg, before it is drawn.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LegPose {
+    pub(crate) from: Point,
+    pub(crate) to: Point,
+    pub(crate) progress: LegProgress,
+    /// Whether the agent renders holding a coffee on this leg.
+    pub(crate) carrying_coffee: bool,
+}
+
+impl LegPose {
+    /// Drawn as the one straight segment between its own ends: no route bends it.
+    pub(crate) fn straight(self) -> Pose {
         Pose::Walking {
-            from,
-            to,
-            t_x1000,
-            travelled: travelled_on(from, to, t_x1000),
-            carrying_coffee,
+            segment: crate::physics::Segment::straight(self.from, self.to, self.progress),
+            carrying_coffee: self.carrying_coffee,
         }
     }
 }
@@ -268,9 +256,13 @@ pub(crate) fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) ->
 /// distinct from the routed path's kinematic profiles — the overlay/snapshot
 /// path stays linear so it has no per-frame history.
 fn linear_walk_pose(since_ms: u64, from: Point, to: Point) -> Pose {
-    let scale = u64::from(PROGRESS_SCALE);
-    let t = (since_ms * scale / ENTRY_ANIMATION_MS).min(scale) as u16;
-    Pose::walking(from, to, t, false)
+    LegPose {
+        from,
+        to,
+        progress: LegProgress::of(since_ms, ENTRY_ANIMATION_MS),
+        carrying_coffee: false,
+    }
+    .straight()
 }
 
 /// The state→pose tail shared by `derive` and `derive_state_only`, applied
@@ -549,17 +541,26 @@ fn idle_pose(slot: &AgentSlot, desk: Point, layout: &SceneLayout, elapsed_ms: u6
         Pose::SeatedIdle
     } else if phase_t < walk_out_end {
         let span = walk_out_end - seated_end;
-        let t = ((phase_t - seated_end) * u64::from(PROGRESS_SCALE) / span) as u16;
-        Pose::walking(desk, dest, t, false)
+        let t = LegProgress::of(phase_t - seated_end, span);
+        LegPose {
+            from: desk,
+            to: dest,
+            progress: t,
+            carrying_coffee: false,
+        }
+        .straight()
     } else if phase_t < at_wp_end {
         at_dest_pose
     } else {
-        // `span == WANDER_WALK_EST_MS` by construction; assert it so a future
-        // estimate-constant change that zeroed it can't divide by zero here.
         let span = cycle_ms - at_wp_end;
-        debug_assert!(span > 0, "idle_pose walk-back span invariant violated");
-        let t = ((phase_t - at_wp_end) * u64::from(PROGRESS_SCALE) / span) as u16;
-        Pose::walking(dest, desk, t, target.kind.carries_coffee())
+        let t = LegProgress::of(phase_t - at_wp_end, span);
+        LegPose {
+            from: dest,
+            to: desk,
+            progress: t,
+            carrying_coffee: target.kind.carries_coffee(),
+        }
+        .straight()
     }
 }
 

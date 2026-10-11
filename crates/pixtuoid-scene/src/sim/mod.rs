@@ -30,7 +30,6 @@ use crate::floor::{CoffeeState, FloorInputs, FloorMeta, PetInputs, VacancyDim};
 use crate::layout::{Facing, Pivot, Point, SceneLayout, Size, WALKING_Y_OFF};
 use crate::pathfind::Router;
 use crate::pet::PetKind;
-use crate::physics::walking_position;
 use crate::pose::{self, Pose, PoseHistory};
 use crate::walk::WalkState;
 
@@ -546,11 +545,11 @@ fn pet_placement(
     let Stance { at, walking } = walk.step(Roam::pet(stride), ground, timing)?;
     // a petted pet sits for it, even held mid-leg
     let (anim_name, frame_idx, flip) = match walking.filter(|_| petted.is_none()) {
-        Some(leg) => (
+        Some(segment) => (
             walk_anim.piece(),
-            pose::walk_frame(leg.travelled, pack.piece(walk_anim.piece()), stride),
+            pose::walk_frame(segment.travelled(), pack.piece(walk_anim.piece()), stride),
             // its walk faces east
-            leg.to.x < leg.from.x,
+            segment.to().x < segment.from().x,
         ),
         None => {
             let all_idle = agents
@@ -736,10 +735,10 @@ fn mascot_placements(
              }| {
                 let def = gateway_mascot_def(key.source())?;
                 let (anim_name, frame_idx) = match walking {
-                    Some(leg) => (
+                    Some(segment) => (
                         def.walk.piece(),
                         pose::walk_frame(
-                            leg.travelled,
+                            segment.travelled(),
                             pack.piece(def.walk.piece()),
                             pack.stride(def.walk),
                         ),
@@ -1030,12 +1029,10 @@ pub(crate) fn resolve_characters(
                 ));
             }
             Pose::Walking {
-                from,
-                to,
-                t_x1000,
-                travelled,
+                segment,
                 mut carrying_coffee,
             } => {
+                let (from, to, travelled) = (segment.from(), segment.to(), segment.travelled());
                 // Exit walks: core sets carrying_coffee=false (it holds no
                 // render-side state), but the coffee map knows better.
                 if agent.exiting_at.is_some() && coffee.contains_key(&agent.agent_id) {
@@ -1044,8 +1041,7 @@ pub(crate) fn resolve_characters(
                 if carrying_coffee {
                     new_coffee_carriers.push(agent.agent_id);
                 }
-                let pos = walking_position(from, to, t_x1000);
-                let walker_top_left = walking_top_left(pos, CHARACTER_SPRITE_W);
+                let walker_top_left = walking_top_left(segment.at(), CHARACTER_SPRITE_W);
                 let dx = i32::from(to.x) - i32::from(from.x);
                 let dy = i32::from(to.y) - i32::from(from.y);
                 // A glide on/off a seat (`to` is a foot-cell sitting down,
