@@ -141,7 +141,9 @@ pub(crate) struct SourceStatus {
     pub display_name: String,
     pub connected: bool,
     pub cli_present: bool,
-    /// A health/issue summary (install-broken / decode-drift), or `null` when n/a.
+    /// The source's worst issue as one line, or `null` if none was found: a broken
+    /// install or decode drift (connected sources only), or hooks an older release
+    /// left that still fire.
     // Generates `health?: string | null`. Do NOT add `schemars(required)` to force
     // it required: that STRIPS the `| null` → the WRONG `health: string`, and the
     // wire CAN be null. Optional is a harmless superset; nullable is load-bearing.
@@ -260,7 +262,7 @@ fn connect_target(
 ) -> Result<ConnectOutcome> {
     write_flags(cfg, target.is_none().then_some((sid, true)))?;
     Ok(match target {
-        Some(t) => ConnectOutcome::Installed(install::install_target(t, None, None)?),
+        Some(t) => ConnectOutcome::Installed(install::install_target(t, None)?),
         None => ConnectOutcome::FlagOnly,
     })
 }
@@ -402,7 +404,8 @@ pub struct ConnectionRow {
     pub config_path: Option<PathBuf>,
     /// `None` ⇒ connect/disconnect is a flag-only flip (no hooks to write).
     pub target: Option<&'static Target>,
-    /// Cached health summary, computed for CONNECTED rows only.
+    /// Cached health summary: a CONNECTED row's worst issue, a disconnected
+    /// one's hooks that fire anyway.
     pub health: Option<String>,
 }
 
@@ -485,9 +488,11 @@ pub(crate) fn build_rows(connected: &HashSet<String>, log: &str) -> Vec<Connecti
                 target,
                 facts,
                 connected,
-                health: connected
-                    .then(|| crate::doctor::diagnose(d.name, log, None).summary())
-                    .flatten(),
+                health: if connected {
+                    crate::doctor::diagnose(d.name, log, None).summary()
+                } else {
+                    crate::doctor::leftover_hooks_health(d.name)
+                },
             }
         })
         .collect();

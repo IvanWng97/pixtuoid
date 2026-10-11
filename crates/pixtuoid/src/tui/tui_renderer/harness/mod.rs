@@ -166,14 +166,98 @@ pub(super) fn region_diff(a: &RgbBuffer, b: &RgbBuffer, x0: u16, y0: u16, w: u16
     d
 }
 
+/// A backend that forwards every call to `inner`, its [`Tap`] seeing each
+/// draw's cells and each flush, and answering the window's pixel size.
+/// `append_lines` is forwarded too: ratatui defaults it to a no-op.
+pub(super) struct Tapped<B, T> {
+    pub(super) inner: B,
+    pub(super) tap: T,
+}
+
+/// What a [`Tapped`] backend lets a test see or answer; each defaults to
+/// forwarding.
+pub(super) trait Tap<B: Backend> {
+    /// Sees each draw's cells before `inner` does.
+    fn on_draw(&mut self, _cells: &[(u16, u16, &ratatui::buffer::Cell)]) {}
+    /// Runs before `inner` flushes.
+    fn on_flush(&mut self) {}
+    fn window_size(&mut self, inner: &mut B) -> Result<ratatui::backend::WindowSize, B::Error> {
+        inner.window_size()
+    }
+}
+
+impl<B: Backend, T: Tap<B>> Backend for Tapped<B, T> {
+    type Error = B::Error;
+    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+    where
+        I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
+    {
+        let cells: Vec<_> = content.collect();
+        self.tap.on_draw(&cells);
+        self.inner.draw(cells.into_iter())
+    }
+    fn append_lines(&mut self, n: u16) -> Result<(), Self::Error> {
+        self.inner.append_lines(n)
+    }
+    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.hide_cursor()
+    }
+    fn show_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.show_cursor()
+    }
+    fn get_cursor_position(&mut self) -> Result<ratatui::layout::Position, Self::Error> {
+        self.inner.get_cursor_position()
+    }
+    fn set_cursor_position<P: Into<ratatui::layout::Position>>(
+        &mut self,
+        position: P,
+    ) -> Result<(), Self::Error> {
+        self.inner.set_cursor_position(position)
+    }
+    fn clear(&mut self) -> Result<(), Self::Error> {
+        self.inner.clear()
+    }
+    fn clear_region(&mut self, clear_type: ratatui::backend::ClearType) -> Result<(), Self::Error> {
+        self.inner.clear_region(clear_type)
+    }
+    fn size(&self) -> Result<ratatui::layout::Size, Self::Error> {
+        self.inner.size()
+    }
+    fn window_size(&mut self) -> Result<ratatui::backend::WindowSize, Self::Error> {
+        self.tap.window_size(&mut self.inner)
+    }
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.tap.on_flush();
+        self.inner.flush()
+    }
+}
+
+impl<T> std::borrow::Borrow<TestBackend> for Tapped<TestBackend, T> {
+    fn borrow(&self) -> &TestBackend {
+        &self.inner
+    }
+}
+
+/// A write that lands `by` late on the `screen` clock.
+pub(super) struct Latency {
+    pub(super) screen: pixtuoid_scene::flash::ManualClock,
+    pub(super) by: Duration,
+}
+
+impl Latency {
+    pub(super) fn land(&self) {
+        self.screen.advance(self.by);
+    }
+}
+
 /// The terminal's side of a [`FrameOut`](crate::tui::FrameOut); set `fail` to
 /// make it refuse writes as a full terminal does (`WouldBlock`), or `slow` to
-/// make a flush take that long on a screen clock.
+/// make a flush land late.
 #[derive(Clone, Default)]
 pub(super) struct Wire {
     pub(super) bytes: Arc<std::sync::Mutex<Vec<u8>>>,
     pub(super) fail: Arc<std::sync::atomic::AtomicBool>,
-    pub(super) slow: Arc<std::sync::Mutex<Option<(pixtuoid_scene::flash::ManualClock, Duration)>>>,
+    pub(super) slow: Arc<std::sync::Mutex<Option<Latency>>>,
 }
 
 impl std::io::Write for Wire {
@@ -185,8 +269,8 @@ impl std::io::Write for Wire {
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
-        if let Some((screen, latency)) = &*self.slow.lock().expect("lock") {
-            screen.advance(*latency);
+        if let Some(latency) = &*self.slow.lock().expect("lock") {
+            latency.land();
         }
         Ok(())
     }
@@ -215,11 +299,6 @@ pub(super) fn half_blocks_on_screen(
     r.present_through(crate::tui::FrameOut::new(wire.clone(), true));
     r.flash = pixtuoid_scene::flash::FlashHold::on(screen.clock());
     (r, screen, wire)
-}
-
-/// What a [`half_blocks_on_screen`] renderer's terminal shows.
-pub(super) fn flushed(r: &TuiRenderer<TestBackend>) -> &ratatui::buffer::Buffer {
-    r.terminal.backend().buffer()
 }
 
 pub(super) fn two_floor_scene() -> SceneState {
