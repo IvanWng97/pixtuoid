@@ -440,3 +440,40 @@ fn a_seeded_groove_lays_every_hit_where_it_did() {
 }
 
 const GOLDEN: u64 = 0x71ca_6f22_f488_2daf;
+
+/// Both moods' first eight seeds, every event and the harmonic timeline as f32
+/// bits. `compose` runs no transcendental function, so these bits hold on every
+/// platform (RFC 3514), unlike the synth's.
+#[test]
+fn every_seed_composes_the_score_it_did() {
+    let mut words: Vec<u64> = Vec::new();
+    for mood in [Mood::Day, Mood::Night] {
+        for seed in 0..8 {
+            let s = compose(mood, seed);
+            words.push(u64::from(s.bpm.to_bits()));
+            for lane in [&s.sparkle, &s.keys, &s.bass] {
+                for &(at, note, vel) in lane {
+                    words.extend([
+                        u64::from(at.to_bits()),
+                        u64::from(note),
+                        u64::from(vel.to_bits()),
+                    ]);
+                }
+            }
+            for &(at, kind, gain) in &s.drums {
+                words.extend([
+                    u64::from(at.to_bits()),
+                    kind as u64,
+                    u64::from(gain.to_bits()),
+                ]);
+            }
+            words.extend(s.kick_times.iter().map(|t| u64::from(t.to_bits())));
+            words.extend(s.bar_chords.iter().flatten().map(|&n| u64::from(n)));
+            words.push(s.lead_voice as u64);
+        }
+    }
+    let h = pixtuoid_core::id::fnv1a(words);
+    assert_eq!(h, EVERY_SEED_GOLDEN, "{h:#018x}");
+}
+
+const EVERY_SEED_GOLDEN: u64 = 0xfd8d_51fc_dda2_5657;
