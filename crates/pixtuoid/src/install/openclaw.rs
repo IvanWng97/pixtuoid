@@ -232,9 +232,9 @@ pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
 pub(crate) fn plugin_artifacts(hook_path: &str) -> Result<Vec<(PathBuf, String)>> {
     let dir = plugin_dir()?;
     Ok(vec![
+        (dir.join("index.js"), render_plugin(hook_path)?),
         (dir.join("openclaw.plugin.json"), MANIFEST.to_string()),
         (dir.join("package.json"), PACKAGE.to_string()),
-        (dir.join("index.js"), render_plugin(hook_path)?),
     ])
 }
 

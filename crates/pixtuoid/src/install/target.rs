@@ -3,10 +3,48 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 /// Each file pixtuoid owns beside a config, at its absolute path with `hook_cmd` baked
-/// in. The paths come from the CLI's OWN state resolver, not the config path a test
-/// isolates itself with, so a test must redirect that resolver too or it writes the
-/// developer's real plugin.
+/// in, the one that bakes the shim first. The paths come from the CLI's OWN state
+/// resolver, not the config path a test isolates itself with, so a test must redirect
+/// that resolver too or it writes the developer's real plugin.
 pub(crate) type RenderBeside = fn(hook_cmd: &str) -> Result<Vec<(PathBuf, String)>>;
+
+pub(crate) type HookCommand = fn(resolved: &Path, explicit: bool) -> Result<String>;
+
+/// Where the shim a rendered plugin file bakes lives, read back from its content.
+pub(crate) type InstalledShim = fn(content: &str) -> crate::install::verify::ShimRef;
+
+/// A target's owned files, whichever kind of primary keys them: all `install::converge_files`
+/// is handed, so it cannot reach a config merge or a host registration.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum OwnedFiles {
+    Primary {
+        render: fn(hook_cmd: &str) -> Result<String>,
+        installed_shim: InstalledShim,
+    },
+    /// Its first file bakes the shim the way [`crate::install::verify::baked_shim`]
+    /// reads it, the reader doctor's `check_beside_shim` shares.
+    Beside(RenderBeside),
+}
+
+impl OwnedFiles {
+    /// Each file at its absolute path with `hook_cmd` baked in, the one that bakes the
+    /// shim first; an owned primary sits at `primary`.
+    pub(crate) fn render(self, primary: &Path, hook_cmd: &str) -> Result<Vec<(PathBuf, String)>> {
+        match self {
+            OwnedFiles::Primary { render, .. } => {
+                Ok(vec![(primary.to_path_buf(), render(hook_cmd)?)])
+            }
+            OwnedFiles::Beside(render) => render(hook_cmd),
+        }
+    }
+
+    pub(crate) fn installed_shim(self, content: &str) -> crate::install::verify::ShimRef {
+        match self {
+            OwnedFiles::Primary { installed_shim, .. } => installed_shim(content),
+            OwnedFiles::Beside(_) => crate::install::verify::baked_shim(content),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryStrategy {
@@ -50,7 +88,7 @@ pub struct Target {
     /// event, but a Config target's `merge_install` MAY append a per-entry suffix —
     /// CodeWhale bakes ` --event <name>` onto each entry, so its `hook_command`
     /// returns a per-source BASE that `merge_install` extends.
-    pub hook_command: fn(resolved: &Path, explicit: bool) -> Result<String>,
+    pub hook_command: HookCommand,
     pub primary: Primary,
     pub binary_strategy: BinaryStrategy,
     /// Presence probe overriding the default config-file-exists check. Needed
@@ -87,6 +125,7 @@ pub enum Primary {
     Owned {
         /// The primary's whole content, `hook_cmd` baked in.
         render: fn(hook_cmd: &str) -> Result<String>,
+        installed_shim: InstalledShim,
         /// The primary as an uninstall leaves it; `changed` iff it was ours. Same
         /// empty rule as `merge_uninstall`.
         uninstall: fn(content: &str) -> Result<MergeOutcome>,
@@ -111,6 +150,20 @@ impl Primary {
             Primary::Config { verify_schema, .. } | Primary::Owned { verify_schema, .. } => {
                 *verify_schema
             }
+        }
+    }
+
+    pub(crate) fn owned_files(&self) -> Option<OwnedFiles> {
+        match *self {
+            Primary::Config { beside, .. } => beside.map(OwnedFiles::Beside),
+            Primary::Owned {
+                render,
+                installed_shim,
+                ..
+            } => Some(OwnedFiles::Primary {
+                render,
+                installed_shim,
+            }),
         }
     }
 }
@@ -153,6 +206,7 @@ pub(crate) const CLAUDE: Target = Target {
     hook_command: crate::install::claude::hook_command,
     primary: Primary::Owned {
         render: crate::install::claude::render_hooks,
+        installed_shim: crate::install::claude::installed_shim,
         uninstall: crate::install::claude::uninstall,
         verify_schema: crate::install::claude::verify_schema,
     },
@@ -230,6 +284,7 @@ pub(crate) const OPENCODE: Target = Target {
     hook_command: crate::install::opencode::hook_command,
     primary: Primary::Owned {
         render: crate::install::opencode::render_plugin,
+        installed_shim: crate::install::verify::baked_shim,
         uninstall: crate::install::opencode::uninstall,
         verify_schema: crate::install::opencode::verify_schema,
     },
@@ -369,6 +424,7 @@ pub(crate) const OMP: Target = Target {
     hook_command: crate::install::omp::hook_command,
     primary: Primary::Owned {
         render: crate::install::omp::render_extension,
+        installed_shim: crate::install::verify::baked_shim,
         uninstall: crate::install::omp::uninstall,
         verify_schema: crate::install::omp::verify_schema,
     },

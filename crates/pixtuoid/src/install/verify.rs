@@ -33,6 +33,10 @@ pub(crate) fn baked_hook_path(content: &str) -> Option<PathBuf> {
     (!path.is_empty()).then(|| PathBuf::from(path))
 }
 
+pub(crate) fn baked_shim(content: &str) -> ShimRef {
+    baked_hook_path(content).map_or(ShimRef::Unknown, ShimRef::Absolute)
+}
+
 /// Marks a rendered artifact that BAKES the shim path. Matched against the
 /// INTENDED content the installer renders, never the file on disk.
 pub(crate) const BAKED_HOOK_MARKER: &str = "const HOOK_PATH";

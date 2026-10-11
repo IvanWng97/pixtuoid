@@ -80,12 +80,9 @@ pub(crate) fn uninstall(content: &str) -> Result<MergeOutcome> {
     })
 }
 
-/// The managed extension is a CODE artifact, so there is no per-event config
-/// to check. The re-render match is the check that isn't obvious: nothing
-/// re-installs on a pixtuoid upgrade (the opencode precedent), so without it an
-/// upgrader keeps their old FORWARD set forever and doctor says fine —
-/// `omp_extension_forward_set_is_pinned` only makes a change deliberate on the
-/// AUTHORING side, leaving the installed base silent.
+/// The managed extension is a CODE artifact, so there is no per-event config to
+/// check — only that the sentinel is present, the shim-path placeholder was
+/// substituted, and the baked `HOOK_PATH` is readable for the on-disk stat.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{SchemaParse, ShimRef};
     if !content.contains(SENTINEL) {
@@ -101,21 +98,8 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     let Some(p) = crate::install::verify::baked_hook_path(content) else {
         return SchemaParse::broken("could not read HOOK_PATH from the omp extension");
     };
-    let stale = render_extension(&p.to_string_lossy())
-        .map(|want| crate::install::plugin_code_differs(content, &want))
-        .unwrap_or(false);
     SchemaParse {
         shim: ShimRef::Absolute(p),
-        issues: if stale {
-            vec![
-                "the installed omp extension differs from this pixtuoid's — it \
-                 predates an upgrade, so events added since are not forwarded. \
-                 Reconnect omp via the Sources panel."
-                    .to_string(),
-            ]
-        } else {
-            Vec::new()
-        },
         ..Default::default()
     }
 }
@@ -275,32 +259,6 @@ mod tests {
                  observe-only"
             );
         }
-    }
-
-    #[test]
-    fn verify_schema_reports_a_bridge_that_predates_this_pixtuoid() {
-        let current = render_extension("/opt/pixtuoid-hook").expect("render");
-        assert!(
-            verify_schema(&current).issues.is_empty(),
-            "the extension this binary would install must verify clean"
-        );
-        let reworded = verify_schema(&crate::install::comment_only_edit(&current)).issues;
-        assert!(
-            reworded.is_empty(),
-            "an extension whose comments alone changed must verify clean, got {reworded:?}"
-        );
-
-        // An older pixtuoid's extension: same sentinel, same baked path, one
-        // event short — exactly the shape an upgrader keeps.
-        let stale = current.replacen("\"tool_approval_resolved\",\n", "", 1);
-        assert_ne!(stale, current, "the mutation must land");
-        let issues = verify_schema(&stale).issues;
-        assert!(
-            issues
-                .iter()
-                .any(|i| i.contains("predates an upgrade") && i.contains("Reconnect omp")),
-            "a stale extension must be reported with its remedy, got {issues:?}"
-        );
     }
 
     #[test]

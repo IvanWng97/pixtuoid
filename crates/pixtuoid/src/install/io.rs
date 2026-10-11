@@ -90,6 +90,9 @@ pub(crate) const SHIM_LOCATE_REMEDY: &str = "install it alongside pixtuoid (`bre
      pixtuoid` / `cargo install pixtuoid-hook` / `npm i -g pixtuoid`) or point \
      PIXTUOID_HOOK at an absolute path to the shim";
 
+/// The shim's binary name, which a bare-name hook command resolves on PATH.
+pub(crate) const HOOK_BIN: &str = "pixtuoid-hook";
+
 /// AUTO-locate `pixtuoid-hook`: PATH, then a sibling of the running exe — both
 /// arms return absolute, verified-existing paths. The [`HOOK_OVERRIDE_ENV`]
 /// override is deliberately NOT read here: [`super::resolve_hook_binary_from`] absolutizes it
@@ -97,7 +100,7 @@ pub(crate) const SHIM_LOCATE_REMEDY: &str = "install it alongside pixtuoid (`bre
 /// silently never fire from another cwd.
 pub(crate) fn default_hook_binary() -> Result<PathBuf> {
     default_hook_binary_from(
-        || which::which("pixtuoid-hook").ok(),
+        || which::which(HOOK_BIN).ok(),
         std::env::consts::EXE_EXTENSION,
         running_exe_dir,
     )
@@ -159,7 +162,7 @@ fn path_hit_is_native(p: &Path, exe_extension: &str) -> bool {
 /// The hook binary's filename next to the running exe: exec-form spawning needs
 /// the real PE name; PATHEXT is a shell behavior we must not rely on.
 fn hook_sibling_name() -> String {
-    format!("pixtuoid-hook{}", std::env::consts::EXE_SUFFIX)
+    format!("{HOOK_BIN}{}", std::env::consts::EXE_SUFFIX)
 }
 
 /// APPENDS `.suffix` to the full filename — never `with_extension`, which
@@ -379,7 +382,7 @@ pub(crate) fn write_config_atomic(path: &Path, contents: &str) -> Result<()> {
 /// hook config stores the name for portability and the CLI spawns hooks via PATH,
 /// so if this is false the installed hooks silently never fire.
 pub(crate) fn hook_on_path() -> bool {
-    which::which("pixtuoid-hook").is_ok()
+    which::which(HOOK_BIN).is_ok()
 }
 
 /// Follow symlink chain to the final target, even if that target doesn't exist

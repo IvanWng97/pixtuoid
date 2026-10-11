@@ -32,7 +32,7 @@ const PLUGIN_NAME: &str = "pixtuoid";
 
 /// Claude Code loads the hooks through its plugin system
 /// (code.claude.com/docs/en/plugins): a local marketplace whose one plugin loads
-/// in place, so a re-install's rewrite reaches the next session.
+/// in place, so a rewrite of the file reaches the next session.
 pub(crate) const HOST: HostRegistration = HostRegistration {
     register,
     unregister,
@@ -299,7 +299,7 @@ pub(crate) fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
         let p = if explicit {
             merge::hook_path_str(resolved)?
         } else {
-            "pixtuoid-hook"
+            io::HOOK_BIN
         };
         crate::install::hook_cmd::shell_hook_command(
             p,
@@ -367,7 +367,7 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
         // thing mapped on top.
         #[cfg(not(windows))]
         Some(c) => match crate::install::verify::shell_shim_ref(c.trim()) {
-            ShimRef::Absolute(p) if p.as_os_str() == "pixtuoid-hook" => ShimRef::BareName,
+            ShimRef::Absolute(p) if p.as_os_str() == io::HOOK_BIN => ShimRef::BareName,
             other => other,
         },
         // NOT that parser: CC's Windows entry is exec form (`args: []`), a bare
@@ -376,6 +376,10 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
         #[cfg(windows)]
         Some(c) => ShimRef::Absolute(std::path::PathBuf::from(c.trim())),
     }
+}
+
+pub(crate) fn installed_shim(content: &str) -> crate::install::verify::ShimRef {
+    verify_schema(content).shim
 }
 
 pub(crate) fn render_hooks(hook_cmd: &str) -> Result<String> {

@@ -821,121 +821,55 @@ fn verify_target_hard_flags_a_missing_beside_file_for_every_beside_target() {
     );
 }
 
-/// EVERY artifact, not just the one that bakes a shim path. The comparison used
-/// to sit inside the marker guard, so an OpenClaw upgrader whose manifest or
-/// `package.json` predated the upgrade got existence-only checking and a green
-/// doctor — the silent-dead class, one artifact short of the invariant.
+/// EVERY owned file, not just the one that bakes a shim path, and any byte of it — a
+/// comment included: an OpenClaw upgrader whose manifest or `package.json` predated the
+/// upgrade once got existence-only checking and a green doctor.
 #[test]
-fn verify_target_flags_code_drift_and_not_comment_drift_in_every_beside_target() {
-    let oc_home = tempfile::TempDir::new().unwrap();
-    let dsh_home = tempfile::TempDir::new().unwrap();
-    temp_env::with_vars(
-        [
-            ("OPENCLAW_STATE_DIR", Some(oc_home.path())),
-            ("DSH_HOME", Some(dsh_home.path())),
-        ],
-        || {
-            let exe = std::env::current_exe().unwrap();
+fn verify_target_flags_any_byte_drift_in_every_owned_file() {
+    with_owned_homes(|| {
+        with_fake_claude(|_| {
             let mut covered = 0;
             for &t in target::TARGETS {
-                let Some(make) = beside_of(t) else {
+                let Some(files) = t.primary.owned_files() else {
                     continue;
                 };
-                for (idx, _) in make(exe.to_str().unwrap()).unwrap().iter().enumerate() {
-                    let tmp = tempfile::TempDir::new().unwrap();
-                    let cfg = tmp.path().join("config");
-                    install_target_from(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
-                    let (p, _) = make(exe.to_str().unwrap()).unwrap().swap_remove(idx);
+                let tmp = tempfile::TempDir::new().unwrap();
+                let cfg = plugin_hooks_path(tmp.path());
+                let paths: Vec<PathBuf> = files
+                    .render(&cfg, io::HOOK_BIN)
+                    .unwrap()
+                    .into_iter()
+                    .map(|(p, _)| p)
+                    .collect();
+                for p in paths {
+                    install_target_from(
+                        t,
+                        Some(cfg.clone()),
+                        Some(PathBuf::from("/fake/pixtuoid-hook")),
+                    )
+                    .unwrap();
                     let body = std::fs::read_to_string(&p).unwrap();
-                    std::fs::write(&p, comment_only_edit(&body)).unwrap();
+                    std::fs::write(&p, drift_edit(&p, &body)).unwrap();
                     let v = verify_target(t, Some(cfg.clone()));
                     assert!(
-                        v.is_sound(),
-                        "{}: a comment-only edit to {} must not read as stale — got {:?}",
+                        v.issues.iter().any(|i| i
+                            .contains("differs from the plugin this pixtuoid ships")
+                            && i.contains("a launch rewrites it")),
+                        "{}: a drifted {} must be a HARD verify issue — got {:?}",
                         t.name,
                         p.display(),
                         v.issues
                     );
-                    std::fs::write(&p, format!("{body}\ndrifted\n")).unwrap();
-                    let v = verify_target(t, Some(cfg));
-                    assert!(
-                        v.issues
-                            .iter()
-                            .any(|i| i.contains("differs from the plugin this pixtuoid ships")),
-                        "{}: a stale {} must be a HARD verify issue — got {:?}",
-                        t.name,
-                        p.display(),
-                        v.issues
-                    );
+                    std::fs::write(&p, &body).unwrap();
                     covered += 1;
                 }
             }
             assert!(
-                covered >= 3,
-                "expected OpenClaw's three artifacts to be swept, saw {covered} — did the roster change?"
+                covered > 0,
+                "no target owns a file — did the registry change?"
             );
-        },
-    );
-}
-
-/// The staleness comparison reads code only: the baked `const HOOK_PATH` line, whole-line
-/// `//` comments and blank lines are ignored; anything else, a trailing comment included,
-/// is code.
-#[test]
-fn the_staleness_comparison_reads_code_and_only_code() {
-    let rendered = "// pixtuoid
-const HOOK_PATH = \"pixtuoid-hook\";
-const F = [\"a\"];
-";
-    let installed = "// pixtuoid
-const HOOK_PATH = \"/opt/pixtuoid-hook\";
-const F = [\"a\"];
-";
-    assert!(
-        !plugin_code_differs(installed, rendered),
-        "only the shim path differs, so this must NOT read as stale"
-    );
-
-    // An older pixtuoid's plugin: same shape, one forwarded event short.
-    let older = installed.replace("[\"a\"]", "[]");
-    assert!(
-        plugin_code_differs(&older, rendered),
-        "a plugin missing an event MUST read as stale"
-    );
-
-    // Comments and blank lines are not behavior.
-    assert!(
-        !plugin_code_differs(&comment_only_edit(installed), rendered),
-        "a comment-only edit must NOT read as stale"
-    );
-
-    // The "and only it" half. A CODE line that merely MENTIONS `const HOOK_PATH` must
-    // still compare: an unanchored filter strips it and a change confined to it reads as
-    // identical, the mention-vs-declaration trap `verify::baked_hook_path` anchors against.
-    let with_note = |note: &str| format!("{rendered}const NOTE = \"{note} const HOOK_PATH\";\n");
-    assert!(
-        plugin_code_differs(&with_note("documents"), &with_note("redocuments")),
-        "a change confined to a code line MENTIONING the marker must still read as stale"
-    );
-
-    // The limit: a trailing `//` and a `/* */`, trailing or leading a line, still count as
-    // code. Each pair differs ONLY in the comment's text, so a normalizer that strips any
-    // of those forms reads the pair as equal and fails here.
-    for (one, two) in [
-        ("[\"a\"]; // one", "[\"a\"]; // two"),
-        ("[\"a\"]; /* one */", "[\"a\"]; /* two */"),
-        (
-            "/* one */ const F = [\"a\"];",
-            "/* two */ const F = [\"a\"];",
-        ),
-    ] {
-        let edit = |comment: &str| installed.replace("const F = [\"a\"];", comment);
-        let (one, two) = (edit(one), edit(two));
-        assert!(
-            plugin_code_differs(&one, &two),
-            "{one:?} vs {two:?}: only a whole-line `//` comment is ignored"
-        );
-    }
+        })
+    });
 }
 
 /// The collapse itself, which the sweep above deliberately cannot see: it accepts
@@ -1654,6 +1588,116 @@ fn claude_uninstall_leaves_no_live_hooks_when_deregistering_fails() {
     });
 }
 
+/// Redirects every CLI state resolver an owned file renders under (OpenClaw's plugin
+/// dir, dsh's plugin file) at temp dirs for `f`, so no test writes a real plugin.
+fn with_owned_homes<R>(f: impl FnOnce() -> R) -> R {
+    let oc_home = tempfile::TempDir::new().unwrap();
+    let dsh_home = tempfile::TempDir::new().unwrap();
+    temp_env::with_vars(
+        [
+            ("OPENCLAW_STATE_DIR", Some(oc_home.path())),
+            ("DSH_HOME", Some(dsh_home.path())),
+        ],
+        f,
+    )
+}
+
+/// `owned_state` and `converge` re-render with the shim an install baked, read back out
+/// of the FIRST owned file — so that read must round-trip every hook shape a target
+/// writes: an explicit path, a PATH-resolved bare name, a path with a space.
+#[test]
+fn every_owned_set_re_renders_byte_identical_from_the_shim_its_first_file_bakes() {
+    with_owned_homes(|| {
+        let shim = abs_fixture("/opt/a dir/pixtuoid-hook", r"C:\a dir\pixtuoid-hook.exe");
+        let primary = std::env::temp_dir().join("primary");
+        let mut covered = 0;
+        for t in target::TARGETS {
+            let Some(files) = t.primary.owned_files() else {
+                continue;
+            };
+            for explicit in [true, false] {
+                let hook = (t.hook_command)(&shim, explicit).unwrap();
+                let rendered = files.render(&primary, &hook).unwrap();
+                let back = files.installed_shim(&rendered[0].1);
+                let rehooked = rehook(t.hook_command, &back)
+                    .unwrap()
+                    .expect("a rendered file gives back its shim");
+                assert_eq!(
+                    files.render(&primary, &rehooked).unwrap(),
+                    rendered,
+                    "{} (explicit: {explicit})",
+                    t.name
+                );
+            }
+            covered += 1;
+        }
+        assert!(
+            covered > 0,
+            "no target owns a file — did the registry change?"
+        );
+    });
+}
+
+/// The verdict is EXACT: any byte an installed file holds that this binary's render
+/// with the same shim does not — a comment, a trailing newline — reads `Differs`.
+#[test]
+fn owned_state_is_current_after_install_and_differs_after_any_byte_edit() {
+    with_owned_homes(|| {
+        with_fake_claude(|_| {
+            for t in target::TARGETS {
+                let Some(files) = t.primary.owned_files() else {
+                    continue;
+                };
+                let tmp = tempfile::TempDir::new().unwrap();
+                let cfg = plugin_hooks_path(tmp.path());
+                install_target_from(
+                    t,
+                    Some(cfg.clone()),
+                    Some(PathBuf::from("/fake/pixtuoid-hook")),
+                )
+                .unwrap();
+                let state = owned_state(files, t.hook_command, &cfg).unwrap();
+                assert!(
+                    matches!(state, OwnedState::Current),
+                    "{}: {state:?}",
+                    t.name
+                );
+
+                let entry = files.render(&cfg, io::HOOK_BIN).unwrap().remove(0).0;
+                let body = io::read_config(&entry).unwrap();
+                std::fs::write(&entry, drift_edit(&entry, &body)).unwrap();
+                match owned_state(files, t.hook_command, &cfg).unwrap() {
+                    OwnedState::Differs(d) => assert_eq!(
+                        d.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+                        [&entry],
+                        "{}",
+                        t.name
+                    ),
+                    other => panic!("{}: a one-byte edit read {other:?}", t.name),
+                }
+
+                std::fs::write(&entry, "").unwrap();
+                let state = owned_state(files, t.hook_command, &cfg).unwrap();
+                assert!(
+                    matches!(state, OwnedState::Unknown),
+                    "{}: {state:?}",
+                    t.name
+                );
+            }
+        })
+    });
+}
+
+/// A drift edit to an owned file: a whole-line comment wherever the format has one,
+/// a trailing newline in JSON, which has none.
+fn drift_edit(p: &std::path::Path, body: &str) -> String {
+    if p.extension().is_some_and(|e| e == "json") {
+        format!("{body}\n")
+    } else {
+        format!("// a comment no release shipped\n{body}")
+    }
+}
+
 /// `(inode, mtime)` on Unix, `mtime` elsewhere: what a rewrite always changes.
 fn write_stamp(p: &std::path::Path) -> (u64, std::time::SystemTime) {
     let m = std::fs::metadata(p).unwrap();
@@ -1662,6 +1706,142 @@ fn write_stamp(p: &std::path::Path) -> (u64, std::time::SystemTime) {
     #[cfg(not(unix))]
     let ino = 0;
     (ino, m.modified().unwrap())
+}
+
+/// Convergence rewrites only what differs, with the shim the install baked, and
+/// never touches the config a target merges into: a current install keeps its
+/// inode and mtime, a stale file comes back exactly as connect wrote it however
+/// `PIXTUOID_HOOK` is set now, and the user's own config edit survives byte for byte.
+#[test]
+fn converge_rewrites_only_stale_owned_files_with_the_installed_shim() {
+    with_owned_homes(|| {
+        with_fake_claude(|fake| {
+            let host_calls = || std::fs::read_to_string(fake.join("calls.log")).unwrap_or_default();
+            for t in target::TARGETS {
+                let Some(files) = t.primary.owned_files() else {
+                    continue;
+                };
+                let tmp = tempfile::TempDir::new().unwrap();
+                let cfg = plugin_hooks_path(tmp.path());
+                let shim = Some(abs_fixture(
+                    "/opt/one/pixtuoid-hook",
+                    r"C:\one\pixtuoid-hook.exe",
+                ));
+                install_target_from(t, Some(cfg.clone()), shim).unwrap();
+                let calls = host_calls();
+                let entry = files.render(&cfg, io::HOOK_BIN).unwrap().remove(0).0;
+                let installed = io::read_config(&entry).unwrap();
+
+                let stamp = write_stamp(&entry);
+                assert!(
+                    converge(t, Some(cfg.clone())).unwrap().rewritten.is_empty(),
+                    "{}",
+                    t.name
+                );
+                assert_eq!(
+                    write_stamp(&entry),
+                    stamp,
+                    "{}: a current file was rewritten",
+                    t.name
+                );
+
+                std::fs::write(&entry, format!("{installed}\n")).unwrap();
+                let user_config = matches!(t.primary, Primary::Config { .. }).then(|| {
+                    let edited = format!("{}\n", io::read_config(&cfg).unwrap());
+                    std::fs::write(&cfg, &edited).unwrap();
+                    edited
+                });
+                let other = abs_fixture("/opt/two/pixtuoid-hook", r"C:\two\pixtuoid-hook.exe");
+                let rewritten = temp_env::with_var(io::HOOK_OVERRIDE_ENV, Some(&other), || {
+                    converge(t, Some(cfg.clone())).unwrap().rewritten
+                });
+                assert_eq!(rewritten, std::slice::from_ref(&entry), "{}", t.name);
+                assert_eq!(io::read_config(&entry).unwrap(), installed, "{}", t.name);
+                assert_eq!(
+                    host_calls(),
+                    calls,
+                    "{}: converge ran the host's CLI",
+                    t.name
+                );
+                if let Some(edited) = user_config {
+                    assert_eq!(
+                        io::read_config(&cfg).unwrap(),
+                        edited,
+                        "{}: config touched",
+                        t.name
+                    );
+                }
+            }
+        })
+    });
+}
+
+/// A user who disabled the plugin through OpenClaw's own CLI keeps it disabled:
+/// convergence writes the plugin dir, never openclaw.json.
+#[test]
+fn converge_never_re_enables_an_openclaw_plugin_the_user_disabled() {
+    with_owned_homes(|| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("openclaw.json");
+        install_target_from(
+            &OPENCLAW,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        let disabled = io::read_config(&cfg)
+            .unwrap()
+            .replace("\"enabled\": true", "\"enabled\": false");
+        std::fs::write(&cfg, &disabled).unwrap();
+        let files = OPENCLAW.primary.owned_files().unwrap();
+        let entry = files.render(&cfg, io::HOOK_BIN).unwrap().remove(0).0;
+        std::fs::write(
+            &entry,
+            "// an older plugin\nconst HOOK_PATH = \"/fake/pixtuoid-hook\";\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            converge(&OPENCLAW, Some(cfg.clone())).unwrap().rewritten,
+            [entry]
+        );
+        assert_eq!(io::read_config(&cfg).unwrap(), disabled);
+    });
+}
+
+/// A file another pixtuoid holds the lock on is left alone and reported, while the
+/// target's other files still converge: OpenClaw's `index.js` refreshed with its
+/// `package.json` locked must still reach the launch's restart notice.
+#[test]
+fn converge_skips_a_locked_file_and_still_reports_the_rest() {
+    with_owned_homes(|| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("openclaw.json");
+        install_target_from(
+            &OPENCLAW,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        let files = (OPENCLAW.primary.owned_files().unwrap())
+            .render(&cfg, io::HOOK_BIN)
+            .unwrap();
+        let (entry, locked) = (files[0].0.clone(), files[2].0.clone());
+        for p in [&entry, &locked] {
+            let body = io::read_config(p).unwrap();
+            std::fs::write(p, format!("{body}\n")).unwrap();
+        }
+        let stale = io::read_config(&locked).unwrap();
+
+        let _held = io::lock_config(&locked).unwrap();
+        let done = converge(&OPENCLAW, Some(cfg.clone())).unwrap();
+        assert_eq!(done.rewritten, [entry]);
+        assert_eq!(
+            done.failed.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+            [&locked]
+        );
+        assert_eq!(io::read_config(&locked).unwrap(), stale);
+    });
 }
 
 /// An older pixtuoid's hooks.json, two registrations short, is rewritten whole by a
@@ -1714,6 +1894,172 @@ fn reinstall_re_bakes_a_moved_shim_into_every_owned_primary() {
         assert!(
             covered > 0,
             "no target owns its primary — did the registry change?"
+        );
+    });
+}
+
+/// A disconnected owned primary holds a stub with no shim to read back, so a launch
+/// that converges it anyway (a stale connected set) leaves the stub alone.
+#[test]
+fn converge_leaves_a_disconnected_owned_primary_alone() {
+    with_fake_claude(|_| {
+        for &t in target::TARGETS {
+            if !matches!(t.primary, Primary::Owned { .. }) {
+                continue;
+            }
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = plugin_hooks_path(tmp.path());
+            install_target_from(
+                t,
+                Some(cfg.clone()),
+                Some(PathBuf::from("/fake/pixtuoid-hook")),
+            )
+            .unwrap();
+            uninstall_target(t, Some(cfg.clone())).unwrap();
+            let stub = io::read_config(&cfg).unwrap();
+            assert!(
+                converge(t, Some(cfg.clone())).unwrap().rewritten.is_empty(),
+                "{}",
+                t.name
+            );
+            assert_eq!(io::read_config(&cfg).unwrap(), stub, "{}", t.name);
+        }
+    });
+}
+
+/// The file that bakes the shim is what convergence re-renders from: a sibling gone
+/// missing is written back, but with the entry gone there is no shim to bake, so
+/// nothing is written and the reconnect doctor names is the repair.
+#[test]
+fn converge_heals_a_missing_sibling_but_not_a_missing_entry() {
+    with_owned_homes(|| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("openclaw.json");
+        install_target_from(
+            &OPENCLAW,
+            Some(cfg.clone()),
+            Some(PathBuf::from("/fake/pixtuoid-hook")),
+        )
+        .unwrap();
+        let files = (OPENCLAW.primary.owned_files().unwrap())
+            .render(&cfg, io::HOOK_BIN)
+            .unwrap();
+        let (entry, sibling) = (&files[0].0, &files[1].0);
+
+        std::fs::remove_file(sibling).unwrap();
+        assert_eq!(
+            converge(&OPENCLAW, Some(cfg.clone())).unwrap().rewritten,
+            std::slice::from_ref(sibling)
+        );
+        assert!(sibling.exists());
+
+        std::fs::remove_file(entry).unwrap();
+        std::fs::write(sibling, "{}").unwrap();
+        assert!(
+            converge(&OPENCLAW, Some(cfg.clone()))
+                .unwrap()
+                .rewritten
+                .is_empty()
+        );
+        assert!(!entry.exists());
+    });
+}
+
+/// A hooks.json from before the `PIXTUOID_SOURCE=` stamp ran the bare shim name; the
+/// shim stays where PATH finds it, while the command takes this build's shape.
+#[cfg(unix)]
+#[test]
+fn converge_stamps_a_pre_stamp_claude_hooks_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cfg = tmp.path().join("hooks.json");
+    std::fs::write(
+        &cfg,
+        crate::install::claude::render_hooks(io::HOOK_BIN).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        converge(&CLAUDE_FILE, Some(cfg.clone())).unwrap().rewritten,
+        std::slice::from_ref(&cfg)
+    );
+    let stamped = (CLAUDE.hook_command)(std::path::Path::new(io::HOOK_BIN), false).unwrap();
+    assert_eq!(
+        io::read_config(&cfg).unwrap(),
+        crate::install::claude::render_hooks(&stamped).unwrap()
+    );
+}
+
+/// A beside entry that no longer gives back a shim (truncated, hand-edited) is HARD:
+/// a launch cannot re-render it, so only a reconnect brings the plugin back.
+#[test]
+fn verify_target_hard_flags_a_beside_entry_with_no_readable_shim() {
+    with_owned_homes(|| {
+        let mut covered = 0;
+        for &t in target::TARGETS {
+            let Some(render) = beside_of(t) else {
+                continue;
+            };
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = tmp.path().join("config");
+            install_target_from(
+                t,
+                Some(cfg.clone()),
+                Some(PathBuf::from("/fake/pixtuoid-hook")),
+            )
+            .unwrap();
+            let entry = render(io::HOOK_BIN).unwrap().remove(0).0;
+            std::fs::write(&entry, "").unwrap();
+            let v = verify_target(t, Some(cfg));
+            assert!(
+                v.issues
+                    .iter()
+                    .any(|i| i.contains("could not read the baked shim path")),
+                "{}: {:?}",
+                t.name,
+                v.issues
+            );
+            covered += 1;
+        }
+        assert!(
+            covered > 0,
+            "no target has beside files — did the registry change?"
+        );
+    });
+}
+
+/// A deleted sibling is a missing artifact, not drift: the launch writes it back,
+/// so doctor must not also call it a file that "differs".
+#[test]
+fn verify_target_reports_a_deleted_sibling_as_missing_not_as_drift() {
+    with_owned_homes(|| {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = tmp.path().join("openclaw.json");
+        let shim = std::env::current_exe().unwrap();
+        install_target_from(&OPENCLAW, Some(cfg.clone()), Some(shim)).unwrap();
+        let sibling = OPENCLAW
+            .primary
+            .owned_files()
+            .unwrap()
+            .render(&cfg, io::HOOK_BIN)
+            .unwrap()
+            .remove(1)
+            .0;
+        std::fs::remove_file(&sibling).unwrap();
+        let v = verify_target(&OPENCLAW, Some(cfg));
+        let name = sibling.file_name().unwrap().to_string_lossy();
+        assert!(
+            v.issues
+                .iter()
+                .any(|i| i.contains("plugin artifact missing") && i.contains(&*name)),
+            "{:?}",
+            v.issues
+        );
+        assert!(
+            !v.issues
+                .iter()
+                .any(|i| i.contains("differs from the plugin")),
+            "{:?}",
+            v.issues
         );
     });
 }

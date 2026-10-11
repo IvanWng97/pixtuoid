@@ -206,6 +206,14 @@ fn build_run_config(
         for w in &cfg_warnings {
             let _ = writeln!(std::io::stderr(), "⚠ pixtuoid: {w}");
         }
+    }
+    refresh_plugins(
+        &connected,
+        headless,
+        sources::converge_owned,
+        &mut std::io::stderr(),
+    );
+    if !headless {
         warn_broken_installs(&connected);
     }
     Ok(runtime::RunConfig {
@@ -225,6 +233,24 @@ fn build_run_config(
         graphics,
         motion,
     })
+}
+
+/// Bring the connected sources' plugin files up to this build, then name each one
+/// rewritten on `out`. A headless run converges too, since its CLIs load the plugin,
+/// and leaves the naming to the converge's own log line.
+fn refresh_plugins(
+    connected: &std::collections::HashSet<String>,
+    headless: bool,
+    converge: impl FnOnce(&std::collections::HashSet<String>) -> Vec<&'static install::target::Target>,
+    out: &mut impl Write,
+) {
+    let refreshed = converge(connected);
+    if headless {
+        return;
+    }
+    for t in refreshed {
+        let _ = writeln!(out, "{}", sources::refreshed_notice(t));
+    }
 }
 
 /// Warn on stderr when a CONNECTED source's hooks are installed but structurally
@@ -249,6 +275,30 @@ fn warn_broken_installs(connected: &std::collections::HashSet<String>) {
                  reconnect in the Sources panel (press s)",
                 t.core_source
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn both_boot_modes_converge_and_only_an_interactive_one_prints() {
+        for headless in [true, false] {
+            let mut converged = false;
+            let mut out = Vec::new();
+            refresh_plugins(
+                &std::collections::HashSet::new(),
+                headless,
+                |_| {
+                    converged = true;
+                    vec![&install::target::OPENCODE]
+                },
+                &mut out,
+            );
+            assert!(converged, "headless: {headless}");
+            assert_eq!(out.is_empty(), headless, "headless: {headless}");
         }
     }
 }
