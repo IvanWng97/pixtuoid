@@ -94,7 +94,7 @@ pub(crate) fn resolve_pid(
     table: &impl ProcessTable,
 ) -> Option<i32> {
     if slot.exiting_at.is_some() {
-        tracing::debug!(agent = %slot.label, "focus: refused — agent is exiting");
+        tracing::debug!(agent = ?&*slot.label, "focus: refused — agent is exiting");
         return None;
     }
     if let Some(cached) = slot.pid {
@@ -102,7 +102,7 @@ pub(crate) fn resolve_pid(
             && table.start_time(cached.pid) != Some(stamped)
         {
             tracing::debug!(
-                agent = %slot.label,
+                agent = ?&*slot.label,
                 pid = cached.pid,
                 "focus: refused — cached pid gone or recycled (start marker mismatch)"
             );
@@ -164,15 +164,15 @@ pub(crate) fn focus_agent(
     activate: impl FnOnce(i32) -> bool,
 ) {
     let Some(pid) = resolve_pid(slot, paths, table) else {
-        tracing::debug!(agent = %slot.label, "focus: no pid resolved");
+        tracing::debug!(agent = ?&*slot.label, "focus: no pid resolved");
         return;
     };
     let Some(app_pid) = ancestor_walk(table, pid) else {
-        tracing::debug!(agent = %slot.label, pid, "focus: no focusable ancestor");
+        tracing::debug!(agent = ?&*slot.label, pid, "focus: no focusable ancestor");
         return;
     };
     if !activate(app_pid) {
-        tracing::debug!(agent = %slot.label, app_pid, "focus: activation declined");
+        tracing::debug!(agent = ?&*slot.label, app_pid, "focus: activation declined");
     }
 }
 
