@@ -178,7 +178,8 @@ fn floor_frames<'a>(
             },
         )
         .expect("layout")
-        .layout
+        .layout()
+        .clone()
     }
 }
 

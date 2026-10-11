@@ -3,12 +3,12 @@
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::SceneState;
 
-use pixtuoid_scene::flash::FlashHold;
 use pixtuoid_scene::floor::{FloorInputs, OfficeSession};
 use pixtuoid_scene::footer::{FooterInputs, FooterModel, build_footer};
 use pixtuoid_scene::interact::{Gesture, Pointer, Pressed};
 use pixtuoid_scene::look::RenderInputs;
 use pixtuoid_scene::render_scale::PixelFit;
+use pixtuoid_scene::screen::Screen;
 
 /// Renders the live office to a reusable `RgbBuffer`. One per window — keeping it
 /// alive across frames is what keeps walks/poses continuous (no walk-flash).
@@ -21,8 +21,11 @@ pub struct OfficeRenderer {
     pointer: Pointer,
     /// Ambient-audio gateway. Inert unless installed.
     audio: crate::audio::AudioHandle,
-    /// The flashes the window shows.
-    flash: FlashHold<(u32, u32)>,
+    /// What the window shows, its physical pixels the hold's shape, and what
+    /// a pointer finds there through the fit it was drawn at.
+    screen: Screen<(u32, u32), PixelFit>,
+    /// What the last frame was drawn under, for its frame report.
+    note: Option<pixtuoid_scene::look::FrameNote>,
 }
 
 impl OfficeRenderer {
@@ -33,7 +36,8 @@ impl OfficeRenderer {
             pets: Vec::new(),
             pointer: Pointer::default(),
             audio: crate::audio::AudioHandle::disabled(),
-            flash: FlashHold::on(pixtuoid_scene::flash::monotonic()),
+            screen: Screen::on(pixtuoid_scene::screen::monotonic()),
+            note: None,
         }
     }
 
@@ -73,20 +77,17 @@ impl OfficeRenderer {
     /// Render the office's floor showing, or its slide to another, into the
     /// owned buffer in `at`'s look, the office `at`'s logical extent, with no
     /// footer row subtracted. `frame.world.scene` is the FULL scene, which the
-    /// office projects onto each floor. A too-small layout leaves the buffer
-    /// filled with the theme's `bg_fallback`.
-    pub fn render(&mut self, at: PixelFit, frame: WindowFrame<'_>) -> Option<&RgbBuffer> {
+    /// office projects onto each floor. `None` when the floor showing can't
+    /// lay out.
+    pub(crate) fn render(&mut self, at: PixelFit, frame: WindowFrame<'_>) -> Option<&RgbBuffer> {
         let WindowFrame {
             world,
             theme,
             place,
             dim,
         } = frame;
-        let FloorInputs {
-            scene, floor, now, ..
-        } = world;
         let gap = theme.surface.bg_fallback;
-        self.session.render(
+        let drawn = self.session.render(
             at.look(pixtuoid_scene::look::WorldText::Baked),
             RenderInputs {
                 world,
@@ -100,33 +101,30 @@ impl OfficeRenderer {
             gap,
         );
         // Composed even when disabled or muted: `AudioObserver::frame`'s contract.
-        self.audio
-            .frame(self.session.audio_frame(scene, floor, now));
-        self.session.buf()
+        self.audio.frame(drawn.audio);
+        self.note = drawn.note;
+        self.buf()
     }
 
-    /// [`render`](Self::render) for the window on screen, `window` physical
-    /// pixels, and whether its frame ([`buf`](Self::buf)) is to show: not
+    /// Render the next frame at `at` for the window on screen, `window`
+    /// physical pixels, and whether it ([`buf`](Self::buf)) is to show: not
     /// when the flash hold keeps it back, so the window keeps the last. A
     /// frame shown is [`presented`](Self::presented) once it shows.
-    pub(crate) fn render_live(
+    pub fn render_live(
         &mut self,
         at: PixelFit,
         frame: WindowFrame<'_>,
         window: (u32, u32),
     ) -> bool {
         self.render(at, frame);
-        let flashes = self.session.flashes();
-        if self.flash.holds(flashes, window) {
-            return false;
-        }
-        self.flash.stage(flashes, window);
-        true
+        self.session
+            .picture()
+            .is_some_and(|picture| self.screen.admit(&picture, window, at, None).written())
     }
 
     /// The last frame's pixels, `None` before the first.
     pub fn buf(&self) -> Option<&RgbBuffer> {
-        self.session.buf()
+        Some(self.session.picture()?.pixels())
     }
 
     /// Count the frame just painted in `jank`, `total` long, `present` of it
@@ -139,31 +137,38 @@ impl OfficeRenderer {
         now: std::time::Instant,
     ) {
         let send = crate::jank::FrameSend {
-            dirty: crate::jank::Painted::from(self.session.dirty()),
+            dirty: crate::jank::Painted::from(self.dirty()),
             ..crate::jank::FrameSend::default()
         };
-        jank.record(total, present, Some(send), self.session.note(), now);
+        jank.record(total, present, Some(send), self.note, now);
     }
 
     /// The frame [`render_live`](Self::render_live) last handed out finished
     /// presenting just now.
-    pub(crate) fn presented(&mut self) {
-        self.flash.landed();
+    pub fn presented(&mut self) {
+        self.screen.landed();
     }
 
-    /// A left press at `cursor` (physical px) in a `window`-sized window
-    /// drawn at `at`, at `now` with `petting` the last one: resize from the
-    /// bottom-right corner, else the pointer's — on what the last frame shows
-    /// there, a click or a drag follows ([`Pointer`]) — else, on the bare
-    /// office or a fixture, drag the frameless window.
+    /// The fit the frame on screen was drawn at; `None` before one shows.
+    pub(crate) fn shown_fit(&self) -> Option<PixelFit> {
+        self.screen.shown().map(|shown| shown.geometry)
+    }
+
+    /// A left press at `cursor` (physical px) in a `window`-sized window, at
+    /// `now` with `petting` the last one: resize from the bottom-right
+    /// corner, else the pointer's — on what the frame on screen shows there,
+    /// a click or a drag follows ([`Pointer`]) — else, on the bare office or
+    /// a fixture, or before a frame shows, drag the frameless window.
     pub fn press_at(
         &mut self,
         cursor: (f64, f64),
         window: (u32, u32),
-        at: PixelFit,
         pressing: Pressing<'_>,
     ) -> Press {
-        let Under::Office(hit) = under(&self.session, cursor, window, at) else {
+        let Some(at) = self.shown_fit() else {
+            return Press::Drag;
+        };
+        let Under::Office(hit) = under(&self.screen, cursor, window) else {
             // As any press does: a carry whose release never came ends here.
             self.cancel_pointer();
             return Press::Resize;
@@ -187,15 +192,14 @@ impl OfficeRenderer {
         }
     }
 
-    /// The pointer's shape at `cursor` in a `window`-sized window drawn at
-    /// `at`, under the panels `modal`: a closed hand while it carries a
-    /// figure, else the arrow under a panel, which takes every press, else
-    /// what a press there does ([`cursor_for`]).
+    /// The pointer's shape at `cursor` in a `window`-sized window, under the
+    /// panels `modal`: a closed hand while it carries a figure, else the
+    /// arrow under a panel, which takes every press, else what a press there
+    /// does ([`cursor_for`]).
     pub(crate) fn cursor_icon(
         &self,
         cursor: (f64, f64),
         window: (u32, u32),
-        at: PixelFit,
         modal: &crate::panels::ModalState,
         petting: Option<&pixtuoid_scene::pet::PetState>,
         now: std::time::SystemTime,
@@ -205,7 +209,7 @@ impl OfficeRenderer {
         } else if modal.any_open() {
             winit::window::CursorIcon::Default
         } else {
-            cursor_for(under(&self.session, cursor, window, at), petting, now)
+            cursor_for(under(&self.screen, cursor, window), petting, now)
         }
     }
 
@@ -219,9 +223,12 @@ impl OfficeRenderer {
         ended.is_some()
     }
 
-    /// The pointer moved to `cursor` over a frame drawn at `at`; whether a
+    /// The pointer moved to `cursor` over the frame on screen; whether a
     /// figure it carries moved, which the window redraws.
-    pub fn pointer_moved(&mut self, cursor: (f64, f64), at: PixelFit) -> bool {
+    pub fn pointer_moved(&mut self, cursor: (f64, f64)) -> bool {
+        let Some(at) = self.shown_fit() else {
+            return false;
+        };
         let gesture = self.pointer.moved(unit_at(cursor, at));
         if let Some(gesture) = &gesture {
             self.session.grip(gesture);
@@ -229,14 +236,11 @@ impl OfficeRenderer {
         gesture.is_some()
     }
 
-    /// The press released at `cursor` over a frame drawn at `at`: the click's
+    /// The press released at `cursor` over the frame on screen: the click's
     /// action, the window's to carry out; a figure carried is set down.
-    pub fn release(
-        &mut self,
-        cursor: (f64, f64),
-        at: PixelFit,
-    ) -> Option<pixtuoid_scene::hit::HitAction> {
-        match self.pointer.up(unit_in(cursor, at))? {
+    pub fn release(&mut self, cursor: (f64, f64)) -> Option<pixtuoid_scene::hit::HitAction> {
+        let at = self.shown_fit().and_then(|at| unit_in(cursor, at));
+        match self.pointer.up(at)? {
             Gesture::Click(action) => Some(action),
             gesture => {
                 self.session.grip(&gesture);
@@ -255,10 +259,9 @@ impl OfficeRenderer {
     pub(crate) fn release_under(
         &mut self,
         cursor: (f64, f64),
-        at: PixelFit,
         modal: &crate::panels::ModalState,
     ) -> Option<pixtuoid_scene::hit::HitAction> {
-        self.release(cursor, at).filter(|_| !modal.any_open())
+        self.release(cursor).filter(|_| !modal.any_open())
     }
 
     /// Whether a pointer `cursor_in` the window shows its tooltip: not over a
@@ -267,19 +270,29 @@ impl OfficeRenderer {
         cursor_in && !self.carrying() && !modal.any_open()
     }
 
-    /// What the last frame, drawn at `at`, shows the pointer at `cursor`
-    /// (physical px).
-    pub fn hit_at(
+    /// What the frame on screen shows the pointer at `cursor` (physical px).
+    pub(crate) fn hit_at(&self, cursor: (f64, f64)) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
+        hit_in(&self.screen, cursor)
+    }
+
+    /// What the last frame rendered, drawn at `at`, shows the pointer at
+    /// `cursor`: the tooltip the window sets over it.
+    pub fn drawn_hit_at(
         &self,
         cursor: (f64, f64),
         at: PixelFit,
     ) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
-        hit_in(&self.session, cursor, at)
+        let area = unit_bounds(unit_at(cursor, at));
+        self.session.picture()?.hits()?.at(area, None)
     }
 
-    /// Where the last frame may differ from the one on screen before it.
+    /// Where the last frame may differ from the one rendered before it.
     pub(crate) fn dirty(&self) -> &pixtuoid_scene::cutaway::canvas::Dirty {
-        self.session.dirty()
+        self.session
+            .picture()
+            .map_or(&pixtuoid_scene::cutaway::canvas::Dirty::All, |picture| {
+                picture.dirty()
+            })
     }
 
     /// The status-footer model for the current scene, with the office's floor
@@ -318,26 +331,25 @@ enum Under<'a> {
 }
 
 /// What `cursor` (physical px) is over in a `window`-sized window showing
-/// `session`'s last frame at `at`.
+/// `screen`.
 fn under<'a>(
-    session: &'a OfficeSession,
+    screen: &'a Screen<(u32, u32), PixelFit>,
     cursor: (f64, f64),
     window: (u32, u32),
-    at: PixelFit,
 ) -> Under<'a> {
     if super::geometry::near_resize_corner(cursor, window, RESIZE_CORNER_PX) {
         Under::Corner
     } else {
-        Under::Office(hit_in(session, cursor, at))
+        Under::Office(hit_in(screen, cursor))
     }
 }
 
 fn hit_in(
-    session: &OfficeSession,
+    screen: &Screen<(u32, u32), PixelFit>,
     cursor: (f64, f64),
-    at: PixelFit,
 ) -> Option<pixtuoid_scene::hit::SceneHit<'_>> {
-    session.hit_at(unit_bounds(unit_at(cursor, at)))
+    let shown = screen.shown()?;
+    shown.hit_at(unit_bounds(unit_at(cursor, shown.geometry)))
 }
 
 /// What a press on `under` affords, as its cursor, in CSS UI 3's names
@@ -515,7 +527,7 @@ mod tests {
         renderer: OfficeRenderer,
         scene: SceneState,
         floor: FloorMeta,
-        screen: pixtuoid_scene::flash::ManualClock,
+        screen: pixtuoid_scene::screen::ManualClock,
         /// How long a present takes on the screen clock.
         present_takes: Duration,
         /// What the window shows.
@@ -526,9 +538,9 @@ mod tests {
 
     impl Window {
         fn new(weather: pixtuoid_scene::sky::WeatherPolicy) -> Self {
-            let screen = pixtuoid_scene::flash::ManualClock::default();
+            let screen = pixtuoid_scene::screen::ManualClock::default();
             let mut renderer = OfficeRenderer::new(crate::test_flash::pack_arc());
-            renderer.flash = FlashHold::on(screen.clock());
+            renderer.screen = Screen::on(screen.clock());
             Self {
                 renderer,
                 scene: SceneState::new([8; pixtuoid_core::state::MAX_FLOORS]),
@@ -603,6 +615,67 @@ mod tests {
         assert!(first.contains("dirty=\"all\""), "{first}");
         let again = report(&mut window);
         assert!(again.contains("dirty=\"unchanged\""), "{again}");
+    }
+
+    /// A pointer hits the frame on screen: while a strike phase holds the
+    /// next frame back, an agent that frame no longer draws is still hit
+    /// where the window shows it.
+    #[test]
+    fn a_held_frame_leaves_the_pointer_hitting_the_one_on_screen() {
+        use crate::test_flash::{held_frames, storm_strike};
+        use pixtuoid_scene::display::HoverTarget;
+        use pixtuoid_scene::hit::{HitAction, SceneHit};
+        let strike = storm_strike();
+        let [dark, late, held, _] = held_frames(&strike);
+        let mut window = Window::new(strike.weather);
+        let agent = active_on("/p/a.jsonl", 0, 0);
+        let id = agent.agent_id;
+        window.scene = scene_with(vec![agent], 16);
+        window.present(dark);
+        let before = window.present(late);
+        let at = cutaway(Size { w: 160, h: 96 });
+        let on_agent = (0..at.logical().h)
+            .flat_map(|y| {
+                (0..at.logical().w).map(move |x| (unit_centre(x, at), unit_centre(y, at)))
+            })
+            .find(|&cursor| {
+                matches!(
+                    window.renderer.hit_at(cursor),
+                    Some(SceneHit::Figure(HoverTarget::Agent(a))) if *a == id
+                )
+            })
+            .expect("the window shows the agent");
+        window.scene = scene_with(vec![], 16);
+        let shown = window.present(held);
+        assert!(shown.as_slice() == before.as_slice(), "premise: held");
+        assert!(
+            matches!(
+                window
+                    .renderer
+                    .hit_at(on_agent)
+                    .and_then(|hit| hit.action(None, held)),
+                Some(HitAction::Focus(a)) if a == id
+            ),
+            "the held frame drew no agent, but the window still shows it"
+        );
+        assert_eq!(
+            window.renderer.drawn_hit_at(on_agent, at),
+            None,
+            "the tooltip reads the frame rendered, which drew none"
+        );
+    }
+
+    /// The tooltip set over a frame reads that frame: the one just rendered.
+    #[test]
+    fn the_tooltip_reads_the_frame_rendered() {
+        use pixtuoid_scene::display::HoverTarget;
+        use pixtuoid_scene::hit::SceneHit;
+        let (renderer, at, _, now, id) = one_agent_office();
+        let on_agent = agent_point(&renderer, at, now);
+        assert!(matches!(
+            renderer.drawn_hit_at(on_agent, at),
+            Some(SceneHit::Figure(HoverTarget::Agent(a))) if *a == id
+        ));
     }
 
     /// A window resized under a hold gets its frame at once: a screen of a new
@@ -864,7 +937,6 @@ mod tests {
                 match renderer.press_at(
                     cursor,
                     size,
-                    at,
                     Pressing {
                         scale_factor: 1.0,
                         petting: None,
@@ -872,7 +944,7 @@ mod tests {
                     },
                 ) {
                     Press::Pointer => {
-                        if let Some(HitAction::Focus(hit)) = renderer.release(cursor, at) {
+                        if let Some(HitAction::Focus(hit)) = renderer.release(cursor) {
                             assert_eq!(hit, id, "a click hit another agent");
                             hit_agent = true;
                             on_agent = Some(cursor);
@@ -881,12 +953,11 @@ mod tests {
                     Press::Drag => dragged = true,
                     Press::Resize => {}
                 }
-                if matches!(renderer.hit_at(cursor, at), Some(SceneHit::Furniture(_))) {
+                if matches!(renderer.hit_at(cursor), Some(SceneHit::Furniture(_))) {
                     assert_eq!(
                         renderer.press_at(
                             cursor,
                             size,
-                            at,
                             Pressing {
                                 scale_factor: 1.0,
                                 petting: None,
@@ -908,7 +979,6 @@ mod tests {
             renderer.press_at(
                 corner,
                 size,
-                at,
                 Pressing {
                     scale_factor: 1.0,
                     petting: None,
@@ -924,7 +994,6 @@ mod tests {
             renderer.press_at(
                 on_agent,
                 size,
-                at,
                 Pressing {
                     scale_factor: 1.0,
                     petting: None,
@@ -934,9 +1003,9 @@ mod tests {
             Press::Pointer
         );
         let away = (on_agent.0 + 10.0 * f64::from(at.scale().get()), on_agent.1);
-        assert!(renderer.pointer_moved(away, at), "the move lifts it");
+        assert!(renderer.pointer_moved(away), "the move lifts it");
         assert!(renderer.carrying());
-        assert_eq!(renderer.release(away, at), None, "a drop clicks nothing");
+        assert_eq!(renderer.release(away), None, "a drop clicks nothing");
         assert!(!renderer.carrying());
         // Under a panel a carry still sets down, and a click lands nowhere.
         let open = crate::panels::ModalState {
@@ -953,7 +1022,6 @@ mod tests {
             renderer.press_at(
                 on_agent,
                 size,
-                at,
                 Pressing {
                     scale_factor: 1.0,
                     petting: None,
@@ -962,22 +1030,22 @@ mod tests {
             )
         };
         press(&mut renderer);
-        assert!(renderer.pointer_moved(away, at));
+        assert!(renderer.pointer_moved(away));
         assert!(
             !renderer.tooltip_shows(true, &crate::panels::ModalState::closed()),
             "nor in hand"
         );
-        assert_eq!(renderer.release_under(away, at, &open), None);
+        assert_eq!(renderer.release_under(away, &open), None);
         assert!(
             !renderer.carrying(),
             "a panel opened mid-carry sets it down"
         );
         press(&mut renderer);
-        assert_eq!(renderer.release_under(on_agent, at, &open), None);
+        assert_eq!(renderer.release_under(on_agent, &open), None);
         press(&mut renderer);
         assert!(
             renderer
-                .release_under(on_agent, at, &crate::panels::ModalState::closed())
+                .release_under(on_agent, &crate::panels::ModalState::closed())
                 .is_some(),
             "with no panel the click lands"
         );
@@ -986,14 +1054,13 @@ mod tests {
         renderer.press_at(
             on_agent,
             size,
-            at,
             Pressing {
                 scale_factor: 1.0,
                 petting: None,
                 now,
             },
         );
-        assert!(renderer.pointer_moved(away, at));
+        assert!(renderer.pointer_moved(away));
         assert!(
             renderer.cancel_pointer(),
             "focus lost mid-carry sets it down"
@@ -1002,18 +1069,16 @@ mod tests {
         renderer.press_at(
             on_agent,
             size,
-            at,
             Pressing {
                 scale_factor: 1.0,
                 petting: None,
                 now,
             },
         );
-        assert!(renderer.pointer_moved(away, at));
+        assert!(renderer.pointer_moved(away));
         renderer.press_at(
             corner,
             size,
-            at,
             Pressing {
                 scale_factor: 1.0,
                 petting: None,
@@ -1358,6 +1423,37 @@ mod tests {
         }
     }
 
+    /// Before a frame shows, a press anywhere drags the frameless window, the
+    /// corner included, and a move or release acts on nothing: a frame
+    /// rendered but not yet presented shows nothing either.
+    #[test]
+    fn before_a_frame_shows_a_press_drags_the_window() {
+        let (rendered, at, size, now, _) = one_agent_office();
+        let fresh = OfficeRenderer::new(crate::test_flash::pack_arc());
+        let mut unpresented = OfficeRenderer::new(crate::test_flash::pack_arc());
+        let scene = scene_with(vec![active_on("/p/a.jsonl", 0, 0)], 16);
+        let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
+        assert!(unpresented.render_live(
+            at,
+            frame(&scene, crate::test_flash::pack(), theme, now),
+            size
+        ));
+        let on_agent = agent_point(&rendered, at, now);
+        let corner = (f64::from(size.0) - 1.0, f64::from(size.1) - 1.0);
+        for mut renderer in [fresh, unpresented] {
+            for cursor in [on_agent, corner] {
+                let pressing = Pressing {
+                    scale_factor: 1.0,
+                    petting: None,
+                    now,
+                };
+                assert_eq!(renderer.press_at(cursor, size, pressing), Press::Drag);
+            }
+            assert!(!renderer.pointer_moved(corner));
+            assert_eq!(renderer.release(corner), None);
+        }
+    }
+
     /// Over the office drawn, the cursor reads what the frame shows: the hand
     /// on its agent, the resize arrow in the corner, a closed hand while a
     /// figure is carried, even under a panel, and the arrow under a panel.
@@ -1371,7 +1467,7 @@ mod tests {
             ..crate::panels::ModalState::closed()
         };
         let icon = |r: &OfficeRenderer, cursor, modal: &crate::panels::ModalState| {
-            r.cursor_icon(cursor, size, at, modal, None, now)
+            r.cursor_icon(cursor, size, modal, None, now)
         };
         let on_agent = agent_point(&renderer, at, now);
         assert_eq!(icon(&renderer, on_agent, &closed), CursorIcon::Pointer);
@@ -1381,7 +1477,6 @@ mod tests {
         renderer.press_at(
             on_agent,
             size,
-            at,
             Pressing {
                 scale_factor: 1.0,
                 petting: None,
@@ -1389,7 +1484,7 @@ mod tests {
             },
         );
         let away = (on_agent.0 + 10.0 * f64::from(at.scale().get()), on_agent.1);
-        assert!(renderer.pointer_moved(away, at), "the move lifts it");
+        assert!(renderer.pointer_moved(away), "the move lifts it");
         assert_eq!(icon(&renderer, away, &closed), CursorIcon::Grabbing);
         assert_eq!(icon(&renderer, away, &open), CursorIcon::Grabbing);
     }
@@ -1414,24 +1509,26 @@ mod tests {
         let window = PhysicalSize::new(960u32, 640u32);
         let at = window_geometry(window, pack.max_density_variant(), Zoom::default());
         let mut renderer = OfficeRenderer::new(std::sync::Arc::clone(&pack));
-        renderer
-            .render(
-                at,
-                WindowFrame {
-                    world: FloorInputs {
-                        scene: &scene,
-                        pack: &pack,
-                        now,
-                        floor: FloorMeta::ground(),
-                        pets: PetInputs::default(),
-                    },
-                    theme,
-                    place: pixtuoid_scene::look::Place::default(),
-                    dim: pixtuoid_scene::look::Dim::NONE,
+        let size = (window.width, window.height);
+        let live = renderer.render_live(
+            at,
+            WindowFrame {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
                 },
-            )
-            .expect("a frame");
-        (renderer, at, (window.width, window.height), now, id)
+                theme,
+                place: pixtuoid_scene::look::Place::default(),
+                dim: pixtuoid_scene::look::Dim::NONE,
+            },
+            size,
+        );
+        assert!(live, "a frame to show");
+        renderer.presented();
+        (renderer, at, size, now, id)
     }
 
     /// The window px at the centre of layout unit `u` drawn at `at`.
@@ -1449,7 +1546,7 @@ mod tests {
             .find(|&cursor| {
                 matches!(
                     renderer
-                        .hit_at(cursor, at)
+                        .hit_at(cursor)
                         .and_then(|hit| hit.action(None, now)),
                     Some(HitAction::Focus(_))
                 )

@@ -70,14 +70,11 @@ fn on_screen(
 ) -> (
     TuiRenderer<Window>,
     Wire,
-    pixtuoid_scene::flash::ManualClock,
+    pixtuoid_scene::screen::ManualClock,
 ) {
     let (mut r, wire) = painter(cols, rows, protocol);
-    let screen = pixtuoid_scene::flash::ManualClock::default();
-    r.cutaway
-        .as_mut()
-        .expect("a cutaway")
-        .hold_on(screen.clock());
+    let screen = pixtuoid_scene::screen::ManualClock::default();
+    r.screen = pixtuoid_scene::screen::Screen::on(screen.clock());
     (r, wire, screen)
 }
 
@@ -149,12 +146,13 @@ fn placeholders_in_row(r: &TuiRenderer<Window>, y: u16) -> usize {
 /// over the image: the only text of the scene's.
 fn world_text(r: &TuiRenderer<Window>) -> ratatui::buffer::Buffer {
     let area = r.frame_buffer().area;
-    let text = r
-        .session
-        .floor(r.session.nav().current())
-        .and_then(|floor| floor.raster.host_text())
-        .expect("the host sets the world's text");
-    let map = r.last_geometry.expect("a frame drawn").map();
+    let picture = r.session.picture();
+    let text = match &picture {
+        Some(pixtuoid_scene::look::Picture::Floor(floor)) => floor.text,
+        _ => None,
+    }
+    .expect("the host sets the world's text");
+    let map = r.screen.shown().expect("a frame drawn").geometry.map();
     let mut term = Terminal::new(TestBackend::new(area.width, area.height)).expect("terminal");
     term.draw(|f| {
         let scene = crate::tui::renderer::scene_rect(f.area());
@@ -221,7 +219,8 @@ fn the_onboarding_dims_the_cutaway_and_sends_its_tiles() {
     let (mut r, wire) = kitty(120, 40);
     let scene = office();
     let lum = |r: &TuiRenderer<Window>| {
-        let frame = r.session.buf().expect("a frame");
+        let picture = r.session.picture().expect("a frame");
+        let frame = picture.pixels();
         avg_lum(frame, 0, 0, frame.width(), frame.height())
     };
     r.render(&scene, pack(), t0()).expect("render");
@@ -862,6 +861,76 @@ fn a_held_slide_frame_sends_nothing() {
     r.render(&scene, pack(), shown).expect("render");
     assert!(wire.take().contains(TRANSMIT), "shown");
     assert!(r.transition().is_some(), "still sliding");
+}
+
+/// A held cutaway frame writes nothing, its text and chrome as well as its
+/// tiles, and a pointer hits the frame the terminal shows: agents the held
+/// frame no longer draws are still hit where their tiles show them.
+#[test]
+fn a_held_cutaway_frame_leaves_the_pointer_hitting_the_one_on_screen() {
+    use crate::test_flash::{held_frames, storm_strike};
+    let strike = storm_strike();
+    let [dark, late, held, _] = held_frames(&strike);
+    let (cols, rows) = (140, 60);
+    let (mut r, wire, screen) = on_screen(cols, rows, ImageProtocol::Kitty);
+    r.set_weather(strike.weather);
+    r.set_motion(pixtuoid_scene::anim::Motion::Full);
+    let scene = office();
+    for at in [dark, late] {
+        screen.at(at);
+        r.render(&scene, pack(), at).expect("render");
+    }
+    let (col, row, id) = (0..rows)
+        .flat_map(|row| (0..cols).map(move |col| (col, row)))
+        .find_map(|(col, row)| Some((col, row, r.hit_test_agent_at(col, row)?)))
+        .expect("the cutaway shows an agent");
+    wire.take();
+    let before = r.frame_buffer().clone();
+    screen.at(held);
+    r.render(&scene_with(vec![], 16), pack(), held)
+        .expect("render");
+    assert!(!wire.take().contains(TRANSMIT), "premise: held");
+    assert_eq!(
+        *r.frame_buffer(),
+        before,
+        "nothing drawn over the held tiles"
+    );
+    assert_eq!(r.hit_test_agent_at(col, row), Some(id));
+}
+
+/// The tiles and the half-blocks are one screen under one hold: a strike
+/// phase the cutaway showed holds the floor across a font zoom that falls
+/// back to the half-blocks, whose first frame shows the next phase. Under a
+/// hold per look, that frame went out at once.
+#[test]
+fn a_phase_holds_the_floor_across_a_fall_back_to_the_half_blocks() {
+    use crate::test_flash::{held_frames, storm_strike};
+    let strike = storm_strike();
+    let [dark, late, held, shown] = held_frames(&strike);
+    let (mut r, _wire, screen) = on_screen(140, 60, ImageProtocol::Kitty);
+    r.set_weather(strike.weather);
+    r.set_motion(pixtuoid_scene::anim::Motion::Full);
+    let scene = office();
+    for at in [dark, late] {
+        screen.at(at);
+        r.render(&scene, pack(), at).expect("render");
+    }
+    assert!(!r.offers_walkable_debug(), "premise: the cutaway shows");
+    let before = r.frame_buffer().clone();
+    r.terminal.backend_mut().zoom(CellSize {
+        w: CELL.w / 2,
+        h: CELL.h / 2,
+    });
+    screen.at(held);
+    r.render(&scene, pack(), held).expect("render");
+    assert!(
+        r.offers_walkable_debug(),
+        "premise: the half-blocks drew it"
+    );
+    assert_eq!(*r.frame_buffer(), before, "held");
+    screen.at(shown);
+    r.render(&scene, pack(), shown).expect("render");
+    assert_ne!(*r.frame_buffer(), before, "shown");
 }
 
 /// A terminal resized under a hold gets its frame at once, alone or sliding:

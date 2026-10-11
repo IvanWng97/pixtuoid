@@ -60,8 +60,6 @@ pub mod cutaway;
 pub mod display;
 pub(crate) mod dither;
 pub(crate) mod effects;
-#[doc(hidden)]
-pub mod flash;
 pub mod floor;
 #[doc(hidden)]
 pub mod footer;
@@ -78,6 +76,8 @@ pub mod look;
 #[doc(hidden)]
 pub mod neon_sign;
 pub(crate) mod outside;
+#[doc(hidden)]
+pub mod screen;
 #[doc(hidden)]
 pub use outside::OutsideCache;
 pub mod pack;

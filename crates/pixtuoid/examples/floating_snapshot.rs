@@ -232,8 +232,9 @@ fn main() -> Result<()> {
         pack.max_density_variant(),
         zoom,
     );
+    // Shown as the window shows a frame, so a press finds what it shows.
     let render = |renderer: &mut OfficeRenderer, now| {
-        renderer.render(
+        let live = renderer.render_live(
             at,
             WindowFrame {
                 world: FloorInputs {
@@ -250,7 +251,11 @@ fn main() -> Result<()> {
                 },
                 dim: pixtuoid_scene::look::Dim::NONE,
             },
+            (win_w, win_h),
         );
+        if live {
+            renderer.presented();
+        }
     };
     render(&mut renderer, now);
     let mut now = now;
@@ -259,20 +264,19 @@ fn main() -> Result<()> {
         renderer.press_at(
             from,
             window,
-            at,
             pixtuoid::dev::Pressing {
                 scale_factor: 1.0,
                 petting: None,
                 now,
             },
         );
-        if !renderer.pointer_moved(to, at) {
+        if !renderer.pointer_moved(to) {
             return Err(anyhow!("--drag lifted nothing at {from:?}"));
         }
         now += Duration::from_millis(100);
         render(&mut renderer, now);
         if let Some(ms) = drop_after {
-            renderer.release(to, at);
+            renderer.release(to);
             // The drop lands on the frame after; the walk then runs `ms`.
             now += Duration::from_millis(100);
             render(&mut renderer, now);
@@ -306,7 +310,7 @@ fn main() -> Result<()> {
         ),
         tooltip: hover.and_then(|cursor| {
             let tip = renderer
-                .hit_at(cursor, at)
+                .drawn_hit_at(cursor, at)
                 .and_then(|hit| pixtuoid_scene::tooltip::for_hit(hit, &world))?;
             Some((tip, (cursor.0 as i32, cursor.1 as i32)))
         }),

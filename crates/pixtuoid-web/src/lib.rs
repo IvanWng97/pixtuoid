@@ -28,11 +28,11 @@ use crate::script::{
 };
 
 use pixtuoid_scene::audio::OneShotPool;
-use pixtuoid_scene::flash::{FlashHold, ScreenClock};
 use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs, floor_capacity};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::look::{Look, Place, RenderInputs};
 use pixtuoid_scene::pack::load_bundled_pack;
+use pixtuoid_scene::screen::{Screen, ScreenClock};
 use pixtuoid_scene::sky::WeatherPolicy;
 use pixtuoid_scene::theme::{NORMAL, Theme};
 
@@ -126,7 +126,7 @@ fn page_clock() -> ScreenClock {
 /// The host's monotonic clock, where the office runs natively.
 #[cfg(not(target_arch = "wasm32"))]
 fn page_clock() -> ScreenClock {
-    pixtuoid_scene::flash::monotonic()
+    pixtuoid_scene::screen::monotonic()
 }
 
 /// A live office rendered to a reusable RGBA buffer across frames. Keeping ONE
@@ -159,8 +159,11 @@ pub struct Office {
     /// `sync_capacity` skip the layout recompute on every other frame.
     caps_size: Option<(u16, u16)>,
     weather: WeatherPolicy,
-    /// The flashes the page shows: the frame `step` leaves is the one it draws.
-    flash: FlashHold<(u16, u16)>,
+    /// What the page shows: the frame `step` leaves is the one it draws.
+    screen: Screen<(u16, u16), ()>,
+    /// The badges of the frame the page shows, which its labels sit over: a
+    /// held frame keeps the last's.
+    shown_badges: Vec<pixtuoid_scene::display::Badge>,
     /// The WebAudio engine — `None` until the visitor clicks ♩ (browser autoplay
     /// policy: no sound without a gesture).
     audio: Option<audio::WebAudioDriver>,
@@ -200,7 +203,8 @@ impl Office {
             last_now: None,
             caps_size: None,
             weather: WeatherPolicy::Clock,
-            flash: FlashHold::on(page_clock()),
+            screen: Screen::on(page_clock()),
+            shown_badges: Vec::new(),
             audio: None,
             adopting: None,
         })
@@ -234,15 +238,32 @@ impl Office {
         // — load-bearing: the looped script REUSES agent ids, and a returning cast
         // member with stale walk legs teleports in.
         self.render(now, buf_w, buf_h);
-        let flashes = self.session.flashes();
-        let shape = (buf_w, buf_h);
-        if self.flash.holds(flashes, shape) {
+        let Some(picture) = self.session.picture() else {
+            // Too small to lay out: the canvas still takes a frame its size,
+            // the raster's backdrop.
+            self.screen.blank((buf_w, buf_h));
+            self.shown_badges.clear();
+            if let Some(backdrop) = self.session.floor().raster.pixels() {
+                expand_rgba(&mut self.rgba, backdrop);
+            }
+            self.screen.landed();
+            return;
+        };
+        let badges = picture
+            .text
+            .map_or_else(Vec::new, |text| text.badges.to_vec());
+        let picture = pixtuoid_scene::look::Picture::Floor(picture);
+        if !self
+            .screen
+            .admit(&picture, (buf_w, buf_h), (), None)
+            .written()
+        {
             return;
         }
-        self.flash.stage(flashes, shape);
-        self.expand_rgba();
+        expand_rgba(&mut self.rgba, picture.pixels());
+        self.shown_badges = badges;
         // The page draws what `step` leaves in the same task, straight after.
-        self.flash.landed();
+        self.screen.landed();
     }
 
     /// Pointer to the RGBA frame in wasm linear memory (`w*h*4` bytes).
@@ -317,7 +338,7 @@ impl Office {
             .board(&self.scene, self.floor_meta().motion, now);
 
         let mut out = String::from("{\"labels\":[");
-        for (i, badge) in self.session.badges().iter().enumerate() {
+        for (i, badge) in self.shown_badges.iter().enumerate() {
             let pixtuoid_scene::display::Badge {
                 at, marker, name, ..
             } = badge;
@@ -673,16 +694,16 @@ impl Office {
             },
         );
     }
+}
 
-    /// `Rgb` is not `repr(C)`, so expand into the RGBA staging vec per-pixel
-    /// (opaque alpha) — don't cast.
-    fn expand_rgba(&mut self) {
-        let px = self.session.buf().map_or(&[][..], |b| b.as_slice());
-        self.rgba.clear();
-        self.rgba.reserve(px.len() * 4);
-        for c in px {
-            self.rgba.extend_from_slice(&[c.r, c.g, c.b, 255]);
-        }
+/// `buf` into the RGBA staging vec `rgba`: `Rgb` is not `repr(C)`, so
+/// per-pixel (opaque alpha) — don't cast.
+fn expand_rgba(rgba: &mut Vec<u8>, buf: &pixtuoid_core::sprite::RgbBuffer) {
+    let px = buf.as_slice();
+    rgba.clear();
+    rgba.reserve(px.len() * 4);
+    for c in px {
+        rgba.extend_from_slice(&[c.r, c.g, c.b, 255]);
     }
 }
 
@@ -757,7 +778,7 @@ fn push_board_segments(
 mod tests {
     use super::*;
     use crate::script::cast_id;
-    use pixtuoid_scene::flash::{Flashes, ManualClock};
+    use pixtuoid_scene::screen::{Flashes, ManualClock};
 
     /// `Office::new`'s error arm constructs a `JsError`, so unwrap via match.
     fn office() -> Office {
@@ -906,7 +927,7 @@ mod tests {
         let mut o = office();
         o.set_weather(Some("storm".into()));
         let screen = ManualClock::default();
-        o.flash = FlashHold::on(screen.clock());
+        o.screen = Screen::on(screen.clock());
         (o, screen)
     }
 
@@ -924,7 +945,11 @@ mod tests {
         let (mut probe, _) = storm_on_screen();
         let mut phase = |ms: u64| {
             probe.step(ms as f64, 160, 96);
-            probe.session.flashes()
+            probe
+                .session
+                .picture()
+                .map(|picture| picture.flashes)
+                .unwrap_or_default()
         };
         let t0 = T0_MS as u64;
         let start = (t0..t0 + MINUTE_MS)
@@ -991,6 +1016,49 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The page's labels are those of the frame it shows: a held frame
+    /// keeps the last frame's, however the office moved since.
+    #[test]
+    fn a_held_frame_keeps_the_labels_of_the_one_shown() {
+        use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS as FLOOR_MS;
+        let strike = storm_strike();
+        let second = strike.changes[1];
+        let (mut o, screen) = storm_on_screen();
+        step_at(&mut o, &screen, strike.changes[0] - 2 * FLOOR_MS);
+        step_at(&mut o, &screen, second - FLOOR_MS / 4);
+        let labels = |o: &mut Office| {
+            let v: serde_json::Value =
+                serde_json::from_str(&o.overlay_json()).expect("overlay_json is valid JSON");
+            v["labels"].as_array().expect("labels").len()
+        };
+        let shown = labels(&mut o);
+        assert!(shown > 0, "premise: the cast is on the page");
+        let before = o.frame().to_vec();
+        o.scene.agents.clear();
+        step_at(&mut o, &screen, second);
+        assert!(o.frame() == before.as_slice(), "premise: held");
+        assert_eq!(labels(&mut o), shown);
+    }
+
+    /// A canvas shrunk too small for the office and grown back inside a
+    /// strike phase's floor gets a frame its size: the backdrop it showed
+    /// flashed nothing, so the frame after it is a new shape's, never held.
+    #[test]
+    fn a_canvas_grown_back_from_too_small_is_never_held() {
+        use pixtuoid_scene::anim::PHOTOSENSITIVE_PHASE_MIN_MS as FLOOR_MS;
+        let strike = storm_strike();
+        let [first, second] = [strike.changes[0], strike.changes[1]];
+        let (mut o, screen) = storm_on_screen();
+        step_at(&mut o, &screen, first - 2 * FLOOR_MS);
+        step_at(&mut o, &screen, second - FLOOR_MS / 4);
+        screen.at(SystemTime::UNIX_EPOCH + Duration::from_millis(second - FLOOR_MS / 8));
+        o.step((second - FLOOR_MS / 8) as f64, 8, 8);
+        assert_eq!(o.frame_len(), 8 * 8 * 4, "premise: the backdrop");
+        screen.at(SystemTime::UNIX_EPOCH + Duration::from_millis(second));
+        o.step(second as f64, 160, 96);
+        assert_eq!(o.frame_len(), 160 * 96 * 4);
     }
 
     /// A phase holds the floor from when its frame is written, not from the
@@ -1156,7 +1224,9 @@ mod tests {
         let got: Vec<serde_json::Value> = v["labels"].as_array().expect("labels").clone();
         let want: Vec<serde_json::Value> = o
             .session
-            .badges()
+            .picture()
+            .and_then(|picture| picture.text)
+            .map_or(&[][..], |text| text.badges)
             .iter()
             .map(|b| {
                 serde_json::json!({

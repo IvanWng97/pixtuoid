@@ -53,7 +53,7 @@ pub mod dev {
     pub use crate::panels::welcome::{OnboardingFrame, WelcomeRow, dim_opening};
     pub use crate::panels::widgets::{footer_context, grid_of};
     pub use crate::sources::{ConnState, ConnectionRow};
-    pub use crate::tui::renderer::{DrawCtx, DrawOut, PetState, draw_scene, scene_buf_size};
+    pub use crate::tui::renderer::{DrawCtx, PetState, draw_scene, scene_buf_size};
     pub use crate::tui::tui_renderer::TuiRenderer;
 }
 
@@ -313,10 +313,10 @@ pub(crate) mod test_flash {
 
     use pixtuoid_core::state::{MAX_FLOORS, SceneState};
     use pixtuoid_scene::anim::{FULL_TICK_MS, Motion, PHOTOSENSITIVE_PHASE_MIN_MS};
-    use pixtuoid_scene::flash::Flashes;
     use pixtuoid_scene::floor::{FloorInputs, FloorMeta, FloorSession, PetInputs};
     use pixtuoid_scene::look::{Look, Place, RenderInputs};
     use pixtuoid_scene::pack::OfficeArt;
+    use pixtuoid_scene::screen::Flashes;
     use pixtuoid_scene::sky::{Weather, WeatherPolicy};
 
     /// How long a probe looks for a flash before the test gives up on it.
@@ -360,7 +360,10 @@ pub(crate) mod test_flash {
                 dim: pixtuoid_scene::look::Dim::NONE,
             },
         );
-        session.flashes()
+        session
+            .picture()
+            .map(|picture| picture.flashes)
+            .unwrap_or_default()
     }
 
     /// A forced storm's first strike after local noon, on a Full floor.

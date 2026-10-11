@@ -346,7 +346,7 @@ impl XrgbSurface<'_> {
 
 /// What the screen shows of one layer, as far as a present may skip.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Shown {
+struct ShownLayer {
     id: LayerId,
     origin: (i32, i32),
     extent: (u32, u32),
@@ -354,11 +354,11 @@ struct Shown {
     size: (u32, u32),
 }
 
-fn shown_of(c: &Composition<'_>) -> ((u32, u32), Vec<Shown>) {
+fn shown_of(c: &Composition<'_>) -> ((u32, u32), Vec<ShownLayer>) {
     let layers = c
         .layers
         .iter()
-        .map(|l| Shown {
+        .map(|l| ShownLayer {
             id: l.id,
             origin: l.origin,
             extent: l.extent,
@@ -373,8 +373,8 @@ fn shown_of(c: &Composition<'_>) -> ((u32, u32), Vec<Shown>) {
 /// of the frame on screen, known only while the screen holds the last frame
 /// rendered, which an office's dirt is measured against.
 #[derive(Debug)]
-pub(crate) struct Screen {
-    shown: Option<((u32, u32), Vec<Shown>)>,
+pub(crate) struct Presented {
+    shown: Option<((u32, u32), Vec<ShownLayer>)>,
     /// Whether the platform keeps the window's pixels between presents. X11
     /// does not ("X does not guarantee to preserve the contents of windows",
     /// Xlib's overview), and winit hands its `Expose` over as the same
@@ -382,7 +382,7 @@ pub(crate) struct Screen {
     retains: bool,
 }
 
-impl Screen {
+impl Presented {
     /// Whether `c` must be presented: unchanged layers, the ones on screen,
     /// are the frame on screen, and presenting it again only spends the
     /// copy and the present.
@@ -593,7 +593,7 @@ mod tests {
             h: 1,
         });
         let still = (Change::Unchanged, Change::Unchanged);
-        let mut screen = Screen::new(true);
+        let mut screen = Presented::new(true);
         assert!(
             screen.needs(&frame(&office, &footer, None, still)),
             "the first frame"
@@ -634,12 +634,12 @@ mod tests {
         ];
         assert!(
             x11.into_iter()
-                .all(|raw| !Screen::of_window(Some(raw)).retains)
+                .all(|raw| !Presented::of_window(Some(raw)).retains)
         );
-        assert!(!Screen::of_window(None).retains);
+        assert!(!Presented::of_window(None).retains);
         let win32 = Win32WindowHandle::new(std::num::NonZeroIsize::MIN);
-        assert!(Screen::of_window(Some(RawWindowHandle::Win32(win32))).retains);
-        let mut forgetful = Screen::new(false);
+        assert!(Presented::of_window(Some(RawWindowHandle::Win32(win32))).retains);
+        let mut forgetful = Presented::new(false);
         forgetful.shown(&frame(&office, &footer, None, still));
         assert!(
             forgetful.needs(&frame(&office, &footer, None, still)),
@@ -659,7 +659,7 @@ mod tests {
             h: 1,
         });
         let still = (Change::Unchanged, Change::Unchanged);
-        let mut screen = Screen::new(true);
+        let mut screen = Presented::new(true);
         assert!(!screen.in_sync(), "nothing shown yet");
         screen.shown(&frame(&office, &footer, None, still));
         assert!(screen.in_sync());

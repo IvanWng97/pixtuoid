@@ -272,14 +272,15 @@ fn a_cancelled_slide_reports_what_its_last_frame_flashes() {
     r.navigate_floor(1, before);
     screen.at(catch);
     r.render(&scene, pack(), catch).expect("render");
-    let flashes = r.session.flashes();
+    let flashes = |r: &TuiRenderer<_>| r.session.picture().map(|p| p.flashes()).unwrap_or_default();
+    let caught = flashes(&r);
     assert_ne!(
-        flashes,
-        pixtuoid_scene::flash::Flashes::default(),
+        caught,
+        pixtuoid_scene::screen::Flashes::default(),
         "the slide's frame catches"
     );
     r.cancel_transition();
-    assert_eq!(r.session.flashes(), flashes);
+    assert_eq!(flashes(&r), caught);
 }
 
 /// A pause freezes the frame clock inside a hold; the screen clock runs on,

@@ -1,22 +1,15 @@
-//! Mouse hit-testing at a terminal cell: the engine's [`pixtuoid_scene::hit`]
-//! over the office pixels the cell shows.
+//! [`SceneHit`] for the terminal, and the bare-office probes the layout tests
+//! read a cell through.
 
+#[cfg(test)]
 use pixtuoid_scene::display::Hovers;
-use pixtuoid_scene::layout::{Bounds, SceneLayout};
+#[cfg(test)]
+use pixtuoid_scene::layout::SceneLayout;
 
+#[cfg(test)]
 use crate::tui::geometry::CellArea;
 
 pub(crate) use pixtuoid_scene::hit::SceneHit;
-
-/// [`pixtuoid_scene::hit::scene_hit`] at the office pixels `cell` shows.
-pub(crate) fn scene_hit<'a>(
-    hovers: &'a Hovers,
-    star: Option<Bounds>,
-    layout: &SceneLayout,
-    cell: CellArea,
-) -> Option<SceneHit<'a>> {
-    pixtuoid_scene::hit::scene_hit(hovers, star, layout, cell.bounds())
-}
 
 /// What the bare office shows at `cell`, no figure or star over it: the
 /// probe the tests read the layout's fixtures through.

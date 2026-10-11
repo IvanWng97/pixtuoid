@@ -659,7 +659,8 @@ fn classic_frame(
             debug_walkable: false,
             dim: crate::look::Dim::NONE,
         },
-    )
+    );
+    session.picture().map(|p| Arc::clone(p.hits.layout()))
 }
 
 #[test]
@@ -704,8 +705,8 @@ fn the_classic_paints_the_flame_crown_for_a_top_tier_agent() {
     )
     .expect("layout");
     let (buf, buf2) = (
-        session.buf().expect("classic buffer"),
-        session2.buf().expect("classic buffer"),
+        session.picture().expect("classic buffer").pixels,
+        session2.picture().expect("classic buffer").pixels,
     );
     // What this pins is that model/effort REACH the painter through projection
     // and the sim/paint hop — not that the crown itself drew. The burn tier also
@@ -738,7 +739,7 @@ fn the_classic_paints_records_coffee_state_and_survives_a_tiny_buffer() {
         Size { w: 8, h: 8 },
     );
     assert!(none.is_none(), "an unlayoutable size returns None");
-    let buf = session.buf().expect("classic buffer");
+    let buf = session.floor().raster.pixels().expect("classic buffer");
     assert_eq!(
         (buf.width(), buf.height()),
         (8, 8),
@@ -756,7 +757,7 @@ fn the_classic_paints_records_coffee_state_and_survives_a_tiny_buffer() {
     assert!(layout.is_some(), "a layoutable size returns the layout");
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let bg = theme.surface.bg_fallback;
-    let buf = session.buf().expect("classic buffer");
+    let buf = session.picture().expect("classic buffer").pixels;
     assert!(
         buf.as_slice()
             .iter()
@@ -780,7 +781,7 @@ fn floor_session_render_owns_the_dual_eviction() {
     session.office.coffee.insert(gone, now);
 
     let scene = SceneState::new([8; MAX_FLOORS]);
-    let layout = session.render(
+    session.render(
         crate::look::Look::Classic,
         crate::look::RenderInputs {
             world: FloorInputs {
@@ -797,7 +798,7 @@ fn floor_session_render_owns_the_dual_eviction() {
             dim: crate::look::Dim::NONE,
         },
     );
-    assert!(layout.is_some(), "a layoutable size renders");
+    assert!(session.picture().is_some(), "a layoutable size renders");
     assert!(
         !session.floor().ctx.walks.contains_key(&gone),
         "render() evicts the floor half (walks) — the floating-leak class"
@@ -832,25 +833,24 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
     let mut fell_back_empty = false;
     for step in 0..600u64 {
         let now = now0 + Duration::from_secs(3 * step);
-        let layout = session
-            .render(
-                crate::look::Look::Classic,
-                crate::look::RenderInputs {
-                    world: FloorInputs {
-                        scene: &scene,
-                        pack: &pack,
-                        now,
-                        floor: FloorMeta::ground(),
-                        pets: PetInputs::default(),
-                    },
-                    theme,
-                    size: Size { w: 160, h: 96 },
-                    place: crate::look::Place::default(),
-                    debug_walkable: false,
-                    dim: crate::look::Dim::NONE,
+        session.render(
+            crate::look::Look::Classic,
+            crate::look::RenderInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs::default(),
                 },
-            )
-            .expect("160x96 lays out");
+                theme,
+                size: Size { w: 160, h: 96 },
+                place: crate::look::Place::default(),
+                debug_walkable: false,
+                dim: crate::look::Dim::NONE,
+            },
+        );
+        let layout = Arc::clone(session.picture().expect("160x96 lays out").hits.layout());
         if session.view.last_occupied.is_empty() {
             if occupied_ever {
                 fell_back_empty = true;
@@ -874,7 +874,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         fell_back_empty,
         "occupancy never fell back to empty — last_occupied accumulates instead of tracking the frame"
     );
-    let none = session.render(
+    session.render(
         crate::look::Look::Classic,
         crate::look::RenderInputs {
             world: FloorInputs {
@@ -891,7 +891,7 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
             dim: crate::look::Dim::NONE,
         },
     );
-    assert!(none.is_none());
+    assert!(session.picture().is_none());
     assert!(
         session.view.last_occupied.is_empty(),
         "an unlayoutable render clears the stale occupancy"
@@ -931,7 +931,10 @@ fn floor_session_step_advances_the_world_without_a_pixel_buffer() {
         session.floor().ctx.door_anim_max_ms > 0,
         "the epilogue ran headlessly: the in-flight entry drives the door clamp"
     );
-    assert!(session.buf().is_none(), "no pixel buffer was bought");
+    assert!(
+        session.floor().raster.pixels().is_none(),
+        "no pixel buffer was bought"
+    );
 
     assert!(
         session
@@ -1129,8 +1132,8 @@ fn the_foreground_layer_is_lit_by_the_clock() {
     };
     let (noon_session, night_session) = (render(at_hour(12)), render(at_hour(2)));
     let (noon, night) = (
-        noon_session.buf().expect("classic buffer"),
-        night_session.buf().expect("classic buffer"),
+        noon_session.picture().expect("classic buffer").pixels,
+        night_session.picture().expect("classic buffer").pixels,
     );
     let (w, h) = (noon.width(), noon.height());
     let frozen = |x: u16, y: u16| noon.get(x, y) == night.get(x, y);
@@ -1595,8 +1598,8 @@ fn the_classic_sees_the_skyline_from_its_floors_altitude() {
             ..FloorMeta::ground()
         }),
     );
-    let ground = ground_session.buf().expect("classic buffer");
-    let top = top_session.buf().expect("classic buffer");
+    let ground = ground_session.picture().expect("classic buffer").pixels;
+    let top = top_session.picture().expect("classic buffer").pixels;
     assert!(
         (0..ground.height())
             .flat_map(|y| (0..ground.width()).map(move |x| (x, y)))
@@ -1689,8 +1692,13 @@ fn paint(
         debug_walkable: false,
         dim: crate::look::Dim::NONE,
     };
-    session.render(look, inputs).expect("lays out");
-    session.buf().expect("a frame").as_slice().to_vec()
+    session.render(look, inputs);
+    session
+        .picture()
+        .expect("lays out")
+        .pixels
+        .as_slice()
+        .to_vec()
 }
 
 /// Both looks' pixels for `scene` on `floor` at `now`, each from fresh
@@ -2061,25 +2069,28 @@ fn an_office_session_shows_each_floor_and_slides_between_them() {
             theme.surface.bg_fallback,
         )
     };
-    assert!(render(&mut office, t0).is_some(), "floor 1 lays out");
+    let _ = render(&mut office, t0);
+    assert!(
+        matches!(office.picture(), Some(crate::look::Picture::Floor(_))),
+        "floor 1 lays out"
+    );
     assert_eq!(office.n_floors(), 2);
     let bread = |office: &OfficeSession| office.footer_floor(&scene).map(|f| f.current);
     assert_eq!(bread(&office), Some(1));
-    let whole = crate::layout::Bounds {
-        x: 0,
-        y: 0,
-        width: 160,
-        height: 96,
-    };
     assert!(office.navigate(1, t0));
     let mid = t0 + Duration::from_millis(400);
+    let _ = render(&mut office, mid);
+    let slide = office.picture().expect("the slide is composed");
     assert!(
-        render(&mut office, mid).is_none(),
+        matches!(slide, crate::look::Picture::Slide(_)),
         "a slide has no one layout"
     );
-    assert!(office.buf().is_some(), "the slide is composed");
-    assert!(office.hit_at(whole).is_none(), "a slide hits nothing");
-    assert!(render(&mut office, t0 + Duration::from_secs(2)).is_some());
+    assert!(slide.hits().is_none(), "a slide hits nothing");
+    let _ = render(&mut office, t0 + Duration::from_secs(2));
+    assert!(matches!(
+        office.picture(),
+        Some(crate::look::Picture::Floor(_))
+    ));
     assert_eq!((office.nav().current(), bread(&office)), (1, Some(2)));
     let pets: Vec<crate::pet::Pet> = (0..8)
         .map(|i| crate::pet::Pet {
@@ -2133,12 +2144,17 @@ fn a_cutaway_slide_bakes_its_floors_text() {
                 theme.surface.bg_fallback,
             )
         };
-        render(&mut office, t0);
+        let _ = render(&mut office, t0);
         if let Some(after) = after {
             assert!(office.navigate(1, t0));
-            render(&mut office, t0 + Duration::from_millis(after));
+            let _ = render(&mut office, t0 + Duration::from_millis(after));
         }
-        office.buf().expect("composed").as_slice().to_vec()
+        office
+            .picture()
+            .expect("composed")
+            .pixels()
+            .as_slice()
+            .to_vec()
     };
     let baked = frame(WorldText::Baked, None);
     assert_ne!(
@@ -2195,10 +2211,10 @@ fn a_slides_gap_dims_with_its_floors() {
             gap,
         )
     };
-    render(&mut office, t0);
+    let _ = render(&mut office, t0);
     assert!(office.navigate(1, t0));
-    render(&mut office, t0 + Duration::from_millis(400));
-    let slide = office.buf().expect("composed");
+    let _ = render(&mut office, t0 + Duration::from_millis(400));
+    let slide = office.picture().expect("composed").pixels();
     let rows = |rgb| {
         (0..slide.height())
             .filter(|&y| (0..slide.width()).all(|x| slide.get(x, y) == rgb))
@@ -2225,7 +2241,7 @@ fn a_frame_without_the_office_forgets_the_last() {
     // A BUDGET for the wander to bring someone to a waypoint, not part of
     // the assertion.
     let occupied = (0..600u64).any(|step| {
-        let drawn = office.render(
+        let _ = office.render(
             crate::look::Look::Classic,
             crate::look::RenderInputs {
                 world: FloorInputs {
@@ -2244,7 +2260,7 @@ fn a_frame_without_the_office_forgets_the_last() {
             &[],
             theme.surface.bg_fallback,
         );
-        drawn.is_some() && !office.heard_occupied().is_empty()
+        office.picture().is_some() && !office.heard_occupied().is_empty()
     });
     assert!(occupied, "someone reaches a waypoint the audio hears");
     let whole = crate::layout::Bounds {
@@ -2254,11 +2270,14 @@ fn a_frame_without_the_office_forgets_the_last() {
         height: 96,
     };
     assert!(
-        office.hit_at(whole).is_some(),
+        office
+            .picture()
+            .and_then(|p| p.hits().map(|h| h.at(whole, None).is_some()))
+            .unwrap_or_default(),
         "the frame drawn shows its agents"
     );
-    office.drew_no_office();
-    assert!(office.hit_at(whole).is_none());
+    let _ = office.drew_no_office(&scene, FloorMeta::ground(), now0);
+    assert!(office.picture().is_none(), "a pointer hits nothing");
     assert!(office.heard_occupied().is_empty());
 }
 
@@ -2292,10 +2311,10 @@ fn an_office_session_follows_its_floors_down() {
         )
     };
     let two = make_scene(3, 2);
-    render(&mut office, &two);
+    let _ = render(&mut office, &two);
     assert_eq!(office.n_floors(), 2);
     let one = make_scene(2, 2);
-    render(&mut office, &one);
+    let _ = render(&mut office, &one);
     assert_eq!(office.n_floors(), 1);
     assert!(
         office.footer_floor(&one).is_none(),
@@ -2574,28 +2593,27 @@ fn a_lifted_creature_is_in_front_of_the_room() {
     };
     let size = Size { w: 160, h: 96 };
     let render = |session: &mut FloorSession, look, now| {
-        session
-            .render(
-                look,
-                crate::look::RenderInputs {
-                    world: FloorInputs {
-                        scene: &scene,
-                        pack: &pack,
-                        now,
-                        floor: FloorMeta::ground(),
-                        pets: PetInputs {
-                            pet: Some(&cat),
-                            petting: None,
-                        },
+        session.render(
+            look,
+            crate::look::RenderInputs {
+                world: FloorInputs {
+                    scene: &scene,
+                    pack: &pack,
+                    now,
+                    floor: FloorMeta::ground(),
+                    pets: PetInputs {
+                        pet: Some(&cat),
+                        petting: None,
                     },
-                    theme,
-                    size,
-                    place: crate::look::Place::default(),
-                    debug_walkable: false,
-                    dim: crate::look::Dim::NONE,
                 },
-            )
-            .expect("lays out");
+                theme,
+                size,
+                place: crate::look::Place::default(),
+                debug_walkable: false,
+                dim: crate::look::Dim::NONE,
+            },
+        );
+        assert!(session.picture().is_some(), "lays out");
     };
     let cell = |at: Point| Bounds {
         x: at.x,
@@ -2619,10 +2637,12 @@ fn a_lifted_creature_is_in_front_of_the_room() {
         let head = (0..size.h)
             .flat_map(|y| (0..size.w).map(move |x| Point { x, y }))
             .find(|&p| {
-                matches!(
-                    session.hit_at(cell(p)),
-                    Some(SceneHit::Figure(HoverTarget::Agent(a))) if *a == id
-                )
+                session.picture().is_some_and(|picture| {
+                    matches!(
+                        picture.hits.at(cell(p), None),
+                        Some(SceneHit::Figure(HoverTarget::Agent(a))) if *a == id
+                    )
+                })
             })
             .expect("the sitter is drawn");
         session.floor_mut().grip(&Gesture::Lift {
@@ -2633,7 +2653,8 @@ fn a_lifted_creature_is_in_front_of_the_room() {
         for paint in 1..=crate::anim::PAINT_FPS {
             session.floor_mut().grip(&Gesture::Carry(head));
             render(&mut session, look, now + FRAME * paint);
-            let hit = session.hit_at(cell(head));
+            let picture = session.picture().expect("drawn");
+            let hit = picture.hits.at(cell(head), None);
             assert!(
                 matches!(
                     (&figure, hit),

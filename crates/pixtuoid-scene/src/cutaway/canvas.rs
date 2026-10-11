@@ -33,7 +33,7 @@ pub struct CanvasFrame {
     /// Where it may differ from the canvas's previous frame.
     pub dirty: Dirty,
     /// What of it flashes.
-    pub(crate) flash: crate::flash::FlashPhase,
+    pub(crate) flash: crate::screen::FlashPhase,
     /// Why it painted whole, when it did.
     pub(crate) repaint: Option<Repaint>,
 }
@@ -186,7 +186,7 @@ struct Shown {
     epoch: Epoch,
     /// Every piece's reach and every light's span, each with its fingerprint.
     footprints: Vec<(Span, u64)>,
-    hovers: Hovers,
+    hovers: Arc<Hovers>,
     /// The cells of the star it drew, if it drew one.
     star: Option<Bounds>,
     /// The world text it left to the host, if it baked none.
@@ -290,7 +290,7 @@ impl CutawayCanvas {
         self.shown = Some(Shown {
             epoch,
             footprints,
-            hovers: list.hovers().clone(),
+            hovers: Arc::new(list.hovers().clone()),
             star: list
                 .texts()
                 .find(|run| run.role == crate::display::TextRole::Star)
@@ -320,7 +320,7 @@ impl CutawayCanvas {
     }
 
     /// What the last frame answers a pointer with; `None` before the first.
-    pub(crate) fn hovers(&self) -> Option<&Hovers> {
+    pub(crate) fn hovers(&self) -> Option<&Arc<Hovers>> {
         self.shown.as_ref().map(|shown| &shown.hovers)
     }
 
@@ -846,7 +846,7 @@ mod tests {
                 crate::look::WorldText::Baked,
                 (&mut cache, &mut outside),
             );
-            canvas.hovers().expect("a frame").clone()
+            Hovers::clone(canvas.hovers().expect("a frame"))
         }
     }
 

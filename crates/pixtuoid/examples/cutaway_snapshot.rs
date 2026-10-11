@@ -179,32 +179,33 @@ fn main() -> Result<()> {
 
     // The real sim, at LOGICAL size, drawn through the painters' one entry.
     let mut session = FloorSession::new(Arc::clone(&pack));
-    let layout = session
-        .render(
-            Look::Cutaway {
-                scale,
-                text: pixtuoid_scene::look::WorldText::Baked,
+    session.render(
+        Look::Cutaway {
+            scale,
+            text: pixtuoid_scene::look::WorldText::Baked,
+        },
+        RenderInputs {
+            world: pixtuoid_scene::floor::FloorInputs {
+                scene: &scene,
+                pack: &pack,
+                now,
+                floor: meta,
+                pets: pixtuoid_scene::floor::PetInputs::default(),
             },
-            RenderInputs {
-                world: pixtuoid_scene::floor::FloorInputs {
-                    scene: &scene,
-                    pack: &pack,
-                    now,
-                    floor: meta,
-                    pets: pixtuoid_scene::floor::PetInputs::default(),
-                },
-                theme,
-                size: Size { w: lw, h: lh },
-                place: Place {
-                    gateway: pixtuoid_scene::tally::office_gateway(&scene),
-                    floor: None,
-                },
-                debug_walkable: false,
-                dim: pixtuoid_scene::look::Dim::NONE,
+            theme,
+            size: Size { w: lw, h: lh },
+            place: Place {
+                gateway: pixtuoid_scene::tally::office_gateway(&scene),
+                floor: None,
             },
-        )
+            debug_walkable: false,
+            dim: pixtuoid_scene::look::Dim::NONE,
+        },
+    );
+    let picture = session
+        .picture()
         .ok_or_else(|| anyhow!("{lw}x{lh} does not lay out"))?;
-    let buf = session.buf().ok_or_else(|| anyhow!("no frame drawn"))?;
+    let (buf, layout) = (picture.pixels, picture.hits.layout());
     let (bw, bh) = (buf.width(), buf.height());
 
     let mut img = RgbImage::new(u32::from(bw), u32::from(bh));

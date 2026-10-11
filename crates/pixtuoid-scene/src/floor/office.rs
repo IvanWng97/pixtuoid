@@ -19,16 +19,16 @@ use super::{
 use crate::footer::FooterFloor;
 
 /// One floor of a painter's office: its raster and sim stores, and what its
-/// last frame laid out, occupied and flashed, so a painter reads the frame it
-/// just drew.
+/// last frame laid out, occupied and flashed.
 #[derive(Debug)]
 pub(crate) struct FloorView {
     pub(super) floor: PerFloor,
-    last_layout: Option<Arc<crate::layout::SceneLayout>>,
+    /// What the last frame answers a pointer with, its layout among it.
+    last_hits: Option<crate::look::Hits>,
     /// REPLACED each frame, never extended: the cue tracker fires on edges, so
     /// an accumulating set would re-report stale waypoints forever.
     pub(super) last_occupied: HashSet<usize>,
-    last_flash: crate::flash::FlashPhase,
+    last_flash: crate::screen::FlashPhase,
     /// Where the last frame may differ from the one before it.
     last_dirty: crate::look::Dirty,
 }
@@ -37,52 +37,55 @@ impl FloorView {
     pub(super) fn new(pack: Arc<OfficeArt>) -> Self {
         Self {
             floor: PerFloor::new(pack),
-            last_layout: None,
+            last_hits: None,
             last_occupied: HashSet::new(),
-            last_flash: crate::flash::FlashPhase::default(),
+            last_flash: crate::screen::FlashPhase::default(),
             last_dirty: crate::look::Dirty::All,
         }
     }
 
     /// Draw `inputs` in `look` beside the office-wide `office`, eviction
-    /// aside; `None` when the size can't lay out.
+    /// aside; a size that can't lay out keeps nothing of the last.
     pub(super) fn render(
         &mut self,
         office: &mut PerOffice,
         look: crate::look::Look,
         inputs: crate::look::RenderInputs<'_>,
-    ) -> Option<Arc<crate::layout::SceneLayout>> {
+    ) {
         match crate::look::render(&mut self.floor, office.stores(), look, inputs) {
             Some(frame) => {
-                self.last_layout = Some(Arc::clone(&frame.layout));
+                self.last_hits = Some(frame.hits);
                 self.last_occupied = frame.occupied_waypoints;
                 self.last_flash = frame.flash;
                 self.last_dirty = frame.dirty;
-                Some(frame.layout)
             }
-            None => {
-                self.forget();
-                None
-            }
+            None => self.forget(),
         }
     }
 
     /// Keep nothing of the last frame: one that drew no office.
     fn forget(&mut self) {
-        self.last_layout = None;
+        self.last_hits = None;
         self.last_occupied.clear();
-        self.last_flash = crate::flash::FlashPhase::default();
+        self.last_flash = crate::screen::FlashPhase::default();
         self.last_dirty = crate::look::Dirty::All;
     }
 
-    /// What the last frame shows a pointer over `area`, in layout units.
-    pub(super) fn hit_at(&self, area: crate::layout::Bounds) -> Option<crate::hit::SceneHit<'_>> {
-        crate::hit::scene_hit(
-            self.floor.raster.hovers()?,
-            self.floor.raster.star(),
-            self.last_layout.as_deref()?,
-            area,
-        )
+    /// The last frame, as floor `floor` of its office, differing anywhere
+    /// from the frame before it when `fresh`; `None` when it drew no office.
+    pub(super) fn picture(
+        &self,
+        floor: usize,
+        fresh: bool,
+    ) -> Option<crate::look::FloorPicture<'_>> {
+        let dirty = if fresh {
+            &crate::look::Dirty::All
+        } else {
+            &self.last_dirty
+        };
+        self.floor
+            .raster
+            .floor_picture(floor, self.last_hits.as_ref()?, self.last_flash, dirty)
     }
 
     /// One frame of audio intent from this floor's last frame, fed from its
@@ -94,7 +97,7 @@ impl FloorView {
         floor: FloorMeta,
         now: SystemTime,
     ) -> AudioFrame {
-        let layout = self.last_layout.as_deref();
+        let layout = self.last_hits.as_ref().map(|hits| &**hits.layout());
         office.audio.frame(
             scene,
             &self.last_occupied,
@@ -104,7 +107,7 @@ impl FloorView {
         )
     }
 
-    pub(super) fn flash(&self) -> crate::flash::FlashPhase {
+    pub(super) fn flash(&self) -> crate::screen::FlashPhase {
         self.last_flash
     }
 
@@ -115,6 +118,19 @@ impl FloorView {
     pub(super) fn moves_off_beat(&self) -> bool {
         self.floor.ctx.moves_off_beat()
     }
+}
+
+/// What a frame of an office feeds besides its picture
+/// ([`OfficeSession::picture`]), whether or not a screen shows that.
+#[doc(hidden)]
+#[must_use]
+#[derive(Debug)]
+pub struct Feed {
+    /// Its audio intent.
+    pub audio: AudioFrame,
+    /// What the floor showing was drawn under, for a painter's jank report.
+    #[doc(hidden)]
+    pub note: Option<crate::look::FrameNote>,
 }
 
 /// Which floor an office shows, and the slide to another: what every painter's
@@ -293,7 +309,7 @@ pub struct OfficeSession {
     nav: FloorNav,
     /// The last frame's slide, while one is under way: its composed pixels,
     /// and what they flash.
-    slide: Option<(RgbBuffer, crate::flash::Flashes)>,
+    slide: Option<(RgbBuffer, crate::screen::Flashes)>,
     /// The floor (or slide) the frame before showed, and whether the last
     /// frame showed another: a floor's own dirt is against ITS last frame,
     /// not the one on screen.
@@ -424,16 +440,15 @@ impl OfficeSession {
     /// it and projects each floor out of it. `inputs.world.floor` carries the
     /// office's weather and motion, `inputs.place.gateway` its gateway; each
     /// floor's index, altitude, breadcrumb and pet (of `pets`) are the
-    /// office's, and a petting plays only on its own floor. `None` when the
-    /// floor showing can't lay out, or during a slide, which has no one
-    /// layout.
+    /// office's, and a petting plays only on its own floor. Its picture is
+    /// [`Self::picture`].
     pub fn render(
         &mut self,
         look: crate::look::Look,
         inputs: crate::look::RenderInputs<'_>,
         pets: &[crate::pet::Pet],
         gap: Rgb,
-    ) -> Option<Arc<crate::layout::SceneLayout>> {
+    ) -> Feed {
         let scene = inputs.world.scene;
         let now = inputs.world.now;
         self.prepare(scene, now);
@@ -453,62 +468,81 @@ impl OfficeSession {
                     },
                     ..inputs
                 },
-            )
+            );
         };
-        let Some(tr) = self.nav.transition() else {
+        if let Some(tr) = self.nav.transition() {
+            self.shown = None;
+            // A slide has no one layout for a host to set text on.
+            let look = match look {
+                crate::look::Look::Cutaway { scale, .. } => crate::look::Look::Cutaway {
+                    scale,
+                    text: crate::look::WorldText::Baked,
+                },
+                classic @ crate::look::Look::Classic => classic,
+            };
+            let (from, to, t) = (tr.from_floor, tr.to_floor, tr.t(now));
+            draw(&mut self.views, &mut self.office, from, look);
+            draw(&mut self.views, &mut self.office, to, look);
+            let (slide, flashes) = self
+                .slide
+                .get_or_insert_with(|| (RgbBuffer::filled(0, 0, gap), Default::default()));
+            if let (Some(leaving), Some(arriving)) = (self.views[from].buf(), self.views[to].buf())
+            {
+                compose_slide(slide, (leaving, arriving), t, to > from, inputs.dim.of(gap));
+                *flashes = crate::screen::Flashes::of_slide(
+                    self.views[from].flash(),
+                    self.views[to].flash(),
+                );
+            }
+        } else {
             self.slide = None;
             let current = self.nav.current();
             self.shown_changed = self.shown.replace(current) != Some(current);
-            return draw(&mut self.views, &mut self.office, current, look);
-        };
-        self.shown = None;
-        // A slide has no one layout for a host to set text on.
-        let look = match look {
-            crate::look::Look::Cutaway { scale, .. } => crate::look::Look::Cutaway {
-                scale,
-                text: crate::look::WorldText::Baked,
-            },
-            classic @ crate::look::Look::Classic => classic,
-        };
-        let (from, to, t) = (tr.from_floor, tr.to_floor, tr.t(now));
-        draw(&mut self.views, &mut self.office, from, look);
-        draw(&mut self.views, &mut self.office, to, look);
-        let (slide, flashes) = self
-            .slide
-            .get_or_insert_with(|| (RgbBuffer::filled(0, 0, gap), Default::default()));
-        if let (Some(leaving), Some(arriving)) = (self.views[from].buf(), self.views[to].buf()) {
-            compose_slide(slide, (leaving, arriving), t, to > from, inputs.dim.of(gap));
-            *flashes =
-                crate::flash::Flashes::of_slide(self.views[from].flash(), self.views[to].flash());
+            draw(&mut self.views, &mut self.office, current, look);
         }
-        None
-    }
-
-    /// The last frame's pixels: the slide's, or the floor showing's.
-    pub fn buf(&self) -> Option<&RgbBuffer> {
-        match &self.slide {
-            Some((slide, _)) => Some(slide),
-            None => self.views.get(self.nav.current())?.buf(),
+        let current = self.nav.current();
+        Feed {
+            audio: self.audio_frame(scene, inputs.world.floor, now),
+            note: self.views[current].floor.raster.note(),
         }
     }
 
-    /// Where the last frame may differ from the one before it: a slide's
-    /// anywhere, as is a frame after one or after another floor's.
-    pub fn dirty(&self) -> &crate::look::Dirty {
-        const ALL: &crate::look::Dirty = &crate::look::Dirty::All;
-        match (&self.slide, self.views.get(self.nav.current())) {
-            (None, Some(view)) if !self.shown_changed => &view.last_dirty,
-            _ => ALL,
+    /// The last frame [`Self::render`] drew: the slide's, or the floor
+    /// showing's; `None` before the first, and when the floor showing could
+    /// not lay out.
+    pub fn picture(&self) -> Option<crate::look::Picture<'_>> {
+        if let Some((pixels, flashes)) = &self.slide {
+            return Some(crate::look::Picture::Slide(crate::look::SlidePicture {
+                pixels,
+                flashes: *flashes,
+            }));
         }
+        let current = self.nav.current();
+        self.views
+            .get(current)?
+            .picture(current, self.shown_changed)
+            .map(crate::look::Picture::Floor)
     }
 
     /// A frame drew no office (a painter's too-small screen): the floor
-    /// showing keeps nothing of its last, so its audio hears an empty floor
-    /// and a pointer hits nothing.
-    pub fn drew_no_office(&mut self) {
-        if let Some(view) = self.views.get_mut(self.nav.current()) {
+    /// showing keeps nothing of its last. Its audio, the empty floor's, is
+    /// the caller's to feed.
+    #[must_use]
+    pub fn drew_no_office(
+        &mut self,
+        scene: &SceneState,
+        office_floor: FloorMeta,
+        now: SystemTime,
+    ) -> AudioFrame {
+        let current = self.nav.current().min(self.n_floors - 1);
+        if let Some(view) = self.views.get_mut(current) {
             view.forget();
         }
+        // The empty floor's by construction, whatever the view still holds.
+        let floor = floor_meta(office_floor, current, self.n_floors);
+        self.office
+            .audio
+            .frame(scene, &HashSet::new(), |_| None, floor, now)
     }
 
     /// The waypoints the floor showing's audio reads as occupied.
@@ -517,41 +551,9 @@ impl OfficeSession {
         &self.views[self.nav.current()].last_occupied
     }
 
-    /// What the last frame flashes: a slide's leaving and arriving floors',
-    /// else the floor showing's.
-    pub fn flashes(&self) -> crate::flash::Flashes {
-        match &self.slide {
-            Some((_, flashes)) => *flashes,
-            None => crate::flash::Flashes::of_floor(
-                self.views
-                    .get(self.nav.current())
-                    .map(FloorView::flash)
-                    .unwrap_or_default(),
-            ),
-        }
-    }
-
-    /// What the floor showing's last frame was drawn under, for a painter's
-    /// jank report; `None` before its first.
-    #[doc(hidden)]
-    pub fn note(&self) -> Option<crate::look::FrameNote> {
-        self.floor(self.nav.current())?.raster.note()
-    }
-
-    /// What the last frame shows a pointer over `area`, in layout units; none
-    /// in a slide, which shows no one floor's figures where they stand.
-    pub fn hit_at(&self, area: crate::layout::Bounds) -> Option<crate::hit::SceneHit<'_>> {
-        self.slide
-            .is_none()
-            .then(|| self.views.get(self.nav.current()))
-            .flatten()?
-            .hit_at(area)
-    }
-
     /// One frame of audio intent for the floor showing, in `scene` (the FULL
-    /// live scene) under `office_floor`'s weather and motion. Call it every
-    /// frame regardless of mute.
-    pub fn audio_frame(
+    /// live scene) under `office_floor`'s weather and motion.
+    fn audio_frame(
         &mut self,
         scene: &SceneState,
         office_floor: FloorMeta,

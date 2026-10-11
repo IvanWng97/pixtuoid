@@ -11,7 +11,7 @@ use std::time::SystemTime;
 use crate::pack::OfficeArt;
 use crate::physics::{WalkProfile, walk_arrived};
 use pixtuoid_core::AgentId;
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
+use pixtuoid_core::sprite::Rgb;
 use pixtuoid_core::state::{AgentSlot, FloorLocalDeskIndex, GlobalDeskIndex, SceneState};
 use pixtuoid_core::walkable::OccupancyOverlay;
 
@@ -29,7 +29,7 @@ use crate::walk::WalkState;
 mod office;
 use office::FloorView;
 #[doc(hidden)]
-pub use office::{FloorNav, OfficeSession};
+pub use office::{Feed, FloorNav, OfficeSession};
 
 pub use pixtuoid_core::state::MAX_FLOORS;
 
@@ -580,12 +580,6 @@ impl FloorSession {
         &mut self.view.floor
     }
 
-    /// What of the last [`render`](Self::render)'s frame flashes; nothing
-    /// before the first, or when it could not lay out.
-    pub fn flashes(&self) -> crate::flash::Flashes {
-        crate::flash::Flashes::of_floor(self.view.flash())
-    }
-
     /// Drop per-agent state for agents no longer in `scene` — BOTH halves of the
     /// dual eviction. `scene` must be the FULL live scene: a PROJECTED
     /// per-floor one holds no other floor's agents, so evicting against it
@@ -596,31 +590,18 @@ impl FloorSession {
     }
 
     /// Render one frame in `look`: the dual eviction, then
-    /// [`look::render`](crate::look::render). Returns the computed layout
-    /// ([`FloorSession::buf`] holds the pixels), or `None` when the size can't
-    /// lay out. `scene` MUST be the full live scene — the session evicts
-    /// against it.
-    pub fn render(
-        &mut self,
-        look: crate::look::Look,
-        inputs: crate::look::RenderInputs<'_>,
-    ) -> Option<Arc<crate::layout::SceneLayout>> {
+    /// [`look::render`](crate::look::render); its picture is
+    /// [`Self::picture`]. `scene` MUST be the full live scene — the session
+    /// evicts against it.
+    pub fn render(&mut self, look: crate::look::Look, inputs: crate::look::RenderInputs<'_>) {
         self.evict_missing(inputs.world.scene);
-        self.view.render(&mut self.office, look, inputs)
+        self.view.render(&mut self.office, look, inputs);
     }
 
-    /// What the LAST rendered frame shows a pointer over `area`, in layout
-    /// units: [`crate::hit::scene_hit`] on its hovers, star and layout.
-    #[cfg(test)]
-    pub(crate) fn hit_at(&self, area: crate::layout::Bounds) -> Option<crate::hit::SceneHit<'_>> {
-        self.view.hit_at(area)
-    }
-
-    /// The badges of the LAST frame the classic rendered, in paint order.
-    /// Empty before the first `render`, and after a cutaway frame, whose image
-    /// holds its text.
-    pub fn badges(&self) -> &[crate::display::Badge] {
-        self.view.floor.raster.classic_badges()
+    /// The last frame [`Self::render`] drew; `None` before the first, and
+    /// when it could not lay out.
+    pub fn picture(&self) -> Option<crate::look::FloorPicture<'_>> {
+        self.view.picture(0, false)
     }
 
     /// The [`wall_board`](crate::neon_sign::wall_board) of `scene`, a one-floor office.
@@ -643,11 +624,6 @@ impl FloorSession {
     #[cfg(test)]
     pub(crate) fn moves_off_beat(&self) -> bool {
         self.view.floor.ctx.moves_off_beat()
-    }
-
-    /// The last frame's pixels, `None` before the first `render`.
-    pub fn buf(&self) -> Option<&RgbBuffer> {
-        self.view.buf()
     }
 
     /// One frame of audio intent for THIS session's last render, fed from the

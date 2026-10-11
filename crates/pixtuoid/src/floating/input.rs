@@ -7,7 +7,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use super::geometry::{Zoom, ZoomKey};
 
-use super::compose::Screen;
+use super::compose::Presented;
 use super::offscreen::OfficeRenderer;
 use pixtuoid_scene::theme::Theme;
 
@@ -140,7 +140,7 @@ fn repeats(code: KeyCode) -> bool {
 pub(crate) struct WindowHost<'a> {
     pub(crate) renderer: &'a mut OfficeRenderer,
     pub(crate) theme: &'a mut &'static Theme,
-    pub(crate) screen: &'a mut Screen,
+    pub(crate) presented: &'a mut Presented,
 }
 
 impl crate::panels::Host for WindowHost<'_> {
@@ -153,7 +153,7 @@ impl crate::panels::Host for WindowHost<'_> {
     }
 
     fn redraw(&mut self) -> anyhow::Result<()> {
-        self.screen.stale();
+        self.presented.stale();
         Ok(())
     }
 }
@@ -242,7 +242,7 @@ mod tests {
         ui: crate::panels::ui_state::UiState,
         renderer: OfficeRenderer,
         theme: &'static Theme,
-        screen: Screen,
+        presented: Presented,
         audio_ctl: crate::audio::AudioController,
         connected: crate::runtime::ConnectedSources,
         snapshot: SceneState,
@@ -272,7 +272,7 @@ mod tests {
                     pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"),
                 )),
                 theme,
-                screen: Screen::new(true),
+                presented: Presented::new(true),
                 audio_ctl: crate::audio::AudioController::new_with(
                     crate::config::AudioConfig {
                         muted: true,
@@ -298,7 +298,7 @@ mod tests {
                     host: &mut WindowHost {
                         renderer: &mut self.renderer,
                         theme: &mut self.theme,
-                        screen: &mut self.screen,
+                        presented: &mut self.presented,
                     },
                     audio_ctl: &mut self.audio_ctl,
                     config_path: &self.config_path,
