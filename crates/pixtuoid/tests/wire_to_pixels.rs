@@ -518,8 +518,7 @@ fn openclaw_state(scenario: &str, stop_at: &[&str]) -> pixtuoid_core::state::Dae
 }
 
 /// pixtuoid usually starts AFTER the gateway, so `gateway_start` is the one
-/// envelope a real attach never sees. Both captures here open on `session_start`;
-/// the failed run is the only bytes anyone has of `agent_end` with success=false.
+/// envelope a real attach never sees; the capture here opens on `session_start`.
 #[test]
 fn a_gateway_we_never_saw_start_still_materializes_from_its_session_wire() {
     use pixtuoid_core::state::DaemonState;
@@ -534,10 +533,17 @@ fn a_gateway_we_never_saw_start_still_materializes_from_its_session_wire() {
         DaemonState::Idle,
         "and agent_end must retire that run"
     );
+}
+
+/// A provider that refuses every connection, from real bytes: each retried
+/// attempt's `agent_end` carries no `error`, and only the plugin's `errored`
+/// tells the failure apart.
+#[test]
+fn a_failed_provider_degrades_the_gateway_rather_than_downing_it() {
+    use pixtuoid_core::state::DaemonState;
     assert_eq!(
-        openclaw_state("gateway-mid-attach-failed-run", &["session_end"]),
-        DaemonState::Degraded,
-        "agent_end success=false is the model backend breaking, not the gateway dying"
+        openclaw_state("provider-failed-run-recorded", &["gateway_stop"]),
+        DaemonState::Degraded
     );
 }
 

@@ -24,7 +24,7 @@ pub(super) fn redraw(frame: &mut impl Frame) {
 /// What the loop's end releases.
 pub(super) trait Teardown {
     /// Take the window off screen now. Dropping it does not: winit queues the
-    /// destroy for a message pump that never runs again.
+    /// destroy for an event loop that never runs again.
     fn hide_window(&mut self);
     /// Release the window and the surface drawn onto it.
     fn release_surface(&mut self);

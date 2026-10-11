@@ -70,7 +70,7 @@ pub struct TuiRenderer<B: Backend<Error: Send + Sync + 'static>> {
     debug_walkable: bool,
     chrome: Chrome,
     /// The flashes the half-blocks show; the cutaway holds its own.
-    flash: pixtuoid_scene::flash::FlashHold<pixtuoid_scene::flash::Flashes, ratatui::layout::Size>,
+    flash: pixtuoid_scene::flash::FlashHold<ratatui::layout::Size>,
     /// The cutaway, painted as terminal images in place of the half-blocks.
     #[cfg(feature = "graphics")]
     cutaway: Option<crate::tui::cutaway::TileCutaway>,
@@ -682,7 +682,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             flush_buffer_to_term(f, slide, scene_rect(full));
             paint_overlays(f, &overlays, now, full, theme);
         })?;
-        self.flash.shown(flashes, term_size);
+        self.flash.stage(flashes, term_size);
         self.chrome.popup.last_scale = popup_scale;
         Ok(())
     }
@@ -795,6 +795,11 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             } else {
                 cutaway.lost();
             }
+        }
+        if presented.is_ok() {
+            self.flash.landed();
+        } else {
+            self.flash.lost();
         }
         let refused = std::mem::replace(&mut self.refusing, presented.is_err());
         if let Err(e) = presented {
@@ -915,7 +920,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
             return Ok(());
         };
         let out = crate::tui::renderer::flush_classic(&mut self.terminal, &frame, layout, floor)?;
-        self.flash.shown(flashes, term_size);
+        self.flash.stage(flashes, term_size);
         self.record_drawn(scene, out, popup_scale, now);
         Ok(())
     }
@@ -991,7 +996,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
                 current,
                 pixels,
                 self.session.dirty().clone(),
-                self.session.flash(),
+                self.session.flashes(),
                 now,
             );
             let raster = self.session.floor(current).map(|floor| &floor.raster);

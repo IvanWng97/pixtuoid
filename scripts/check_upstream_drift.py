@@ -189,6 +189,14 @@ OPENCLAW_HOOK_TYPES_URL = (
     "https://raw.githubusercontent.com/openclaw/openclaw/main/src/plugins/hook-types.ts"
 )
 
+# What openclaw_plugin.js stamps `errored` from — Degraded's only trigger: each
+# upstream type's fields it reads, and the union literal it compares one against.
+OPENCLAW_DEGRADED_FIELDS: dict[str, tuple[tuple[str, str | None], ...]] = {
+    "PluginHookAgentEndEvent": (("runId", None), ("success", None), ("error", None)),
+    "PluginHookModelCallBaseEvent": (("runId", None),),
+    "PluginHookModelCallEndedEvent": (("outcome", '"error"'), ("failureKind", '"aborted"')),
+}
+
 # The inventory is SPLIT (the CLI publishes v1 `permission.asked`, declared in
 # v1/permission.ts; core's v2 tools `permission.v2.asked`, in permission.ts), so
 # the union is the document and one fetch failure must not read as a vanish. No
@@ -2028,9 +2036,35 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             for ev in sorted(ours.openclaw):
                 if f'"{ev}"' not in text:
                     report.add_breaking(
-                        f"OpenClaw hook `{ev}` (registered in OPENCLAW_EVENTS / the TS "
-                        f"plugin) is GONE from src/plugins/hook-types.ts — likely renamed; "
-                        f"the plugin registers a hook OpenClaw never fires (no presence)."
+                        f"OpenClaw hook `{ev}` (registered by the TS plugin: OPENCLAW_EVENTS "
+                        f"/ OPENCLAW_VERDICT_EVENTS) is GONE from src/plugins/hook-types.ts — "
+                        f"likely renamed; the plugin registers a hook OpenClaw never fires."
+                    )
+            for ty, fields in OPENCLAW_DEGRADED_FIELDS.items():
+                # `= Base & {` as well as `= {`: the model-call events extend a base.
+                body = _braced_body(text, rf"(?m)^(?:export\s+)?type\s+{ty}\s*=[^{{;]*\{{")
+                if body is None:
+                    report.add_blind(
+                        f"OpenClaw's `{ty}` declaration",
+                        "src/plugins/hook-types.ts",
+                        "The Degraded field watch on it was SKIPPED.",
+                    )
+                    continue
+                members = _strip_nested(body)
+                for field, literal in fields:
+                    m = re.search(
+                        rf"(?:^|[;,\n])\s*(?:readonly\s+)?{field}\??\s*:([^;]*)", members
+                    )
+                    if m is None:
+                        lost = f"no longer declares `{field}`"
+                    elif literal is not None and literal not in m.group(1):
+                        lost = f"`{field}` no longer allows {literal}"
+                    else:
+                        continue
+                    report.add_breaking(
+                        f"OpenClaw's `{ty}` {lost} (src/plugins/hook-types.ts) — "
+                        f"openclaw_plugin.js stamps `errored` from it, so the Degraded "
+                        f"verdict misreads a run."
                     )
 
     if ours.openclaw_gateway_port is not None:
