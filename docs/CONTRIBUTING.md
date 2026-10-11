@@ -183,11 +183,12 @@ our release never builds. Two consequences:
 - **Their `test do` block is a public contract** — see the "homebrew-core
   contract" comments at `crates/pixtuoid/src/app/sources_cli.rs`,
   `crates/pixtuoid-core/src/source/codewhale.rs`; the packaging-build action
-  replays the block. Homebrew changes a test only once a release needs the
-  change, so when the block calls a subcommand this tree dropped, or connects a
-  source that fails with no agent CLI installed, open a `pixtuoid: update test`
-  PR there right after the tag, carrying packaging-build's replay. A
-  `release-plz.yml` dispatch warns when one is owed.
+  replays the block. homebrew-core turned away a test update sent ahead of the
+  release that needed it, so when the block calls a subcommand this tree
+  dropped, or connects a source that fails with no agent CLI installed, open a
+  `pixtuoid: update test` PR there right after the tag, carrying
+  packaging-build's replay. A `release-plz.yml` dispatch warns when one is
+  owed.
 
 Do not try to preempt BrewTestBot: the formula is on homebrew-core's
 autobump list, so `brew bump-formula-pr pixtuoid` refuses by policy and the
