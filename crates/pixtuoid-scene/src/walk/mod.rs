@@ -374,16 +374,13 @@ pub(crate) fn advance_wander(
         WanderPhase::WalkingOut(profile) => {
             match poll_walk_leg(&profile, elapsed_phase, may_transition) {
                 WalkLegStatus::InFlight(t) => (WanderPhase::WalkingOut(profile), t),
-                WalkLegStatus::Arrived {
-                    progress,
-                    walk_total,
-                } => {
+                WalkLegStatus::Arrived { walk_total } => {
                     // Snapshot the walk-back profile now — the overlay may differ
                     // by the time the dwell ends.
                     let back = snapshot_back_profile(slot, walk, layout, router, overlay);
                     walk.wander.phase = WanderPhase::AtWaypoint(back);
                     advance_phase_clock(walk, walk_total, now);
-                    (WanderPhase::AtWaypoint(back), progress)
+                    (WanderPhase::AtWaypoint(back), Progress::ZERO)
                 }
             }
         }
@@ -403,7 +400,7 @@ pub(crate) fn advance_wander(
         WanderPhase::WalkingBack(profile) => {
             match poll_walk_leg(&profile, elapsed_phase, may_transition) {
                 WalkLegStatus::InFlight(t) => (WanderPhase::WalkingBack(profile), t),
-                WalkLegStatus::Arrived { walk_total, .. } => {
+                WalkLegStatus::Arrived { walk_total } => {
                     // `target.dest` is deliberately left as-is: the Seated arm
                     // never reads it and the next WalkingOut overwrites it.
                     walk.wander.cycle_n += 1;
@@ -436,7 +433,7 @@ enum WalkLegStatus {
     InFlight(Progress),
     /// The walk and its pause have completed; `walk_total` = `duration_ms +
     /// pause_ms`.
-    Arrived { progress: Progress, walk_total: u64 },
+    Arrived { walk_total: u64 },
 }
 
 /// The progress/arrival check the `WalkingOut` and `WalkingBack` arms share;
@@ -445,7 +442,6 @@ fn poll_walk_leg(profile: &WalkProfile, elapsed_phase: u64, may_transition: bool
     let progress = crate::physics::walk_progress(profile, elapsed_phase);
     if may_transition && walk_arrived(profile, elapsed_phase) {
         WalkLegStatus::Arrived {
-            progress,
             walk_total: profile.duration_ms + profile.pause_ms,
         }
     } else {
