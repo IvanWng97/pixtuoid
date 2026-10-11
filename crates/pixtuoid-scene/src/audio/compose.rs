@@ -85,7 +85,7 @@ impl Score {
         self.beat_s() * super::score::BEATS_PER_BAR
     }
 
-    pub fn loop_secs(&self) -> f32 {
+    pub(crate) fn loop_secs(&self) -> f32 {
         self.bar_s() * GEN_LOOP_BARS as f32
     }
 

@@ -36,7 +36,7 @@ use crate::tally::StateCounts;
 /// identically — a per-crate copy silently desyncs the two soundtracks on the
 /// next edit.
 #[doc(hidden)]
-pub const BUILD_SEED: u64 = 0xC0FF_EE01;
+pub(crate) const BUILD_SEED: u64 = 0xC0FF_EE01;
 // `AudioEngine::new`'s seeds for the per-tick keystroke / rain-drop schedulers
 // and their picker.
 pub(crate) const TYPING_SEED: u64 = 0xBEEF;
@@ -183,7 +183,7 @@ pub(crate) fn select_track(is_day: bool, precipitation: f32, track_epoch: u64) -
 /// Decode a [`TrackId`] to its composed score — the ONE
 /// `TrackId → (Mood, seed) → compose` bridge both build shells call, so the mood
 /// decode lives once instead of a hand-synced match per shell.
-pub fn compose_track(track: TrackId) -> compose::Score {
+pub(crate) fn compose_track(track: TrackId) -> compose::Score {
     let (mood, seed) = match track {
         TrackId::GenDay(seed) => (compose::Mood::Day, seed),
         TrackId::GenNight(seed) => (compose::Mood::Night, seed),
