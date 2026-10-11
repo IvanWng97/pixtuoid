@@ -423,7 +423,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["claude", "--version"]),
     home_env: Some("CLAUDE_CONFIG_DIR"),
     #[cfg(any(test, feature = "upstream"))]
-    upstream: Upstream::Watched(&[]),
+    upstream: Upstream::Watched(&[claude_code::UPSTREAM]),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: claude_code::decode_cc_line,
@@ -461,7 +461,7 @@ const CODEX: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["codex", "--version"]),
     home_env: Some("CODEX_HOME"),
     #[cfg(any(test, feature = "upstream"))]
-    upstream: Upstream::Watched(&[]),
+    upstream: Upstream::Watched(&[codex::UPSTREAM]),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: codex::decode_codex_line,
@@ -817,7 +817,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["grok", "--version"]),
     home_env: Some("GROK_HOME"),
     #[cfg(any(test, feature = "upstream"))]
-    upstream: Upstream::Watched(&[acp::UPSTREAM]),
+    upstream: Upstream::Watched(&[grok::UPSTREAM, acp::UPSTREAM]),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: grok::decode_grok_line,
@@ -871,7 +871,7 @@ const OMP: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["omp", "--version"]),
     home_env: Some("PI_CODING_AGENT_DIR"),
     #[cfg(any(test, feature = "upstream"))]
-    upstream: Upstream::Watched(&[]),
+    upstream: Upstream::Watched(&[omp::UPSTREAM]),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: omp::decode_omp_line,

@@ -27,9 +27,6 @@ CODEWHALE_HOOK_URL = (
     "crates/tui/src/hooks/config.rs"
 )
 
-# The codex escalation pair is a BOOLEAN check with no breadcrumb possible: a
-# renamed field makes `is_escalated` silently false, and false is a legitimate
-# answer. The pair spans this file and models.rs, so the union is the document.
 CODEX_PROTOCOL_URL = (
     "https://raw.githubusercontent.com/openai/codex/main/"
     "codex-rs/protocol/src/protocol.rs"
@@ -49,47 +46,6 @@ HERMES_BLOCKING_UNSAFE = {"pre_approval_request"}
 HERMES_PLUGINS_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/plugins.py"
 )
-
-# The ROLLOUT `response_item` types live in this sibling of protocol.rs, not in
-# protocol.rs itself.
-CODEX_MODELS_URL = (
-    "https://raw.githubusercontent.com/openai/codex/main/"
-    "codex-rs/protocol/src/models.rs"
-)
-
-# omp's clean-teardown marker VALUE. The decoder's guard falls through to
-# `_ => vec![]`, so a rename means no omp session ever ends cleanly — every one
-# lingers to a stale sweep, with nothing said.
-OMP_EXIT_DIAG_URL = (
-    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
-    "packages/coding-agent/src/session/exit-diagnostics.ts"
-)
-
-# omp's message-level vocabulary is SPLIT across two upstream files: the roles
-# and block type live in the shared LLM types, the `ask` tool in its own module.
-# Each is an equality guard whose miss decodes the turn to nothing.
-OMP_AI_TYPES_URL = (
-    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/ai/src/types.ts"
-)
-
-# The union IS the document: `ask` is declared only here, the rest only in
-# types.ts, so a single fetch failure must not read as a vanish.
-OMP_ASK_URL = (
-    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
-    "packages/coding-agent/src/tools/ask.ts"
-)
-
-# omp's entry types are generic English words, so every omp match is
-# QUOTE-anchored: a bare word test stays green on prose. No appearing sweep —
-# single words carry no family signal, and renderable state rides the messages.
-OMP_SESSION_ENTRIES_URL = (
-    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/session/session-entries.ts"
-)
-
-# The two declarations whose `title` key the decoder actually reads. A third
-# same-named field exists on `SessionHeader`; scanning the whole document lets
-# that unrelated survivor mask both carrier renames.
-OMP_TITLE_FIELD_CARRIERS = ("SessionTitleSlotEntry", "TitleChangeEntry")
 
 # The dsh plugin's surface (#928) — every event name the bundled plugin
 # listens for, each declared as a single-quoted key in one of these four
@@ -142,29 +98,9 @@ OMP_DIRS_URL = (
 # The interface bodies carrying the approval fields the extension forwards.
 OMP_APPROVAL_EVENT_CARRIERS = ("ToolApprovalRequestedEvent", "ToolApprovalResolvedEvent")
 
-CODEX_ROLLOUT_ITEM_URL = (
-    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/history/src/lib.rs"
-)
-
 GROK_HOOK_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
     "crates/codegen/xai-grok-hooks/src/event.rs"
-)
-
-# The module that WRITES the method into updates.jsonl, so it OWNS the name we
-# gate on — not the notification module, which only mentions it in a `///`. The
-# ACP-standard `session/update` is a different name, watched off the ACP schema.
-GROK_SESSION_STORAGE_URL = (
-    "https://raw.githubusercontent.com/xai-org/grok-build/main/"
-    "crates/codegen/xai-grok-shell/src/session/storage/mod.rs"
-)
-
-# The xAI `SessionUpdate` variants. Upstream declares PascalCase idents whose
-# snake_case wire tags derive via `rename_all`, so the tag never appears
-# literally and the check converts before searching.
-GROK_NOTIFICATION_URL = (
-    "https://raw.githubusercontent.com/xai-org/grok-build/main/"
-    "crates/codegen/xai-grok-shell/src/extensions/notification.rs"
 )
 
 # A VALUE watch, not a name sweep: the resolved port is the daemon's runtime
@@ -209,7 +145,6 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 CORE_LIB_FRAGMENT = "crates/pixtuoid-core/drift-surface.json"
 CORE_BIN_FRAGMENT = "crates/pixtuoid/drift-surface.json"
 
-CC_TOOLS_URL = "https://code.claude.com/docs/en/tools-reference.md"
 CC_HOOKS_URL = "https://code.claude.com/docs/en/hooks.md"
 CC_PLUGIN_COMPONENTS_URL = "https://code.claude.com/docs/en/plugins/components.md"
 CC_PLUGIN_INSTALL_URL = "https://code.claude.com/docs/en/plugins/install.md"
@@ -301,27 +236,6 @@ PLUGIN_DOC_MARKERS: dict[str, PluginDoc] = {
     }),
 }
 
-# Documented hooks.md surfaces the burn-tier decoder DEPENDS on: a string
-# VANISHING here is review-class drift (the docs renamed a surface we read). No
-# appearing sweep — CC breadcrumbs its unknown vocabulary at runtime.
-CC_DEPENDED_DOC_MARKERS = {
-    "CLAUDE_EFFORT": "the hook-payload effort surface (effort.level, burn tier)",
-    "receive a `model` field": "SessionStart's optional model field (burn tier)",
-}
-
-# `session_end` is snake_case on purpose — the SessionEnd HOOK name is all over
-# hooks.md and must not match. The effort markers are undocumented today, so their
-# appearing is a ping to re-verify the labels the CC decoder synthesizes.
-CC_LIFECYCLE_SURFACE_MARKERS = {
-    "session_end": 'a structural transcript end record (subtype:"session_end")',
-    ".claude/sessions/": "the ~/.claude/sessions/<pid>.json session registry",
-    "procStart": "the sessions-registry procStart field",
-    "ultra_effort_enter": "the ultra-effort transcript attachment marker",
-    "ultrathink_effort": "the ultrathink transcript attachment marker",
-    "ultra_effort_exit": "the ultra-effort EXIT attachment marker (instant flame-off)",
-}
-
-
 # Cursor is a closed binary, so the docs are the only watchable surface.
 # ONE-DIRECTIONAL. The common-word `stop` is intrinsically low-confidence (the
 # page holds the word regardless); the distinctive names carry the check.
@@ -350,18 +264,10 @@ class Anchor(typing.NamedTuple):
     also: str | None = None
 
 
-# The value must be read from upstream's DECLARATION, never scanned for as a
-# substring: a rename leaves the old literal standing in a `///` and a
-# `#[cfg(test)]` fixture, so `"…" in text` never fires.
-GROK_XAI_METHOD_CONST = r"const XAI_SESSION_UPDATE_METHOD\s*:\s*&(?:'static\s+)?str"
-GROK_XAI_METHOD_DECL = GROK_XAI_METHOD_CONST + r'\s*=\s*"([^"]+)"'
-
 ANCHORS: dict[str, Anchor] = {
     # owner-grade: the anchor IS the declaration the checked names live inside.
     CODEWHALE_HOOK_URL: Anchor(r"pub enum HookEvent\b", "`HookEvent`"),
-    CODEX_MODELS_URL: Anchor(r"pub enum ResponseItem\b", "`ResponseItem`"),
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
-    CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem\b", "`RolloutItem`"),
     # dsh declares its event keys as cordis module augmentations, so the owner is
     # the augmented interface: a key would be a SIBLING of the names it guards.
     DSH_RUNTIME_TYPES_URL: Anchor(
@@ -379,20 +285,12 @@ ANCHORS: dict[str, Anchor] = {
         also=r"(?m)^\s+interface Events \{",
     ),
     GROK_HOOK_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
-    GROK_NOTIFICATION_URL: Anchor(r"pub enum SessionUpdate\b", "`SessionUpdate`"),
-    GROK_SESSION_STORAGE_URL: Anchor(
-        GROK_XAI_METHOD_CONST, "`XAI_SESSION_UPDATE_METHOD`"
-    ),
     HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
     HERMES_SHELL_HOOK_URL: Anchor(r"_BLOCKING_EVENTS\s*=", "`_BLOCKING_EVENTS`"),
     OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName\s*=", "`PluginHookName`"),
     OPENCLAW_PATHS_URL: Anchor(r"DEFAULT_GATEWAY_PORT\s*=", "`DEFAULT_GATEWAY_PORT`"),
     # identity-grade: co-located only — a name moved out still matches, so phantom
     # renames survive it. Not upgradeable without a parser; a docs PAGE is only this.
-    OMP_AI_TYPES_URL: Anchor(r"(?m)^export type Message\s*=", "the `Message` union"),
-    OMP_ASK_URL: Anchor(r"export class AskTool", "the `AskTool` class"),
-    OMP_EXIT_DIAG_URL: Anchor(r"SESSION_EXIT_CUSTOM_TYPE", "`SESSION_EXIT_CUSTOM_TYPE`"),
-    OMP_SESSION_ENTRIES_URL: Anchor(r"export type SessionEntry\b", "the session-entry union"),
     OMP_EXT_SHARED_EVENTS_URL: Anchor(r"SessionShutdownEvent", "`SessionShutdownEvent`"),
     OMP_EXT_TYPES_URL: Anchor(r"ToolApprovalRequestedEvent", "`ToolApprovalRequestedEvent`"),
     OMP_SESSION_MANAGER_URL: Anchor(r"(?m)^export class SessionManager\b", "`SessionManager`"),
@@ -401,7 +299,6 @@ ANCHORS: dict[str, Anchor] = {
     ),
     OMP_DIRS_URL: Anchor(r"export function getAgentDir", "`getAgentDir`"),
     CC_HOOKS_URL: Anchor(r"(?m)^# Hooks reference", "the hooks-reference page"),
-    CC_TOOLS_URL: Anchor(r"(?m)^# Tools reference", "the tools-reference page"),
     CC_PLUGIN_COMPONENTS_URL: Anchor(r"(?m)^# Add components to a plugin", "the plugin-components page"),
     CC_PLUGIN_INSTALL_URL: Anchor(r"(?m)^# Install and manage plugins", "the plugin-install page"),
     CC_PLUGIN_LOADING_URL: Anchor(r"(?m)^# Plugin loading reference", "the plugin-loading page"),
@@ -474,7 +371,7 @@ class Report:
         )
 
 
-# One stalled host must not hold the ~60-document sweep.
+# One stalled host must not hold the whole sweep.
 FETCH_TIMEOUT_S = 30
 
 
@@ -546,54 +443,6 @@ def fetch_anchored(url: str, label: str, report: Report) -> str | None:
     return text
 
 
-# Codex variants we know about and deliberately do not decode — read by BOTH
-# the ResponseItem and RolloutItem sweeps, so one name exempts either enum;
-# each entry's value is its own WHY. For the two `*_call` entries the cost is
-# concrete: an activity START with no upstream END strands the session Active
-# until the stale sweep — worse than not decoding it.
-CODEX_KNOWN_OMITTED: dict[str, str] = {
-    "local_shell_call": "no `local_shell_call_output` sibling exists to end it",
-    "image_generation_call": "no `image_generation_call_output` sibling exists to end it",
-    "realtime_item": "a realtime VOICE sub-session's items (protocol/src/realtime.rs), "
-    "keyed by `realtime_session_id` — not the agent session's key space: "
-    "Started/Closed bracket the voice layer, speech segments are content no "
-    "decoder reads, and `BemItemPromoted` re-presents items already decoded "
-    "from `response_item` (upstream: 'sparse, model-invisible facts')",
-    "retained_context": "host-only, model-invisible records "
-    "(history/src/retained_context.rs: 'Sparse, model-invisible updates. Only "
-    "the host may produce these records.'); the sole variant `verified_answer` "
-    "is authorization evidence — no lifecycle, activity, model or token signal. "
-    "Sibling of `turn_context` by suffix only",
-}
-
-
-# grok xAI variants we know about and deliberately do not decode.
-GROK_XAI_KNOWN_OMITTED: dict[str, str] = {
-    "hook_annotation": "TUI scrollback text; carries no state we render",
-    "subagent_progress": "cumulative per-child totals (turns, tool calls); "
-    "summing a running total into the delta-accumulating reducer double-counts "
-    "(codex's `token_count_emits_fresh_usage_from_last_reading` is the precedent)",
-    "turn_usage": "declared in `SessionUpdate` (extensions/notification.rs) but "
-    "nothing constructs it, so it never reaches updates.jsonl; a prompt's usage "
-    "rides `turn_completed.usage`",
-    "hook_run_started": "never in the transcript: upstream emits it through "
-    "`send_xai_notification_transient` (session/acp_session_impl/hook_dispatch.rs), "
-    "which only forwards to the live client and never appends to updates.jsonl, "
-    "the file this decoder reads. A pager spinner phase — 'the turn is blocked on "
-    "an awaited hook batch that just started' (extensions/notification.rs) — whose "
-    "end `hook_execution` decodes to nothing but session_end",
-}
-
-
-def sibling_families(decoded: set[str]) -> set[str]:
-    """The trailing word of each name we decode — `function_call` → `call`. A MISS
-    matters when the new name is a sibling of one we handle (`custom_tool_call`
-    beside `function_call`, #933), not when upstream merely grows. Excluded where the
-    suffix is no real family: codex's `EventMsg` suffixes are generic lifecycle words
-    shared across unrelated subsystems."""
-    return {n.rsplit("_", 1)[-1] for n in decoded if "_" in n}
-
-
 def upstream_cursor_hook_events(text: str) -> set[str] | None:
     """The per-hook SECTION HEADINGS of cursor's hooks page.
 
@@ -624,32 +473,6 @@ def plugin_marker_findings(url: str, doc: str) -> list[str]:
     ]
 
 
-def cc_doc_marker_findings(hooks_doc: str) -> list[str]:
-    """CC is a closed binary, so hooks.md is the only watchable surface, and these
-    markers are depended on for their ABSENCE — nothing of ours to read first, so
-    the scan is unconditional. Adopting a structural end record also means the
-    liveness-probe first-sight bypass (`probe_admits`, core's source/jsonl.rs)
-    needs an ended-check: it skips the ended tail-scan only because none exists."""
-    # Depended markers alarm on VANISH, surface markers on APPEARANCE. Not named
-    # `review`: the selftest bans a bucket-named local outside `Report`.
-    findings: list[str] = []
-    for marker, what in sorted(CC_DEPENDED_DOC_MARKERS.items()):
-        if marker not in hooks_doc:
-            findings.append(
-                f"CC hooks.md no longer mentions `{marker}` — {what} may have "
-                f"moved/renamed; re-verify the burn-tier hook decode."
-            )
-    for marker, what in sorted(CC_LIFECYCLE_SURFACE_MARKERS.items()):
-        if marker in hooks_doc:
-            findings.append(
-                f"CC hooks doc now mentions `{marker}` — {what} may have "
-                f"landed upstream. Adopt it (a durable end signal for the "
-                f"JSONL transport / the liveness-probe registry) and "
-                f"update this watch."
-            )
-    return findings
-
-
 @dataclasses.dataclass
 class OurNames:
     """What WE depend on, read from our OWN source — one field per READER.
@@ -658,25 +481,13 @@ class OurNames:
     stale parser darkens exactly what it fed and nothing else."""
 
     cc: set[str] | None = None
-    dispatch_names: set[str] | None = None
     codex: set[str] | None = None
     codewhale: set[str] | None = None
     hermes: set[str] | None = None
     grok: set[str] | None = None
-    grok_xai_method: set[str] | None = None
-    grok_xai_tags: set[str] | None = None
     dsh_plugin_events: set[str] | None = None
-    omp: set[str] | None = None
-    omp_exit_marker: set[str] | None = None
-    omp_message_vocab: set[str] | None = None
-    omp_title_fields: set[str] | None = None
-    omp_hook_events: set[str] | None = None
     omp_extension_reads: set[str] | None = None
     omp_extension_subdir: set[str] | None = None
-    codex_event_msg: set[str] | None = None
-    codex_response_item: set[str] | None = None
-    codex_outers: set[str] | None = None
-    codex_escalation: set[str] | None = None
     openclaw: set[str] | None = None
     openclaw_gateway_port: set[str] | None = None
     reasonix: set[str] | None = None
@@ -730,24 +541,12 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("codewhale", CORE_BIN_FRAGMENT, "registered", "codewhale"),
     ("hermes", CORE_BIN_FRAGMENT, "registered", "hermes"),
     ("grok", CORE_BIN_FRAGMENT, "registered", "grok"),
-    ("grok_xai_method", CORE_LIB_FRAGMENT, "decoded", "grok.xai_method"),
-    ("grok_xai_tags", CORE_LIB_FRAGMENT, "decoded", "grok.xai_tags"),
-    ("omp", CORE_LIB_FRAGMENT, "decoded", "omp.entry_types"),
-    ("omp_exit_marker", CORE_LIB_FRAGMENT, "decoded", "omp.exit_marker"),
-    ("omp_message_vocab", CORE_LIB_FRAGMENT, "decoded", "omp.message_vocab"),
-    ("omp_title_fields", CORE_LIB_FRAGMENT, "decoded", "omp.title_fields"),
-    ("omp_hook_events", CORE_LIB_FRAGMENT, "decoded", "omp.hook_events"),
     ("dsh_plugin_events", CORE_BIN_FRAGMENT, "shipped", "dsh.plugin_events"),
     ("omp_extension_reads", CORE_BIN_FRAGMENT, "shipped", "omp.extension_reads"),
     ("omp_extension_subdir", CORE_LIB_FRAGMENT, "shipped", "omp.extension_subdir"),
-    ("codex_event_msg", CORE_LIB_FRAGMENT, "decoded", "codex.event_msg"),
-    ("codex_response_item", CORE_LIB_FRAGMENT, "decoded", "codex.response_item"),
-    ("codex_outers", CORE_LIB_FRAGMENT, "decoded", "codex.rollout_outers"),
-    ("codex_escalation", CORE_LIB_FRAGMENT, "decoded", "codex.escalation"),
     ("openclaw", CORE_BIN_FRAGMENT, "registered", "openclaw"),
     ("openclaw_gateway_port", CORE_BIN_FRAGMENT, "shipped", "openclaw.default_gateway_port"),
     ("reasonix", CORE_BIN_FRAGMENT, "registered", "reasonix"),
-    ("dispatch_names", CORE_LIB_FRAGMENT, "decoded", "decoder.dispatch_names"),
 )
 
 
@@ -850,27 +649,6 @@ def fetch_all_anchored(targets: list[tuple[str, str]], report: Report) -> str | 
     return "\n".join(d for d in docs if d is not None) if all(docs) else None
 
 
-def report_stale_ledger(
-    ledger_name: str,
-    ledger: dict[str, str],
-    upstream: set[str],
-    enum_label: str,
-    report: Report,
-) -> None:
-    """Ledger rows naming a variant upstream no longer declares.
-
-    Both sibling sweeps compute `upstream - mine - ledger`, so a deleted variant
-    drops out of the subtrahend and is never mentioned again. Call this only once
-    every document feeding `upstream` was fetched, or a 404 reads as a deletion."""
-    for name in sorted(set(ledger) - upstream):
-        report.add_review(
-            f"{ledger_name} still ledgers `{name}`, which {enum_label} no longer "
-            f"declares — upstream removed it. Delete the row: it documents a "
-            f"decision about a variant that is gone, and would silently exempt the "
-            f"name from the sibling sweep if upstream ever reused it."
-        )
-
-
 def rust_block_after(src: str, anchor_re: str) -> str | None:
     """The `{ … }` block following the first `anchor_re` match, `None` if absent.
 
@@ -902,36 +680,6 @@ def typescript_interface_body(text: str, name: str) -> str | None:
     pattern = rf"(?ms)^export\s+interface\s+{re.escape(name)}\b[^{{\n]*\{{(.*?)(?=^\}})"
     matches = list(re.finditer(pattern, text))
     return matches[0].group(1) if len(matches) == 1 else None
-
-
-def check_omp_title_fields(text: str, fields: set[str], report: Report) -> None:
-    bodies = {
-        name: typescript_interface_body(text, name) for name in OMP_TITLE_FIELD_CARRIERS
-    }
-    missing_carriers = [name for name, body in bodies.items() if body is None]
-    if missing_carriers:
-        report.add_blind(
-            "omp title-field carriers " + ", ".join(f"`{name}`" for name in missing_carriers),
-            "session-entries.ts",
-            "The omp title-field checks were SKIPPED.",
-        )
-        return
-
-    for field in sorted(fields):
-        property_re = (
-            rf"(?m)^\s*(?:readonly\s+)?(?P<quote>[\"']?){re.escape(field)}"
-            rf"(?P=quote)\??\s*:"
-        )
-        missing_owners = [
-            name for name, body in bodies.items() if re.search(property_re, body or "") is None
-        ]
-        if missing_owners:
-            report.add_breaking(
-                f"omp title field `{field}` (read by source/omp.rs) is GONE from "
-                + ", ".join(f"`{name}`" for name in missing_owners)
-                + " in session-entries.ts — renamed; first sight or live updates lose "
-                "the only human-readable root label and fall back to cwd."
-            )
 
 
 def check_omp_extension_reads(
@@ -1072,20 +820,6 @@ def _strip_nested(s: str) -> str:
     return s
 
 
-def upstream_codex_enum_types(text: str, enum_name: str) -> set[str] | None:
-    """Serialized `type` tags of a codex `#[serde(tag="type", rename_all="snake_case")]`
-    enum. Over-includes (a renamed variant keeps its snake_case form too), which is
-    HARMLESS given a one-directional check. Returns None if the enum can't be
-    located → the caller files probe health rather than claiming a rename."""
-    body = _enum_body(text, enum_name)
-    if body is None:
-        return None
-    # rename/alias literals must be read BEFORE `_strip_nested` eats the attr parens.
-    names = set(re.findall(r'(?:rename|alias)\s*=\s*"([^"]+)"', body))
-    names.update(_snake_case(v) for v in re.findall(r"\b([A-Z][A-Za-z0-9]*)\b", _strip_nested(body)))
-    return names or None
-
-
 def upstream_grok_hooks(text: str) -> set[str] | None:
     """The HookEventName enum variants — registration keys take the PascalCase
     spelling, so these ARE the names we register. TWO shapes, because upstream now
@@ -1203,22 +937,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"(no sprite / no activity)."
                     )
 
-    if ours.dispatch_names is not None:
-        tools = fetch_anchored(CC_TOOLS_URL, "CC tools-reference", report)
-        if tools is not None:
-            # At least one name we detect by-name must still be documented. The
-            # set is a singleton since `Task` was renamed AND deleted, so this is
-            # now "the name is still there", not a tolerance for legacy spellings.
-            present = [n for n in ours.dispatch_names if re.search(rf"`{re.escape(n)}`", tools)]
-            if not present:
-                report.add_breaking(
-                    f"None of our known dispatch tool names {sorted(ours.dispatch_names)} "
-                    f"appear in CC tools-reference — the subagent tool was likely "
-                    f"renamed again. Update make_tool_detail's known names. (Semantic "
-                    f"subagent_type detection still works, but by-name detection is "
-                    f"stale.)"
-                )
-
     hooks_doc = fetch_anchored(CC_HOOKS_URL, "CC hooks doc", report)
     if hooks_doc is not None:
         if ours.cc is not None:
@@ -1237,8 +955,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"EVENTS) is GONE from hooks.md — likely renamed; "
                             f"the decoder will silently drop it."
                         )
-        for finding in cc_doc_marker_findings(hooks_doc):
-            report.add_review(finding)
 
     registered = {"CC": ours.cc, "Codex": ours.codex, "Reasonix": ours.reasonix}
     for url, entry in PLUGIN_DOC_MARKERS.items():
@@ -1368,45 +1084,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"install/hermes.rs, or make the shim decline explicitly."
                         )
 
-    if ours.omp_message_vocab is not None:
-        joined = fetch_all_anchored(
-            [(u, "omp message vocabulary") for u in (OMP_AI_TYPES_URL, OMP_ASK_URL)], report
-        )
-        if joined is not None:
-            for name in sorted(ours.omp_message_vocab):
-                if f'"{name}"' not in joined:
-                    report.add_breaking(
-                        f"omp message name `{name}` (decoded in source/omp.rs) is GONE "
-                        f"from upstream — renamed; the turn decodes to nothing, or an "
-                        f"`ask` round strands its Waiting gate forever."
-                    )
-
-    if ours.omp_exit_marker is not None:
-        diag = fetch_anchored(OMP_EXIT_DIAG_URL, "omp exit-diagnostics", report)
-        if diag is not None:
-            for marker in sorted(ours.omp_exit_marker):
-                if f'"{marker}"' not in diag:
-                    report.add_breaking(
-                        f"omp's clean-teardown marker `{marker}` (decoded in "
-                        f"source/omp.rs) is GONE from exit-diagnostics.ts — renamed; "
-                        f"no omp session ever ends cleanly again, each lingering to a "
-                        f"stale sweep with no breadcrumb."
-                    )
-
-    if ours.omp is not None or ours.omp_title_fields is not None:
-        text = fetch_anchored(OMP_SESSION_ENTRIES_URL, "omp session-entries", report)
-        if text is not None:
-            if ours.omp is not None:
-                for name in sorted(ours.omp):
-                    if f'"{name}"' not in text:
-                        report.add_breaking(
-                            f"omp entry type `{name}` (decoded in source/omp.rs) is GONE from "
-                            f"session-entries.ts — likely renamed; the transcript still flows "
-                            f"but the decoder maps it to nothing (no sprite / no activity)."
-                        )
-            if ours.omp_title_fields is not None:
-                check_omp_title_fields(text, ours.omp_title_fields, report)
-
     if ours.dsh_plugin_events is not None:
         joined = fetch_all_anchored(
             [
@@ -1427,26 +1104,15 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"(that slice of the office silently stops updating)."
                     )
 
-    if ours.omp_hook_events is not None or ours.omp_extension_reads is not None:
+    if ours.omp_extension_reads is not None:
         shared = fetch_anchored(OMP_EXT_SHARED_EVENTS_URL, "omp extension shared-events", report)
         ext_types = fetch_anchored(OMP_EXT_TYPES_URL, "omp extension types", report)
         if shared is not None and ext_types is not None:
-            joined = shared + "\n" + ext_types
-            for name in sorted(ours.omp_hook_events or ()):
-                # The declaration form — bare quoted names also live in prose.
-                if f'type: "{name}"' not in joined:
-                    report.add_breaking(
-                        f"omp extension event `{name}` (registered by the installed "
-                        f"omp_extension.ts, decoded in source/omp.rs) is GONE from the "
-                        f"extension API — renamed; the bridge subscribes to an event omp "
-                        f"never fires (approval waits or lifecycle silently stop arriving)."
-                    )
-            if ours.omp_extension_reads is not None:
-                sm = fetch_anchored(OMP_SESSION_MANAGER_URL, "omp session-manager", report)
-                if sm is not None:
-                    check_omp_extension_reads(
-                        shared, ext_types, sm, ours.omp_extension_reads, report
-                    )
+            sm = fetch_anchored(OMP_SESSION_MANAGER_URL, "omp session-manager", report)
+            if sm is not None:
+                check_omp_extension_reads(
+                    shared, ext_types, sm, ours.omp_extension_reads, report
+                )
 
     if ours.omp_extension_subdir is not None:
         disco = fetch_anchored(OMP_EXT_DISCOVERY_URL, "omp extension discovery", report)
@@ -1471,31 +1137,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 "installs where omp never scans. Re-verify dirs.ts by hand."
             )
 
-    for field, url, enum, label in (
-        ("codex_outers", CODEX_ROLLOUT_ITEM_URL, "RolloutItem", "rollout OUTER"),
-        ("codex_event_msg", CODEX_PROTOCOL_URL, "EventMsg", "rollout event_msg"),
-        ("codex_response_item", CODEX_MODELS_URL, "ResponseItem", "rollout response_item"),
-    ):
-        mine = getattr(ours, field)
-        if mine is None:
-            continue
-        text = fetch_anchored(url, f"Codex `{enum}`", report)
-        if text is None:
-            continue
-        upstream = upstream_codex_enum_types(text, enum)
-        if upstream is None:
-            report.add_blind(
-                f"the Codex `{enum}` enum",
-                url.rsplit("/", 2)[-1],
-                f"The {label} watch was SKIPPED.",
-            )
-            continue
-        for name in sorted(mine - upstream):
-            report.add_breaking(
-                f"Codex {label} `{name}` (decoded in source/codex.rs) is GONE from "
-                f"upstream `{enum}` — renamed; the transcript decodes to nothing."
-            )
-
     if ours.grok is not None:
         text = fetch_anchored(GROK_HOOK_URL, "grok hook source", report)
         if text is not None:
@@ -1512,125 +1153,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"grok hook `{ev}` (registered in GROK_EVENTS) is GONE from "
                         f"upstream event.rs — likely renamed; we register a hook it never "
                         f"fires, so the decoder is never reached (no sprite)."
-                    )
-
-    # The PREFIX twin of the codex suffix sweep.
-    if ours.grok_xai_tags is not None:
-        text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
-        if text is not None:
-            upstream = upstream_codex_enum_types(text, "SessionUpdate")
-            if upstream is None:
-                # Unlike the codex loops, no vanish check files blind for this
-                # enum first, so a silent `continue` here is covered by nothing.
-                report.add_blind(
-                    "grok's xAI `SessionUpdate` variants",
-                    GROK_NOTIFICATION_URL,
-                    "The appearance sweep and the ledger staleness check were both "
-                    "SKIPPED — most likely the enum moved behind a declarative "
-                    "macro, as `HookEventName` already did.",
-                )
-            else:
-                families = {n.split("_", 1)[0] for n in ours.grok_xai_tags if "_" in n}
-                report_stale_ledger(
-                    "GROK_XAI_KNOWN_OMITTED",
-                    GROK_XAI_KNOWN_OMITTED,
-                    upstream,
-                    "grok's xAI `SessionUpdate`",
-                    report,
-                )
-                gap = upstream - ours.grok_xai_tags - set(GROK_XAI_KNOWN_OMITTED)
-                for name in sorted(gap):
-                    if name.split("_", 1)[0] in families:
-                        report.add_review(
-                            f"grok's xAI `SessionUpdate` has `{name}`, a sibling of a "
-                            f"family we already decode, and source/grok.rs decodes it "
-                            f"to nothing. Decode it, or add it to "
-                            f"GROK_XAI_KNOWN_OMITTED with the reason."
-                        )
-
-    if ours.codex_escalation is not None:
-        joined = fetch_all_anchored(
-            [(u, "Codex escalation names") for u in (CODEX_PROTOCOL_URL, CODEX_MODELS_URL)],
-            report,
-        )
-        if joined is not None:
-            for name in sorted(ours.codex_escalation):
-                if not re.search(rf"\b{re.escape(name)}\b", joined):
-                    report.add_breaking(
-                        f"Codex escalation name `{name}` (read by source/codex.rs) is "
-                        f"GONE from upstream — renamed; the approval gate never fires, "
-                        f"so a codex session sits Active through every prompt."
-                    )
-
-    # `CODEX_KNOWN_OMITTED` exempts a name from EITHER enum, hence the union, and
-    # only once every sweep ran (`report_stale_ledger`'s precondition).
-    codex_sibling_sweeps = (
-        ("codex_response_item", CODEX_MODELS_URL, "ResponseItem"),
-        ("codex_outers", CODEX_ROLLOUT_ITEM_URL, "RolloutItem"),
-    )
-    codex_seen: set[str] = set()
-    codex_swept = 0
-    for field, url, enum in codex_sibling_sweeps:
-        mine = getattr(ours, field)
-        if mine is None:
-            continue
-        text = fetch_anchored(url, f"Codex `{enum}`", report)
-        if text is None:
-            continue
-        upstream = upstream_codex_enum_types(text, enum)
-        if upstream is None:
-            continue
-        codex_seen |= upstream
-        codex_swept += 1
-        families = sibling_families(mine)
-        for name in sorted(upstream - mine - set(CODEX_KNOWN_OMITTED)):
-            if name.rsplit("_", 1)[-1] in families:
-                report.add_review(
-                    f"upstream `{enum}` has `{name}`, a sibling of the "
-                    f"`{'`/`'.join(sorted(n for n in mine if n.rsplit('_', 1)[-1] == name.rsplit('_', 1)[-1])[:2])}` "
-                    f"we already decode, and source/codex.rs decodes it to nothing. "
-                    f"Decode it, or add it to CODEX_KNOWN_OMITTED with the reason."
-                )
-    if codex_swept == len(codex_sibling_sweeps):
-        report_stale_ledger(
-            "CODEX_KNOWN_OMITTED",
-            CODEX_KNOWN_OMITTED,
-            codex_seen,
-            "`ResponseItem`/`RolloutItem`",
-            report,
-        )
-
-    if ours.grok_xai_method is not None:
-        text = fetch_anchored(GROK_SESSION_STORAGE_URL, "grok session storage", report)
-        if text is not None:
-            decl = sole_match(GROK_XAI_METHOD_DECL, strip_rust_comments(text))
-            if decl is None:
-                report.add_blind(
-                    "grok's `XAI_SESSION_UPDATE_METHOD` declaration",
-                    "storage/mod.rs",
-                    "The xAI method watch was SKIPPED.",
-                )
-            else:
-                for method in sorted(ours.grok_xai_method):
-                    if method != decl.group(1):
-                        report.add_breaking(
-                            f"grok's xAI method is now `{decl.group(1)}`, not `{method}` "
-                            f"(source/grok.rs) — decode_grok_line gates the WHOLE xAI "
-                            f"block on it, so every subagent link, model change and end "
-                            f"marker is silently lost."
-                        )
-
-    if ours.grok_xai_tags is not None:
-        text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
-        if text is not None:
-            for tag in sorted(ours.grok_xai_tags):
-                variant = "".join(p.title() for p in tag.split("_"))
-                if not re.search(rf"(?m)^\s*{variant}\b", text):
-                    report.add_breaking(
-                        f"grok xAI update variant `{variant}` (tag `{tag}`, decoded in "
-                        f"source/grok.rs) is GONE from extensions/notification.rs — its "
-                        f"snake_case tag shifts and the line decodes to nothing "
-                        f"(no subagent link / no model info / no end marker)."
                     )
 
     if ours.openclaw is not None:

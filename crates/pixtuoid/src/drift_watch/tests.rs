@@ -543,7 +543,9 @@ fn render(pattern: &str, name: &str) -> String {
                 .find(')')
                 .unwrap_or_else(|| panic!("unclosed group in {pattern}"));
             let first = alts[..end].split('|').next().unwrap_or_default();
-            (render(first, name), 3 + end + 1)
+            // An optional group renders present: its first branch still matches.
+            let optional = usize::from(alts[end + 1..].starts_with('?'));
+            (render(first, name), 3 + end + 1 + optional)
         } else {
             let fixed: &[(&str, &str)] = &[
                 ("{name}", name),
@@ -591,6 +593,7 @@ fn rendering_a_pattern_yields_text_it_matches() {
             r#"impl\s+X\s*\{\s*fn\s+(?:a|b)\(\)\s*\{\s*"([^"]+)""#,
             "agent",
         ),
+        (r#"const M\s*:\s*&(?:'static\s+)?str\s*=\s*"([^"]+)""#, "m"),
     ] {
         let text = render(pattern, name);
         let re = Regex::new(&pattern.replace("{name}", &regex::escape(name))).expect("compiles");

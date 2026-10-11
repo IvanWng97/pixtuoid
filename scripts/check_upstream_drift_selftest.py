@@ -76,19 +76,6 @@ def test_try_fetch_classifies_permanent_vs_transient() -> None:
         d.fetch = real
 
 
-def test_cc_doc_marker_detection_fires_both_directions() -> None:
-    quiet = "\n".join(d.CC_DEPENDED_DOC_MARKERS)
-    got = d.cc_doc_marker_findings(quiet)
-    check(got == [], f"quiet doc -> no findings: {got!r}")
-
-    missing = "\n".join(m for m in d.CC_DEPENDED_DOC_MARKERS if m != "CLAUDE_EFFORT")
-    got = d.cc_doc_marker_findings(missing)
-    check(len(got) == 1 and "CLAUDE_EFFORT" in got[0], f"vanish fires: {got!r}")
-
-    got = d.cc_doc_marker_findings(quiet + "\nultra_effort_exit\n")
-    check(len(got) == 1 and "ultra_effort_exit" in got[0], f"appearance fires: {got!r}")
-
-
 def test_plugin_doc_markers_fire_on_vanish() -> None:
     for url, entry in d.PLUGIN_DOC_MARKERS.items():
         full = "\n".join(entry.markers)
@@ -153,18 +140,12 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.REASONIX_PLUGIN_DOC_URL: "\n## CLI Mode\n",
     d.CURSOR_HOOKS_URL: "\n### Hook events\n\n#### preToolUse\n",
     d.KIMI_HOOKS_URL: '"hook_event_name": "PreToolUse"',
-    d.CC_TOOLS_URL: "\n# Tools reference\n",
     d.CC_HOOKS_URL: "\n# Hooks reference\n",
     d.REASONIX_HOOK_URL: 'const (\n    SessionStart Event = "SessionStart"\n)\n',
     d.CODEWHALE_HOOK_URL: "pub enum HookEvent {\n    SessionStart,\n}\n",
     d.CODEX_PROTOCOL_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
     d.HERMES_PLUGINS_URL: 'VALID_HOOKS: set[str] = {\n    "on_session_start",\n}\n',
     d.HERMES_SHELL_HOOK_URL: '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n',
-    d.OMP_SESSION_ENTRIES_URL: 'export type SessionEntry = { type: "session" }\n',
-    d.OMP_EXIT_DIAG_URL: 'const SESSION_EXIT_CUSTOM_TYPE = "session_exit";\n',
-    d.OMP_AI_TYPES_URL:
-        'export type Message = UserMessage | AssistantMessage;\n'
-        'export interface ToolCall { type: "toolCall" }\n',
     d.OMP_EXT_SHARED_EVENTS_URL:
         'export interface SessionShutdownEvent { type: "session_shutdown"; }\n',
     d.OMP_EXT_TYPES_URL:
@@ -187,12 +168,7 @@ ANCHOR_SAMPLES: dict[str, str] = {
         'export async function discoverExtensionModulePaths() {}\n',
     d.OMP_DIRS_URL:
         'export function getAgentDir(): string {\n\treturn dirs.agentDir;\n}\n',
-    d.OMP_ASK_URL: 'export class AskTool { name = "ask"; }\n',
-    d.CODEX_ROLLOUT_ITEM_URL: "pub enum RolloutItem {\n    SessionMeta,\n}\n",
-    d.CODEX_MODELS_URL: "pub enum ResponseItem {\n    FunctionCall,\n}\n",
     d.GROK_HOOK_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
-    d.GROK_NOTIFICATION_URL: "pub enum SessionUpdate {\n    HookExecution,\n}\n",
-    d.GROK_SESSION_STORAGE_URL: 'const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";\n',
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "agent_end"\n',
     d.OPENCLAW_PATHS_URL: "export const DEFAULT_GATEWAY_PORT = 18789;\n",
 }
@@ -546,44 +522,6 @@ def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
         )
 
 
-def test_an_unreadable_grok_enum_files_probe_health_rather_than_nothing() -> None:
-    """The anchor still matches when the enum moves behind a macro — xAI already
-    did this to `HookEventName` — so the document passes identity while the parser
-    reads the macro DEFINITION's body, and both directions riding it skip."""
-    real = d.fetch
-    try:
-        rep0 = d.Report()
-        tags = sorted(d.read_our_names(rep0).grok_xai_tags or ())
-        check(bool(tags), "the fragment supplies the xai tag set")
-        pas = lambda n: "".join(p.title() for p in n.split("_"))
-        variants = "".join(f"    {pas(n)},\n" for n in tags)
-
-        def drive(doc: str) -> d.Report:
-            def stub(u: str, _d: str = doc) -> str:
-                if u == d.GROK_NOTIFICATION_URL:
-                    return _d
-                raise urllib.error.URLError("offline: not this case's document")
-
-            d.fetch = stub
-            rep = d.Report()
-            d.run_checks(d.read_our_names(rep), report=rep)
-            return rep
-
-        plain = drive(f"pub enum SessionUpdate {{\n{variants}}}\n")
-        check(not any("SessionUpdate` variants" in b for b in plain.blind),
-              f"a readable enum files no probe health; got {plain.blind}")
-
-        macro = drive(
-            "macro_rules! session_updates {\n    ($($variant:ident,)*) => {\n"
-            "        pub enum SessionUpdate { $($variant,)* }\n    };\n}\n"
-            f"session_updates! {{\n{variants}}}\n"
-        )
-        check(any("SessionUpdate` variants" in b for b in macro.blind),
-              f"an unreadable enum must file probe health; got blind={macro.blind}")
-    finally:
-        d.fetch = real
-
-
 def test_no_anchor_is_a_name_the_watcher_checks() -> None:
     """`Anchor`'s docstring bans this in prose, and prose has no failure mode.
 
@@ -598,8 +536,8 @@ def test_no_anchor_is_a_name_the_watcher_checks() -> None:
         if isinstance(v := getattr(ours, f), set)
         for n in v
     }
-    # A floor: an empty vocabulary would make every `re.search` below vacuous.
-    check(len(names) > 100, f"the fragments supply the swept vocabulary, got {len(names)}")
+    # An empty vocabulary would make every `re.search` below vacuous.
+    check(bool(names), "the fragments supply the swept vocabulary")
     circular = sorted(
         (a.owns, p, n)
         for a in d.ANCHORS.values()
@@ -886,179 +824,6 @@ def test_every_block_reader_strips_comments_before_counting_braces() -> None:
         )
 
 
-def test_an_undecoded_sibling_is_reported_and_a_stranger_is_not() -> None:
-    """#933's direction: upstream GAINING a name we do not decode. Scoped to
-    siblings of what we handle, because "upstream grew" alone is not a signal —
-    codex's `EventMsg` adds names constantly. `custom_tool_call` beside
-    `function_call` is the shape that cost four tool calls a turn."""
-    real = d.fetch
-    saved = dict(d.CODEX_KNOWN_OMITTED)
-    try:
-        rep0 = d.Report()
-        ours = d.read_our_names(rep0)
-        decoded = sorted(ours.codex_response_item or ())
-        check(bool(decoded), "the fragment supplies the response_item set")
-
-        def drive(extra: list[str]) -> d.Report:
-            rows = "".join(
-                f'    #[serde(rename = "{n}")]\n    Pxv{i},\n'
-                for i, n in enumerate(decoded + extra)
-            )
-            body = f"pub enum ResponseItem {{\n{rows}}}\n"
-
-            def stub(u: str, _b: str = body) -> str:
-                if u == d.CODEX_MODELS_URL:
-                    return _b
-                raise urllib.error.URLError("offline: not this case's document")
-
-            d.fetch = stub
-            rep = d.Report()
-            d.run_checks(d.read_our_names(rep), report=rep)
-            return rep
-
-        d.CODEX_KNOWN_OMITTED.clear()
-        quiet = drive([])
-        check(not quiet.review, f"decoding everything upstream has stays silent: {quiet.review}")
-
-        family = decoded[0].rsplit("_", 1)[-1]
-        sibling = f"pxd_new_{family}"
-        loud = drive([sibling])
-        check(any(sibling in x for x in loud.review),
-              f"a new `_{family}` sibling must be reported; got {loud.review}")
-
-        stranger = drive(["pxd_unrelated_thing"])
-        check(not any("pxd_unrelated" in x for x in stranger.review),
-              f"an unrelated addition must NOT be reported; got {stranger.review}")
-
-        d.CODEX_KNOWN_OMITTED[sibling] = "test"
-        ledgered = drive([sibling])
-        check(not any(sibling in x for x in ledgered.review),
-              f"a ledgered sibling goes quiet; got {ledgered.review}")
-    finally:
-        d.fetch = real
-        d.CODEX_KNOWN_OMITTED.clear()
-        d.CODEX_KNOWN_OMITTED.update(saved)
-
-
-def test_a_ledger_row_upstream_deleted_is_reported_once_every_doc_was_fetched() -> None:
-    """The direction both sibling sweeps are blind to: `upstream - mine - ledger`
-    drops a deleted variant out of the subtrahend. `CODEX_KNOWN_OMITTED` exempts
-    EITHER enum, so staleness is knowable only once both were fetched."""
-    real = d.fetch
-    saved_codex = dict(d.CODEX_KNOWN_OMITTED)
-    saved_grok = dict(d.GROK_XAI_KNOWN_OMITTED)
-    phantom = "pxd_upstream_deleted_this"
-    try:
-        rep0 = d.Report()
-        ours = d.read_our_names(rep0)
-        response_item = sorted(ours.codex_response_item or ())
-        outers = sorted(ours.codex_outers or ())
-        tags = sorted(ours.grok_xai_tags or ())
-        check(bool(response_item and outers and tags), "the fragment supplies all three sets")
-
-        def serve(docs: dict[str, str]) -> d.Report:
-            def stub(u: str, _d: dict[str, str] = docs) -> str:
-                if u in _d:
-                    return _d[u]
-                raise urllib.error.URLError("offline: not this case's document")
-
-            d.fetch = stub
-            rep = d.Report()
-            d.run_checks(d.read_our_names(rep), report=rep)
-            return rep
-
-        def codex_enum(enum: str, names: list[str]) -> str:
-            rows = "".join(
-                f'    #[serde(rename = "{n}")]\n    Pxv{i},\n' for i, n in enumerate(names)
-            )
-            return f"pub enum {enum} {{\n{rows}}}\n"
-
-        both = {
-            d.CODEX_MODELS_URL: codex_enum("ResponseItem", response_item),
-            d.CODEX_ROLLOUT_ITEM_URL: codex_enum("RolloutItem", outers),
-        }
-        d.CODEX_KNOWN_OMITTED.clear()
-        d.CODEX_KNOWN_OMITTED[phantom] = "test"
-        loud = serve(both)
-        check(any(phantom in x for x in loud.review),
-              f"a ledger row upstream no longer declares must be reported; got {loud.review}")
-
-        half = serve({d.CODEX_MODELS_URL: both[d.CODEX_MODELS_URL]})
-        check(not any(phantom in x for x in half.review),
-              f"one enum unfetched cannot prove staleness; got {half.review}")
-
-        # EITHER enum exempts, so the check must union them. Ledger a name only the
-        # FIRST-swept enum has: a last-wins accumulator drops it and cries stale.
-        only_response = sorted(set(response_item) - set(outers))
-        check(bool(only_response), "ResponseItem has a name RolloutItem does not")
-        d.CODEX_KNOWN_OMITTED.clear()
-        d.CODEX_KNOWN_OMITTED[only_response[0]] = "test"
-        live = serve(both)
-        check(not any(f"ledgers `{only_response[0]}`" in x for x in live.review),
-              f"a row only the FIRST enum declares stays quiet; got {live.review}")
-
-        pas = lambda n: "".join(p.title() for p in n.split("_"))
-        grok_doc = ("pub enum SessionUpdate {\n"
-                    + "".join(f"    {pas(n)},\n" for n in tags) + "}\n")
-        d.GROK_XAI_KNOWN_OMITTED.clear()
-        d.GROK_XAI_KNOWN_OMITTED[phantom] = "test"
-        gl = serve({d.GROK_NOTIFICATION_URL: grok_doc})
-        check(any(phantom in x for x in gl.review),
-              f"the grok ledger gets the same sweep; got {gl.review}")
-
-        d.GROK_XAI_KNOWN_OMITTED.clear()
-        d.GROK_XAI_KNOWN_OMITTED[tags[0]] = "test"
-        gq = serve({d.GROK_NOTIFICATION_URL: grok_doc})
-        check(not any(f"ledgers `{tags[0]}`" in x for x in gq.review),
-              f"a live grok row stays quiet; got {gq.review}")
-    finally:
-        d.fetch = real
-        d.CODEX_KNOWN_OMITTED.clear()
-        d.CODEX_KNOWN_OMITTED.update(saved_codex)
-        d.GROK_XAI_KNOWN_OMITTED.clear()
-        d.GROK_XAI_KNOWN_OMITTED.update(saved_grok)
-
-
-def test_the_prefix_sweeps_flag_a_family_sibling_and_ignore_a_stranger() -> None:
-    """The grok twin of the codex suffix sweep, same four directions."""
-    real = d.fetch
-    saved = dict(d.GROK_XAI_KNOWN_OMITTED)
-    try:
-        rep0 = d.Report()
-        ours = d.read_our_names(rep0)
-        tags = sorted(ours.grok_xai_tags or ())
-        check(bool(tags), "the fragment supplies the xai tag set")
-
-        def drive(extra: list[str]) -> d.Report:
-            pas = lambda n: "".join(p.title() for p in n.split("_"))
-            doc = ("pub enum SessionUpdate {\n"
-                   + "".join(f"    {pas(n)},\n" for n in tags + extra) + "}\n")
-
-            def stub(u: str, _d: str = doc) -> str:
-                if u == d.GROK_NOTIFICATION_URL:
-                    return _d
-                raise urllib.error.URLError("offline: not this case's document")
-
-            d.fetch = stub
-            rep = d.Report()
-            d.run_checks(d.read_our_names(rep), report=rep)
-            return rep
-
-        d.GROK_XAI_KNOWN_OMITTED.clear()
-        check(not drive([]).review, "decoding everything upstream has stays silent")
-        fam = tags[0].split("_", 1)[0]
-        sib = f"{fam}_pxd_new"
-        loud = drive([sib])
-        check(any(sib in x for x in loud.review), f"a `{fam}_*` sibling must flag; got {loud.review}")
-        check(not drive(["pxd_stranger"]).review, "a family-less addition stays silent")
-        d.GROK_XAI_KNOWN_OMITTED[sib] = "test"
-        check(not drive([sib]).review, "a ledgered sibling goes quiet")
-    finally:
-        d.fetch = real
-        d.GROK_XAI_KNOWN_OMITTED.clear()
-        d.GROK_XAI_KNOWN_OMITTED.update(saved)
-
-
 def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
     """Tracking `'` as a string opener swallows the comment AFTER an odd number of
     lifetimes into a fake literal, re-admitting every word inside it. An EVEN count
@@ -1188,15 +953,15 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         full = {rel: real(rel) for rel in (d.CORE_LIB_FRAGMENT, d.CORE_BIN_FRAGMENT)}
 
         holed = {rel: json.loads(json.dumps(f)) for rel, f in full.items()}
-        del holed[d.CORE_LIB_FRAGMENT]["decoded"]["omp.entry_types"]
+        del holed[d.CORE_BIN_FRAGMENT]["registered"]["claude-code"]
         d.load_fragment = lambda rel: holed[rel]
         rep = d.Report()
         ours = d.read_our_names(rep)
-        check(ours.omp is None, f"the holed field is dark, got {ours.omp!r}")
-        for other in ("cc", "cursor", "kimi", "grok_xai_tags", "dispatch_names"):
+        check(ours.cc is None, f"the holed field is dark, got {ours.cc!r}")
+        for other in ("cursor", "kimi", "codex", "omp_extension_subdir"):
             check(getattr(ours, other), f"{other} must survive a sibling's gap")
-        named = [b for b in rep.blind if "`omp`" in b]
-        check(len(named) == 1, f"exactly one probe-health line names omp: {rep.blind}")
+        named = [b for b in rep.blind if "`cc`" in b]
+        check(len(named) == 1, f"exactly one probe-health line names cc: {rep.blind}")
 
         # A fragment that does not load at all darkens only what IT feeds.
         def half(rel):
@@ -1208,32 +973,12 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         rep2 = d.Report()
         ours2 = d.read_our_names(rep2)
         check(ours2.cc is None, "a registration field is dark when its fragment is gone")
-        check(bool(ours2.omp), "a DECODE field survives the other fragment going missing")
+        check(
+            bool(ours2.omp_extension_subdir),
+            "a field of the other fragment survives it going missing",
+        )
     finally:
         d.load_fragment = real
-
-
-def test_codex_enum_reader_drops_field_types_and_keeps_renames() -> None:
-    """`_strip_nested` is what stops a struct field's CamelCase TYPE reading as a
-    variant. A phantom is invisible to the vanish census — the check is
-    one-directional — so it needs a reader-level case: a phantom makes a REAL
-    rename look present, which is the masked half of the same failure.
-    """
-    body = (
-        "pub enum EventMsg {\n"
-        "    TaskStarted { detail: PhantomType, n: usize },\n"
-        "    ExecCommandEnd(PhantomTuple),\n"
-        "    #[serde(rename = \"renamed_wire_name\")]\n"
-        "    TokenCount,\n"
-        "}\n"
-    )
-    got = d.upstream_codex_enum_types(body, "EventMsg")
-    check(got is not None, "the enum parses")
-    got = got or set()
-    check("task_started" in got and "exec_command_end" in got, f"variants convert: {sorted(got)}")
-    check("renamed_wire_name" in got, f"a rename attr is read verbatim: {sorted(got)}")
-    check("phantom_type" not in got and "phantom_tuple" not in got,
-          f"a field TYPE is not a variant: {sorted(got)}")
 
 
 def test_the_cc_hook_table_parser_extracts_from_a_snippet() -> None:
@@ -1251,7 +996,6 @@ def test_the_cc_hook_table_parser_extracts_from_a_snippet() -> None:
         d.upstream_cc_hook_events("# Hooks reference\n\nprose with no table\n") in (None, set()),
         "a table-less page must not read as a full parse",
     )
-
 
 
 def test_omp_approved_optionality_is_watched() -> None:
@@ -1288,93 +1032,6 @@ def test_omp_approved_optionality_is_watched() -> None:
     )
 
 
-def test_omp_title_field_watch_requires_both_carriers() -> None:
-    """A same-named SessionHeader field must not mask either carrier's rename."""
-    def document(
-        slot_field: str = "title",
-        change_field: str = "title",
-        *,
-        include_slot: bool = True,
-        include_change: bool = True,
-    ) -> str:
-        slot = (
-            "export interface SessionTitleSlotEntry {\n"
-            "  type: typeof SESSION_TITLE_SLOT_ENTRY_TYPE;\n"
-            f"  {slot_field}: string;\n"
-            "}\n"
-            if include_slot
-            else ""
-        )
-        change = (
-            "export interface TitleChangeEntry {\n"
-            "  type: typeof TITLE_CHANGE_ENTRY_TYPE;\n"
-            f"  {change_field}: string;\n"
-            "}\n"
-            if include_change
-            else ""
-        )
-        return (
-            "export type SessionEntry = TitleChangeEntry;\n"
-            "export interface SessionHeader {\n"
-            "  title?: string;\n"
-            "}\n"
-            + slot
-            + change
-        )
-
-    def drive(text: str) -> tuple[list[str], list[str]]:
-        report = d.Report()
-        d.check_omp_title_fields(text, {"title"}, report)
-        return report.breaking, report.blind
-
-    intact_breaking, intact_blind = drive(document())
-    check(not intact_breaking and not intact_blind, "both intact title carriers stay silent")
-
-    quoted_breaking, quoted_blind = drive(document('readonly "title"?', "'title'"))
-    check(
-        not quoted_breaking and not quoted_blind,
-        "quoted/readonly/optional spellings preserve the same property key",
-    )
-
-    for slot_field, change_field, missing_owner in [
-        ("currentTitle", "title", "SessionTitleSlotEntry"),
-        ("title", "nextTitle", "TitleChangeEntry"),
-    ]:
-        breaking, blind = drive(document(slot_field, change_field))
-        check(
-            len(breaking) == 1 and missing_owner in breaking[0] and not blind,
-            f"a field missing from {missing_owner} must be breaking: "
-            f"breaking={breaking}, blind={blind}",
-        )
-
-    for include_slot, include_change, missing_owner in [
-        (False, True, "SessionTitleSlotEntry"),
-        (True, False, "TitleChangeEntry"),
-    ]:
-        breaking, blind = drive(
-            document(include_slot=include_slot, include_change=include_change)
-        )
-        check(
-            not breaking and len(blind) == 1 and missing_owner in blind[0],
-            f"a missing {missing_owner} declaration must be probe health: "
-            f"breaking={breaking}, blind={blind}",
-        )
-
-    duplicate = document() + (
-        "export interface SessionTitleSlotEntry {\n"
-        "  type: typeof SESSION_TITLE_SLOT_ENTRY_TYPE;\n"
-        "  title: string;\n"
-        "}\n"
-    )
-    duplicate_breaking, duplicate_blind = drive(duplicate)
-    check(
-        not duplicate_breaking
-        and len(duplicate_blind) == 1
-        and "SessionTitleSlotEntry" in duplicate_blind[0],
-        "a merged/duplicate carrier declaration is probe health, never drift",
-    )
-
-
 def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> None:
     """The gate #941 asks for: EVERY surface row's check, both directions, offline.
 
@@ -1396,41 +1053,11 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
         def bare_enum(enum: str, names: list[str]) -> str:
             return f"pub enum {enum} {{\n" + "".join(f"    {n},\n" for n in names) + "}\n"
 
-        def tagged_enum(enum: str, names: list[str]) -> str:
-            """Shaped like the REAL codex enums in the two dimensions the parsers
-            defend: a STRUCT variant (so `_enum_body` must brace-balance rather than
-            stop at the first `}`) and PascalCase idents whose snake_case tags derive
-            — the path that delivers 7/7 of `ResponseItem` and 3/3 of `RolloutItem`,
-            where a `rename` attr delivers almost none."""
-            rows = "".join(
-                f"    {pascal(n)} {{ pxd: PxdType }},\n" if i == 0 else f"    {pascal(n)},\n"
-                for i, n in enumerate(names)
-            )
-            return f"pub enum {enum} {{\n{rows}}}\n"
-
-        def omp_session_entries(entry_types: list[str], title_fields: list[str]) -> str:
-            return (
-                "export type SessionEntry =\n"
-                + "".join(f"\t| Pxe{i}Entry\n" for i in range(len(entry_types)))
-                + "".join(
-                    f'export interface Pxe{i}Entry {{ type: "{name}" }}\n'
-                    for i, name in enumerate(entry_types)
-                )
-                + "export interface SessionTitleSlotEntry {\n"
-                + "  type: typeof SESSION_TITLE_SLOT_ENTRY_TYPE;\n"
-                + "".join(f"  {name}: string;\n" for name in title_fields)
-                + "}\n"
-                + "export interface TitleChangeEntry {\n"
-                + "  type: typeof TITLE_CHANGE_ENTRY_TYPE;\n"
-                + "".join(f"  {name}: string;\n" for name in title_fields)
-                + "}\n"
-            )
-
-        def omp_extension_docs(events: list[str], reads: list[str]) -> dict[str, str]:
+        def omp_extension_docs(reads: list[str]) -> dict[str, str]:
             """The three extension-API docs, shaped like upstream: constant
-            interface names (the anchors) whose `type:`/field lines exist only
-            for the names still in the mutated sets — exactly an upstream
-            rename's silhouette."""
+            interface names (the anchors) whose field lines exist only for the
+            names still in the mutated set — exactly an upstream rename's
+            silhouette."""
             lifecycle = {
                 "session_start": "SessionStartEvent",
                 "session_switch": "SessionSwitchEvent",
@@ -1439,7 +1066,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             }
             shared = ""
             for name, iface in lifecycle.items():
-                tag = f'\ttype: "{name}";\n' if name in events else ""
+                tag = f'\ttype: "{name}";\n'
                 prev = (
                     "\tpreviousSessionFile: string | undefined;\n"
                     if iface == "SessionSwitchEvent" and "previousSessionFile" in reads
@@ -1464,7 +1091,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 ("tool_approval_requested", "ToolApprovalRequestedEvent"),
                 ("tool_approval_resolved", "ToolApprovalResolvedEvent"),
             ):
-                tag = f'\ttype: "{name}";\n' if name in events else ""
+                tag = f'\ttype: "{name}";\n'
                 body = "".join(
                     f"\t{f}: {t};\n" for f, t in approval_fields.items() if f in reads
                 )
@@ -1498,21 +1125,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             ("codewhale", pascal, lambda ns: {
                 d.CODEWHALE_HOOK_URL: bare_enum("HookEvent", ns)}),
             ("codex", str, lambda ns: {
-                d.CODEX_PROTOCOL_URL: bare_enum("HookEventName", ns)
-                + tagged_enum("EventMsg", full["codex_event_msg"])}),
-            ("codex_event_msg", str, lambda ns: {
-                d.CODEX_PROTOCOL_URL: bare_enum("HookEventName", full["codex"])
-                + tagged_enum("EventMsg", ns)}),
-            ("codex_response_item", str, lambda ns: {
-                d.CODEX_MODELS_URL: tagged_enum("ResponseItem", ns)}),
-            ("codex_escalation", str, lambda ns: {
-                d.CODEX_PROTOCOL_URL: bare_enum("HookEventName", full["codex"])
-                + "".join(f'const {n.upper()}: &str = "{n}";\n' for n in ns),
-                d.CODEX_MODELS_URL: tagged_enum(
-                    "ResponseItem", full["codex_response_item"]
-                )}),
-            ("codex_outers", str, lambda ns: {
-                d.CODEX_ROLLOUT_ITEM_URL: tagged_enum("RolloutItem", ns)}),
+                d.CODEX_PROTOCOL_URL: bare_enum("HookEventName", ns)}),
             ("hermes", str, lambda ns: {
                 d.HERMES_PLUGINS_URL:
                     "VALID_HOOKS: set[str] = {\n" + "".join(f'    "{n}",\n' for n in ns) + "}\n"}),
@@ -1532,32 +1145,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             ("openclaw", str, lambda ns: {
                 d.OPENCLAW_HOOK_TYPES_URL:
                     "export type PluginHookName =\n" + "".join(f'  | "{n}"\n' for n in ns)}),
-            ("grok_xai_method", str, lambda ns: {
-                d.GROK_SESSION_STORAGE_URL:
-                    f'const XAI_SESSION_UPDATE_METHOD: &\'static str = "{ns[0]}";\n'}),
-            ("grok_xai_tags", pascal, lambda ns: {
-                d.GROK_NOTIFICATION_URL:
-                    "pub enum SessionUpdate {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"}),
-            ("omp_message_vocab", str, lambda ns: {
-                d.OMP_AI_TYPES_URL:
-                    "export type Message = UserMessage | AssistantMessage;\n"
-                    + "".join(f'  | "{n}"\n' for n in ns if n != "ask"),
-                d.OMP_ASK_URL:
-                    "export class AskTool {\n"
-                    + "".join(f'  name = "{n}";\n' for n in ns if n == "ask") + "}\n"}),
-            ("omp_exit_marker", str, lambda ns: {
-                d.OMP_EXIT_DIAG_URL: "".join(
-                    f'const SESSION_EXIT_CUSTOM_TYPE = "{n}";\n' for n in ns)}),
-            ("omp", str, lambda ns: {
-                d.OMP_SESSION_ENTRIES_URL:
-                    omp_session_entries(ns, full["omp_title_fields"])}),
-            ("omp_title_fields", str, lambda ns: {
-                d.OMP_SESSION_ENTRIES_URL:
-                    omp_session_entries(full["omp"], ns)}),
-            ("omp_hook_events", str, lambda ns: omp_extension_docs(
-                ns, full["omp_extension_reads"])),
-            ("omp_extension_reads", str, lambda ns: omp_extension_docs(
-                full["omp_hook_events"], ns)),
+            ("omp_extension_reads", str, omp_extension_docs),
             ("omp_extension_subdir", str, lambda ns: {
                 d.OMP_EXT_DISCOVERY_URL:
                     "export async function discoverExtensionModulePaths() {}\n"
@@ -1575,8 +1163,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             ("cc", str, lambda ns: {
                 d.CC_HOOKS_URL: "# Hooks reference\n\n| Event | When it fires |\n|---|---|\n"
                 + "".join(f"| `{n}` | x |\n" for n in ns)}),
-            ("dispatch_names", str, lambda ns: {
-                d.CC_TOOLS_URL: "# Tools reference\n\n" + "".join(f"| `{n}` | x |\n" for n in ns)}),
             ("dsh_plugin_events", str, lambda ns: {
                 d.DSH_RUNTIME_TYPES_URL:
                     "declare module '@deepseek-ai/cordis' {\n  interface Events {\n"
@@ -1611,10 +1197,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
         for field, spell, build in cases:
             names = full[field]
             check(bool(names), f"{field}: the fragment supplies a set")
-            pool = list(names)
-            # `dispatch_names` is an ANY-of check — one surviving documented name
-            # clears it — so its vanish arm has to take them all.
-            victims = pool if field == "dispatch_names" else pool[:1]
+            victims = names[:1]
             # The vanish arm ADDS as it drops, in the name's own shape — below the
             # floor the check SKIPS. `_` not case is the axis (cursor's lone `stop`).
             # The decoy is built from the VICTIM, so the mutated document carries the
@@ -1641,10 +1224,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                   f"(skipped as probe health? {rep.blind})")
     finally:
         d.fetch = real
-
-
-def test_grok_turn_usage_is_a_known_omission() -> None:
-    check("turn_usage" in d.GROK_XAI_KNOWN_OMITTED, "turn_usage has its reason")
 
 
 def main() -> int:

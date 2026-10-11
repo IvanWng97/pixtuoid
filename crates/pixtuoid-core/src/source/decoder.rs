@@ -599,11 +599,11 @@ fn shared_hook_arms(
 /// worse desk starvation than the gap. Fleet lifecycle rides the Subagent hooks.
 const DISPATCH_TOOL: &str = "Agent";
 
-#[cfg(test)]
-/// The subagent-dispatch tool NAME we still recognise — this module's row in the
-/// drift surface. A FALLBACK, not the detector: dispatch is found semantically by
+#[cfg(any(test, feature = "upstream"))]
+/// The subagent-dispatch tool NAME we still recognise, which CC's docs watch
+/// reads. A FALLBACK, not the detector: dispatch is found semantically by
 /// `subagent_type` presence, so a rename degrades to a breadcrumb rather than a
-/// miss. Test-gated: the surface emitter is the only reader.
+/// miss.
 pub(crate) const DECODED_DISPATCH_NAMES: &[&str] = &[DISPATCH_TOOL];
 
 /// The detail for one tool call. The subagent dispatch is detected SEMANTICALLY, by

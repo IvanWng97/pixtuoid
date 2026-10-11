@@ -909,13 +909,13 @@ gen-contract:
     SNAPSHOTS=overwrite just test -p pixtuoid --lib schema_matches_the_committed_contract
     npm --prefix integrations/raycast run gen:contract
 
-# Regenerate the committed drift-surface fragments — what each crate declares it
-# READS (pixtuoid-core) and REGISTERS (pixtuoid). `check_upstream_drift.py` reads
+# Regenerate the committed drift-surface fragments — what each crate's installers
+# SHIP (pixtuoid-core) and REGISTER (pixtuoid). `check_upstream_drift.py` reads
 # these instead of parsing our Rust, so a rename must be re-emitted or the watch
 # narrows. The gate is the crates' own tests, which fail on a stale file; this is
 # just the writer. The filter runs the writing test alone: a sibling that reads
 # the stale file fails and, under nextest's fail-fast, can cancel the write.
-[doc('Regenerate crates/*/drift-surface.json after changing a decoded/registered name')]
+[doc('Regenerate crates/*/drift-surface.json after changing a registered or shipped name')]
 [group('gen')]
 gen-drift-surface:
     SNAPSHOTS=overwrite just test -p pixtuoid-core --lib drift_surface::tests::the_committed_fragment_matches
