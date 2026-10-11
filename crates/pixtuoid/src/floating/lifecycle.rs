@@ -5,20 +5,21 @@
 use crate::jank::Jank;
 
 /// What one redraw touches.
-pub(super) trait Frame {
+pub(super) trait Redraw {
     fn jank(&mut self) -> &mut Jank;
-    /// Paint one frame, recording it with [`Jank::record`] when it presents.
+    /// Paint one frame, recording it with [`Jank::record`] once it has tried to
+    /// present.
     fn paint(&mut self);
     fn recursor(&mut self);
 }
 
 /// One redraw: the frame, then the cursor it leaves under the pointer. Every
-/// way `paint` ends without presenting skips `record`, the only thing that
-/// spends a scheduled frame's due, so it is spent here.
-pub(super) fn redraw(frame: &mut impl Frame) {
-    frame.paint();
-    frame.jank().spend_due();
-    frame.recursor();
+/// way `paint` returns before it records skips `record`, the only thing that
+/// spends a scheduled redraw's due, so it is spent here.
+pub(super) fn redraw(app: &mut impl Redraw) {
+    app.paint();
+    app.jank().spend_due();
+    app.recursor();
 }
 
 /// What the loop's end releases.
@@ -53,9 +54,11 @@ mod tests {
         jank: Jank,
         log: Vec<&'static str>,
         presents: bool,
+        /// When a recorded frame showed.
+        shown_at: Instant,
     }
 
-    impl Frame for Fake {
+    impl Redraw for Fake {
         fn jank(&mut self) -> &mut Jank {
             &mut self.jank
         }
@@ -67,7 +70,7 @@ mod tests {
                     Duration::ZERO,
                     None,
                     None,
-                    Instant::now(),
+                    self.shown_at,
                 );
             }
         }
@@ -87,6 +90,7 @@ mod tests {
                 jank: Jank::new(),
                 log: Vec::new(),
                 presents: false,
+                shown_at: t0 + ms(500),
             };
             app.jank.scheduled_every(ms(33));
             app.jank.due_at(t0);
@@ -112,6 +116,7 @@ mod tests {
                 jank: Jank::new(),
                 log: Vec::new(),
                 presents: true,
+                shown_at: Instant::now(),
             };
             app.jank.due_at(Instant::now());
             redraw(&mut app);

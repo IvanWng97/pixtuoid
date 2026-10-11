@@ -285,6 +285,42 @@ mod controller_tests {
         );
     }
 
+    /// `stop` persists and joins once; the drop after it, which production runs
+    /// at every floating quit, does nothing more and does not panic.
+    #[test]
+    fn stop_then_drop_persists_and_joins_once() {
+        use std::sync::atomic::Ordering;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "theme = \"normal\"\n").unwrap();
+        let done = std::cell::OnceCell::new();
+        let mut c = AudioController::new_with(
+            AudioConfig {
+                muted: false,
+                volume: 0.5,
+            },
+            path.clone(),
+            |h, _| {
+                let _ = done.set(install_slow_fake_device(h));
+            },
+        );
+        c.apply(AudioAction::Volume(false), false, Instant::now(), |_, _| {});
+        c.stop();
+        assert!(done.get().unwrap().load(Ordering::SeqCst), "stop joins");
+        assert!(
+            std::fs::read_to_string(&path).unwrap().contains("volume"),
+            "stop persists the pending nudge"
+        );
+        std::fs::write(&path, "theme = \"normal\"\n").unwrap();
+        drop(c);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "theme = \"normal\"\n",
+            "the drop after stop writes nothing"
+        );
+    }
+
     #[test]
     fn mute_persists_immediately_and_does_not_arm_the_volume_flash() {
         let (mut c, _d) = ctl(false, 0.4);

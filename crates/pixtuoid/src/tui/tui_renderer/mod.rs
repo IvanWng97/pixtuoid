@@ -238,13 +238,16 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         self.cutaway = Some(cutaway);
     }
 
-    /// Whether the last frame was the half-blocks, which draw the walkable
-    /// debug layer where the cutaway never does: `w` is listed and read only
-    /// then, including while a cutaway too big for the cell falls back to them.
+    /// Whether the last frame was the half-blocks of a debug build, which draw
+    /// the walkable debug layer where the cutaway never does: `w` is listed and
+    /// read only then, including while a cutaway too big for the cell falls
+    /// back to them.
     pub(crate) fn offers_walkable_debug(&self) -> bool {
-        self.session
-            .floor(self.session.nav().current())
-            .is_some_and(|f| f.raster.shown() == Some(Look::Classic))
+        cfg!(debug_assertions)
+            && self
+                .session
+                .floor(self.session.nav().current())
+                .is_some_and(|f| f.raster.shown() == Some(Look::Classic))
     }
 
     /// Draw the first frame of `scene` unseen, in the look the first frame

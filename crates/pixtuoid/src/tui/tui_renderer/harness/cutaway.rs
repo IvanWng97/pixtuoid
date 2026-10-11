@@ -1438,37 +1438,51 @@ fn a_floor_clamped_into_view_repaints_whole() {
 #[test]
 fn w_follows_the_look_the_frame_drew() {
     use crossterm::event::KeyCode;
-    let (cols, rows) = crate::tui::renderer::min_terminal_size();
-    let (mut r, _wire) = kitty(cols, rows);
+    let (mut r, _wire) = kitty(140, 60);
     let scene = office();
     let cadence = ImageProtocol::Kitty.cadence();
     let w = |r: &mut TuiRenderer<Window>| {
-        crate::tui::read_walkable_debug_key(
+        crate::tui::toggle_walkable_debug_on_w(
             r,
             KeyCode::Char('w'),
             &crate::panels::ModalState::closed(),
         )
     };
-    let lists_w = |r: &TuiRenderer<Window>| {
-        r.chrome
-            .overlays(0.0, r.offers_walkable_debug())
-            .host_keys
-            .iter()
-            .any(|(k, _)| *k == "w")
+    // The help the frame draws: its text, read off the composed cells.
+    let help = |r: &mut TuiRenderer<Window>, at| {
+        r.set_frames(
+            RenderFrames {
+                help_open: true,
+                ..Default::default()
+            },
+            t0(),
+        );
+        r.render(&scene, pack(), at).expect("render");
+        let text = frame_text(r.frame_buffer());
+        r.set_frames(RenderFrames::default(), t0());
+        text
     };
     r.render(&scene, pack(), t0()).expect("render");
-    assert!(!r.offers_walkable_debug() && !lists_w(&r), "the cutaway");
+    assert!(!r.offers_walkable_debug(), "the cutaway");
+    let text = help(&mut r, t0() + cadence);
+    assert!(text.contains("Keyboard"), "premise: the help is drawn");
+    assert!(!text.contains("walkable"), "the cutaway's help: {text}");
     assert!(!w(&mut r) && !r.debug_walkable());
 
     r.terminal.backend_mut().zoom(CellSize {
         w: CELL.w / 2,
         h: CELL.h / 2,
     });
-    r.render(&scene, pack(), t0() + cadence).expect("render");
-    assert!(r.offers_walkable_debug() && lists_w(&r), "the fallback");
+    r.render(&scene, pack(), t0() + cadence * 2)
+        .expect("render");
+    assert!(r.offers_walkable_debug(), "the fallback");
+    let text = help(&mut r, t0() + cadence * 3);
+    assert!(text.contains("walkable"), "the fallback's help: {text}");
+    r.render(&scene, pack(), t0() + cadence * 4)
+        .expect("render");
     let before = r.buf().expect("a frame").clone();
     assert!(w(&mut r));
-    r.render(&scene, pack(), t0() + cadence * 2)
+    r.render(&scene, pack(), t0() + cadence * 5)
         .expect("render");
     let after = r.buf().expect("a frame");
     assert!(
@@ -1477,7 +1491,7 @@ fn w_follows_the_look_the_frame_drew() {
     );
 
     r.terminal.backend_mut().zoom(CELL);
-    r.render(&scene, pack(), t0() + cadence * 3)
+    r.render(&scene, pack(), t0() + cadence * 6)
         .expect("render");
     assert!(!r.offers_walkable_debug(), "the cutaway is back");
 }

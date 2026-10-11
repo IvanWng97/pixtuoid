@@ -119,7 +119,7 @@ pub(crate) struct Jank {
     hitch: Duration,
     /// The frames this window that a schedule asked for.
     scheduled: u32,
-    /// When the schedule asked for the next frame recorded.
+    /// When the schedule asked for the redraw now pending.
     due: Option<Instant>,
     /// When this window began: `None` until the first frame starts it.
     since: Option<Instant>,
@@ -166,20 +166,21 @@ impl Jank {
         self.interval = interval;
     }
 
-    /// The next frame recorded is the one the schedule asked for at `at`: it
-    /// counts toward the hitch time by how far it showed past its interval,
+    /// The redraw that follows is the one the schedule asked for at `at`: if it
+    /// records, it counts toward the hitch time by how far it showed past its interval,
     /// when the frame after it is due. That is the hitch duration, "the
     /// difference between the actual frame lifetime and the expected frame
     /// lifetime", each from the frame's begin
     /// (<https://developer.apple.com/documentation/xcode/understanding-hitches-in-your-app>).
-    /// A redraw no schedule asked for has no due, so it can't count.
+    /// A redraw that ends without recording spends the due
+    /// ([`Self::spend_due`]); one no schedule asked for has none, so it can't
+    /// count.
     pub(crate) fn due_at(&mut self, at: Instant) {
         self.due = Some(at);
     }
 
-    /// Spend a due the frame did not take: one that ended without a
-    /// [`Self::record`] (nothing to show, or nothing changed) must not count
-    /// the next redraw, which no schedule asked for, as the scheduled one.
+    /// Spend a due that [`Self::record`] did not take, when the redraw ended
+    /// without one (nothing to show, or nothing changed).
     pub(crate) fn spend_due(&mut self) {
         self.due = None;
     }

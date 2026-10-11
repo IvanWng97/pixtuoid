@@ -39,33 +39,43 @@ fn should_dispatch_key(kind: KeyEventKind) -> bool {
     kind == KeyEventKind::Press
 }
 
-/// What the terminal's help lists beside the shared shortcuts.
-#[cfg(debug_assertions)]
+/// What the terminal's help lists beside the shared shortcuts, when
+/// [`TuiRenderer::offers_walkable_debug`] says it does.
 pub(crate) const WALKABLE_SHORTCUTS: &[crate::panels::widgets::Shortcut] =
     &[("w", "walkable / approach / route debug")];
-#[cfg(not(debug_assertions))]
-pub(crate) const WALKABLE_SHORTCUTS: &[crate::panels::widgets::Shortcut] = &[];
 
-/// Whether `code` was `w`, which flips the half-block painter's walkable
-/// debug layer when no panel owns input. Only the half-blocks draw that layer
-/// ([`TuiRenderer::offers_walkable_debug`]), so the terminal's loop reads the
-/// key itself, and neither cutaway sees it.
-pub(crate) fn read_walkable_debug_key<
+/// Flip the half-block painter's walkable debug layer on `w`; whether it did.
+/// It does when no panel owns input and the last frame was the half-blocks
+/// ([`TuiRenderer::offers_walkable_debug`]), which alone draw that layer.
+pub(crate) fn toggle_walkable_debug_on_w<
     B: ratatui::backend::Backend<Error: Send + Sync + 'static>,
 >(
     renderer: &mut TuiRenderer<B>,
     code: KeyCode,
     modal: &ModalState,
 ) -> bool {
-    let toggles = cfg!(debug_assertions)
-        && renderer.offers_walkable_debug()
-        && code == KeyCode::Char('w')
-        && !modal.any_open();
+    let toggles =
+        renderer.offers_walkable_debug() && code == KeyCode::Char('w') && !modal.any_open();
     if toggles {
         let on = renderer.debug_walkable();
         renderer.set_debug_walkable(!on);
     }
     toggles
+}
+
+/// What a key does: the terminal's own `w` first, which neither the window nor
+/// the cutaway share, then the shared dispatch.
+pub(crate) fn route_key<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
+    renderer: &mut TuiRenderer<B>,
+    (code, mods): (KeyCode, crossterm::event::KeyModifiers),
+    modal: ModalState,
+    floor: FloorNav,
+) -> KeyAction {
+    if toggle_walkable_debug_on_w(renderer, code, &modal) {
+        KeyAction::None
+    } else {
+        dispatch_key(code, mods, modal, floor)
+    }
 }
 
 /// The per-floor desk-capacity sweep, memoized on its own inputs.
@@ -557,11 +567,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<Option<QuitSignal>> {
                             current_floor: renderer.current_floor(),
                             in_transition: renderer.transition().is_some(),
                         };
-                        let action = if read_walkable_debug_key(&mut renderer, k.code, &ui.modal()) {
-                            KeyAction::None
-                        } else {
-                            dispatch_key(k.code, k.modifiers, ui.modal(), floor)
-                        };
+                        let action =
+                            route_key(&mut renderer, (k.code, k.modifiers), ui.modal(), floor);
                         let quit = apply_key_action(
                             action,
                             &mut KeyCtx {
@@ -1237,13 +1244,13 @@ mod apply_key_action_tests {
         )
         .expect("a half-block frame");
         let before = r.debug_walkable();
-        assert!(super::read_walkable_debug_key(
+        assert!(super::toggle_walkable_debug_on_w(
             &mut r,
             KeyCode::Char('w'),
             &modal(false)
         ));
         assert_eq!(r.debug_walkable(), !before, "w must FLIP");
-        assert!(super::read_walkable_debug_key(
+        assert!(super::toggle_walkable_debug_on_w(
             &mut r,
             KeyCode::Char('w'),
             &modal(false)
@@ -1253,9 +1260,58 @@ mod apply_key_action_tests {
             (KeyCode::Char('w'), modal(true)),
             (KeyCode::Char('x'), modal(false)),
         ] {
-            assert!(!super::read_walkable_debug_key(&mut r, code, &modal));
+            assert!(!super::toggle_walkable_debug_on_w(&mut r, code, &modal));
             assert_eq!(r.debug_walkable(), before);
         }
+    }
+
+    /// The loop's routing: `w` flips the layer and is swallowed with no panel
+    /// open; with one open, and for every other key, the shared dispatch decides.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn route_key_reads_w_before_the_shared_dispatch() {
+        use crate::panels::{FloorNav, ModalState};
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let pack =
+            std::sync::Arc::new(pixtuoid_scene::pack::load_bundled_pack().expect("bundled pack"));
+        let mut r = TuiRenderer::new(
+            Terminal::new(TestBackend::new(120, 60)).expect("test backend"),
+            &theme::NORMAL,
+            Vec::new(),
+            std::sync::Arc::clone(&pack),
+        );
+        r.render(
+            &pixtuoid_core::state::SceneState::uniform(16),
+            &pack,
+            SystemTime::UNIX_EPOCH,
+        )
+        .expect("a half-block frame");
+        let floor = FloorNav {
+            n_floors: 1,
+            current_floor: 0,
+            in_transition: false,
+        };
+        let key = |code| (code, KeyModifiers::NONE);
+        let help = ModalState {
+            help_open: true,
+            ..ModalState::closed()
+        };
+        assert_eq!(
+            super::route_key(&mut r, key(KeyCode::Char('w')), ModalState::closed(), floor),
+            KeyAction::None
+        );
+        assert!(r.debug_walkable(), "w flipped the layer");
+        assert_eq!(
+            super::route_key(&mut r, key(KeyCode::Char('?')), ModalState::closed(), floor),
+            KeyAction::ToggleHelp,
+            "other keys reach the shared dispatch"
+        );
+        assert_eq!(
+            super::route_key(&mut r, key(KeyCode::Char('w')), help, floor),
+            crate::panels::dispatch_key(KeyCode::Char('w'), KeyModifiers::NONE, help, floor),
+            "a panel open sends w on"
+        );
+        assert!(r.debug_walkable(), "and leaves the layer alone");
     }
 
     /// `delete -` on either `-1` makes Up behave as Down. The panels are

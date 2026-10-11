@@ -775,24 +775,28 @@ fn a_still_floor_holds_its_wall_board_flap() {
     );
 }
 
-/// In the half-blocks `w` is listed in the help and flips a layer the frame
-/// shows.
+/// In the half-blocks `w` is listed in the help the frame draws and flips a
+/// layer the frame shows.
 #[cfg(debug_assertions)]
 #[test]
 fn the_classic_lists_w_and_its_key_tints_the_frame() {
     use crossterm::event::KeyCode;
     let scene = scene_with(vec![idle("/t/0.jsonl", 0, t0())], 16);
-    let mut r = build(120, 60, vec![]);
+    let mut r = build(140, 60, vec![]);
+    r.set_frames(
+        RenderFrames {
+            help_open: true,
+            ..Default::default()
+        },
+        t0(),
+    );
+    r.render(&scene, pack(), t0()).unwrap();
+    let text = frame_text(r.frame_buffer());
+    assert!(text.contains("walkable"), "the help lists w: {text}");
+    r.set_frames(RenderFrames::default(), t0());
     r.render(&scene, pack(), t0()).unwrap();
     let before = r.buf().expect("a frame").clone();
-    assert!(
-        r.chrome
-            .overlays(0.0, r.offers_walkable_debug())
-            .host_keys
-            .iter()
-            .any(|(k, _)| *k == "w")
-    );
-    assert!(crate::tui::read_walkable_debug_key(
+    assert!(crate::tui::toggle_walkable_debug_on_w(
         &mut r,
         KeyCode::Char('w'),
         &crate::panels::ModalState::closed()

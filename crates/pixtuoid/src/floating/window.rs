@@ -7,8 +7,9 @@
 //!
 //! Platform glue — codecov-ignored; the testable seams are `floating::offscreen`
 //! (render), `floating::overlays` and `floating::compose` (the chrome and the
-//! frame), `floating::geometry` (the window/monitor rect math), and
-//! `floating::cadence` (the animation throttle).
+//! frame), `floating::geometry` (the window/monitor rect math),
+//! `floating::cadence` (the animation throttle), and `floating::lifecycle`
+//! (the redraw's pacing and the exit order).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -583,7 +584,7 @@ fn position_on_a_monitor(event_loop: &ActiveEventLoop, x: i32, y: i32, w: u32, h
     )
 }
 
-impl super::lifecycle::Frame for FloatingApp {
+impl super::lifecycle::Redraw for FloatingApp {
     fn jank(&mut self) -> &mut crate::jank::Jank {
         &mut self.jank
     }
@@ -605,7 +606,8 @@ impl super::lifecycle::Teardown for FloatingApp {
         }
     }
 
-    // The surface borrows the window, so it goes first.
+    // The surface holds its own clone of the window's `Arc`, so the window is
+    // destroyed once both are dropped.
     fn release_surface(&mut self) {
         self.gpu = None;
         self.window = None;
