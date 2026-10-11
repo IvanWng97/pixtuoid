@@ -50,12 +50,11 @@ pub(crate) struct TileShape {
 /// How long each wait of the capability probe may take: the query start to
 /// finish, and, inside tmux, the `allow-passthrough` read before it.
 ///
-/// The query ends with a device-status request ([`wire::ask`]), so a
-/// terminal that answers ends the wait the
-/// moment its reply is complete; the budget is only spent where no reply comes
-/// (a hidden tmux pane refusing passthrough), which is why it can outlast
-/// [`crate::term::TRUECOLOR_PROBE_TIMEOUT`], whose query has no such
-/// terminator.
+/// The query ends with a device-status request ([`wire::ask`]), so a terminal
+/// that answers ends the wait the moment its reply is complete; the budget is
+/// only spent where no reply comes (a hidden tmux pane refusing passthrough),
+/// which is why it can outlast [`crate::term::TRUECOLOR_PROBE_TIMEOUT`], whose
+/// query has no such terminator.
 #[cfg(unix)]
 pub(crate) const GRAPHICS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
@@ -458,7 +457,7 @@ pub(crate) struct Detected {
 pub(crate) enum Probe {
     /// What the terminal's reply and the environment established — the
     /// environment alone where the reply never completed but the environment
-    /// names a protocol, as ratatui-image falls back (see [`probe()`]).
+    /// names a protocol (see [`probe()`]).
     #[cfg_attr(
         all(not(unix), not(test)),
         expect(dead_code, reason = "only the Unix graphics probe returns it")
@@ -1163,8 +1162,7 @@ mod tests {
     }
 
     /// `run` and `doctor` plan through the one probe this platform has, so
-    /// neither prints a protocol the other never sees: off Unix, or without the
-    /// feature, it never asks.
+    /// neither prints a protocol the other never sees: off Unix it never asks.
     #[test]
     fn the_platform_probe_asks_only_where_run_can() {
         let can_ask = cfg!(unix);
