@@ -22,7 +22,7 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: ./.github/actions/setup-rust
+    - uses: pixtuoid/.github/.github/actions/setup-rust@main
       with:
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}

@@ -178,10 +178,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/require-jobs
+      - uses: pixtuoid/.github/.github/actions/require-jobs@main
         with:
           results: ${{ toJSON(needs) }}
           label: "Required test job failed"

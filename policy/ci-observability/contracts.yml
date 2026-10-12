@@ -128,7 +128,7 @@
       and $required.if == "${{ always() }}"
       and ($required | has("continue-on-error") | not)
       and ([$required.steps[]
-            | select(.uses == "./.github/actions/require-jobs")
+            | select(.uses == "pixtuoid/.github/.github/actions/require-jobs@main")
             | select(.with.results == "${{ toJSON(needs) }}")
             | select((has("if") or has("continue-on-error")) | not)]
            | length == 1)
@@ -137,14 +137,14 @@
     - del(.jobs.required.if)
     - |
       .jobs.required.steps |= map(
-        if .uses == "./.github/actions/require-jobs" then .with.results = "{}" else . end)
+        if .uses == "pixtuoid/.github/.github/actions/require-jobs@main" then .with.results = "{}" else . end)
     - .jobs.required["continue-on-error"] = true
     - |
       .jobs.required.steps |= map(
-        if .uses == "./.github/actions/require-jobs" then .if = "${{ success() }}" else . end)
+        if .uses == "pixtuoid/.github/.github/actions/require-jobs@main" then .if = "${{ success() }}" else . end)
     - |
       .jobs.required.steps |= map(
-        if .uses == "./.github/actions/require-jobs" then .["continue-on-error"] = true else . end)
+        if .uses == "pixtuoid/.github/.github/actions/require-jobs@main" then .["continue-on-error"] = true else . end)
 
 - id: only-the-light-tier-passes-skipped-jobs
   file:
@@ -157,12 +157,12 @@
     queue's draft PR, so a skip counted green there would merge an untested
     tree.
   assert: |
-    [.jobs.required.steps[] | select(.uses == "./.github/actions/require-jobs")]
+    [.jobs.required.steps[] | select(.uses == "pixtuoid/.github/.github/actions/require-jobs@main")]
     | all(.with["allow-skipped"] == "${{ !inputs.full }}")
   break:
     - |
       .jobs.required.steps |= map(
-        if .uses == "./.github/actions/require-jobs" then .with["allow-skipped"] = "true" else . end)
+        if .uses == "pixtuoid/.github/.github/actions/require-jobs@main" then .with["allow-skipped"] = "true" else . end)
 
 - id: only-the-queue-buys-the-full-tier
   file: .github/workflows/ci.yml
@@ -196,7 +196,7 @@
       and $gate.if == "${{ always() }}"
       and ($gate | has("continue-on-error") | not)
       and ([$gate.steps[]
-            | select(.uses == "./.github/actions/require-jobs")
+            | select(.uses == "pixtuoid/.github/.github/actions/require-jobs@main")
             | select(.with.results == "${{ toJSON(needs) }}")
             | select((has("if") or has("continue-on-error")) | not)]
            | length == 1)
@@ -206,14 +206,14 @@
     - .jobs.gate.needs |= map(select(. != "tests"))
     - |
       .jobs.gate.steps |= map(
-        if .uses == "./.github/actions/require-jobs" then .with.results = "${{ toJSON(needs.lint) }}" else . end)
+        if .uses == "pixtuoid/.github/.github/actions/require-jobs@main" then .with.results = "${{ toJSON(needs.lint) }}" else . end)
     - .jobs.gate["continue-on-error"] = true
     - |
       .jobs.gate.steps |= map(
-        if .uses == "./.github/actions/require-jobs" then .if = "${{ success() }}" else . end)
+        if .uses == "pixtuoid/.github/.github/actions/require-jobs@main" then .if = "${{ success() }}" else . end)
     - |
       .jobs.gate.steps |= map(
-        if .uses == "./.github/actions/require-jobs" then .["continue-on-error"] = true else . end)
+        if .uses == "pixtuoid/.github/.github/actions/require-jobs@main" then .["continue-on-error"] = true else . end)
 
 # ── Publishing
 

@@ -80,12 +80,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
       # toJSON(needs) carries every group this job needs, so a group added to
       # `needs` is judged without also being named in a verdict script.
-      - uses: ./.github/actions/require-jobs
+      - uses: pixtuoid/.github/.github/actions/require-jobs@main
         with:
           results: ${{ toJSON(needs) }}
           label: "CI group failed"
