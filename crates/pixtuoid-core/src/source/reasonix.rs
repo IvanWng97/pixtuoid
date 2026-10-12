@@ -35,8 +35,8 @@ pub const SOURCE_NAME: &str = "reasonix";
 
 /// Each version publishes a "Reasonix CLI" and a "Reasonix Studio" release
 /// (`studio-v…`, github.com/esengine/DeepSeek-Reasonix/releases), so
-/// `releases/latest` may name the app; the CLI is npm's `reasonix` at its
-/// `latest` dist-tag (registry.npmjs.org/reasonix), tagged `v{version}`.
+/// `releases/latest` may name the app; the CLI is npm's `reasonix` `latest`
+/// (registry.npmjs.org/reasonix).
 #[cfg(any(test, feature = "upstream"))]
 pub const REPO: crate::source::upstream::Repo = crate::source::upstream::Repo {
     name: "esengine/DeepSeek-Reasonix",

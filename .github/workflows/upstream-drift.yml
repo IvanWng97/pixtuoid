@@ -44,7 +44,7 @@ jobs:
       - if: steps.check.outputs.exit == '1'
         uses: actions/upload-artifact@v7
         with:
-          name: drift-report-${{ github.run_id }}
+          name: drift-report-${{ github.run_id }}-${{ github.run_attempt }}
           path: drift-report.md
           retention-days: 1
           if-no-files-found: error
@@ -76,7 +76,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: drift-report-${{ github.run_id }}
+          name: drift-report-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Open or update tracking issue
         env:
