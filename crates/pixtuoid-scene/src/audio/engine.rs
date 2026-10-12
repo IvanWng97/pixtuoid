@@ -10,11 +10,12 @@
 //!
 //! Time is a PARAMETER: `tick` takes `dt` and never reads a clock.
 
+use pixtuoid_lofi::dsp::NoiseStream;
+
 use super::bank::{
     DROP_GAIN, DROP_POOL, KEYSTROKE_GAIN, KEYSTROKE_POOL, ONE_SHOT_GAIN, OneShotPool,
     track_stems_silent,
 };
-use super::dsp::NoiseStream;
 use super::mixer::{DropScheduler, LoopStem, Mixer, TypingScheduler};
 use super::{
     AudioFrame, DROP_SEED, OneShot, PICK_SEED, StemLevels, TYPING_SEED, TrackId, TrackSwitch,

@@ -39,6 +39,7 @@ crates/   DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}  (+
 ├── pixtuoid-core/   headless lib — no terminal deps; `native` feature gates the async
 │                    source runtime (off = wasm32-clean decode/reduce)
 ├── pixtuoid-scene/  render+sim engine — terminal- AND window-free BY CRATE BOUNDARY
+│                    (its music: the external `pixtuoid-lofi`, https://github.com/pixtuoid/lofi)
 ├── pixtuoid/        binary — two thin painters over pixtuoid-scene: `tui/`, `floating/`
 ├── pixtuoid-web/    third painter — wasm canvas, publish=false; a SITE BUILD INPUT
 │                    (`just gen-wasm` → gitignored site/public/wasm/, built in CI)
@@ -96,7 +97,7 @@ runs queued, and a plain cancel still runs the `always()` gate jobs, so
 them.
 
 Repo skills (committed): `local-review`, `beautify-decoration`,
-`add-source`, `add-theme`, `procedural-lofi`.
+`add-source`, `add-theme`.
 
 ## Conventions
 

@@ -2,9 +2,12 @@
 //! machine and the rain. Office props and weather, so they sit beside the bank
 //! that pools them rather than in the music synth: they change when the office
 //! does. Pure buffer generators (mono f32 at [`SAMPLE_RATE`]), run once at
-//! startup; every constant is an auditioned, ratified value.
+//! startup; every constant is an auditioned, ratified value. Tuned with
+//! [procedural-lofi's analyzers](https://github.com/pixtuoid/lofi/tree/main/.claude/skills/procedural-lofi/scripts).
 
-use super::dsp::{NoiseStream, SAMPLE_RATE, bandpass, lowpass, shaped_noise_loop};
+use pixtuoid_lofi::dsp::{NoiseStream, bandpass, lowpass, shaped_noise_loop};
+
+use super::SAMPLE_RATE;
 
 const SR: f32 = SAMPLE_RATE as f32;
 
@@ -12,7 +15,7 @@ const SR: f32 = SAMPLE_RATE as f32;
 /// the FFT domain, which is circular, so the block loops click-free.
 const RAIN_LOOP_SAMPLES: usize = 1 << 19;
 
-// Copied, not shared: synth's music voices are bound for `pixtuoid-lofi`, and
+// Copied, not shared: the music voices live in `pixtuoid-lofi`, and
 // exporting five small helpers for one consumer would make them its semver
 // surface. Each copy shapes only its own module's sounds.
 fn n_samples(dur_s: f32) -> usize {
@@ -247,7 +250,7 @@ pub(crate) fn rain_drop(rng: &mut NoiseStream) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::audio::dsp::{band_energy_share, centroid_hz};
+    use pixtuoid_lofi::dsp::{band_energy_share, centroid_hz};
 
     #[test]
     fn one_shot_synth_spectral_sanity() {

@@ -79,12 +79,16 @@ debug = "line-tables-only"
 debug = false
 
 [profile.dev.package.pixtuoid-scene]
-# The audio DSP is the one genuinely compute-bound thing in the workspace and
-# `test` inherits `dev`, so the synth fingerprint tests were paying for
-# unoptimized butterflies and sin loops. Debug assertions stay ON. This cannot
-# perturb the ratified spectral pins because none of them asserts bit equality —
-# they compare centroid and band-energy shares within tolerances orders of
-# magnitude wider than any codegen-level float difference.
+# The layout and pathfinding sweeps and the cutaway, cloud and outside paint
+# tests are the workspace's compute-bound tests, and `test` inherits `dev`.
+# Debug assertions stay ON. This cannot perturb foley's spectral pins: they
+# compare centroid and band-energy shares within tolerances orders of magnitude
+# wider than any codegen-level float difference.
+opt-level = 2
+
+[profile.dev.package.pixtuoid-lofi]
+# The bank's synthesis tests render every music lane through it, the
+# workspace's other compute-bound tests.
 opt-level = 2
 
 # Opt-in full debuginfo for an actual debugger session:
@@ -118,6 +122,7 @@ thiserror          = "2"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 notify             = "8"
+pixtuoid-lofi      = "0.1"
 ratatui            = "0.30"
 crossterm          = "0.29"
 # Terminal display-column width — the authority ratatui itself uses, so wide
