@@ -64,11 +64,9 @@ pub fn omp_agent_dir() -> PathBuf {
     resolve_omp_agent_dir(&env)
 }
 
-/// The subdirectory omp's loader scans for extension modules — upstream
-/// `discovery/builtin.ts` joins this onto `getAgentDir()`. Watched by the
-/// drift surface (`omp.extension_subdir`): a silent upstream rename would
-/// leave the installer writing where omp never looks while every local check
-/// reads green.
+/// The subdirectory omp's loader scans for extension modules: upstream joins
+/// it onto each config dir, and `omp.extension_subdir` watches that join,
+/// since a rename leaves every local check green.
 pub(crate) const EXTENSIONS_SUBDIR: &str = "extensions";
 
 /// Where the bridge extension installs: [`omp_agent_dir`] +
@@ -528,7 +526,7 @@ pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_TITLE_FIELDS: &[&str] = &[TITLE_FIELD];
 
-/// The header entry (line 2; line 1 is a fixed-width 256-byte `title` slot that omp
+/// The header entry (line 2; line 1 is a fixed-width `title` slot that omp
 /// rewrites IN PLACE — pwrite at offset 0, and the tail cursor sits past it, so it
 /// is never re-read; legacy files lack the slot). Fork, branch, version migration
 /// and tool-output pruning REWRITE the file atomically (temp + rename → new inode)
@@ -830,10 +828,9 @@ const HOOK_APPROVAL_REQUESTED: &str = "tool_approval_requested";
 const HOOK_APPROVAL_RESOLVED: &str = "tool_approval_resolved";
 
 /// The hook event types this decoder turns into events — this module's
-/// hook watch below, pinned to the dispatch arms by the
-/// drift-surface census (`every_exported_set_is_exactly_its_dispatch_arms`)
-/// and to the TS extension's registration list by the install-side
-/// two-language pin.
+/// hook watch below, pinned to the dispatch arms by
+/// `every_exported_set_is_exactly_its_dispatch_arms` and to the TS
+/// extension's registration list by the install-side two-language pin.
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
     HOOK_SESSION_START,
@@ -1005,6 +1002,27 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             "if `getAgentDir()` gained a redirect (XDG or otherwise), `omp_agent_dir()`'s \
              no-flatten rule is stale and the bridge installs where omp never scans; re-verify \
              dirs.ts",
+        ),
+        siblings: None,
+    },
+    Watch {
+        id: "omp.extension_subdir",
+        ours: || vec![EXTENSIONS_SUBDIR],
+        docs: &[omp_doc(
+            "packages/coding-agent/src/discovery/builtin.ts",
+            r"(?m)^async function loadExtensionModules\b",
+            "`loadExtensionModules`",
+        )],
+        // Bound to the module discovery: `loadExtensions` joins the same
+        // subdir for another loader. Whitespace-tolerant, since a call past
+        // the formatter's width wraps.
+        read: Read::Each {
+            pattern: r#"discoverExtensionModulePaths\(\s*ctx,\s*path\.join\(\s*dir,\s*"{name}"\s*\)"#,
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the installer writes the bridge where omp's loader never looks: it installs \
+             cleanly and never loads",
         ),
         siblings: None,
     },
