@@ -60,12 +60,6 @@ impl From<Names> for Declared {
     }
 }
 
-impl From<Declared> for Names {
-    fn from(d: Declared) -> Self {
-        d.names
-    }
-}
-
 /// Whether `name` is a field, not one of a `TsFields` read's facts beside it.
 pub(super) fn is_bare(name: &str) -> bool {
     field_of(name) == name
@@ -1096,9 +1090,9 @@ mod tests {
 
     /// The names, or what the reader found instead; a pattern of ours that
     /// fails to compile fails the test.
-    fn found(read: Result<impl Into<Names>, Unread>) -> Result<Vec<String>, String> {
+    fn found(read: Result<impl Into<Declared>, Unread>) -> Result<Vec<String>, String> {
         match read {
-            Ok(names) => Ok(names.into().into_iter().collect()),
+            Ok(read) => Ok(read.into().names.into_iter().collect()),
             Err(Unread::Missing(what)) => Err(what),
             Err(Unread::Ours(e)) => panic!("a test pattern does not compile: {e}"),
         }

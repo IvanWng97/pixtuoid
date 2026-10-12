@@ -395,9 +395,9 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
 
         def drive(docs: dict[str, str]) -> d.Report:
             """OFFLINE: every URL this case does not serve raises rather than going
-            to the network. `else real(u)` made `just lint` issue 208 live requests
-            per run, and `lint` joins its jobs with `wait`, so a blackholing network
-            would hang preflight and pre-push at 30s/request."""
+            to the network. `else real(u)` sent every unserved URL live, and `lint`
+            joins its jobs with `wait`, so a blackholing network would hang
+            preflight and pre-push at 30s/request."""
             def stub(u: str, _d: dict[str, str] = docs) -> str:
                 if u in _d:
                     return _d[u]

@@ -1104,13 +1104,14 @@ fn the_report_title_carries_the_strongest_disposition_and_the_exit_code() {
     );
 }
 
-/// What a shipped template reads is what its watches read. omp and dsh, both
-/// ways: a read added without its watch, or a watch outliving its read, fails
-/// here. OpenClaw, one way: each field and literal its Degraded consts name is
-/// still read or compared; a new read is not detected.
+/// What a shipped template reads is what its watches read. omp, both ways: a
+/// read added without its watch, or a watch outliving its read, fails here.
+/// OpenClaw, one way: each field and literal its Degraded consts name is still
+/// read or compared; a new read is not detected. dsh's watch reads its scan
+/// itself, so it needs no leg.
 #[test]
 fn each_template_read_is_watched() {
-    use crate::install::{dsh, omp, openclaw};
+    use crate::install::{omp, openclaw};
     let bare = |watches: &[Watch]| -> BTreeSet<&str> {
         watches
             .iter()
@@ -1118,13 +1119,9 @@ fn each_template_read_is_watched() {
             .filter(|n| read::is_bare(n))
             .collect()
     };
-    for (template, watched) in [
-        (omp::extension_reads(), bare(omp::UPSTREAM)),
-        (dsh::plugin_events(), bare(dsh::UPSTREAM)),
-    ] {
-        assert!(!template.is_empty(), "a template scan reads nothing");
-        assert_eq!(template.into_iter().collect::<BTreeSet<_>>(), watched);
-    }
+    let reads: BTreeSet<&str> = omp::extension_reads().into_iter().collect();
+    assert!(!reads.is_empty(), "the template scan reads nothing");
+    assert_eq!(reads, bare(omp::UPSTREAM));
     let fields = [openclaw::AGENT_END_FIELDS, openclaw::MODEL_CALL_BASE_FIELDS].concat();
     for field in fields {
         let read = format!("ev.{field}");

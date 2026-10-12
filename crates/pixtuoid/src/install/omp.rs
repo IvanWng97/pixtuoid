@@ -31,10 +31,10 @@ const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 pub(crate) const EXTENSION_TEMPLATE: &str = include_str!("omp_extension.ts");
 
 /// The upstream extension-API names the bridge reads: each event field
-/// (`ev?.…`) and context member (`ctx?.…`), and the session getters.
+/// (`ev?.…`), context member (`ctx?.…`) and session-manager getter.
 #[cfg(all(test, feature = "upstream"))]
 pub(crate) fn extension_reads() -> Vec<&'static str> {
-    let mut names: Vec<&'static str> = ["ev?.", "ctx?."]
+    let mut names: Vec<&'static str> = ["ev?.", "ctx?.", "sessionManager?."]
         .into_iter()
         .flat_map(|marker| EXTENSION_TEMPLATE.match_indices(marker))
         .map(|(i, m)| {
@@ -45,14 +45,6 @@ pub(crate) fn extension_reads() -> Vec<&'static str> {
             &rest[..end]
         })
         .collect();
-    for (probe, name) in [
-        (".getSessionFile", "getSessionFile"),
-        (".getSessionId", "getSessionId"),
-    ] {
-        if EXTENSION_TEMPLATE.contains(probe) {
-            names.push(name);
-        }
-    }
     names.sort_unstable();
     names.dedup();
     names
@@ -62,9 +54,10 @@ pub(crate) fn extension_reads() -> Vec<&'static str> {
 const READ_GONE: &str = "the installed bridge forwards an undefined value, so that signal quietly \
                          dies (approval waits, lifecycle, or identity)";
 
-/// One watch per declaring type: a field moving between the approval events
-/// would read as present off their union. `extension_reads` is held to the
-/// union of their bare names by `each_template_read_is_watched`.
+/// Split by declaring type, so a field moving between the approval events
+/// can't read as present off their union (`ToolApprovalResolvedEvent` has two,
+/// split by verdict). `each_template_read_is_watched` holds `extension_reads`
+/// to the union of every watch's bare names.
 #[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
