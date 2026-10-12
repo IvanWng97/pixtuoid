@@ -302,8 +302,8 @@ the PR changes, reading each file that change touches whole at the new head;
 its marker names the new head and its text the old one. When that old head is
 no longer an ancestor of the new one (a rebase), the re-run judges the whole
 PR. The [`local-review`](../.claude/skills/local-review/SKILL.md) skill runs
-those rows. A published review passes whatever it found; a failed or missing status
-is no review: comment `/claude-review`, else split the PR smaller.
+those rows. A published review passes whatever it found; a failed or missing
+status is no review: comment `/claude-review`, else split the PR smaller.
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
 entry is a command because no queue condition can confirm a finding or match a
