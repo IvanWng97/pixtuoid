@@ -164,6 +164,7 @@ sha2               = "0.10"
 # through oxc, Markdown through pulldown-cmark, both new to the build.
 oxc_allocator      = "0.153"
 oxc_ast            = "0.153"
+oxc_ast_visit      = "0.153"
 oxc_parser         = "0.153"
 oxc_span           = "0.153"
 pulldown-cmark     = { version = "0.13", default-features = false }

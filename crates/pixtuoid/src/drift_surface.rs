@@ -1,6 +1,6 @@
 //! This crate's half of the **drift surface** — the values our shipped
-//! artifacts bake in, emitted as data for `check_upstream_drift.py`. The hook
-//! sets the installers register are watched beside them (`install/<cli>.rs`'s
+//! artifacts bake in, emitted as data for `check_upstream_drift.py`. Everything
+//! else the installers depend on is watched beside them (`install/<cli>.rs`'s
 //! `UPSTREAM`).
 
 use std::collections::BTreeMap;
@@ -20,8 +20,6 @@ fn surface() -> Value {
         json!([openclaw_default_gateway_port()
             .expect("openclaw_plugin.js declares DEFAULT_GATEWAY_PORT")]),
     );
-    shipped.insert("dsh.plugin_events", json!(dsh_plugin_events()));
-    shipped.insert("omp.extension_reads", json!(omp_extension_reads()));
 
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
     root.insert("shipped", json!(shipped));
@@ -40,56 +38,6 @@ fn openclaw_default_gateway_port() -> Option<&'static str> {
     let digits = after.trim_start();
     let end = digits.find(|c: char| !c.is_ascii_digit())?;
     (end > 0).then(|| &digits[..end])
-}
-
-/// The upstream event names the bundled dsh plugin actually listens for —
-/// its `ctx.on("...")` subscriptions plus the `case "..."` labels of its
-/// session/event switch, scanned from the template itself so a hand-kept
-/// list can't claim coverage the code doesn't have. A rename upstream
-/// leaves the plugin listening to silence.
-fn dsh_plugin_events() -> Vec<String> {
-    let template = crate::install::dsh::PLUGIN_TEMPLATE;
-    let scan = |marker: &str| -> Vec<String> {
-        template
-            .match_indices(marker)
-            .filter_map(|(i, m)| {
-                template[i + m.len()..]
-                    .split_once('"')
-                    .map(|(name, _)| name.to_string())
-            })
-            .collect()
-    };
-    let mut names = scan(r#"ctx.on(""#);
-    names.extend(scan(r#"case ""#));
-    names.sort_unstable();
-    names.dedup();
-    names
-}
-
-/// The upstream extension-API names the bundled omp bridge reads.
-fn omp_extension_reads() -> Vec<String> {
-    let template = crate::install::omp::EXTENSION_TEMPLATE;
-    let mut names: Vec<String> = template
-        .match_indices("ev?.")
-        .map(|(i, m)| {
-            template[i + m.len()..]
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                .collect()
-        })
-        .collect();
-    for (probe, name) in [
-        (".getSessionFile", "getSessionFile"),
-        (".getSessionId", "getSessionId"),
-        ("ctx?.cwd", "cwd"),
-    ] {
-        if template.contains(probe) {
-            names.push(name.to_string());
-        }
-    }
-    names.sort_unstable();
-    names.dedup();
-    names
 }
 
 #[cfg(test)]

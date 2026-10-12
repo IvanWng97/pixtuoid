@@ -45,26 +45,106 @@ pub(crate) const REASONIX_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
+/// `reasonix plugin install`'s flags: link in place, re-link over an existing
+/// install.
+const LINK: &str = "--link";
+const REPLACE: &str = "--replace";
+/// The consent to write that `install` and `remove` both require.
+const YES: &str = "--yes";
+/// The `reasonix plugin` subcommand that uninstalls one.
+const REMOVE: &str = "remove";
+/// The file Reasonix records its installed plugins in.
+const PACKAGES: &str = "plugin-packages.json";
+
 #[cfg(feature = "upstream")]
-pub(crate) const UPSTREAM: &[Watch] = &[Watch {
-    id: "reasonix.hook_events",
-    ours: || REASONIX_EVENTS.to_vec(),
-    docs: &[Doc {
-        at: At::Path {
-            repo: "esengine/DeepSeek-Reasonix",
-            branch: "main-v2",
-            path: "internal/hook/hook.go",
-        },
-        anchor: r"type Event string\b",
-        owns: "the `Event` type",
-    }],
-    read: Read::Matches {
-        pattern: r#"\w+\s+Event\s*=\s*"(\w+)""#,
+const PACKAGES_DOC: &[Doc] = &[Doc {
+    at: At::Path {
+        repo: "esengine/DeepSeek-Reasonix",
+        branch: "studio",
+        path: "docs/PLUGIN_PACKAGES.md",
     },
-    when: When::Vanishes,
-    finding: Finding::Breaking(UNFIRED_HOOK),
-    siblings: None,
+    anchor: r"(?m)^## CLI Mode",
+    owns: "the plugin-packages CLI section",
 }];
+
+#[cfg(feature = "upstream")]
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "reasonix.hook_events",
+        ours: || REASONIX_EVENTS.to_vec(),
+        docs: &[Doc {
+            at: At::Path {
+                repo: "esengine/DeepSeek-Reasonix",
+                branch: "studio",
+                path: "internal/ext/hook/hook.go",
+            },
+            anchor: r"type Event string\b",
+            owns: "the `Event` type",
+        }],
+        read: Read::Matches {
+            pattern: r#"\w+\s+Event\s*=\s*"(\w+)""#,
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(UNFIRED_HOOK),
+        siblings: None,
+    },
+    host_plugin::premise(
+        "reasonix.link_flag",
+        || vec![LINK],
+        PACKAGES_DOC,
+        "`{name}` links a local plugin directory instead of copying it",
+        "the in-place install `register` relies on, with no reload, may have changed",
+    ),
+    host_plugin::premise(
+        "reasonix.yes_flag",
+        || vec![YES],
+        PACKAGES_DOC,
+        r"`{name}` is required for any install that writes files\.",
+        "the consent flag `register` passes may have changed",
+    ),
+    host_plugin::premise(
+        "reasonix.replace_flag",
+        || vec![REPLACE],
+        PACKAGES_DOC,
+        "`{name}` allows the source to replace an installed plugin with the same",
+        "the re-link a repeat `register` relies on may have changed",
+    ),
+    host_plugin::premise(
+        "reasonix.remove_command",
+        || vec![REMOVE],
+        PACKAGES_DOC,
+        r"`{name}` also accepts `uninstall` as an alias\.",
+        "the uninstall command `unregister` runs may have changed",
+    ),
+    host_plugin::premise(
+        "reasonix.remove_consent",
+        || vec![YES],
+        PACKAGES_DOC,
+        r"as an alias\. It requires `{name}` because it",
+        "the consent flag `unregister` passes to `remove` may have changed",
+    ),
+    host_plugin::premise(
+        "reasonix.packages_file",
+        || vec![PACKAGES],
+        PACKAGES_DOC,
+        r"~/\.reasonix/{name}\b",
+        "where `is_registered` reads an install from may have changed",
+    ),
+    host_plugin::premise(
+        "reasonix.manifest",
+        || vec![MANIFEST],
+        PACKAGES_DOC,
+        "Native `{name}` manifests must declare the exact",
+        "the manifest `render_manifest` writes may have changed",
+    ),
+    host_plugin::premise(
+        "reasonix.exec_form",
+        || vec![r#"When `args` is present, including `"args": []`, the hook uses **exec form**"#],
+        PACKAGES_DOC,
+        r"{name}\.",
+        "the exec form our hooks rely on may have changed",
+    ),
+];
 
 /// Reasonix links the plugin dir in place, so a rewrite of the manifest reaches the
 /// next session.
@@ -103,7 +183,7 @@ fn settings_path() -> Result<PathBuf> {
 /// Where Reasonix records its installed plugins and whether each is enabled
 /// (`internal/ext/pluginpkg/pluginpkg.go` @ v2.35.0).
 fn packages_path() -> Result<PathBuf> {
-    Ok(home()?.join("plugin-packages.json"))
+    Ok(home()?.join(PACKAGES))
 }
 
 /// Reasonix's home is platform-ASYMMETRIC, so a generic USERPROFILE-first path on
@@ -247,9 +327,9 @@ fn register(config: &Path) -> Result<()> {
         "plugin".as_ref(),
         "install".as_ref(),
         plugin.as_os_str(),
-        "--link".as_ref(),
-        "--replace".as_ref(),
-        "--yes".as_ref(),
+        LINK.as_ref(),
+        REPLACE.as_ref(),
+        YES.as_ref(),
     ])?;
     Ok(())
 }
@@ -267,9 +347,9 @@ fn unregister(config: &Path) -> Result<Unregistered> {
         }
         CLI.run(&[
             "plugin".as_ref(),
-            "remove".as_ref(),
+            REMOVE.as_ref(),
             NAME.as_ref(),
-            "--yes".as_ref(),
+            YES.as_ref(),
         ])?;
     }
     host_plugin::remove_if_ours(root, config)?;

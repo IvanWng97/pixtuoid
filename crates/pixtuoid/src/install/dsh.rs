@@ -17,6 +17,8 @@ use saphyr::{LoadableYamlNode, MappingOwned, ScalarOwned, Yaml, YamlEmitter, Yam
 
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
+#[cfg(feature = "upstream")]
+use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 /// The mount entry's `id` — uninstall and the one-entry verify key on it.
 const PLUGIN_ID: &str = "pixtuoid";
@@ -24,6 +26,81 @@ const PLUGIN_ID: &str = "pixtuoid";
 const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
 pub(crate) const PLUGIN_TEMPLATE: &str = include_str!("dsh_plugin.mjs");
+
+/// The upstream events the plugin listens for: its `ctx.on("…")`
+/// subscriptions and the `case "…"` labels of its `session/event` switch,
+/// scanned from the template so a hand-kept list can't claim coverage the code
+/// doesn't have.
+#[cfg(feature = "upstream")]
+pub(crate) fn plugin_events() -> Vec<&'static str> {
+    let mut names = Vec::new();
+    for marker in [r#"ctx.on(""#, r#"case ""#] {
+        for (i, m) in PLUGIN_TEMPLATE.match_indices(marker) {
+            if let Some((name, _)) = PLUGIN_TEMPLATE[i + m.len()..].split_once('"') {
+                names.push(name);
+            }
+        }
+    }
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// dsh declares its events as keys of the cordis `Events` and the session's
+/// `SessionEventMap`, each augmented across packages, so one key may live in
+/// any of the four.
+#[cfg(feature = "upstream")]
+pub(crate) const UPSTREAM: &[Watch] = &[Watch {
+    id: "dsh.plugin_events",
+    ours: plugin_events,
+    docs: &[
+        Doc {
+            at: At::Path {
+                repo: "deepseek-ai/deepseek-harness",
+                branch: "master",
+                path: "packages/core/agent/src/runtime-types.ts",
+            },
+            anchor: r"declare module '@deepseek-ai/cordis' \{\s*interface Events \{",
+            owns: "the cordis `Events` augmentation",
+        },
+        Doc {
+            at: At::Path {
+                repo: "deepseek-ai/deepseek-harness",
+                branch: "master",
+                path: "packages/core/session/src/types.ts",
+            },
+            anchor: r"export interface SessionEventMap\b",
+            owns: "`SessionEventMap`",
+        },
+        Doc {
+            at: At::Path {
+                repo: "deepseek-ai/deepseek-harness",
+                branch: "master",
+                path: "packages/interaction/user-approval/src/types.ts",
+            },
+            anchor: r"declare module '@deepseek-ai/dsh-session/types' \{\s*interface SessionEventMap \{",
+            owns: "the `SessionEventMap` augmentation",
+        },
+        Doc {
+            at: At::Path {
+                repo: "deepseek-ai/deepseek-harness",
+                branch: "master",
+                path: "packages/core/session/src/index.ts",
+            },
+            anchor: r"declare module '@deepseek-ai/cordis' \{",
+            owns: "the cordis augmentation",
+        },
+    ],
+    read: Read::TsMembers {
+        of: &["Events", "SessionEventMap"],
+    },
+    when: When::Vanishes,
+    finding: Finding::Breaking(
+        "the plugin listens to an event dsh never fires, so that slice of the office silently \
+         stops updating",
+    ),
+    siblings: None,
+}];
 
 /// `$DSH_HOME` else `~/.dsh` — upstream `resolveDshHome`
 /// (`packages/util/home-paths/src/index.ts`, fetched 2026-09-01) resolves

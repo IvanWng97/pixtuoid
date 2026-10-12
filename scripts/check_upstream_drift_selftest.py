@@ -76,79 +76,11 @@ def test_try_fetch_classifies_permanent_vs_transient() -> None:
         d.fetch = real
 
 
-def test_plugin_doc_markers_fire_on_vanish() -> None:
-    for url, entry in d.PLUGIN_DOC_MARKERS.items():
-        full = "\n".join(entry.markers)
-        check(d.plugin_marker_findings(url, full) == [], f"{url}: quiet doc -> none")
-        first = sorted(entry.markers)[0]
-        got = d.plugin_marker_findings(url, "\n".join(m for m in entry.markers if m != first))
-        installer = d.PLUGIN_HOST_INSTALLERS[entry.cli]
-        check(
-            len(got) == 1 and first in got[0] and installer in got[0],
-            f"{url}: vanish fires: {got!r}",
-        )
-
-
-def test_a_vanished_plugin_contract_marker_files_a_review() -> None:
-    """A vanished marker files a review naming that host's installer."""
-    real = d.fetch
-    try:
-        url = d.CODEX_PLUGIN_CMD_URL
-        entry = d.PLUGIN_DOC_MARKERS[url]
-        first = sorted(entry.markers)[0]
-        maimed = ANCHOR_SAMPLES[url] + "\n".join(m for m in entry.markers if m != first)
-        def stub(u: str) -> str:
-            if u == url:
-                return maimed
-            raise urllib.error.URLError("offline: not this case's document")
-
-        d.fetch = stub
-        rep = d.Report()
-        d.run_checks(d.OurNames(), report=rep)
-        check(
-            any(first in r and "install/codex.rs" in r for r in rep.review),
-            f"a vanished Codex plugin marker files a review: {rep.review!r}",
-        )
-    finally:
-        d.fetch = real
-
-
 # One snippet per anchored document; a new ANCHORS entry with no sample here
 # fails the gate test below.
 ANCHOR_SAMPLES: dict[str, str] = {
-    d.CC_PLUGIN_COMPONENTS_URL: "# Add components to a plugin\n",
-    d.CC_PLUGIN_INSTALL_URL: "# Install and manage plugins\n",
-    d.CC_PLUGIN_LOADING_URL: "# Plugin loading reference\n",
-    d.CODEX_PLUGIN_CMD_URL: "pub enum PluginSubcommand {\n    Add(AddPluginArgs),\n}\n",
-    d.CODEX_MARKETPLACE_CMD_URL: "enum MarketplaceSubcommand {\n    Add(AddMarketplaceArgs),\n}\n",
-    d.CODEX_MARKETPLACE_URL: "const MARKETPLACE_MANIFEST_RELATIVE_PATHS: &[&str] = &[];\n",
-    d.CODEX_PLUGIN_EDIT_URL: "fn set_plugin_enabled(doc: &mut DocumentMut) -> bool {\n}\n",
-    d.CODEX_MARKETPLACE_RECORD_URL: "pub(super) fn record_added_marketplace_entry(\n) {\n}\n",
-    d.CODEX_MARKETPLACE_SOURCE_URL: "fn resolve_local_source_path(source: &str) {\n}\n",
-    d.REASONIX_PLUGIN_DOC_URL: "\n## CLI Mode\n",
-    d.OMP_EXT_SHARED_EVENTS_URL:
-        'export interface SessionShutdownEvent { type: "session_shutdown"; }\n',
-    d.OMP_EXT_TYPES_URL:
-        'export interface ToolApprovalRequestedEvent { type: "tool_approval_requested"; }\n',
-    d.OMP_SESSION_MANAGER_URL:
-        'export class SessionManager {\n\tgetSessionFile(): string | undefined {}\n}\n',
-    d.DSH_RUNTIME_TYPES_URL:
-        "declare module '@deepseek-ai/cordis' {\n  interface Events {\n"
-        "    'agent/pre-step'(payload: {}): void\n  }\n}\n",
-    d.DSH_SESSION_TYPES_URL: "export interface SessionEventMap {\n  'assistant/message': { text: string }\n}\n",
-    d.DSH_APPROVAL_TYPES_URL:
-        "declare module '@deepseek-ai/dsh-session/types' {\n  interface SessionEventMap {\n"
-        "    'approval/asked': { id: ApprovalRequestId }\n  }\n}\n",
-    # The `also` shape: upstream puts `interface Context` between the module
-    # header and the `Events` the keys live in, so the sample must too.
-    d.DSH_SESSION_INDEX_URL:
-        "declare module '@deepseek-ai/cordis' {\n  interface Context {\n    session: Session\n  }\n"
-        "  interface Events {\n    'session/created'(session: Session): void\n  }\n}\n",
     d.OMP_EXT_DISCOVERY_URL:
         'export async function discoverExtensionModulePaths() {}\n',
-    d.OMP_DIRS_URL:
-        'export function getAgentDir(): string {\n\treturn dirs.agentDir;\n}\n',
-    d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "agent_end"\n',
     d.OPENCLAW_PATHS_URL: "export const DEFAULT_GATEWAY_PORT = 18789;\n",
 }
 
@@ -163,7 +95,7 @@ def test_anchor_gate_fires_in_both_directions() -> None:
     try:
         # A floor, because everything below iterates `ANCHORS`: an emptied table
         # would run zero loop bodies and this test would pass VACUOUSLY.
-        check(len(d.ANCHORS) >= 4, f"ANCHORS covers every swept document, got {len(d.ANCHORS)}")
+        check(len(d.ANCHORS) >= 2, f"ANCHORS covers every swept document, got {len(d.ANCHORS)}")
         missing_samples = sorted(set(d.ANCHORS) - set(ANCHOR_SAMPLES))
         check(not missing_samples, f"every ANCHORS entry needs a sample: {missing_samples}")
 
@@ -191,103 +123,6 @@ def test_anchor_gate_fires_in_both_directions() -> None:
                 out == sample and not r.blind and not r.errors,
                 f"{anchor.owns}: anchor present -> body returned, got blind={r.blind}",
             )
-
-            # The sample above satisfies both halves, so only deleting one
-            # proves the second is load-bearing rather than decorative.
-            if anchor.also is None:
-                continue
-            for drop, half in (("pattern", anchor.pattern), ("also", anchor.also)):
-                maimed = re.sub(half, "", sample, count=1)
-                check(
-                    maimed != sample,
-                    f"{anchor.owns}: the {drop} half must occur in its own sample",
-                )
-                d.fetch = lambda _u, _s=maimed: _s
-                r = d.Report()
-                check(
-                    d.fetch_anchored(url, "T", r) is None and len(r.blind) == 1,
-                    f"{anchor.owns}: {drop} missing -> blind, got blind={r.blind}",
-                )
-    finally:
-        d.fetch = real
-
-
-def test_the_omp_extension_router_flags_a_name_it_cannot_place() -> None:
-    """The router's documented promise, as a gate: a name it cannot place goes
-    blind, and an unverifiable carrier suppresses its fields rather than renaming
-    every one of them."""
-    shared = "export interface SessionSwitchEvent {\n\tpreviousSessionFile: string;\n}\n"
-    ext = (
-        "export interface ToolApprovalRequestedEvent {\n\ttoolCallId: string;\n}\n"
-        "export interface ToolApprovalResolvedEvent {\n\tapproved: boolean;\n}\n"
-        "export interface ExtensionContext {\n\tcwd: string;\n}\n"
-    )
-    sm = "export class SessionManager {\n\tgetSessionFile(): string {}\n}\n"
-
-    rep = d.Report()
-    d.check_omp_extension_reads(shared, ext, sm, {"cwd", "toolCallId"}, rep)
-    check(
-        not rep.blind and not rep.breaking,
-        f"names the router can place stay silent; blind={rep.blind} breaking={rep.breaking}",
-    )
-
-    rep = d.Report()
-    d.check_omp_extension_reads(shared, ext, sm, {"pxdNewlyRead"}, rep)
-    check(
-        any("pxdNewlyRead" in b for b in rep.blind),
-        f"a read with no declaration site must go BLIND, not green; blind={rep.blind}",
-    )
-    check(
-        not rep.breaking,
-        f"an unplaceable name is probe health, never a rename; got {rep.breaking}",
-    )
-
-    # A carrier that will not parse must suppress its fields, not rename them —
-    # `approved` included, whose OPTIONALITY arm reads the same value and would
-    # raise on None, killing every check after this one.
-    for fields in ({"toolCallId"}, {"approved", "toolCallId"}):
-        rep = d.Report()
-        d.check_omp_extension_reads(shared, "", sm, fields, rep)
-        check(
-            any("carrier" in b for b in rep.blind) and not rep.breaking,
-            f"an unreadable carrier is blind and suppresses {sorted(fields)}; "
-            f"blind={rep.blind} breaking={rep.breaking}",
-        )
-
-
-def test_a_redirected_omp_agent_dir_is_breaking() -> None:
-    """`omp_agent_dir()`'s no-flatten rule rests on this returning the resolver's
-    dir verbatim, and the check's own message says no local check can see the
-    failure it guards."""
-    real = d.fetch
-    try:
-
-        def drive(body: str) -> d.Report:
-            def stub(u: str, _b: str = body) -> str:
-                if u == d.OMP_DIRS_URL:
-                    return _b
-                raise urllib.error.URLError("offline: not this case's document")
-
-            d.fetch = stub
-            rep = d.Report()
-            d.run_checks(d.read_our_names(rep), report=rep)
-            return rep
-
-        verbatim = drive("export function getAgentDir(): string {\n\treturn dirs.agentDir;\n}\n")
-        check(
-            not any("getAgentDir" in x for x in verbatim.breaking),
-            f"the verbatim resolver is silent; got {verbatim.breaking}",
-        )
-
-        redirected = drive(
-            "export function getAgentDir(): string {\n"
-            "\treturn process.env.XDG_DATA_HOME ?? dirs.agentDir;\n}\n"
-        )
-        check(
-            any("getAgentDir" in x for x in redirected.breaking),
-            f"a redirect must be BREAKING, not silence; breaking={redirected.breaking} "
-            f"blind={redirected.blind}",
-        )
     finally:
         d.fetch = real
 
@@ -334,124 +169,6 @@ def test_two_declarations_are_probe_health_not_a_first_match() -> None:
         d.fetch = real
 
 
-def test_the_openclaw_degraded_watch_tells_a_vanished_field_from_a_missing_type() -> None:
-    """The hook-name sweep stays green while a field or literal the plugin stamps
-    `errored` from vanishes, and Degraded silently becomes unreachable."""
-    table = d.OPENCLAW_DEGRADED_FIELDS
-    check(bool(table), "the watch pins at least one type")
-    plugin = (d.REPO / "crates/pixtuoid/src/install/openclaw_plugin.js").read_text()
-    for fields in table.values():
-        for f, literal in fields:
-            check(re.search(rf"\.{f}\b", plugin) is not None,
-                  f"the watch pins `{f}`, which openclaw_plugin.js no longer reads")
-            if literal is not None:
-                check(re.search(rf"\.{f}\s*[!=]==\s*{re.escape(literal)}", plugin) is not None,
-                      f"the watch pins `{f}` {literal}, which openclaw_plugin.js no longer compares")
-
-    real = d.fetch
-    try:
-        # The anchor, so only the event types vary.
-        names = 'export type PluginHookName =\n  | "agent_end"\n'
-
-        def member(f: str, literal: str | None, drop_literal: bool) -> str:
-            """A literal's union wraps one member per line, as upstream's formatter
-            does once the line passes its width."""
-            if literal is None:
-                return f"  {f}?: unknown;\n"
-            union = ['"other"'] if drop_literal else [literal, '"other"']
-            return f"  {f}?:\n" + "".join(f"    | {u}\n" for u in union[:-1]) + f"    | {union[-1]};\n"
-
-        def document(omit: tuple[str, str] | None = None,
-                     drop_literal: tuple[str, str] | None = None,
-                     rename: str | None = None) -> str:
-            """Every pinned type, each extending a base as upstream's model-call
-            events do. An omitted field also sits in a comment, a nested object and
-            the next type: the three spellings a whole-document match takes for a
-            declaration."""
-            out = names
-            for ty, fields in table.items():
-                decl = f"{ty}V2" if ty == rename else ty
-                out += f"export type {decl} = PluginHookContextWindow & {{\n  callId: string;\n"
-                for f, literal in fields:
-                    if (ty, f) == omit:
-                        out += f"  /*\n  {f}?: string;\n  */\n  detail?: {{\n    {f}?: string;\n  }};\n"
-                        continue
-                    out += member(f, literal, (ty, f) == drop_literal)
-                out += "};\n"
-                if omit is not None and ty == omit[0]:
-                    out += f"export type PluginHookNextEvent = {{\n  {omit[1]}?: string;\n}};\n"
-            return out
-
-        def drive(doc: str) -> d.Report:
-            def stub(u: str, _d: str = doc) -> str:
-                if u == d.OPENCLAW_HOOK_TYPES_URL:
-                    return _d
-                raise urllib.error.URLError("offline: not this case's document")
-
-            d.fetch = stub
-            rep = d.Report()
-            d.run_checks(d.read_our_names(rep), report=rep)
-            return rep
-
-        def on_table(lines: list[str]) -> list[str]:
-            return [x for x in lines if any(ty in x for ty in table)]
-
-        intact = drive(document())
-        check(not intact.breaking and not on_table(intact.blind),
-              f"every field declared -> silent; breaking={intact.breaking} "
-              f"blind={on_table(intact.blind)}")
-        for ty, fields in table.items():
-            for f, literal in fields:
-                gone = drive(document(omit=(ty, f)))
-                check(len(gone.breaking) == 1 and f"`{ty}`" in gone.breaking[0]
-                      and f"`{f}`" in gone.breaking[0] and not on_table(gone.blind),
-                      f"`{ty}.{f}` gone -> one breaking line naming it; "
-                      f"breaking={gone.breaking} blind={on_table(gone.blind)}")
-                if literal is not None:
-                    narrowed = drive(document(drop_literal=(ty, f)))
-                    check(len(narrowed.breaking) == 1 and literal in narrowed.breaking[0],
-                          f"`{ty}.{f}` without {literal} -> one breaking line naming it; "
-                          f"breaking={narrowed.breaking}")
-            renamed = drive(document(rename=ty))
-            check(not renamed.breaking and len(on_table(renamed.blind)) == 1
-                  and f"`{ty}`" in on_table(renamed.blind)[0],
-                  f"a missing `{ty}` is probe health, never drift; "
-                  f"breaking={renamed.breaking} blind={renamed.blind}")
-
-        one_line = drive(names + "".join(
-            f"export type {ty} = {{ "
-            + "; ".join(f"readonly {f}?: " + (literal or "unknown") for f, literal in fields)
-            + " };\n"
-            for ty, fields in table.items()))
-        check(not one_line.breaking and not on_table(one_line.blind),
-              f"a one-line restyle is not a vanish; breaking={one_line.breaking} "
-              f"blind={on_table(one_line.blind)}")
-    finally:
-        d.fetch = real
-
-
-def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
-    """A one-line edit reopens the gate with every other test still green:
-    dropping `also=` makes the half-anchor check SKIP rather than fail."""
-    # Pinned BY URL: with `also` gone the loop in the anchor test just skips, which
-    # is indistinguishable from an anchor that never needed a second half.
-    # `\s+`, not `\s*`: indentation is the only nesting signal a both-present
-    # anchor has, so a flush-left `interface Events` on ANOTHER module must fail.
-    a = d.ANCHORS[d.DSH_SESSION_INDEX_URL]
-    for indent, want in ((" ", True), ("\t", True), ("    ", True), ("", False)):
-        body = f"declare module '@deepseek-ai/cordis' {{\n{indent}interface Events {{\n}}\n}}\n"
-        got = bool(re.search(a.pattern, body)) and bool(re.search(a.also or "", body))
-        check(got is want, f"indent {indent!r}: anchored={got}, want {want}")
-
-    for url in (d.DSH_SESSION_INDEX_URL,):
-        check(
-            d.ANCHORS[url].also is not None,
-            f"{url}: `interface Context` sits between this module header and the "
-            f"`Events` that owns the keys, so one pattern cannot span it — `also` "
-            f"is what makes the anchor whole",
-        )
-
-
 def test_no_anchor_is_a_name_the_watcher_checks() -> None:
     """`Anchor`'s docstring bans this in prose, and prose has no failure mode.
 
@@ -469,55 +186,9 @@ def test_no_anchor_is_a_name_the_watcher_checks() -> None:
     # An empty vocabulary would make every `re.search` below vacuous.
     check(bool(names), "the fragments supply the swept vocabulary")
     circular = sorted(
-        (a.owns, p, n)
-        for a in d.ANCHORS.values()
-        for p in (a.pattern, a.also)
-        if p is not None
-        for n in names
-        if re.search(p, n)
+        (a.owns, n) for a in d.ANCHORS.values() for n in names if re.search(a.pattern, n)
     )
     check(not circular, f"an anchor must not match a name it guards: {circular}")
-
-
-def test_a_multi_document_check_is_all_or_nothing() -> None:
-    """Where a name is declared in exactly one half, a partial join reads a
-    still-present name as VANISHED and files breaking drift against what was only
-    a fetch failure."""
-    real = d.fetch
-    try:
-        urls = [(f"https://x.invalid/{i}", f"doc {i}") for i in range(3)]
-        bodies = {u: f"pub enum HookEvent {{ Pxv{i} }}\n" for i, (u, _) in enumerate(urls)}
-        anchor = d.Anchor(r"pub enum HookEvent\b", "`HookEvent`")
-        saved = {u: d.ANCHORS.get(u) for u, _ in urls}
-        try:
-            for u, _ in urls:
-                d.ANCHORS[u] = anchor
-
-            d.fetch = lambda u, _b=bodies: _b[u]
-            r = d.Report()
-            joined = d.fetch_all_anchored(urls, r)
-            check(joined is not None and all(b.strip() in joined for b in bodies.values()),
-                  f"every document present -> all of them joined, got {joined!r}")
-            check(not r.blind and not r.errors, f"a clean run files nothing, got {r.blind}")
-
-            # Exactly one short, and the whole check must abstain — never join the rest.
-            for drop, _ in urls:
-                d.fetch = lambda u, _d=drop, _b=bodies: (
-                    _UNANCHORED if u == _d else _b[u]
-                )
-                r = d.Report()
-                check(d.fetch_all_anchored(urls, r) is None,
-                      f"{drop} unanchored -> the whole check abstains")
-                check(len(r.blind) == 1 and not r.errors,
-                      f"{drop} unanchored -> one blind line, got {r.blind}")
-        finally:
-            for u, prev in saved.items():
-                if prev is None:
-                    d.ANCHORS.pop(u, None)
-                else:
-                    d.ANCHORS[u] = prev
-    finally:
-        d.fetch = real
 
 
 def test_main_prints_exactly_the_four_buckets() -> None:
@@ -602,18 +273,6 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
     )
 
 
-def test_ts_comment_strip_keeps_strings_in_all_three_quotes() -> None:
-    """A `//` inside any TS literal is not a comment: a blind `//[^\\n]*` eats the
-    rest of the line, members included."""
-    for quoted in ('"https://x/y"', "'https://x/y'", "`https://x/y`"):
-        line = f"const U = {quoted}; const K = 'PxKeep';"
-        check(d.strip_ts_comments(line) == line,
-              f"a `//` inside {quoted[0]} is not a comment: {d.strip_ts_comments(line)}")
-    # TS block comments do not nest: the first `*/` ends one.
-    stripped = d.strip_ts_comments("A, /* outer /* inner */ B, // gone\nC,")
-    check(stripped == "A,  B, \nC,", f"comments go, code stays: {stripped!r}")
-
-
 def test_every_swept_url_declares_an_anchor() -> None:
     """Every swept document declares an anchor. The anchor gate is #793's fix: a
     pin that 200s as a facade reads as mass drift without it. A new sweep declaring
@@ -662,29 +321,26 @@ def test_every_surface_row_names_a_key_the_emitter_actually_writes() -> None:
 
 
 def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
-    """A gap in the emitted surface costs exactly what it feeds. The 16 hand-written
-    readers this replaced had per-reader `try` for it; the fragments give per-KEY
-    isolation instead, and it must be the same promise or one missing row silently
-    darkens the whole watch."""
+    """A gap in the emitted surface costs exactly what it feeds: per-KEY
+    isolation, or one missing row silently darkens the whole watch."""
     real = d.load_fragment
     try:
         full = {rel: real(rel) for rel in (d.CORE_LIB_FRAGMENT, d.CORE_BIN_FRAGMENT)}
 
         holed = {rel: json.loads(json.dumps(f)) for rel, f in full.items()}
-        del holed[d.CORE_BIN_FRAGMENT]["shipped"]["dsh.plugin_events"]
+        del holed[d.CORE_BIN_FRAGMENT]["shipped"]["openclaw.default_gateway_port"]
         d.load_fragment = lambda rel: holed[rel]
         rep = d.Report()
         ours = d.read_our_names(rep)
         check(
-            ours.dsh_plugin_events is None,
-            f"the holed field is dark, got {ours.dsh_plugin_events!r}",
+            ours.openclaw_gateway_port is None,
+            f"the holed field is dark, got {ours.openclaw_gateway_port!r}",
         )
-        for other in ("omp_extension_reads", "openclaw_gateway_port", "omp_extension_subdir"):
-            check(getattr(ours, other), f"{other} must survive a sibling's gap")
-        named = [b for b in rep.blind if "`dsh_plugin_events`" in b]
+        check(bool(ours.omp_extension_subdir), "omp_extension_subdir must survive a sibling's gap")
+        named = [b for b in rep.blind if "`openclaw_gateway_port`" in b]
         check(
             len(named) == 1,
-            f"exactly one probe-health line names dsh_plugin_events: {rep.blind}",
+            f"exactly one probe-health line names openclaw_gateway_port: {rep.blind}",
         )
 
         # A fragment that does not load at all darkens only what IT feeds.
@@ -697,7 +353,7 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         rep2 = d.Report()
         ours2 = d.read_our_names(rep2)
         check(
-            ours2.dsh_plugin_events is None,
+            ours2.openclaw_gateway_port is None,
             "a field of the missing fragment is dark when its fragment is gone",
         )
         check(
@@ -708,45 +364,11 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         d.load_fragment = real
 
 
-def test_omp_approved_optionality_is_watched() -> None:
-    """required->optional on `approved` must fire — the presence matcher alone
-    accepts `approved?:` and the decoder reads absent-as-denied."""
-    shared = (
-        'export interface SessionSwitchEvent {\n'
-        '\tpreviousSessionFile: string | undefined;\n}\n'
-    )
-    sm = "getSessionFile(): x {}\ngetSessionId(): x {}\n"
-
-    def types(approved: str) -> str:
-        return (
-            "export interface ToolApprovalRequestedEvent {\n"
-            "\ttoolCallId: string;\n\ttoolName: string;\n\treason: string;\n}\n"
-            "export interface ToolApprovalResolvedEvent {\n"
-            f"\ttoolCallId: string;\n\ttoolName: string;\n\treason: string;\n\t{approved}\n"
-            "}\n"
-            "export interface ExtensionContext {\n\tcwd: string;\n}\n"
-        )
-
-    fields = {
-        "approved", "cwd", "getSessionFile", "getSessionId",
-        "previousSessionFile", "reason", "toolCallId", "toolName",
-    }
-    r = d.Report()
-    d.check_omp_extension_reads(shared, types("approved: boolean;"), sm, fields, r)
-    check(not r.breaking, f"required `approved` is clean, got {r.breaking}")
-    r = d.Report()
-    d.check_omp_extension_reads(shared, types("approved?: boolean;"), sm, fields, r)
-    check(
-        any("OPTIONAL" in x for x in r.breaking),
-        f"`approved?:` must fire the optionality arm, got {r.breaking}",
-    )
-
-
 def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> None:
     """The gate #941 asks for: EVERY surface row's check, both directions, offline.
 
-    Each document is BUILT from the set we depend on, so an added event cannot make
-    this stale."""
+    Each document is BUILT from the row's own value, so an added row's value cannot
+    make this stale."""
     real = d.fetch
     try:
         rep0 = d.Report()
@@ -756,73 +378,16 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             f: sorted(getattr(ours, f) or ()) for f, *_ in d.SURFACE_ROWS
         }
 
-        def omp_extension_docs(reads: list[str]) -> dict[str, str]:
-            """The three extension-API docs, shaped like upstream: the anchors'
-            interfaces, whose field lines exist only for the names still in the
-            mutated set — exactly an upstream rename's silhouette."""
-            prev = (
-                "\tpreviousSessionFile: string | undefined;\n"
-                if "previousSessionFile" in reads
-                else ""
-            )
-            shared = (
-                "export interface SessionShutdownEvent {\n}\n"
-                f"export interface SessionSwitchEvent {{\n{prev}}}\n"
-            )
-            approval_fields = {
-                "toolCallId": "string",
-                "toolName": "string",
-                "reason": "string",
-                "approved": "boolean",
-            }
-            ext = ""
-            for iface in ("ToolApprovalRequestedEvent", "ToolApprovalResolvedEvent"):
-                body = "".join(
-                    f"\t{f}: {t};\n" for f, t in approval_fields.items() if f in reads
-                )
-                ext += f"export interface {iface} {{\n{body}}}\n"
-            cwd = '\tcwd: string;\n' if "cwd" in reads else ""
-            ext += (
-                "export interface ExtensionContext {\n"
-                + cwd
-                + "\tsessionManager: ReadonlySessionManager;\n}\n"
-            )
-            sm = "export class SessionManager {\n" + "".join(
-                f"\t{g}(): string {{\n\t}}\n"
-                for g in ("getSessionFile", "getSessionId")
-                if g in reads
-            ) + "}\n"
-            return {
-                d.OMP_EXT_SHARED_EVENTS_URL: shared,
-                d.OMP_EXT_TYPES_URL: ext,
-                d.OMP_SESSION_MANAGER_URL: sm,
-            }
-
         cases = [
             ("openclaw_gateway_port", lambda ns: {
                 d.OPENCLAW_PATHS_URL: f"export const DEFAULT_GATEWAY_PORT = {ns[0]};\n"}),
-            ("omp_extension_reads", omp_extension_docs),
             ("omp_extension_subdir", lambda ns: {
                 d.OMP_EXT_DISCOVERY_URL:
                     "export async function discoverExtensionModulePaths() {}\n"
                     + "".join(
                         f'discoverExtensionModulePaths(ctx, path.join(dir, "{n}"))\n'
                         for n in ns
-                    ),
-                d.OMP_DIRS_URL:
-                    "export function getAgentDir(): string {\n"
-                    "\treturn dirs.agentDir;\n}\n"}),
-            ("dsh_plugin_events", lambda ns: {
-                d.DSH_RUNTIME_TYPES_URL:
-                    "declare module '@deepseek-ai/cordis' {\n  interface Events {\n"
-                    + "\n".join(f"'{n}'" for n in ns),
-                d.DSH_SESSION_TYPES_URL: "export interface SessionEventMap {\n",
-                d.DSH_APPROVAL_TYPES_URL:
-                    "declare module '@deepseek-ai/dsh-session/types' {\n"
-                    "  interface SessionEventMap {\n",
-                d.DSH_SESSION_INDEX_URL:
-                    "declare module '@deepseek-ai/cordis' {\n  interface Context {\n  }\n"
-                    "  interface Events {\n"}),
+                    )}),
         ]
         covered = {c[0] for c in cases}
         rows = {f for f, *_ in d.SURFACE_ROWS}
@@ -830,9 +395,9 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
 
         def drive(docs: dict[str, str]) -> d.Report:
             """OFFLINE: every URL this case does not serve raises rather than going
-            to the network. `else real(u)` made `just lint` issue 208 live requests
-            per run, and `lint` joins its jobs with `wait`, so a blackholing network
-            would hang preflight and pre-push at 30s/request."""
+            to the network. `else real(u)` sent every unserved URL live, and `lint`
+            joins its jobs with `wait`, so a blackholing network would hang
+            preflight and pre-push at 30s/request."""
             def stub(u: str, _d: dict[str, str] = docs) -> str:
                 if u in _d:
                     return _d[u]
