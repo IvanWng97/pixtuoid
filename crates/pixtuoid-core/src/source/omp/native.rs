@@ -17,16 +17,17 @@ use crate::source::{Source, TaggedSender};
 /// injectable so tests can grow the set without touching process env.
 pub(crate) type OmpProfileEnumerate = Arc<dyn Fn() -> Vec<PathBuf> + Send + Sync>;
 
-/// omp appends a `custom` entry `customType:"session_exit"` on every clean
-/// teardown, so a transcript that already ended carries that marker — the
-/// first-sight gate uses it to avoid resurrecting a finished session.
-/// Structural parse only: tool arguments/results are persisted verbatim in the
-/// same file, so a substring scan would let CONTENT (a grep for
-/// `session_exit`) end a live session — the CC sharp edge.
+/// omp appends a [`super::CUSTOM`] entry whose `customType` is
+/// [`super::SESSION_EXIT`] on every clean teardown, so a transcript that already
+/// ended carries that marker — the first-sight gate uses it to avoid
+/// resurrecting a finished session. Structural parse only: tool
+/// arguments/results are persisted verbatim in the same file, so a substring
+/// scan would let CONTENT (a grep for the marker) end a live session — the CC
+/// sharp edge.
 fn omp_session_ended(tail: &[u8]) -> bool {
     parsed_tail_lines(tail).any(|v| {
-        v.get("type").and_then(|t| t.as_str()) == Some("custom")
-            && v.get("customType").and_then(|c| c.as_str()) == Some("session_exit")
+        v.get("type").and_then(|t| t.as_str()) == Some(super::CUSTOM)
+            && v.get("customType").and_then(|c| c.as_str()) == Some(super::SESSION_EXIT)
     })
 }
 
@@ -246,7 +247,7 @@ fn omp_probe_root_resolved(sessions_root: &Path, resolved_sessions: &Path) -> Op
     }
     let parent = sessions_root.parent();
     let parent_is_dot_omp_agent = parent.is_some_and(|p| {
-        p.file_name().and_then(|n| n.to_str()) == Some("agent")
+        p.file_name().and_then(|n| n.to_str()) == Some(super::AGENT_SUBDIR)
             && p.parent()
                 .and_then(|g| g.file_name())
                 .and_then(|n| n.to_str())

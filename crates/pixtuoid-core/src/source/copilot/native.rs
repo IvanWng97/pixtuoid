@@ -7,14 +7,14 @@ use crate::source::decoder::parsed_tail_lines;
 use crate::source::jsonl::JsonlWatcher;
 use crate::source::{Source, TaggedSender};
 
-/// Copilot persists a real `session.shutdown` event, so a transcript that has
-/// already ended carries that marker — the first-sight gate uses it to avoid
-/// resurrecting a finished session. Anchored on the structural top-level
+/// Copilot persists a real [`super::SESSION_SHUTDOWN`] event, so a transcript
+/// that has already ended carries that marker — the first-sight gate uses it to
+/// avoid resurrecting a finished session. Anchored on the structural top-level
 /// `type`: copilot persists tool `arguments` verbatim in events.jsonl, so a
-/// substring scan would let a grep for `session.shutdown` end a live session.
+/// substring scan would let a grep for the marker end a live session.
 fn copilot_session_ended(tail: &[u8]) -> bool {
     parsed_tail_lines(tail)
-        .any(|v| v.get("type").and_then(|t| t.as_str()) == Some("session.shutdown"))
+        .any(|v| v.get("type").and_then(|t| t.as_str()) == Some(super::SESSION_SHUTDOWN))
 }
 
 /// Source that watches the Copilot session-state directory.
