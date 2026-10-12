@@ -6,10 +6,14 @@ use serde_json::json;
 use crate::install::SENTINEL_KEY;
 use crate::install::host_plugin::{self, NAME};
 use crate::install::io;
+#[cfg(any(test, feature = "upstream"))]
+use crate::install::target::UNFIRED_HOOK;
 use crate::install::target::{
     HostRegistration, LegacyConfig, MergeOutcome, PluginCopy, Unregistered,
 };
 use crate::install::verify::{SchemaParse, ShimRef};
+#[cfg(any(test, feature = "upstream"))]
+use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 pub(crate) const CODEX_EVENTS: &[&str] = &[
     "SessionStart",
@@ -24,6 +28,27 @@ pub(crate) const CODEX_EVENTS: &[&str] = &[
     // exits still ride the probe ladder + short-idle reap.
     "SessionEnd",
 ];
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: &[Watch] = &[Watch {
+    id: "codex.hook_events",
+    ours: || CODEX_EVENTS.to_vec(),
+    docs: &[Doc {
+        at: At::Path {
+            repo: "openai/codex",
+            branch: "main",
+            path: "codex-rs/config/src/hook_config.rs",
+        },
+        anchor: r"struct HookEventsToml\b",
+        owns: "`HookEventsToml`",
+    }],
+    read: Read::Each {
+        pattern: r#"rename\s*=\s*"{name}""#,
+    },
+    when: When::Vanishes,
+    finding: Finding::Breaking(UNFIRED_HOOK),
+    siblings: None,
+}];
 
 /// Codex loads the hooks through its plugin system: a local marketplace it records in
 /// place, and a plugin `codex plugin add` copies into its cache.

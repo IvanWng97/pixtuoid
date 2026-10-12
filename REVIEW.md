@@ -145,7 +145,7 @@ modules nor examples).
   one caller of a shared fn: `rg` and verify the full set and every call site.
 - **Wire format** — a decoder or drift watch vs the recorded upstream
   shape; every name a decoder reads owes a drift watch, a breadcrumb, or an
-  adjudicated `EXEMPT` row (`drift_surface.rs`'s census); `just drift-watch`
+  adjudicated `EXEMPT` row (`drift_watch`'s census); `just drift-watch`
   runs the watches.
 - **Manifest bridge** — `site/src/*.json` and generated schemas vs their Rust
   source of truth.

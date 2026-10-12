@@ -21,8 +21,12 @@ use serde_json::{Value, json};
 use crate::install::host_plugin::{self, NAME};
 use crate::install::io;
 use crate::install::merge;
+#[cfg(any(test, feature = "upstream"))]
+use crate::install::target::UNFIRED_HOOK;
 use crate::install::target::{HostRegistration, LegacyConfig, MergeOutcome, Unregistered};
 use crate::install::verify::{SchemaParse, ShimRef};
+#[cfg(any(test, feature = "upstream"))]
+use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 /// Events we register == events we decode, enforced by
 /// `every_registered_reasonix_event_decodes` below. PostToolUseFailure /
@@ -40,6 +44,27 @@ pub(crate) const REASONIX_EVENTS: &[&str] = &[
     "Notification",
     "SessionEnd",
 ];
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: &[Watch] = &[Watch {
+    id: "reasonix.hook_events",
+    ours: || REASONIX_EVENTS.to_vec(),
+    docs: &[Doc {
+        at: At::Path {
+            repo: "esengine/DeepSeek-Reasonix",
+            branch: "main-v2",
+            path: "internal/hook/hook.go",
+        },
+        anchor: r"type Event string\b",
+        owns: "the `Event` type",
+    }],
+    read: Read::Matches {
+        pattern: r#"\w+\s+Event\s*=\s*"(\w+)""#,
+    },
+    when: When::Vanishes,
+    finding: Finding::Breaking(UNFIRED_HOOK),
+    siblings: None,
+}];
 
 /// Reasonix links the plugin dir in place, so a rewrite of the manifest reaches the
 /// next session.

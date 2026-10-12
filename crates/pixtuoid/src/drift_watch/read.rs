@@ -198,6 +198,104 @@ pub(super) fn ts_fields(text: &str, name: &str) -> Result<Names, Unread> {
     Ok(names)
 }
 
+pub(super) fn matches(text: &str, pattern: &str) -> Result<Names, Unread> {
+    let found: Names = Regex::new(pattern)?
+        .captures_iter(text)
+        .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
+        .collect();
+    if found.is_empty() {
+        return Err(missing("no match of its pattern"));
+    }
+    Ok(found)
+}
+
+/// The first table under that header: a page's later tables repeat its names.
+pub(super) fn md_table(text: &str, header: &str) -> Result<Names, Unread> {
+    let table = Regex::new(&format!(
+        r"(?m)^\|\s*{}\s*\|[^\n]*\n\|[\s:|-]*\n((?:\|[^\n]*\n?)+)",
+        regex::escape(header)
+    ))?;
+    let rows = table
+        .captures(text)
+        .and_then(|c| c.get(1))
+        .ok_or_else(|| missing(format!("no `{header}` table")))?;
+    let name = Regex::new(r"(?m)^\|\s*`([^`]+)`\s*\|")?;
+    let found: Names = name
+        .captures_iter(rows.as_str())
+        .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
+        .collect();
+    if found.is_empty() {
+        return Err(missing(format!("no name in the `{header}` table")));
+    }
+    Ok(found)
+}
+
+pub(super) fn md_headings(text: &str) -> Result<Names, Unread> {
+    let heading = Regex::new(r"(?m)^#{2,4}[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$")?;
+    let found: Names = heading
+        .captures_iter(text)
+        .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
+        .collect();
+    if found.is_empty() {
+        return Err(missing("no one-word heading"));
+    }
+    Ok(found)
+}
+
+/// Comments go first: a comment quoting `{"action": "continue"}` once ended
+/// the set at its stray `}`. An empty set is an answer, not a miss.
+pub(super) fn py_set(text: &str, decl: &str) -> Result<Names, Unread> {
+    let src = strip_py_comments(text);
+    let opener = Regex::new(&format!(r"(?:{decl})\s*\{{"))?;
+    let mut all = opener.find_iter(&src);
+    if !matches!((all.next(), all.next()), (Some(_), None)) {
+        return Err(missing("no single declaration matching its pattern"));
+    }
+    let body =
+        braced_body(&src, &opener).ok_or_else(|| missing("no end to the set its pattern opens"))?;
+    let member = Regex::new(r#""([^"\\\n]+)""#)?;
+    Ok(member
+        .captures_iter(&body)
+        .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
+        .collect())
+}
+
+/// Python source without `#` comments, string literals kept.
+fn strip_py_comments(src: &str) -> String {
+    src.lines()
+        .map(|line| {
+            let mut quote = None;
+            for (i, c) in line.char_indices() {
+                match (quote, c) {
+                    (None, '#') => return &line[..i],
+                    (None, '"' | '\'') => quote = Some(c),
+                    (Some(q), _) if c == q => quote = None,
+                    _ => {}
+                }
+            }
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Only each row's header: a row's body is `key: value` lines whose values
+/// carry capitalised tokens of their own.
+pub(super) fn rust_macro_rows(text: &str, name: &str) -> Result<Names, Unread> {
+    let src = strip_rust_comments(text);
+    let opener = Regex::new(&format!(r"(?m)^\s*{}!\s*\{{", regex::escape(name)))?;
+    let body = braced_body(&src, &opener).ok_or_else(|| missing(format!("no `{name}!` table")))?;
+    let header = Regex::new(r"^\s*([A-Z][A-Za-z0-9_]*)\s*\{")?;
+    let found: Names = split_top_level(&body)
+        .into_iter()
+        .filter_map(|row| header.captures(row)?.get(1).map(|m| m.as_str().to_owned()))
+        .collect();
+    if found.is_empty() {
+        return Err(missing(format!("no row in `{name}!`")));
+    }
+    Ok(found)
+}
+
 /// Scoped to the union ON PURPOSE: every definition's `type` const also yields
 /// nested-content tags (`audio`, `text`) that no envelope carries.
 pub(super) fn json_union(text: &str, def: &str, prop: Option<&str>) -> Result<Names, Unread> {
@@ -446,6 +544,7 @@ mod tests {
             #[derive(Serialize)]
             #[serde(tag = "type", rename_all = "snake_case")]
             pub(super) enum Item<'a> {
+                /// Fires like `Foo { bar }` does, or `Baz }`.
                 EventMsg { payload: Cow<'a, Payload> },
                 #[serde(rename = "compaction_summary", alias = "compacted")]
                 Compaction(Summary),
@@ -491,6 +590,75 @@ mod tests {
         );
         let twice = format!("{src}export interface Other {{\n  b: string;\n}}\n");
         assert!(found(ts_fields(&twice, "Other")).is_err());
+    }
+
+    #[test]
+    fn matches_read_every_first_group() {
+        let go = "const (\n\tSessionStart Event = \"SessionStart\"\n\tStop Event = \"Stop\"\n)\nvar x = \"Nope\"";
+        let p = r#"\w+\s+Event\s*=\s*"(\w+)""#;
+        assert_eq!(found(matches(go, p)), names(&["SessionStart", "Stop"]));
+        assert_eq!(
+            found(matches("const ()", p)),
+            Err("no match of its pattern".to_owned())
+        );
+    }
+
+    #[test]
+    fn an_md_table_is_read_by_its_header_and_first_column() {
+        let page = "| Event | When it fires |\n|---|---|\n| `PreToolUse` | before `Bash` |\n| `Stop` | done |\n\n| Field | Event |\n|---|---|\n| `x` | `Other` |\n";
+        assert_eq!(
+            found(md_table(page, "Event")),
+            names(&["PreToolUse", "Stop"])
+        );
+        assert_eq!(
+            found(md_table(page, "Hook")),
+            Err("no `Hook` table".to_owned())
+        );
+    }
+
+    #[test]
+    fn md_headings_are_the_one_word_sections() {
+        let page = "# Hooks\n## Hook events\n### preToolUse\n#### stop\n##### deeper\nprose stop\n";
+        assert_eq!(found(md_headings(page)), names(&["preToolUse", "stop"]));
+    }
+
+    #[test]
+    fn a_py_set_is_the_one_declaration_comments_first() {
+        let src = "VALID_HOOKS: set[str] = {\n    \"on_start\",  # was {\"x\"} once\n    \"on_end\",\n}\n";
+        let decl = r"VALID_HOOKS\s*:\s*set\[str\]\s*=";
+        assert_eq!(found(py_set(src, decl)), names(&["on_end", "on_start"]));
+        let frozen = "_BLOCKING_EVENTS = frozenset({\"pre_tool_call\"})";
+        assert_eq!(
+            found(py_set(frozen, r"_BLOCKING_EVENTS\s*=\s*frozenset\(")),
+            names(&["pre_tool_call"])
+        );
+        for comment in [
+            "# returns {\"action\": \"continue\"",
+            "# anything else } ends it",
+        ] {
+            let poisoned = format!(
+                "VALID_HOOKS: set[str] = {{\n    \"on_start\",\n    {comment}\n    \"on_end\",\n}}\n"
+            );
+            assert_eq!(
+                found(py_set(&poisoned, decl)),
+                names(&["on_end", "on_start"])
+            );
+        }
+        assert_eq!(found(py_set("X = {\n}", r"X\s*=")), names(&[]));
+        assert!(found(py_set(&format!("{src}{src}"), decl)).is_err());
+    }
+
+    #[test]
+    fn macro_rows_are_the_row_headers_only() {
+        let src = "macro_rules! hook_events {\n    ($($v:ident { $($r:tt)* }),*) => { pub enum HookEventName { $($v,)* } };\n}\nhook_events! {\n    SessionStart { alias: \"start\", traits: [Blocking] },\n    // Gone { },\n    Stop { alias: \"stop\" },\n}\n";
+        assert_eq!(
+            found(rust_macro_rows(src, "hook_events")),
+            names(&["SessionStart", "Stop"])
+        );
+        assert_eq!(
+            found(rust_macro_rows("fn x() {}", "hook_events")),
+            Err("no `hook_events!` table".to_owned())
+        );
     }
 
     #[test]

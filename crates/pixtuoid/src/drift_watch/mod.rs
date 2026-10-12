@@ -16,6 +16,8 @@ use pixtuoid_core::source::upstream::{At, Doc, Family, Finding, Read, Siblings, 
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
+use crate::install::target::TARGETS;
+
 use net::Platform;
 use read::{Names, Unread};
 
@@ -481,6 +483,11 @@ fn read_docs(
             Read::RustArms { name, arm } => read::rust_arms(text, name, arm),
             Read::RustEnum { name } => read::rust_enum(text, name),
             Read::TsFields { name } => read::ts_fields(text, name),
+            Read::Matches { pattern } => read::matches(text, pattern),
+            Read::MdTable { header } => read::md_table(text, header),
+            Read::MdHeadings => read::md_headings(text),
+            Read::PySet { decl } => read::py_set(text, decl),
+            Read::RustMacroRows { name } => read::rust_macro_rows(text, name),
             Read::JsonUnion { def, prop } => read::json_union(text, def, prop),
             Read::JsonKeys => read::json_keys(text),
         };
@@ -587,12 +594,23 @@ pub fn run(report: &mut Report) {
     check_all(&Platform, report);
 }
 
+/// Every declared watch with the source it reads for: the decoders' off the
+/// registry, then the installers' off their targets.
+fn declared() -> impl Iterator<Item = (&'static str, &'static Watch)> {
+    REGISTRY
+        .iter()
+        .flat_map(|d| d.upstream.watches().map(move |w| (d.name, w)))
+        .chain(
+            TARGETS
+                .iter()
+                .flat_map(|t| t.upstream.iter().map(move |w| (t.core_source, w))),
+        )
+}
+
 fn check_all(fetch: &dyn Fetch, report: &mut Report) {
     let mut fetched = Fetched::new(fetch);
-    for d in REGISTRY {
-        for w in d.upstream.watches() {
-            check_watch(d.name, w, &mut fetched, report);
-        }
+    for (source, w) in declared() {
+        check_watch(source, w, &mut fetched, report);
     }
 }
 

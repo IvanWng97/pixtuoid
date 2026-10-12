@@ -18,6 +18,8 @@ use serde_json::{Value, json};
 use crate::install::io;
 use crate::install::merge::{prune_empty, prune_empty_root};
 use crate::install::target::MergeOutcome;
+#[cfg(any(test, feature = "upstream"))]
+use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 const PLUGIN_ID: &str = "pixtuoid";
 
@@ -33,10 +35,10 @@ pub(crate) const PLUGIN_TEMPLATE: &str = include_str!("openclaw_plugin.js");
 
 /// The OpenClaw gateway hook events the plugin FORWARDS, pinned to its `HOOKS`
 /// array and `decode_openclaw_hook_payload`'s arms by the consistency test below,
-/// and emitted into the drift surface by `drift_surface.rs` (which is why a const
-/// with no prod caller is test-gated rather than deleted). A rename upstream makes
-/// that hook silently stop firing, since the plugin registers by name.
-#[cfg(test)]
+/// and watched by [`UPSTREAM`] (which is why a const with no prod caller is gated
+/// rather than deleted). A rename upstream makes that hook silently stop firing,
+/// since the plugin registers by name.
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) const OPENCLAW_EVENTS: &[&str] = &[
     "gateway_start",
     "gateway_stop",
@@ -47,9 +49,30 @@ pub(crate) const OPENCLAW_EVENTS: &[&str] = &[
 ];
 
 /// The hooks the plugin registers only to stamp `agent_end`'s verdict, pinned to its
-/// `VERDICT_HOOKS` and emitted into the drift surface beside [`OPENCLAW_EVENTS`].
-#[cfg(test)]
+/// `VERDICT_HOOKS` and watched beside [`OPENCLAW_EVENTS`].
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) const OPENCLAW_VERDICT_EVENTS: &[&str] = &["model_call_ended"];
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: &[Watch] = &[Watch {
+    id: "openclaw.hook_events",
+    ours: || [OPENCLAW_EVENTS, OPENCLAW_VERDICT_EVENTS].concat(),
+    docs: &[Doc {
+        at: At::Path {
+            repo: "openclaw/openclaw",
+            branch: "main",
+            path: "src/plugins/hook-types.ts",
+        },
+        anchor: r"export type PluginHookName\s*=",
+        owns: "`PluginHookName`",
+    }],
+    read: Read::Each {
+        pattern: r#""{name}""#,
+    },
+    when: When::Vanishes,
+    finding: Finding::Breaking("the plugin registers a hook OpenClaw never fires"),
+    siblings: None,
+}];
 
 const MANIFEST: &str = r#"{
   "id": "pixtuoid",
