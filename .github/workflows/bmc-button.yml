@@ -15,7 +15,6 @@ on:
       - scripts/bmc-button.py
       - scripts/readme_pixels.py
       - scripts/readme-palette.json
-      - .github/FUNDING.yml
       - crates/pixtuoid-scene/sprites/default/pack.toml
       - crates/pixtuoid-scene/sprites/default/walking_coffee_[0-9].sprite
       - crates/pixtuoid-scene/sprites/default/cat_sit_[0-9].sprite
@@ -38,8 +37,21 @@ jobs:
         with:
           persist-credentials: false
 
+      # The Sponsor button as GitHub resolves it: this repo's FUNDING.yml, else
+      # the org `.github` repo's.
+      - name: Read the funding links
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FUNDING_QUERY: >-
+            query($owner: String!, $name: String!) {
+            repository(owner: $owner, name: $name) { fundingLinks { platform url } } }
+        run: >-
+          gh api graphql -f query="$FUNDING_QUERY"
+          -f owner="$GITHUB_REPOSITORY_OWNER" -f name="${GITHUB_REPOSITORY#*/}"
+          >"$RUNNER_TEMP/funding.json"
+
       - name: Render the button
-        run: python3 scripts/bmc-button.py "$RUNNER_TEMP/button"
+        run: python3 scripts/bmc-button.py "$RUNNER_TEMP/funding.json" "$RUNNER_TEMP/button"
 
       - id: day
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"

@@ -174,4 +174,52 @@ mod tests {
         );
         assert_eq!(act(SceneHit::Furniture("Desk"), None), None);
     }
+
+    /// Files outside Rust can't read [`COFFEE_URL`], so this holds every tracked
+    /// `https://buymeacoffee.com/` link to it.
+    #[test]
+    fn every_coffee_link_in_the_workspace_is_coffee_url() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        // A crates.io package or a source tarball has no checkout to scan.
+        if !root.join(".git").exists() {
+            return;
+        }
+        let host = "https://buymeacoffee.com/";
+        let grep = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(["grep", "-l", "-z", "-F", host, "--"])
+            // Lockfiles name other projects' accounts, this file holds the
+            // authority, and bmc-button.py's selftest feeds made-up accounts.
+            .args([
+                ":!*.lock",
+                ":!*-lock.json",
+                ":!crates/pixtuoid-scene/src/hit.rs",
+                ":!scripts/bmc-button.py",
+            ])
+            .output()
+            .expect("run git grep");
+        // git grep exits 1 when nothing matches, which the emptiness check reports.
+        assert!(
+            grep.status.code().is_some_and(|c| c <= 1),
+            "git grep failed: {}",
+            String::from_utf8_lossy(&grep.stderr)
+        );
+        let files: Vec<&str> = std::str::from_utf8(&grep.stdout)
+            .expect("git grep prints UTF-8 paths")
+            .split('\0')
+            .filter(|rel| !rel.is_empty())
+            .collect();
+        assert!(!files.is_empty(), "no tracked file links {host}");
+        for rel in files {
+            let text = std::fs::read_to_string(root.join(rel))
+                .unwrap_or_else(|e| panic!("read {rel}: {e}"));
+            for (at, _) in text.match_indices(host) {
+                let link = text[at..]
+                    .split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | ')'))
+                    .next()
+                    .unwrap_or_default();
+                assert_eq!(link, COFFEE_URL, "{rel}");
+            }
+        }
+    }
 }
