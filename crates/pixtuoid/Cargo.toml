@@ -114,7 +114,8 @@ portable = []
 # Ambient sound (config-OFF at runtime regardless; this gates the DEPENDENCY).
 audio = ["dep:rodio"]
 # The `drift_watch` example's checker, with every source's upstream
-# declarations; no shipped build enables it.
+# declarations, and its tests (`just test-upstream`); no shipped build enables
+# it, and no other build compiles its parsers.
 upstream = [
     "pixtuoid-core/upstream",
     "dep:regex",
@@ -174,20 +175,13 @@ windows-sys = { workspace = true, features = [
 [dev-dependencies]
 # `tests/wire_to_pixels.rs` drives real fixture bytes through the shared
 # `pixtuoid_core::harness` pipeline, which is behind core's dev-only feature.
-# `upstream`: the drift watch's tests read every source's declarations.
+# `upstream`: the installers' parity tests read a source's declared watch.
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", features = ["harness", "upstream"] }
-regex = { workspace = true }
-sha2  = { workspace = true }
-oxc_allocator  = { workspace = true }
-oxc_ast        = { workspace = true }
-oxc_parser     = { workspace = true }
-oxc_span       = { workspace = true }
-pulldown-cmark = { workspace = true }
 tempfile = { workspace = true }
 temp-env = { workspace = true }
 # tests/text_coverage.rs parses the source of everything that renders text.
-syn         = { workspace = true, features = ["printing"] }
-proc-macro2 = { workspace = true, features = ["span-locations"] }
+syn         = { workspace = true }
+proc-macro2 = { workspace = true }
 # End-to-end CLI golden for `sources --json`, the Raycast contract (tests/cli_json.rs).
 # Goldens update with SNAPSHOTS=overwrite.
 snapbox  = { workspace = true, features = ["json"] }

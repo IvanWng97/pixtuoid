@@ -22,9 +22,9 @@ use toml::value::Table;
 use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::target::MergeOutcome;
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use crate::install::target::UNFIRED_HOOK;
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 /// Events we register == events we decode (`source/codewhale.rs`). The `bool` is
@@ -45,7 +45,7 @@ pub(crate) const CODEWHALE_EVENTS: &[(&str, bool)] = &[
     ("subagent_complete", false),
 ];
 
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[Watch {
     id: "codewhale.hook_events",
     ours: || CODEWHALE_EVENTS.iter().map(|(name, _)| *name).collect(),

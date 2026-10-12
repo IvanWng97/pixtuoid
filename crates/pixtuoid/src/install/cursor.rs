@@ -17,9 +17,9 @@ use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::MergeOutcome;
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use crate::install::target::UNDOCUMENTED_HOOK;
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 /// Events we register == events we decode (`source/cursor.rs`), enforced by
@@ -36,7 +36,7 @@ pub(crate) const CURSOR_EVENTS: &[&str] = &[
     "sessionEnd",
 ];
 
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[Watch {
     id: "cursor.hook_events",
     ours: || CURSOR_EVENTS.to_vec(),

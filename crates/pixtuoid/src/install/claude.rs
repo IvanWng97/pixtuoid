@@ -7,11 +7,11 @@ use serde_json::{Value, json};
 use crate::install::host_plugin::{self, NAME};
 use crate::install::io;
 use crate::install::merge;
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use crate::install::target::UNDOCUMENTED_HOOK;
 use crate::install::target::{HostRegistration, LegacyConfig, Unregistered};
 use crate::install::verify::ShimRef;
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 pub(crate) const EVENTS: &[&str] = &[
@@ -31,7 +31,7 @@ pub(crate) const EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[Watch {
     id: "claude.hook_events",
     ours: || EVENTS.to_vec(),

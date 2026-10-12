@@ -25,10 +25,10 @@ use toml::value::Table;
 
 use crate::install::io;
 use crate::install::target::MergeOutcome;
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use crate::install::target::UNDOCUMENTED_HOOK;
 use pixtuoid_core::source::kimi::SOURCE_NAME;
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 /// Events we register == events we decode, enforced by
@@ -46,7 +46,7 @@ pub(crate) const KIMI_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[Watch {
     id: "kimi.hook_events",
     ours: || KIMI_EVENTS.to_vec(),

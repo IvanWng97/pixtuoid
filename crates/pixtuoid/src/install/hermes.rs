@@ -24,7 +24,7 @@ use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 const PRE_APPROVAL_REQUEST: &str = "pre_approval_request";
@@ -50,7 +50,7 @@ pub(crate) const HERMES_EVENTS: &[&str] = &[
     "on_session_finalize",
 ];
 
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "hermes.hook_events",

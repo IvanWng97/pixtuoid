@@ -1255,6 +1255,13 @@ drift-selftest:
 drift-watch:
     cargo run -q -p pixtuoid --no-default-features --features upstream --example drift_watch
 
+# Its parsers build only under `upstream`, and its readers read fetched text
+# alike on every OS, so CI runs this on Linux alone (ci-tests.yml).
+[doc('Test the upstream drift watch: engine, readers, censuses (`upstream` feature)')]
+[group('rust')]
+test-upstream:
+    just test -p pixtuoid --features upstream --lib drift_watch
+
 # The pty driver's pure halves — the ANSI stripper, the composer comparison, the
 # gate/menu wording. Each fails silently, at the price of a BILLED turn: a broken
 # stripper just stops matching, and the capture comes back empty blaming the

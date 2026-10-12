@@ -17,7 +17,7 @@ pub(crate) mod doctor;
 
 #[cfg(test)]
 mod drift_surface;
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 mod drift_watch;
 pub(crate) mod floating;
 pub(crate) mod focus;
@@ -44,7 +44,7 @@ pub mod dev {
     pub use crate::config::{FLOATING_DEFAULT_H, FLOATING_DEFAULT_W};
     pub use crate::doctor::footer_warning;
     /// The upstream drift watch, apart from [`crate::run`], the program.
-    #[cfg(any(test, feature = "upstream"))]
+    #[cfg(feature = "upstream")]
     pub mod drift_watch {
         pub use crate::drift_watch::{Report, run, run_legacy};
     }
