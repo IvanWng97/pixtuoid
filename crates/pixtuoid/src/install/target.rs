@@ -358,7 +358,7 @@ pub(crate) const OPENCODE: Target = Target {
     #[cfg(feature = "upstream")]
     upstream: &[],
     #[cfg(all(test, feature = "upstream"))]
-    registers: crate::install::opencode::registers,
+    registers: crate::install::opencode::plugin_events,
 };
 
 pub(crate) const GROK: Target = Target {

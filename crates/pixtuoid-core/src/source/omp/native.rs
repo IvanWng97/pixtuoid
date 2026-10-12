@@ -247,7 +247,7 @@ fn omp_probe_root_resolved(sessions_root: &Path, resolved_sessions: &Path) -> Op
     }
     let parent = sessions_root.parent();
     let parent_is_dot_omp_agent = parent.is_some_and(|p| {
-        p.file_name().and_then(|n| n.to_str()) == Some("agent")
+        p.file_name().and_then(|n| n.to_str()) == Some(super::AGENT_SUBDIR)
             && p.parent()
                 .and_then(|g| g.file_name())
                 .and_then(|n| n.to_str())

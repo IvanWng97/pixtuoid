@@ -32,7 +32,7 @@ const PLUGIN_TEMPLATE: &str = include_str!("opencode_plugin.ts");
 /// handles outside it (`t === "…"`), today the part update it dedupes on status
 /// change.
 #[cfg(test)]
-pub(crate) fn registers() -> Vec<&'static str> {
+pub(crate) fn plugin_events() -> Vec<&'static str> {
     let beside = PLUGIN_TEMPLATE
         .match_indices("t === \"")
         .filter_map(|(i, m)| PLUGIN_TEMPLATE[i + m.len()..].split_once('"'))
@@ -148,7 +148,7 @@ mod tests {
     /// that signal never arrives.
     #[test]
     fn the_plugin_forwards_exactly_what_the_decoder_reads() {
-        let forwarded: std::collections::BTreeSet<&str> = registers().into_iter().collect();
+        let forwarded: std::collections::BTreeSet<&str> = plugin_events().into_iter().collect();
         let decoded: std::collections::BTreeSet<&str> =
             pixtuoid_core::source::registry::declared_watch("opencode.hook_events")
                 .map(|w| (w.ours)().into_iter().collect())
@@ -332,24 +332,21 @@ mod tests {
         assert!(hook_command(bad, false).is_err());
     }
 
-    fn plugin_forward_set() -> std::collections::BTreeSet<&'static str> {
-        crate::install::forward_set(PLUGIN_TEMPLATE)
-    }
-
     /// The binding test above catches a one-sided drop; this pin is what stops
     /// a SYMMETRIC one — plugin and decoder deleted together — from shipping
     /// silently.
     #[test]
     fn opencode_plugin_forward_set_is_pinned() {
         assert_eq!(
-            plugin_forward_set(),
-            std::collections::BTreeSet::from([
+            plugin_events(),
+            [
+                "message.part.updated",
                 "permission.asked",
                 "permission.v2.asked",
                 "session.created",
                 "session.deleted",
-            ]),
-            "opencode_plugin.ts FORWARD changed — update the decoder and this pin together"
+            ],
+            "opencode_plugin.ts's forwarded events changed — update the decoder and this pin together"
         );
     }
 
@@ -376,7 +373,7 @@ mod tests {
             .iter()
             .map(|p| p["type"].as_str().unwrap())
             .collect();
-        for ev in plugin_forward_set() {
+        for ev in plugin_events() {
             assert!(
                 covered.contains(ev),
                 "plugin forwards `{ev}` but this test has no payload for it — the \
