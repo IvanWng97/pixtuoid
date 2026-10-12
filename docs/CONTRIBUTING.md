@@ -303,8 +303,6 @@ ancestor of the new one (a rebase), the re-run judges the whole PR. The
 [`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
 rows. A refuted blocking finding clears without a push: once its thread is
 resolved with the disposition, re-run the review (`gh run rerun <id> --failed`).
-A bot's push onto a human's PR fails the review until a human pushes: a re-run
-keeps the bot as its `github.actor`, which the action refuses.
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
 entry is a command because no queue condition can confirm a finding or match a
@@ -321,8 +319,7 @@ already read as evidence.
 The review skips a fork's or a bot's PR, and its skipped check passes. A
 maintainer reviews a fork's or Dependabot's PR by hand before queueing it; a
 fork's author can resolve their own threads, so read each thread's
-`resolvedBy` and its reply. The media-regen PR above is unreviewed by design,
-held to `docs/images/` by its queue rule's file filter.
+`resolvedBy` and its reply.
 
 ### Dispositions
 
