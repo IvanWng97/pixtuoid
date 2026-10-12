@@ -60,7 +60,8 @@ updates:
       # A lofi minor (0.y) is a breaking change, a new Mood/Lane or a changed dsp
       # output among them (https://github.com/pixtuoid/lofi/blob/main/AGENTS.md#workflow),
       # so it needs pixtuoid code or the owner's LISTEN and a person bumps it.
-      # Patches flow: nothing here pins lofi's output, so one is a lock-only bump.
+      # Patches flow: lofi makes a changed dsp output a minor, so a patch is a
+      # lock-only bump.
       - dependency-name: "pixtuoid-lofi"
         update-types:
           ["version-update:semver-minor", "version-update:semver-major"]
