@@ -7,6 +7,9 @@ paths:
       # GitHub documents job.workflow_repository and job.workflow_sha; actionlint
       # does not yet. Drop when https://github.com/rhysd/actionlint/pull/707 ships.
       - 'property "workflow_(repository|sha)" is not defined in object type'
+  .github/workflows/probe-job-workflow-callee.yml:
+    ignore:
+      - 'property "workflow_(repository|sha)" is not defined in object type'
   .github/workflows/release*.yml:
     ignore:
       # GitHub supports concurrency.queue; actionlint does not yet know the
