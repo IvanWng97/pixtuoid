@@ -275,6 +275,23 @@
     - (.jobs[] | select(has("uses")) | .if) += " || (github.event_name == 'issue_comment' && github.event.issue.pull_request)"
     - .jobs.second = (.jobs[] | select(has("uses")))
 
+- id: reviewer-fork-head-needs-a-maintainer-in-the-callee
+  file: .github/workflows/claude-readonly-review.yml
+  why: >-
+    A caller in another repository sets allow_fork from an `if:` no contract
+    here sees, so the resolver admits a fork head only on the maintainer's
+    comment reviewer-fork-head-needs-a-maintainer requires of pixtuoid's own
+    caller: a caller can narrow the admission, never widen it.
+  expected: >-
+    ${{ inputs.allow_fork && github.event_name == 'issue_comment' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) }}
+  assert: |
+    [.jobs.analyze.steps[] | select(.name == "Resolve pull request")]
+    | length == 1 and .[0].env.ALLOW_FORK == $expected
+  break:
+    - (.jobs.analyze.steps[] | select(.name == "Resolve pull request") | .env.ALLOW_FORK) = "${{ inputs.allow_fork }}"
+    - (.jobs.analyze.steps[] | select(.name == "Resolve pull request") | .env.ALLOW_FORK) |= sub(" && github.event_name == 'issue_comment'"; "")
+    - (.jobs.analyze.steps[] | select(.name == "Resolve pull request") | .env.ALLOW_FORK) |= sub(" && contains\\(.*\\)"; "")
+
 - id: exemption-needs-a-dependabot-pr
   file: .github/workflows/claude-review.yml
   why: >-

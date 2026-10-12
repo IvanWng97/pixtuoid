@@ -69,7 +69,7 @@ jobs:
       - name: Resolve pull request
         id: pr
         env:
-          ALLOW_FORK: ${{ inputs.allow_fork }}
+          ALLOW_FORK: ${{ inputs.allow_fork && github.event_name == 'issue_comment' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
