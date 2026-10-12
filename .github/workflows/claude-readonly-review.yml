@@ -106,6 +106,22 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      # The files this workflow's code is written against, at the commit that
+      # defines this job: a caller's tree, here or in another repository,
+      # never supplies them.
+      - name: Stage the review's own files
+        if: steps.pr.outputs.reviewable == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .claude-review/workflow
+          sparse-checkout: |
+            .github/prompts/review-schema.json
+            .github/prompts/review-agents.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Prepare inert review input
         if: steps.pr.outputs.reviewable == 'true'
         env:
@@ -260,13 +276,14 @@ jobs:
         run: |
           set -euo pipefail
           quoted() { jq -c . "$1" | python3 -c 'import shlex,sys; sys.stdout.write(shlex.quote(sys.stdin.read().strip()))'; }
-          printf 'json=%s\nagents=%s\n' "$(quoted .github/prompts/review-schema.json)" \
-            "$(quoted .github/prompts/review-agents.json)" >>"$GITHUB_OUTPUT"
+          own=.claude-review/workflow/.github/prompts
+          printf 'json=%s\nagents=%s\n' "$(quoted "$own/review-schema.json")" \
+            "$(quoted "$own/review-agents.json")" >>"$GITHUB_OUTPUT"
           jq -r '.properties as $p | $p.findings.items.properties as $f
             | "bounds=\({severities: $f.severity.enum, lenses: $f.lens.enum, max_findings: $p.findings.maxItems,
                 path_max: $f.path.maxLength, summary_max: $p.summary.maxLength,
                 body_max: $f.body.maxLength} | tojson)"' \
-            .github/prompts/review-schema.json >>"$GITHUB_OUTPUT"
+            "$own/review-schema.json" >>"$GITHUB_OUTPUT"
 
       - name: Run read-only Claude review
         if: steps.pr.outputs.reviewable == 'true'

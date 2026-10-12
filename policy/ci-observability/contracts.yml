@@ -28,16 +28,46 @@
   file: .github/workflows/claude-readonly-review.yml
   why: >-
     Checking out the PR head here runs untrusted files beside the base branch's
-    credentials. (A persisted checkout token is zizmor's `artipacked`.)
+    credentials, so the caller's one checkout is its default branch and any
+    other is reviewer-stages-its-own-files'. (A persisted checkout token is
+    zizmor's `artipacked`.)
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@"))]
-    | length == 1
-      and .[0].with.ref == "${{ github.event.repository.default_branch }}"
+    | (map(select(.with.repository == null)) | length == 1
+         and .[0].with.ref == "${{ github.event.repository.default_branch }}")
+      and all(.[]; .with.repository == null or .with.repository == "${{ job.workflow_repository }}")
   break:
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with.ref)
       = "${{ github.event.pull_request.head.sha }}"
     - '.jobs.analyze.steps += [{"uses": "actions/checkout@v7"}]'
+    - '.jobs.analyze.steps += [{"uses": "actions/checkout@v7", "with": {"repository": "${{ github.event.pull_request.head.repo.full_name }}"}}]'
+
+- id: reviewer-stages-its-own-files
+  file: .github/workflows/claude-readonly-review.yml
+  why: >-
+    The review schema and agents are this workflow's code, so they come from
+    the commit that defines the job, never a caller's tree, which an outside
+    caller pins apart from this workflow. Cone mode adds every top-level file
+    (git-scm.com/docs/git-sparse-checkout, "Cone mode handling"), which would
+    set this repository's AGENTS.md and REVIEW.md before a caller's review;
+    the path is inside reviewer-model-only-reads' claudeMdExcludes and apart
+    from .claude-review/head/, where a PR's own copies of these files land.
+  expected: |-
+    .github/prompts/review-agents.json
+    .github/prompts/review-schema.json
+  assert: |
+    [.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@")) | select(.with.repository != null)]
+    | length == 1
+      and (.[0].with | .repository == "${{ job.workflow_repository }}" and .ref == "${{ job.workflow_sha }}"
+           and .["sparse-checkout-cone-mode"] == false and .path == ".claude-review/workflow"
+           and ((.["sparse-checkout"] // "") | split("\n") | map(select(. != "")) | sort | join("\n")) == $expected)
+  break:
+    - (.jobs.analyze.steps[] | select(.name == "Stage the review's own files") | .with.ref) = "main"
+    - (.jobs.analyze.steps[] | select(.name == "Stage the review's own files") | .with) |= del(.["sparse-checkout-cone-mode"])
+    - (.jobs.analyze.steps[] | select(.name == "Stage the review's own files") | .with["sparse-checkout"]) += ".github/\n"
+    - (.jobs.analyze.steps[] | select(.name == "Stage the review's own files") | .with.path) = ".claude-review/head"
+    - .jobs.analyze.steps |= map(select(.name != "Stage the review's own files"))
 
 - id: reviewer-model-only-reads
   file: .github/workflows/claude-readonly-review.yml

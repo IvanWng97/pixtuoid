@@ -241,9 +241,20 @@ assert_status() {
 }
 
 schema_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Load the review schema and agents")"
+# The step reads what the callee checkout stages, so a caller's own copies,
+# here decoys, never reach the model or the publisher.
+stage() { STEP_NAME="Stage the review's own files" yq -e -r ".jobs.analyze.steps[] | select(.name == strenv(STEP_NAME)) | .with.$1" "$CLAUDE_REVIEW_WORKFLOW_FILE"; }
+stage_path="$(stage path)" || fail "$CLAUDE_REVIEW_WORKFLOW_FILE stages its own files nowhere"
+schema_work="$test_dir/schema-work"
+while IFS= read -r staged; do
+    [[ -n "$staged" ]] || continue
+    mkdir -p "$schema_work/$stage_path/$(dirname "$staged")" "$schema_work/$(dirname "$staged")"
+    cp "$staged" "$schema_work/$stage_path/$staged"
+    echo '{"decoy": true}' >"$schema_work/$staged"
+done < <(stage '"sparse-checkout"')
 : >"$test_dir/schema-output"
-GITHUB_OUTPUT="$test_dir/schema-output" bash -c "$schema_script" ||
-    fail "the review schema step exited non-zero"
+(cd "$schema_work" && GITHUB_OUTPUT="$test_dir/schema-output" bash -c "$schema_script") ||
+    fail "the review schema step exited non-zero on the staged files"
 bounds="$(sed -n 's/^bounds=//p' "$test_dir/schema-output")"
 severities="$(jq -c '.severities' <<<"$bounds")"
 max_findings="$(jq '.max_findings' <<<"$bounds")"
