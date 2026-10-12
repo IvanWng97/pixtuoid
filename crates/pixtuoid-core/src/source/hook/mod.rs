@@ -170,9 +170,9 @@ impl Drop for UndeliveredEvents {
 
 /// The agent a decoded event should bind to the connection's `_pid` (for the
 /// abrupt-exit watch). BOTH `SessionStart` and `Identity` register-or-back-fill
-/// a slot, and `Identity` is the ONLY registration carrier for a mid-attached
-/// session whose `SessionStart` predates the daemon (opencode never re-emits
-/// `session.created`). Activity/Waiting/End never register a new slot.
+/// a slot, and `Identity` is the only carrier for a session attached mid-turn
+/// until its next `SessionStart`. Activity/Waiting/End never register a new
+/// slot.
 ///
 /// Dispatches on the same `FocusChannel` as [`patch_identity_pids`], which
 /// reads a narrower fact off it: a `ServerStamp` pid ends sessions but is no

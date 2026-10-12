@@ -26,12 +26,21 @@ const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
 const PLUGIN_TEMPLATE: &str = include_str!("opencode_plugin.ts");
 
-/// The events the plugin forwards: its `FORWARD` set.
+/// The events the plugin names: its `FORWARD` set, plus each it compares an
+/// event against (`=== "…"`), so no copy of a name escapes the pins.
 #[cfg(test)]
 pub(crate) fn plugin_events() -> Vec<&'static str> {
-    crate::install::forward_set(PLUGIN_TEMPLATE)
+    let compared = PLUGIN_TEMPLATE
+        .match_indices("=== \"")
+        .filter_map(|(i, m)| PLUGIN_TEMPLATE[i + m.len()..].split_once('"'))
+        .map(|(name, _)| name);
+    let mut names: Vec<&'static str> = crate::install::forward_set(PLUGIN_TEMPLATE)
         .into_iter()
-        .collect()
+        .chain(compared)
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
 }
 
 /// A no-op plugin WITHOUT the sentinel, so a re-uninstall is a no-op.
