@@ -489,7 +489,6 @@ mod tests {
         }
     }
 
-    /// An end must not resurrect a swept session.
     #[test]
     fn an_execution_start_is_a_session_start_with_its_record_and_its_end_closes_the_turn() {
         let start = decode_all(
