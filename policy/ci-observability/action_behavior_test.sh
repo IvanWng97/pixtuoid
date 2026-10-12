@@ -287,21 +287,43 @@ anchors_of() {
     # github-slugger's slug, for an ASCII heading.
     awk '/^#+ / { h = tolower($0); sub(/^#+ /, "", h); gsub(/[^a-z0-9 _-]/, "", h); gsub(/ /, "-", h); print h }' "$1"
 }
-cites() { { grep -oE "${1//./\\.}#[a-z0-9-]+" || true; } | sed 's/.*#//' | sort -u; }
-readers() { jq -r '.[].prompt' .github/prompts/review-agents.json && printf '%s\n' "$prompt"; }
+cites() { { grep -oE "${1//./\\.}#[A-Za-z0-9_-]+" || true; } | sed 's/.*#//' | sort -u; }
 rules_name="$(basename "$REVIEW_RULES_FILE")"
+# One problem per line: an anchor no heading has, or a heading named anywhere
+# but in a citation or an in-file link (an allowlist: no prose form escapes).
+citation_problems() {
+    local agents="$1" orchestrator="$2" protocol="$3" rules="$4" readers cited prose name
+    readers="$(jq -r '.[].prompt' "$agents" && printf '%s\n' "$orchestrator")"
+    for cited in "$protocol_dest:$protocol" "$rules_name:$rules"; do
+        comm -23 <({ printf '%s\n' "$readers" && cat "$protocol"; } | cites "${cited%%:*}") \
+            <(anchors_of "${cited#*:}" | sort -u) | sed "s|^|${cited%%:*}#|"
+    done
+    prose="$({ printf '%s\n' "$readers" && grep -v '^#' "$protocol"; } |
+        sed -E 's/\[[^]]*\]\(#[^)]*\)//g; s/[A-Za-z./-]*#[A-Za-z0-9_-]+//g')"
+    while IFS= read -r name; do
+        grep -qE "(^|[^A-Za-z-])$(sed 's/[][\.*^$+?(){}|/]/\\&/g' <<<"$name")([^A-Za-z-]|$)" <<<"$prose" &&
+            echo "\"$name\" outside a citation"
+    done < <(awk '/^#+ / { sub(/^#+ /, ""); sub(/ \(.*$/, ""); print }' "$rules" "$protocol" | sort -u)
+    true
+}
 while IFS= read -r reader; do
     [[ "$reader" == *"$protocol_dest#common"* && "$reader" == *"$rules_name#"* ]] ||
         fail "a review prompt does not apply $protocol_dest#common and cite $rules_name: $reader"
-done < <(readers)
-for cited in "$protocol_dest:.github/prompts/review-protocol.md" "$rules_name:$REVIEW_RULES_FILE"; do
-    missing="$(comm -23 <({ readers && cat .github/prompts/review-protocol.md; } | cites "${cited%%:*}") \
-        <(anchors_of "${cited#*:}" | sort -u))"
-    [[ -z "$missing" ]] || fail "the review cites ${cited%%:*}#[${missing//$'\n'/ }], headings ${cited#*:} lacks"
+done < <(jq -r '.[].prompt' .github/prompts/review-agents.json && printf '%s\n' "$prompt")
+problems="$(citation_problems .github/prompts/review-agents.json "$prompt" .github/prompts/review-protocol.md "$REVIEW_RULES_FILE")"
+[[ -z "$problems" ]] ||
+    fail "the review cites a section by a heading its file lacks, or not as <file>#<anchor>: ${problems//$'\n'/; }"
+# Each way a citation once escaped the check.
+cite_dir="$test_dir/cites"
+mkdir -p "$cite_dir"
+for bypass in 's/REVIEW\.md#escalation/REVIEW.md#Escalation/g' \
+    's/every matching REVIEW\.md#escalation row/every matching Escalation row of REVIEW.md/' \
+    "s/each with the fields \\.claude-review\\/protocol\\.md#findings names/each with the fields the protocol's Findings names/"; do
+    sed -E "$bypass" .github/prompts/review-agents.json >"$cite_dir/agents.json"
+    ! cmp -s "$cite_dir/agents.json" .github/prompts/review-agents.json || fail "the citation bypass $bypass edits nothing"
+    [[ -n "$(citation_problems "$cite_dir/agents.json" "$prompt" .github/prompts/review-protocol.md "$REVIEW_RULES_FILE")" ]] ||
+        fail "the citation check misses a review prompt edited by $bypass"
 done
-# A citation in prose would escape the check above.
-prose="$({ readers && cat .github/prompts/review-protocol.md; } | { grep -oE "${rules_name//./\\.}\`?('s)? [A-Z][A-Za-z]*" || true; })"
-[[ -z "$prose" ]] || fail "the review cites $rules_name in prose, not as $rules_name#<anchor>: ${prose//$'\n'/; }"
 # Staged alone, the protocol resolves only its own anchors and absolute URLs.
 dead_links="$(grep -noE '\]\([^)]*\)' "$own_dir/work/$protocol_dest" | grep -vE '\]\((#|https://)' || true)"
 [[ -z "$dead_links" ]] || fail "the staged protocol links what its location lacks: ${dead_links//$'\n'/ }"
