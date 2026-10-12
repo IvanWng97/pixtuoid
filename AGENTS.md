@@ -53,7 +53,7 @@ site/     Astro landing page; integrations/raycast/  Raycast extension
 ```
 just build [--release] · just test                   # the one test runner (nextest)
 just test -p <crate> <filter>                        # fast loop
-just preflight [full]                                # pre-push gate: lint → clippy; `full` adds hack → test → test-upstream (CI's Rust recipes)
+just preflight [full]                                # pre-push gate: lint → clippy; `full` adds hack → test (CI's Rust recipes)
 cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 cargo run --profile release-local --example snapshot -- /tmp/snap.png   # the same, rebuilt faster; scripts still read target/release
 ```

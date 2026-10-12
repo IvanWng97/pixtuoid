@@ -31,7 +31,7 @@ exceptions = [
     { allow = ["OFL-1.1"], crate = "pixtuoid-scene" },
     { allow = ["OFL-1.1"], crate = "pixtuoid-web" },
     # The one crate oxc_parser pulls in under an expression outside the list,
-    # and only into the `upstream` feature.
+    # and only into the `upstream` feature and the test build.
     { allow = ["Apache-2.0 WITH LLVM-exception"], crate = "dragonbox_ecma" },
 ]
 
