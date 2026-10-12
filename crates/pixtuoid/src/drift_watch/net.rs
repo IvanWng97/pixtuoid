@@ -204,37 +204,4 @@ mod tests {
             Err(FetchError::Transient(e)) if e.contains("Could not resolve host")
         ));
     }
-
-    /// The legacy half classifies its fetches by its own copy of these values,
-    /// and both land in one report: a status one side calls dark and the other
-    /// transient would split one issue's verdict.
-    #[test]
-    fn the_legacy_checker_classifies_fetches_by_the_same_values() {
-        let py = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../scripts/check_upstream_drift.py"
-        ))
-        .expect("the legacy checker is readable");
-        let value_of = |name: &str| {
-            let line = py
-                .lines()
-                .find(|l| l.starts_with(&format!("{name} = ")))
-                .unwrap_or_else(|| panic!("{name} is declared"));
-            let mut nums: Vec<u64> = line
-                .split(|c: char| !c.is_ascii_digit())
-                .filter_map(|n| n.parse().ok())
-                .collect();
-            nums.sort_unstable();
-            nums
-        };
-        let ours: Vec<u64> = PERMANENT_HTTP_STATUS
-            .iter()
-            .map(|&s| u64::from(s))
-            .collect();
-        assert_eq!(value_of("PERMANENT_HTTP_STATUS"), ours);
-        assert_eq!(
-            value_of("FETCH_TIMEOUT_S"),
-            [super::super::FETCH_TIMEOUT.as_secs()]
-        );
-    }
 }

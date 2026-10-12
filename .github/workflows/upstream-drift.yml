@@ -29,11 +29,6 @@ jobs:
           # so a saved target dir would rarely be restored.
           enable-cache: 'false'
 
-      # Guards the legacy parsers before the live check trusts them. Duplicates
-      # ci-lint.yml's `hygiene` job because ci-lint does not run on the cron.
-      - name: Self-test the legacy watches
-        run: just drift-selftest
-
       - name: Check upstream drift
         id: check
         shell: bash

@@ -5,12 +5,11 @@
 use std::io::Write;
 use std::process::ExitCode;
 
-use pixtuoid::dev::drift_watch::{Report, run, run_legacy};
+use pixtuoid::dev::drift_watch::{Report, run};
 
 fn main() -> ExitCode {
     let mut report = Report::default();
     run(&mut report);
-    run_legacy(&mut report);
     let _ = writeln!(std::io::stdout(), "{}", report.render());
     ExitCode::from(report.exit_code())
 }

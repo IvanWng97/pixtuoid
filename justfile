@@ -304,7 +304,6 @@ lint:
     run ci-obs  just ci-observability     & pids+=($!)
     run schemas just json-schemas         & pids+=($!)
     run links   just links               & pids+=($!)
-    run drift   just drift-selftest       & pids+=($!)
     run tuidrive just tuidrive-selftest   & pids+=($!)
     run e2escrub just e2e-scrub-selftest  & pids+=($!)
     run starhist just star-history-selftest & pids+=($!)
@@ -911,18 +910,6 @@ gen-contract:
     SNAPSHOTS=overwrite just test -p pixtuoid --lib schema_matches_the_committed_contract
     npm --prefix integrations/raycast run gen:contract
 
-# Regenerate the committed drift-surface fragments — the names each crate's
-# installers ship. `check_upstream_drift.py` reads these instead of
-# parsing our Rust, so a rename must be re-emitted or the watch narrows. The
-# gate is the crates' own tests, which fail on a stale file; this is just the
-# writer. The filter runs the writing test alone: a sibling that reads the stale
-# file fails and, under nextest's fail-fast, can cancel the write.
-[doc('Regenerate crates/*/drift-surface.json after changing a shipped name')]
-[group('gen')]
-gen-drift-surface:
-    SNAPSHOTS=overwrite just test -p pixtuoid-core --lib drift_surface::tests::the_committed_fragment_matches
-    SNAPSHOTS=overwrite just test -p pixtuoid --lib drift_surface::tests::the_committed_fragment_matches
-
 [doc("Regenerate the cutaway's pinned-frame digests (crates/pixtuoid-scene/src/cutaway/canvas.golden)")]
 [group('gen')]
 gen-cutaway-golden:
@@ -1240,14 +1227,6 @@ compare-selftest:
     # any python3 with Pillow answers the question this recipe asks.
     if [ -x .venv/bin/python3 ]; then py=.venv/bin/python3; else py=python3; fi
     "$py" scripts/compare-screenshots.py --selftest
-
-# The legacy watches' ONLY test. A regex-parser regression is a silent monitor
-# death (the script returns empty / raises, the weekly job alarms on junk or
-# watches nothing). Pure Python, no deps, no network.
-[doc('Self-test the legacy upstream-drift watches (parsers + fetch classifier)')]
-[group('meta')]
-drift-selftest:
-    python3 scripts/check_upstream_drift_selftest.py
 
 # Default features off: the watch plays no audio, so the runner needs no ALSA.
 [doc('Check every name the sources read and the installers register against upstream (network)')]

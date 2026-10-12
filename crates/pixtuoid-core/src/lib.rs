@@ -78,7 +78,4 @@ pub use state::{
 pub use walkable::{OccupancyOverlay, WalkableMask};
 
 #[cfg(test)]
-mod drift_surface;
-
-#[cfg(test)]
 pub(crate) mod test_capture;
