@@ -20,6 +20,7 @@ jobs:
       contents: read
     outputs:
       exit: ${{ steps.check.outputs.exit }}
+      report: ${{ steps.check.outputs.report }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -40,11 +41,12 @@ jobs:
           set +e
           just drift-watch | tee drift-report.md
           echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          echo "report=drift-report-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
       - if: steps.check.outputs.exit == '1'
         uses: actions/upload-artifact@v7
         with:
-          name: drift-report-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.check.outputs.report }}
           path: drift-report.md
           retention-days: 1
           if-no-files-found: error
@@ -76,7 +78,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: drift-report-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ needs.drift.outputs.report }}
 
       - name: Open or update tracking issue
         env:

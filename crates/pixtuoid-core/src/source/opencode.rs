@@ -95,8 +95,8 @@ const EVENT_DECLARATIONS: &[Doc] = &[
     ),
 ];
 
-/// Its GitHub `releases/latest` is still the v1 line; v2 installs as npm's
-/// `@opencode/cli` (`services/www/src/docs/content/index.mdx:16`, v2.0.27).
+/// Its GitHub `releases/latest` is still the v1 line; v2 installs from npm
+/// (`services/www/src/docs/content/index.mdx:16`, v2.0.27).
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const REPO: Repo = Repo {
     name: "anomalyco/opencode",
