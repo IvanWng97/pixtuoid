@@ -37,6 +37,8 @@ static FAKE: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
+    #[cfg(feature = "upstream")]
+    registers: Vec::new,
 };
 
 // A fn-pointer `default_config_path` can't capture a TempDir, so FAKE2/FAKE_DIR
@@ -79,6 +81,8 @@ static FAKE2: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
+    #[cfg(feature = "upstream")]
+    registers: Vec::new,
 };
 
 // FAKE_DIR's config path is created as a DIRECTORY, so read_config errors.
@@ -110,6 +114,8 @@ static FAKE_DIR: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
+    #[cfg(feature = "upstream")]
+    registers: Vec::new,
 };
 
 // FAKE_NO_HOME's default_config_path Errs — the no-home-dir arm.
@@ -141,6 +147,8 @@ static FAKE_NO_HOME: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
+    #[cfg(feature = "upstream")]
+    registers: Vec::new,
 };
 
 /// The files a target owns beside its config, `None` for every other target.

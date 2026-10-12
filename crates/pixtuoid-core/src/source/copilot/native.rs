@@ -14,7 +14,7 @@ use crate::source::{Source, TaggedSender};
 /// substring scan would let a grep for `session.shutdown` end a live session.
 fn copilot_session_ended(tail: &[u8]) -> bool {
     parsed_tail_lines(tail)
-        .any(|v| v.get("type").and_then(|t| t.as_str()) == Some("session.shutdown"))
+        .any(|v| v.get("type").and_then(|t| t.as_str()) == Some(super::SESSION_SHUTDOWN))
 }
 
 /// Source that watches the Copilot session-state directory.

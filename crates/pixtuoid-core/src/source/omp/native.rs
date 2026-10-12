@@ -25,8 +25,8 @@ pub(crate) type OmpProfileEnumerate = Arc<dyn Fn() -> Vec<PathBuf> + Send + Sync
 /// `session_exit`) end a live session — the CC sharp edge.
 fn omp_session_ended(tail: &[u8]) -> bool {
     parsed_tail_lines(tail).any(|v| {
-        v.get("type").and_then(|t| t.as_str()) == Some("custom")
-            && v.get("customType").and_then(|c| c.as_str()) == Some("session_exit")
+        v.get("type").and_then(|t| t.as_str()) == Some(super::CUSTOM)
+            && v.get("customType").and_then(|c| c.as_str()) == Some(super::SESSION_EXIT)
     })
 }
 

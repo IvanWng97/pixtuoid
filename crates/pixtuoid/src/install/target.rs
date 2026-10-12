@@ -105,6 +105,10 @@ pub struct Target {
     /// The upstream declarations the artifacts this target installs depend on.
     #[cfg(feature = "upstream")]
     pub upstream: &'static [pixtuoid_core::source::upstream::Watch],
+    /// The hook names the installed artifact subscribes to, each of which a
+    /// vanish watch must carry (`every_registered_hook_is_watched`).
+    #[cfg(all(test, feature = "upstream"))]
+    pub(crate) registers: fn() -> Vec<&'static str>,
 }
 
 /// Whose the primary file is: the user's, with pixtuoid's entries merged in, or
@@ -254,6 +258,8 @@ pub(crate) const CLAUDE: Target = Target {
     host: Some(&crate::install::claude::HOST),
     #[cfg(feature = "upstream")]
     upstream: crate::install::claude::UPSTREAM,
+    #[cfg(all(test, feature = "upstream"))]
+    registers: || crate::install::claude::EVENTS.to_vec(),
 };
 
 pub(crate) const CODEX: Target = Target {
@@ -278,6 +284,8 @@ pub(crate) const CODEX: Target = Target {
     host: Some(&crate::install::codex::HOST),
     #[cfg(feature = "upstream")]
     upstream: crate::install::codex::UPSTREAM,
+    #[cfg(all(test, feature = "upstream"))]
+    registers: || crate::install::codex::CODEX_EVENTS.to_vec(),
 };
 
 pub(crate) const REASONIX: Target = Target {
@@ -298,6 +306,8 @@ pub(crate) const REASONIX: Target = Target {
     host: Some(&crate::install::reasonix::HOST),
     #[cfg(feature = "upstream")]
     upstream: crate::install::reasonix::UPSTREAM,
+    #[cfg(all(test, feature = "upstream"))]
+    registers: || crate::install::reasonix::REASONIX_EVENTS.to_vec(),
 };
 
 pub(crate) const CODEWHALE: Target = Target {
@@ -318,6 +328,13 @@ pub(crate) const CODEWHALE: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::codewhale::UPSTREAM,
+    #[cfg(all(test, feature = "upstream"))]
+    registers: || {
+        crate::install::codewhale::CODEWHALE_EVENTS
+            .iter()
+            .map(|&(name, _)| name)
+            .collect()
+    },
 };
 
 pub(crate) const OPENCODE: Target = Target {
@@ -340,6 +357,8 @@ pub(crate) const OPENCODE: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
+    #[cfg(all(test, feature = "upstream"))]
+    registers: crate::install::opencode::registers,
 };
 
 pub(crate) const GROK: Target = Target {
@@ -360,6 +379,8 @@ pub(crate) const GROK: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::grok::UPSTREAM,
+    #[cfg(all(test, feature = "upstream"))]
+    registers: || crate::install::grok::GROK_EVENTS.to_vec(),
 };
 
 pub(crate) const CURSOR: Target = Target {
@@ -380,6 +401,8 @@ pub(crate) const CURSOR: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::cursor::UPSTREAM,
+    #[cfg(all(test, feature = "upstream"))]
+    registers: || crate::install::cursor::CURSOR_EVENTS.to_vec(),
 };
 
 pub(crate) const HERMES: Target = Target {
@@ -401,6 +424,8 @@ pub(crate) const HERMES: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::hermes::UPSTREAM,
+    #[cfg(all(test, feature = "upstream"))]
+    registers: || crate::install::hermes::HERMES_EVENTS.to_vec(),
 };
 
 pub(crate) const OPENCLAW: Target = Target {
@@ -425,6 +450,14 @@ pub(crate) const OPENCLAW: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::openclaw::UPSTREAM,
+    #[cfg(all(test, feature = "upstream"))]
+    registers: || {
+        [
+            crate::install::openclaw::OPENCLAW_EVENTS,
+            crate::install::openclaw::OPENCLAW_VERDICT_EVENTS,
+        ]
+        .concat()
+    },
 };
 
 pub(crate) const KIMI: Target = Target {
@@ -447,6 +480,8 @@ pub(crate) const KIMI: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::kimi::UPSTREAM,
+    #[cfg(all(test, feature = "upstream"))]
+    registers: || crate::install::kimi::KIMI_EVENTS.to_vec(),
 };
 
 pub(crate) const DSH: Target = Target {
@@ -472,6 +507,8 @@ pub(crate) const DSH: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::dsh::UPSTREAM,
+    #[cfg(all(test, feature = "upstream"))]
+    registers: crate::install::dsh::plugin_events,
 };
 
 pub(crate) const OMP: Target = Target {
@@ -495,6 +532,12 @@ pub(crate) const OMP: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::omp::UPSTREAM,
+    #[cfg(all(test, feature = "upstream"))]
+    registers: || {
+        crate::install::forward_set(crate::install::omp::EXTENSION_TEMPLATE)
+            .into_iter()
+            .collect()
+    },
 };
 
 pub(crate) const TARGETS: &[&Target] = &[
