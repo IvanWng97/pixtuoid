@@ -492,7 +492,7 @@ fn read_docs(
             Ok(names) => upstream.extend(names),
             Err(Unread::Ours(e)) => {
                 report.add_blind(
-                    &format!("`{}`'s pattern ({e})", w.id),
+                    &format!("`{}`'s pattern or item spec ({e})", w.id),
                     source,
                     &format!("`{}` was SKIPPED.", w.id),
                     true,

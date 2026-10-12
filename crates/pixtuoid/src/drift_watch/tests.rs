@@ -266,10 +266,23 @@ fn a_broken_pattern_of_ours_blames_ours() {
         finding: Finding::Breaking("x"),
         siblings: None,
     };
-    for w in [&EACH, &ARMS] {
+    const STR: Watch = Watch {
+        id: "t.str",
+        ours: || vec!["x"],
+        docs: &[doc("e.ts")],
+        read: Read::RustStr { item: "<<>" },
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
+        siblings: None,
+    };
+    for w in [&EACH, &ARMS, &STR] {
         let r = check(&Served::default().with(&raw("e.ts"), "enum Events {\n"), w);
         assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
         assert!(r.blind[0].contains("Our own declaration"), "{r:?}");
+        assert!(
+            r.blind[0].contains(&format!("`{}`'s pattern or item spec", w.id)),
+            "{r:?}"
+        );
         assert!(
             r.blind[0].contains(&format!("`{}` was SKIPPED", w.id)),
             "{r:?}"
