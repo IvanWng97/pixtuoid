@@ -700,18 +700,52 @@ fn percent_decode(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// The grok home dir — `$GROK_HOME` UNCONDITIONALLY when set (grok takes the
-/// env var without an exists-check and `create_dir_all`s it, unlike codex's
-/// gate), else `<home>/.grok`. The watcher, the installer and the liveness
-/// probe all route through here, so the watched root, the installed hooks file
-/// and the probed registry can never disagree.
+/// The grok home dir, matching grok-build's own resolution (`xai-grok-config`
+/// `paths.rs::grok_home`): `GROK_HOME` UNCONDITIONALLY when set (upstream takes
+/// the env var without an exists-check and `create_dir_all`s it — the opposite
+/// of codex's existing-dir gate), else `<home>/.grok` on EVERY OS (no XDG, no
+/// APPDATA). Upstream resolves home via `std::env::home_dir()` (USERPROFILE on
+/// Windows, `$HOME` never consulted there), which `user_home` mirrors. The
+/// watcher, the installer and the liveness probe all route through here, so
+/// the watched root, the installed hooks file and the probed registry can never
+/// disagree.
+///
+/// Not mirrored: upstream `dunce::canonicalize`s the DEFAULT home before joining
+/// `.grok` (never `$GROK_HOME`), so under a SYMLINKED `$HOME` its path string
+/// differs from ours while naming the same directory. Unobservable because the
+/// exposed surface — the sessions WATCH ROOT — is opened, not string-compared,
+/// and both forms resolve through the link to one dir.
 pub fn grok_home() -> PathBuf {
-    crate::platform::grok_home()
+    resolve_grok_home(
+        crate::platform::path_env("GROK_HOME"),
+        crate::platform::user_home(),
+    )
+}
+
+/// Pure precedence core, separated so it's unit-testable without env mutation.
+fn resolve_grok_home(grok_home_env: Option<PathBuf>, home: PathBuf) -> PathBuf {
+    grok_home_env.unwrap_or_else(|| home.join(".grok"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grok_home_takes_env_unconditionally_even_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("missing");
+        assert_eq!(
+            resolve_grok_home(Some(missing.clone()), PathBuf::from("/home/u")),
+            missing
+        );
+    }
+
+    #[test]
+    fn grok_home_falls_back_to_dot_grok_when_env_unset() {
+        let expected = PathBuf::from("/home/u").join(".grok");
+        assert_eq!(resolve_grok_home(None, PathBuf::from("/home/u")), expected);
+    }
     use serde_json::json;
 
     fn decode_all(v: Value) -> Vec<AgentEvent> {

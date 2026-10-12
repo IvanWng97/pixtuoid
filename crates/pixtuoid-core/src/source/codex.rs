@@ -427,17 +427,57 @@ fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> 
     }
 }
 
-/// The Codex home dir — honors `CODEX_HOME` when it points at an existing dir,
-/// else `~/.codex` (codex's own precedence). The installer reads Codex's
-/// `config.toml` through here too, so the watched sessions root and the plugin
-/// state it reads can never disagree.
+/// The Codex home dir, matching codex's own precedence (`codex-rs`
+/// `find_codex_home`): `CODEX_HOME` if it's set to an EXISTING directory, else
+/// `<user_home>/.codex`. The installer reads Codex's `config.toml` through here
+/// too, so the watched sessions root and the plugin state it reads can never
+/// disagree.
+///
+/// Not mirrored: upstream `canonicalize`s the ENV value (the default branch it
+/// leaves alone) — the inverse scoping of [`super::grok::grok_home`]'s, and
+/// unobservable for the same reason.
 pub fn codex_home() -> PathBuf {
-    crate::platform::codex_home()
+    resolve_codex_home(
+        crate::platform::path_env("CODEX_HOME"),
+        crate::platform::user_home(),
+    )
+}
+
+/// Pure precedence core, separated so it's unit-testable without env mutation.
+/// On a set-but-absent `CODEX_HOME` upstream codex returns a FATAL error; we
+/// deliberately fall back to `~/.codex` — benign for a visualizer, since codex
+/// itself won't run (and writes no rollouts) when its home dir is missing.
+fn resolve_codex_home(codex_home_env: Option<PathBuf>, home: PathBuf) -> PathBuf {
+    if let Some(p) = codex_home_env.filter(|p| p.is_dir()) {
+        return p;
+    }
+    home.join(".codex")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_home_uses_env_when_it_points_at_an_existing_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_codex_home(Some(tmp.path().to_path_buf()), PathBuf::from("/home/u")),
+            tmp.path()
+        );
+    }
+
+    #[test]
+    fn codex_home_falls_back_to_dot_codex_when_env_unset_or_missing_dir() {
+        let expected = PathBuf::from("/home/u").join(".codex");
+        assert_eq!(resolve_codex_home(None, PathBuf::from("/home/u")), expected);
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("missing");
+        assert_eq!(
+            resolve_codex_home(Some(missing.clone()), PathBuf::from("/home/u")),
+            expected
+        );
+    }
     use serde_json::json;
 
     /// Every name in a behaviour group reaches a real arm, and one outside them
