@@ -328,6 +328,50 @@
   break:
     - .jobs.review.if |= sub(" *\\(github.event.action != 'edited' \\|\\| github.event.changes.base\\) &&"; "")
 
+- id: review-callee-interface-holds
+  file: .github/workflows/claude-readonly-review.yml
+  why: >-
+    pixtuoid/lofi calls this workflow at a pinned commit, so a renamed,
+    retyped or newly required input or secret fails every lofi review from the
+    pin bump that brings it, in CI this suite never runs; a step's `uses: ./`
+    resolves in the caller's workspace there
+    (docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
+  expected: >-
+    {"inputs": {"pr_number": {"type": "number", "required": true},
+                "prompt_path": {"type": "string", "required": true},
+                "max_turns": {"type": "number", "required": true},
+                "max_budget_usd": {"type": "number", "required": true},
+                "allow_fork": {"type": "boolean", "required": false}},
+     "secrets": {"CLAUDE_CODE_OAUTH_TOKEN": false}}
+  assert: |
+    (.on.workflow_call | {inputs: (.inputs // {} | map_values({type, required: (.required // false)})),
+                          secrets: (.secrets // {} | map_values(.required // false))}) == ($expected | fromjson)
+      and ([.jobs[].steps[]? | .uses // empty | select(startswith("./"))] == [])
+  break:
+    - .on.workflow_call.inputs.pr_number.type = "string"
+    - .on.workflow_call.inputs.allow_fork.required = true
+    - .on.workflow_call.inputs.prompt = .on.workflow_call.inputs.prompt_path | del(.on.workflow_call.inputs.prompt_path)
+    - .on.workflow_call.secrets.CLAUDE_CODE_OAUTH_TOKEN.required = true
+    - '.on.workflow_call.secrets.ANTHROPIC_API_KEY = {"required": false}'
+    - '.jobs.analyze.steps += [{"uses": "./.github/actions/x"}]'
+
+- id: exemption-callee-interface-holds
+  file: .github/workflows/claude-review-exempt.yml
+  why: >-
+    pixtuoid/lofi calls this workflow at a pinned commit, the same exposure
+    review-callee-interface-holds names.
+  expected: >-
+    {"inputs": {"allow": {"type": "string", "required": true}}, "secrets": {}}
+  assert: |
+    (.on.workflow_call | {inputs: (.inputs // {} | map_values({type, required: (.required // false)})),
+                          secrets: (.secrets // {} | map_values(.required // false))}) == ($expected | fromjson)
+      and ([.jobs[].steps[]? | .uses // empty | select(startswith("./"))] == [])
+  break:
+    - .on.workflow_call.inputs.allow.type = "boolean"
+    - '.on.workflow_call.inputs.paths = {"type": "string", "required": true}'
+    - '.on.workflow_call.secrets = {"X": {"required": false}}'
+    - '.jobs.exempt.steps += [{"uses": "./.github/actions/x"}]'
+
 # ── Scopes that only look narrow
 
 - id: cache-cleanup-stays-inert
