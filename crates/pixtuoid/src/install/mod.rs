@@ -630,6 +630,29 @@ fn write_beside(files: &[(PathBuf, String)]) -> Result<()> {
     Ok(())
 }
 
+/// Rewrite `t`'s [`RetiredStub`](target::RetiredStub) where it sits byte-exact;
+/// whether it did. A missing file is left missing.
+pub(crate) fn heal_retired_stub(t: &Target, config: Option<PathBuf>) -> Result<bool> {
+    let Primary::Owned {
+        retired: Some(stub),
+        ..
+    } = &t.primary
+    else {
+        return Ok(false);
+    };
+    let path = config
+        .map(Ok)
+        .unwrap_or_else(|| (t.default_config_path)())?;
+    // Checked before the lock, which would create its file beside a CLI the
+    // user may not have.
+    if io::read_config(&path)? != stub.was {
+        return Ok(false);
+    }
+    write_owned_file(&path, || {
+        Ok((io::read_config(&path)? == stub.was).then(|| stub.now.to_owned()))
+    })
+}
+
 /// Write `want()` to `p` under `p`'s own lock when the file holds anything else, and
 /// say whether it did. `want` runs under the lock, so a caller can re-derive the
 /// content there; `None` leaves the file alone.

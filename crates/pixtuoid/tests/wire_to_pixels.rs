@@ -251,9 +251,9 @@ fn agent_cases() -> Vec<WireCase> {
         WireCase {
             name: "opencode",
             source: "opencode",
-            fixture: "fixtures/opencode/session-run/hook-payloads.jsonl",
+            fixture: "fixtures/opencode/session-recorded/hook-payloads.jsonl",
             wire: Wire::Hooks,
-            must_reach: &[Reach::Active, Reach::Waiting, Reach::Delegating],
+            must_reach: &[Reach::Active, Reach::Waiting],
         },
         WireCase {
             name: "cursor",

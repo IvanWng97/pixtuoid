@@ -43,7 +43,10 @@ invocation_for() {
     antigravity) echo "-p|" ;;
     reasonix) echo "-p|" ;;
     codewhale) echo "exec|" ;;
-    opencode) echo "run|" ;;
+    # A plain `run` attaches to the background service, whose env never carries
+    # this tier's PIXTUOID_SOCKET; a private server inherits it
+    # (`packages/cli/src/services/standalone.ts:24-25`).
+    opencode) echo "run|--standalone" ;;
     copilot) echo "-p|" ;;
     cursor) echo "-p|" ;;
     hermes) echo "-z|" ;;

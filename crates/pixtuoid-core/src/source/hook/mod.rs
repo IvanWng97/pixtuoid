@@ -170,19 +170,19 @@ impl Drop for UndeliveredEvents {
 
 /// The agent a decoded event should bind to the connection's `_pid` (for the
 /// abrupt-exit watch). BOTH `SessionStart` and `Identity` register-or-back-fill
-/// a slot, and `Identity` is the ONLY registration carrier for a mid-attached
-/// session whose `SessionStart` predates the daemon (opencode never re-emits
-/// `session.created`). Activity/Waiting/End never register a new slot.
+/// a slot, and `Identity` is the only carrier for a session attached mid-turn
+/// until its next `SessionStart`. Activity/Waiting/End never register a new
+/// slot.
 ///
-/// Dispatches on the SAME `FocusChannel` capability as [`patch_identity_pids`] —
-/// one fact ("is this source's `_pid` trustworthy") with two consumers. A
-/// `TranscriptProbe` source is excluded on its own terms: its pid comes from the
-/// CLI's own registry via `jsonl::liveness`, which drives its own exit watch, so
-/// binding here would only offer a second, weaker answer. omp carries BOTH
-/// reapers and no precedence is enforced: on an abrupt kill this watch usually
-/// ends the slot first, and the jsonl exit path's trailing rows then land on
-/// an exiting slot as no-ops — accepted, a duplicate `SessionEnd` is a
-/// documented reducer no-op.
+/// Dispatches on the same `FocusChannel` as [`patch_identity_pids`], which
+/// reads a narrower fact off it: a `ServerStamp` pid ends sessions but is no
+/// focus target. A `TranscriptProbe` source is excluded on its own terms: its
+/// pid comes from the CLI's own registry via `jsonl::liveness`, which drives
+/// its own exit watch, so binding here would only offer a second, weaker
+/// answer. omp carries BOTH reapers and no precedence is enforced: on an abrupt
+/// kill this watch usually ends the slot first, and the jsonl exit path's
+/// trailing rows then land on an exiting slot as no-ops — accepted, a duplicate
+/// `SessionEnd` is a documented reducer no-op.
 fn pid_bind_target(ev: &AgentEvent) -> Option<(AgentId, bool)> {
     use crate::source::registry::FocusChannel;
     let (agent_id, source) = match ev {
@@ -198,8 +198,8 @@ fn pid_bind_target(ev: &AgentEvent) -> Option<(AgentId, bool)> {
         // The shim GUESSED which ancestor is the CLI — corroborate it.
         Some(FocusChannel::ShimStamp) => Some((*agent_id, true)),
         // The source stamped its own `process.pid`; a session that never calls a
-        // tool reports it once, and for opencode this watch IS the teardown path.
-        Some(FocusChannel::PluginStamp) => Some((*agent_id, false)),
+        // tool reports it once.
+        Some(FocusChannel::PluginStamp | FocusChannel::ServerStamp) => Some((*agent_id, false)),
         _ => None,
     }
 }
@@ -232,7 +232,7 @@ fn patch_identity_pids(evs: &mut [AgentEvent], pid: Option<i32>) {
         if let AgentEvent::Identity { source, pid: p, .. } = ev {
             let channel = crate::source::registry::descriptor_for(source)
                 .map_or(FocusChannel::Unsupported, |d| d.focus_channel());
-            if channel.accepts_stamp() {
+            if channel.stamps_focus_pid() {
                 *p = Some(*stamp.get_or_insert_with(|| crate::source::PidIdentity {
                     pid,
                     started: crate::source::pid_start_marker(pid),
@@ -343,11 +343,11 @@ mod tests {
 
     #[test]
     fn patch_identity_pids_stamps_only_identity_events() {
-        let id = AgentId::from_parts("opencode", "ses_x");
+        let id = AgentId::from_parts("omp", "ses_x");
         let mut evs = vec![
             AgentEvent::Identity {
                 agent_id: id,
-                source: "opencode".into(),
+                source: "omp".into(),
                 session_id: "ses_x".into(),
                 cwd: None,
                 pid: None,
@@ -370,8 +370,8 @@ mod tests {
     }
 
     #[test]
-    fn patch_identity_pids_never_stamps_the_transcript_family() {
-        for source in ["claude-code", "codex", "antigravity", "copilot"] {
+    fn patch_identity_pids_stamps_only_a_focus_target() {
+        for source in ["claude-code", "codex", "antigravity", "copilot", "opencode"] {
             let mut evs = vec![AgentEvent::Identity {
                 agent_id: AgentId::from_parts(source, "ses_t"),
                 source: source.into(),
@@ -385,14 +385,7 @@ mod tests {
                 "{source} Identity must stay pid: None"
             );
         }
-        for source in [
-            "opencode",
-            "cursor",
-            "codewhale",
-            "hermes",
-            "reasonix",
-            "omp",
-        ] {
+        for source in ["cursor", "codewhale", "hermes", "reasonix", "omp"] {
             let mut evs = vec![AgentEvent::Identity {
                 agent_id: AgentId::from_parts(source, "ses_t"),
                 source: source.into(),
@@ -534,7 +527,7 @@ mod tests {
             assert_eq!(
                 pid_bind_target(&ev),
                 Some((id, false)),
-                "{ev:?} must bind the pid; opencode stamps its own, so no corroboration"
+                "{ev:?} must bind the pid; opencode's server stamps its own, so no corroboration"
             );
         }
         for ev in [
@@ -692,7 +685,7 @@ mod tests {
         client
             .write_all(
                 b"{\"_pixtuoid_source\":\"opencode\",\"type\":\"session.created\",\
-                  \"properties\":{\"info\":{\"id\":\"ses_neg\",\"directory\":\"/repo\"}},\
+                  \"data\":{\"sessionID\":\"ses_neg\",\"location\":{\"directory\":\"/repo\"}},\
                   \"_pid\":5555}\n",
             )
             .await

@@ -194,9 +194,8 @@ mod tests {
         assert_eq!(b.take(7).len(), 1, "a re-sighted (pid, agent) is deduped");
     }
 
-    /// A pid the SOURCE stamped is not a guess: opencode's plugin sends its own
-    /// `process.pid`, and a session with no tool call reports it exactly once —
-    /// this watch is that source's instance-teardown path, so it arms on sight.
+    /// A pid the SOURCE stamped is not a guess, and a session with no tool call
+    /// reports it exactly once, so it arms on sight.
     #[test]
     fn a_source_stamped_pid_arms_on_the_first_sighting() {
         let mut b = Bindings::default();

@@ -10,6 +10,8 @@
 // HOOK_PATH is baked in at install time (a JSON-encoded absolute path). Safe to
 // delete — disconnecting opencode in pixtuoid's Sources panel replaces this
 // with a removed-marker stub.
+import { spawn } from "node:child_process"
+
 const HOOK_PATH: string = "{{HOOK_PATH_JSON}}"
 
 // Only forward what pixtuoid maps; the decoder (`source/opencode.rs`) ignores
@@ -17,58 +19,93 @@ const HOOK_PATH: string = "{{HOOK_PATH_JSON}}"
 const FORWARD = new Set<string>([
   "session.created",
   "session.deleted",
+  "session.execution.started",
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+  "session.tool.input.started",
+  "session.tool.success",
+  "session.tool.failed",
   "permission.asked",
-  "permission.v2.asked",
 ])
 
-// opencode re-publishes a tool part with status STILL `running` on EVERY output
-// chunk (streaming `bash`/`task` output). Forwarding each would spawn a shim per
-// chunk and inflate the tooltip's tool-call count, so we forward a tool part only
-// when its status CHANGES. The key is `sessionID:callID`, NOT callID alone: this
-// Map is module-level (one plugin process serves a parent AND its task-spawned
-// child sessions concurrently), so callID alone could collide across sessions and
-// drop the wrong one.
-const lastToolStatus = new Map<string, string>()
-
-export const PixtuoidOpencode = async () => ({
-  event: async ({ event }: { event: { type: string; properties: any } }) => {
-    try {
-      const t = event?.type
-      let keep = FORWARD.has(t)
-      if (t === "message.part.updated" && event?.properties?.part?.type === "tool") {
-        const part = event.properties.part
-        const callID: unknown = part?.callID
-        const status: unknown = part?.state?.status
-        const sessionID: unknown = event.properties?.sessionID
-        if (typeof callID === "string" && typeof status === "string") {
-          const key = `${typeof sessionID === "string" ? sessionID : "?"}:${callID}`
-          if (lastToolStatus.get(key) === status) return
-          lastToolStatus.set(key, status)
-          if (status === "completed" || status === "error") lastToolStatus.delete(key)
-        }
-        keep = true
-      }
-      if (!keep) return
-      const payload = JSON.stringify({
-        type: t,
-        properties: event.properties,
-        // The opencode process pid (the in-process worker shares the CLI's pid);
-        // the daemon's HookPidWatch ends every bound sprite when it dies.
-        _pid: typeof process !== "undefined" ? process.pid : undefined,
-      })
-      const proc = Bun.spawn([HOOK_PATH, "--source", "opencode"], {
-        stdin: new TextEncoder().encode(payload),
-        stdout: "ignore",
-        stderr: "ignore",
-      })
-      // opencode does NOT await this hook (`void hook.event(...)`), so awaiting
-      // the (`transport::WRITE_TIMEOUT`-bounded, always-exit-0) shim here can't stall
-      // opencode — it just keeps a burst of events from orphaning a pile of spawns.
-      await proc.exited
-    } catch {
-      // Best-effort: a broken shim must never surface in opencode.
-    }
-  },
+// Copied field by field, so no prompt, tool input or output leaves opencode.
+const allowlisted = (data: any) => ({
+  sessionID: data?.sessionID,
+  parentID: data?.parentID,
+  location: data?.location && { directory: data.location.directory },
+  model: data?.model && { id: data.model.id },
+  id: data?.id,
+  name: data?.name,
+  action: data?.action,
+  source: data?.source && { id: data.source.id },
 })
 
-export default PixtuoidOpencode
+// Resolves once the shim exits or fails to start; never rejects.
+const send = (payload: string) =>
+  new Promise<void>((resolve) => {
+    try {
+      // No `detached`: on Windows it gives each shim its own console window.
+      const child = spawn(HOOK_PATH, ["--source", "opencode"], {
+        stdio: ["pipe", "ignore", "ignore"],
+        windowsHide: true,
+      })
+      child.on("error", () => resolve())
+      child.on("close", () => resolve())
+      child.stdin?.on("error", () => {})
+      child.stdin?.end(payload)
+    } catch {
+      resolve()
+    }
+  })
+
+// A session's record, or nothing when it cannot be read: `ctx.session.get`'s
+// endpoint answers `{ data: PublicSessionInfo }`
+// (`packages/protocol/src/groups/session.ts:127-130`, `:287-290`), whose lone
+// `data` the promise adapter unwraps (`packages/plugin/src/promise/adapter.ts:186-197`),
+// so it returns the `Session.Info` (`packages/schema/src/session.ts:31-59`). A
+// fork's row keeps its source in `fork_session_id` with `parent_id` null
+// (`packages/core/src/session/projector.ts:160-161`), read back as `fork`, not
+// `parentID` (`packages/core/src/session/info.ts:21-28`), so a fork stays a root.
+const record = async (ctx: any, sessionID: unknown) => {
+  try {
+    return (await ctx.session.get({ sessionID })) ?? {}
+  } catch {
+    return {}
+  }
+}
+
+export default {
+  id: "pixtuoid",
+  setup(ctx: any) {
+    const controller = new AbortController()
+    // Not awaited: setup returns at once, and the loop's own awaits only pace
+    // this subscription, whose queue is unbounded.
+    void (async () => {
+      try {
+        for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+          if (!FORWARD.has(event?.type)) continue
+          // A turn's start carries only `sessionID`; the session's record adds
+          // what `session.created` did, for a session swept since.
+          const data =
+            event.type === "session.execution.started"
+              ? { ...(await record(ctx, event.data?.sessionID)), ...event.data }
+              : event.data
+          await send(
+            JSON.stringify({
+              type: event.type,
+              location: event.location && { directory: event.location.directory },
+              data: allowlisted(data),
+              // The opencode server's pid; the daemon's HookPidWatch ends every
+              // sprite bound to it when it dies.
+              _pid: process.pid,
+            }),
+          )
+        }
+      } catch {
+        // Best-effort: a failed stream must never surface in opencode.
+      }
+    })()
+    return () => controller.abort()
+  },
+}

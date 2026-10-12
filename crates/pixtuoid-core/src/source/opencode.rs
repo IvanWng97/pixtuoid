@@ -1,225 +1,228 @@
-//! opencode source — HOOK-ONLY (no JSONL watcher), via a bundled TS plugin.
+//! opencode source — HOOK-ONLY, via a bundled TS plugin.
 //!
-//! opencode has NO config-level shell-command hook and stores every session in
-//! SQLite with no tailable per-session transcript. Its ONLY external seam is the
-//! **plugin** system: a TS plugin gets an `event` hook receiving the SAME
-//! EventV2 stream the server's SSE endpoint serves, and pipes the events into
-//! the `pixtuoid-hook` shim on stdin. Connecting opencode drops that plugin at
-//! `<opencode-config>/plugins/pixtuoid.ts`, which opencode auto-discovers — so
-//! there is NO `opencode.jsonc` edit (see `install/opencode.rs`).
-//!
-//! The forwarded envelope is opencode's own EventV2 shape:
+//! opencode keeps sessions in SQLite with no tailable transcript, so its one
+//! external seam is the plugin API: the bundled plugin
+//! (`install/opencode_plugin.ts`) reads `ctx.event.subscribe()` and pipes an
+//! allowlisted copy of each event into the `pixtuoid-hook` shim:
 //!
 //! ```json
-//! {"type":"session.created","properties":{"sessionID":"ses_…","info":{"id":"ses_…","directory":"/repo","parentID":"ses_…?","agent":"build","model":{…}}},"_pid":12345}
+//! {"type":"session.created","location":{"directory":"/repo"},"data":{"sessionID":"ses_…","location":{"directory":"/repo"},"parentID":"ses_…","model":{"id":"…"}},"_pid":12345}
 //! ```
 //!
-//! `type` is the BASE event name (the `.N` version suffix is persistence/sync
-//! only), so the custom decoder claims every event by `type` and the shared
-//! CC-shaped arms are unreachable. The upstream facts the decoding rests on:
+//! The upstream facts the decode rests on, at opencode v2 (`@opencode/cli`):
 //!
-//! - The `ses_*` session id is a durable SQLite PRIMARY KEY, identical on every
-//!   event of a session, so slots key on it rather than cwd. `info.directory` is
-//!   the cwd, canonicalized by opencode (`/tmp` → `/private/tmp`).
-//! - Subagents are first-class child SESSIONS: `task` calls
-//!   `sessions.create({parentID})`, so the child's `session.created` carries
-//!   `info.parentID` and no coalescing trick is needed.
-//! - **Waiting** rides the `permission.asked`/`permission.v2.asked` EVENTS — the
-//!   `permission.ask` PLUGIN hook is declared but never `.trigger`ed upstream.
-//! - An abrupt exit kills the opencode process; the plugin stamps that pid
-//!   (`_pid`) and `hook::HookPidWatch` ends every bound sprite when it dies
-//!   (Unix only; Windows falls to the stale-sweep).
-//!   `server.instance.disposed` carries only a `directory` (no session ids), so
-//!   it is NOT decoded — the pid-watch covers instance teardown.
+//! - `sessionID` is on every session event and is the session's durable key,
+//!   so slots key on it.
+//! - A subagent is a child SESSION: the `subagent` tool creates it with
+//!   `parentID` (`packages/core/src/tool/plugin/subagent.ts:188-189`), so its
+//!   `session.created` links it.
+//! - An event published in a location carries it on its envelope, beside
+//!   `data` (`packages/schema/src/event.ts:114`, `:138`): the recording's tool
+//!   and permission events do, its `session.execution.*` events do not.
 
-use crate::source::decoder::{DecodeError, DecodeResult as Result};
-use serde_json::Value;
+use std::path::PathBuf;
+
+use serde_json::{Map, Value};
 
 use crate::AgentId;
-use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
+use crate::source::AgentEvent;
+use crate::source::decoder::{
+    DecodeError, DecodeResult as Result, MAX_DECODED_FIELD_CHARS, ellipsize, generic_tool_display,
+};
 #[cfg(any(test, feature = "upstream"))]
 use crate::source::upstream::{At, Doc, Finding, Read, Watch, When};
-use crate::source::{AgentEvent, ToolDetail};
 
 /// The opencode CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "opencode";
 
-/// opencode's sub-agent dispatch tool — matched by NAME only, see
-/// `oc_tool_detail`.
-const SUBAGENT_TOOLS: &[&str] = &["task"];
-
-/// Decode one opencode plugin envelope (already identified by
-/// `_pixtuoid_source == "opencode"`). `type` is the base EventV2 name; the data
-/// is under `properties`.
-///
-/// An unmapped `type` is a benign skip (`Ok(vec![])`), not an error: the
-/// plugin's forward filter lives in JS, so the Rust decoder can't assert 1:1.
-/// Upstream drift is caught by `UPSTREAM`, not a bail here.
-///
-/// # Errors
-///
-/// If the payload is not an object or lacks `type`, a `session.created` or
-/// `session.deleted` lacks `info` or a non-empty `info.id`, or a
-/// `message.part.updated` or permission event lacks `sessionID`.
-pub(crate) fn decode_oc_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
-    let obj = v
-        .as_object()
-        .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;
-    let event = obj
-        .get("type")
-        .and_then(|s| s.as_str())
-        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "type"))?;
-    // `properties` is the EventV2 `data`.
-    let props_val = obj.get("properties").unwrap_or(&Value::Null);
-    let empty = serde_json::Map::new();
-    let props = props_val.as_object().unwrap_or(&empty);
-
-    match event {
-        SESSION_CREATED => decode_session_lifecycle(props, false),
-        SESSION_DELETED => decode_session_lifecycle(props, true),
-        MESSAGE_PART_UPDATED => decode_tool_part(props),
-        PERMISSION_ASKED | PERMISSION_V2_ASKED => decode_permission(props_val),
-        _ => Ok(vec![]),
-    }
-}
-
 const SESSION_CREATED: &str = "session.created";
 const SESSION_DELETED: &str = "session.deleted";
-const MESSAGE_PART_UPDATED: &str = "message.part.updated";
+const EXECUTION_STARTED: &str = "session.execution.started";
+const EXECUTION_SUCCEEDED: &str = "session.execution.succeeded";
+const EXECUTION_FAILED: &str = "session.execution.failed";
+const EXECUTION_INTERRUPTED: &str = "session.execution.interrupted";
+const TOOL_STARTED: &str = "session.tool.input.started";
+const TOOL_SUCCESS: &str = "session.tool.success";
+const TOOL_FAILED: &str = "session.tool.failed";
 const PERMISSION_ASKED: &str = "permission.asked";
-const PERMISSION_V2_ASKED: &str = "permission.v2.asked";
 
-const STATUS_RUNNING: &str = "running";
-const STATUS_COMPLETED: &str = "completed";
-const STATUS_ERROR: &str = "error";
-
-/// The part-state statuses that drive activity. Pinned to the `match status`
-/// arms by `every_exported_set_is_exactly_its_dispatch_arms`.
-#[cfg(any(test, feature = "upstream"))]
-pub(crate) const DECODED_PART_STATUSES: &[&str] = &[STATUS_RUNNING, STATUS_COMPLETED, STATUS_ERROR];
-
-/// The hook event types this decoder turns into events. Pinned to the arms
-/// above by `the_decoded_event_set_is_exactly_what_the_arms_match`.
-///
-/// Off shipped builds: only the drift watch and tests read it. The ARMS are what
-/// production dispatches on, and a second copy of the vocabulary must not be
-/// something the shipped crate can read and drift against.
+/// The event types this decoder turns into events. Pinned to the arms below
+/// by `every_exported_set_is_exactly_its_dispatch_arms`, and to the plugin's
+/// `FORWARD` set by `the_plugin_forwards_exactly_what_the_decoder_reads`.
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_EVENTS: &[&str] = &[
     SESSION_CREATED,
     SESSION_DELETED,
-    MESSAGE_PART_UPDATED,
+    EXECUTION_STARTED,
+    EXECUTION_SUCCEEDED,
+    EXECUTION_FAILED,
+    EXECUTION_INTERRUPTED,
+    TOOL_STARTED,
+    TOOL_SUCCESS,
+    TOOL_FAILED,
     PERMISSION_ASKED,
-    PERMISSION_V2_ASKED,
 ];
 
-/// The inventory is SPLIT — the CLI's v1 `permission.asked` is declared in
-/// `v1/permission.ts`, core's v2 `permission.v2.asked` in `permission.ts` — so
-/// the union is the document. No sibling sweep: the plugin forwards exactly
-/// what the decoder reads (`install/opencode.rs`,
-/// `the_plugin_forwards_exactly_what_the_decoder_reads`).
+/// Every `data` path `field` reads, dotted, pinned by
+/// `every_decoded_data_field_is_read`. The plugin's `allowlisted` copies these
+/// and nothing more, pinned by
+/// `the_plugin_copies_exactly_the_fields_the_decoder_reads`.
 #[cfg(any(test, feature = "upstream"))]
-const EVENT_INVENTORY: &[Doc] = &[
-    inventory("packages/schema/src/v1/session.ts"),
-    inventory("packages/schema/src/v1/permission.ts"),
-    inventory("packages/schema/src/permission.ts"),
+pub const DECODED_DATA_FIELDS: &[&str] = &[
+    "sessionID",
+    "parentID",
+    "location.directory",
+    "model.id",
+    "id",
+    "name",
+    "action",
+    "source.id",
+];
+
+/// Session events are declared in `session-event.ts`'s inventory, permission
+/// events in `permission.ts`'s, so the union is the document.
+#[cfg(any(test, feature = "upstream"))]
+const EVENT_DECLARATIONS: &[Doc] = &[
+    declarations(
+        "packages/schema/src/session-event.ts",
+        r"(?m)^export const Definitions = Event\.inventory\(",
+        "the session `Definitions` inventory",
+    ),
+    declarations(
+        "packages/schema/src/permission.ts",
+        r"(?m)^export const Event = \{",
+        "the permission `Event` inventory",
+    ),
 ];
 
 #[cfg(any(test, feature = "upstream"))]
-const fn inventory(path: &'static str) -> Doc {
+const fn declarations(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
     Doc {
         at: At::Path {
             repo: "anomalyco/opencode",
             path,
             branch: "dev",
         },
-        anchor: r"(?m)^export const Event = \{",
-        owns: "the `Event` inventory",
+        anchor,
+        owns,
     }
 }
 
 #[cfg(any(test, feature = "upstream"))]
-pub(crate) const UPSTREAM: &[Watch] = &[
-    Watch {
-        id: "opencode.hook_events",
-        ours: || DECODED_EVENTS.to_vec(),
-        docs: EVENT_INVENTORY,
-        read: Read::Each {
-            pattern: r#""{name}""#,
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(
-            "the plugin subscribes to an event opencode never fires (no sprite)",
-        ),
-        siblings: None,
+pub(crate) const UPSTREAM: &[Watch] = &[Watch {
+    id: "opencode.hook_events",
+    ours: || DECODED_EVENTS.to_vec(),
+    docs: EVENT_DECLARATIONS,
+    // The declaration form: a bare quoted name also matches prose and tests.
+    read: Read::Each {
+        pattern: r#"type: "{name}""#,
     },
-    Watch {
-        id: "opencode.part_statuses",
-        ours: || DECODED_PART_STATUSES.to_vec(),
-        docs: EVENT_INVENTORY,
-        // The declaration form: a bare `"error"` also matches unrelated
-        // `Omit<…, "error">` sites, which would mask a rename.
-        read: Read::Each {
-            pattern: r#"Schema\.Literal\("{name}"\)"#,
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(
-            "tool activity decodes to nothing: sprites never go Active, or never \
-             come back",
-        ),
-        siblings: None,
-    },
-];
+    when: When::Vanishes,
+    finding: Finding::Breaking(
+        "the plugin subscribes to an event opencode never fires (no sprite)",
+    ),
+    siblings: None,
+}];
 
-/// `session.created` / `session.deleted` → `{sessionID, info: SessionInfo}`,
-/// where `info.id` is the stable `ses_*` key, `info.directory` the cwd, and
-/// `info.parentID` (only on a `task`-spawned subagent) the parent link.
-fn decode_session_lifecycle(
-    props: &serde_json::Map<String, Value>,
-    deleted: bool,
-) -> Result<Vec<AgentEvent>> {
-    let info = props
-        .get("info")
-        .and_then(|i| i.as_object())
-        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "session", "info"))?;
-    let session_id = info
-        .get("id")
-        .and_then(|s| s.as_str())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "session info", "id"))?;
-    let agent_id = AgentId::from_parts(SOURCE_NAME, session_id);
-    let parent = info
-        .get("parentID")
-        .and_then(|s| s.as_str())
+/// Decode one opencode plugin envelope (already identified by
+/// `_pixtuoid_source == "opencode"`). An unmapped `type` is a benign skip: the
+/// forward filter lives in the plugin, and drift is `UPSTREAM`'s to catch.
+///
+/// # Errors
+///
+/// If the payload is not an object or lacks `type`, or a mapped event lacks a
+/// non-empty `data.sessionID`.
+pub(crate) fn decode_oc_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
+    let obj = v
+        .as_object()
+        .ok_or_else(|| DecodeError::not_an_object(SOURCE_NAME))?;
+    let event = obj
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| DecodeError::missing(SOURCE_NAME, "type"))?;
+    let empty = Map::new();
+    let data = obj.get("data").and_then(Value::as_object).unwrap_or(&empty);
+    let at = obj
+        .get("location")
+        .and_then(|l| l.get("directory"))
+        .and_then(Value::as_str)
         .filter(|s| !s.is_empty());
 
-    if deleted {
-        return Ok(vec![AgentEvent::SessionEnd {
-            agent_id,
-            as_child: parent.is_some(),
-        }]);
+    match event {
+        // A new prompt re-emits SessionStart, the event that walks a swept
+        // session back in, mid-walkout too. Its own `data` is only `sessionID`,
+        // so the plugin adds the session's record (`ctx.session.get`).
+        SESSION_CREATED | EXECUTION_STARTED => session_start(data, at, event),
+        // `data` is only `sessionID` (`packages/schema/src/session-event.ts:178`,
+        // `Base`), so a child's end cannot be told from a root's here.
+        SESSION_DELETED => Ok(vec![AgentEvent::SessionEnd {
+            agent_id: session(data, event)?.0,
+            as_child: false,
+        }]),
+        // A turn's end, as cursor's `stop`: no call to pair, so it ends the
+        // session's activity rather than one tool's.
+        EXECUTION_SUCCEEDED | EXECUTION_FAILED | EXECUTION_INTERRUPTED => {
+            ended(data, at, event, None)
+        }
+        TOOL_STARTED => tool_started(data, at),
+        TOOL_SUCCESS | TOOL_FAILED => ended(data, at, event, field(data, "id").map(str::to_owned)),
+        PERMISSION_ASKED => permission_asked(data, at),
+        _ => Ok(vec![]),
     }
+}
 
-    let cwd = info
-        .get("directory")
-        .and_then(|s| s.as_str())
-        .unwrap_or_default();
-    let mut out = vec![AgentEvent::SessionStart {
+/// The session an event concerns: its agent id and its `sessionID`.
+fn session<'d>(data: &'d Map<String, Value>, event: &str) -> Result<(AgentId, &'d str)> {
+    let session_id = field(data, "sessionID")
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, event, "sessionID"))?;
+    Ok((AgentId::from_parts(SOURCE_NAME, session_id), session_id))
+}
+
+/// The non-empty string at dotted `path` in `data`.
+fn field<'d>(data: &'d Map<String, Value>, path: &str) -> Option<&'d str> {
+    // The plugin strips every field outside the list, so a read missing from it
+    // would see nothing in production while an inline test payload passes.
+    #[cfg(test)]
+    assert!(
+        DECODED_DATA_FIELDS.contains(&path),
+        "{path} is not in DECODED_DATA_FIELDS"
+    );
+    let mut keys = path.split('.');
+    let mut at = data.get(keys.next()?)?;
+    for key in keys {
+        at = at.get(key)?;
+    }
+    at.as_str().filter(|s| !s.is_empty())
+}
+
+fn identity(agent_id: AgentId, session_id: &str, at: Option<&str>) -> AgentEvent {
+    AgentEvent::identity(agent_id, SOURCE_NAME, session_id, at.map(PathBuf::from))
+}
+
+/// `location.directory` is the cwd, `parentID` the parent session, and
+/// `model.id` the raw model slug.
+fn session_start(
+    data: &Map<String, Value>,
+    at: Option<&str>,
+    event: &str,
+) -> Result<Vec<AgentEvent>> {
+    let (agent_id, session_id) = session(data, event)?;
+    let cwd = field(data, "location.directory").or(at);
+    let mut out = Vec::new();
+    // A start the plugin could not read a record for has no cwd, and a
+    // cwd-less SessionStart registers on the short unknown-cwd window; an
+    // Identity marks the slot a live process's instead (`apply_identity`).
+    if cwd.is_none() {
+        out.push(identity(agent_id, session_id, None));
+    }
+    out.push(AgentEvent::SessionStart {
         agent_id,
         source: SOURCE_NAME.to_string(),
         session_id: session_id.to_string(),
-        cwd: cwd.into(),
-        parent_id: parent.map(|p| AgentId::from_parts(SOURCE_NAME, p)),
-    }];
-    // `info.model` is `{id, providerID}`, the id being the raw model slug.
-    // session.created is opencode's ONE model carrier — a mid-session switch
-    // has no wire signal.
-    if let Some(model) = info
-        .get("model")
-        .and_then(|m| m.get("id"))
-        .and_then(|s| s.as_str())
-        .filter(|s| !s.is_empty())
-    {
+        cwd: cwd.unwrap_or_default().into(),
+        parent_id: field(data, "parentID").map(|p| AgentId::from_parts(SOURCE_NAME, p)),
+    });
+    if let Some(model) = field(data, "model.id") {
         out.push(AgentEvent::ModelInfo {
             agent_id,
             model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
@@ -229,227 +232,138 @@ fn decode_session_lifecycle(
     Ok(out)
 }
 
-/// `message.part.updated` → `{sessionID, part}`. Only `part.type == "tool"`
-/// drives activity. `state.status`: `running` → `ActivityStart`,
-/// `completed`/`error` → `ActivityEnd`, `pending` → skipped. Keyed on the real
-/// `callID` so a future JSONL twin would dedup.
-fn decode_tool_part(props: &serde_json::Map<String, Value>) -> Result<Vec<AgentEvent>> {
-    let session_id = props
-        .get("sessionID")
-        .and_then(|s| s.as_str())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "message.part.updated", "sessionID"))?;
-    let part = match props.get("part").and_then(|p| p.as_object()) {
-        Some(p) => p,
-        None => return Ok(vec![]),
-    };
-    if part.get("type").and_then(|t| t.as_str()) != Some("tool") {
-        return Ok(vec![]);
-    }
-    let status = part
-        .get("state")
-        .and_then(|s| s.as_object())
-        .and_then(|s| s.get("status"))
-        .and_then(|s| s.as_str())
-        .unwrap_or("");
-    let call_id = part
-        .get("callID")
-        .and_then(|s| s.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
-
-    let agent_id = AgentId::from_parts(SOURCE_NAME, session_id);
-    let identity = oc_identity(agent_id, session_id);
-    match status {
-        STATUS_RUNNING => {
-            let tool = part
-                .get("tool")
-                .and_then(|t| t.as_str())
-                .unwrap_or_else(|| {
-                    crate::source::drift::missing_field(
-                        SOURCE_NAME,
-                        "message.part.updated",
-                        "tool",
-                    );
-                    "?"
-                });
-            let input = part.get("state").and_then(|s| s.get("input"));
-            Ok(vec![
-                identity,
-                AgentEvent::ActivityStart {
-                    agent_id,
-                    tool_use_id: call_id,
-                    detail: Some(oc_tool_detail(tool, input)),
-                },
-            ])
-        }
-        STATUS_COMPLETED | STATUS_ERROR => Ok(vec![
-            identity,
-            AgentEvent::ActivityEnd {
-                agent_id,
-                tool_use_id: call_id,
-            },
-        ]),
-        // `pending` = queued, not yet executing.
-        _ => Ok(vec![]),
-    }
-}
-
-/// `permission.asked` / `permission.v2.asked` → `Waiting`, labelled by the
-/// v2 shape's `action` or the v1 shape's `permission`.
-fn decode_permission(props: &Value) -> Result<Vec<AgentEvent>> {
-    let session_id = props
-        .get("sessionID")
-        .and_then(|s| s.as_str())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, "permission", "sessionID"))?;
-    let agent_id = AgentId::from_parts(SOURCE_NAME, session_id);
-    const KEYS: &[&str] = &["action", "permission"];
-    let reason = crate::source::decoder::first_present_str(props, KEYS)
-        .filter(|s| !s.is_empty())
-        .map(|s| ellipsize(s, MAX_DECODED_FIELD_CHARS))
-        .unwrap_or_else(|| "permission".to_string());
+/// An end, led by Identity (#221) as a tool start and a permission ask are,
+/// so one for a slot the reaper removed registers it with its identity, not
+/// as a blank `#N`.
+fn ended(
+    data: &Map<String, Value>,
+    at: Option<&str>,
+    event: &str,
+    tool_use_id: Option<String>,
+) -> Result<Vec<AgentEvent>> {
+    let (agent_id, session_id) = session(data, event)?;
     Ok(vec![
-        oc_identity(agent_id, session_id),
-        AgentEvent::Waiting {
+        identity(agent_id, session_id, at),
+        AgentEvent::ActivityEnd {
             agent_id,
-            reason,
-            tool_use_id: None,
+            tool_use_id,
         },
     ])
 }
 
-/// The `Identity` prepended ahead of a tool/permission activity event.
-/// `cwd: None` — those events carry only `sessionID`, so the reducer back-fills
-/// cwd first-wins from the session's `session.created`.
-fn oc_identity(agent_id: AgentId, session_id: &str) -> AgentEvent {
-    AgentEvent::identity(agent_id, SOURCE_NAME, session_id, None)
+/// The tool's `id` is the call id its `success`/`failed` pair on. The input
+/// rides a later event, so the detail is the tool's name alone.
+fn tool_started(data: &Map<String, Value>, at: Option<&str>) -> Result<Vec<AgentEvent>> {
+    let (agent_id, session_id) = session(data, TOOL_STARTED)?;
+    let name = field(data, "name").unwrap_or_else(|| {
+        crate::source::drift::missing_field(SOURCE_NAME, TOOL_STARTED, "name");
+        "?"
+    });
+    Ok(vec![
+        identity(agent_id, session_id, at),
+        AgentEvent::ActivityStart {
+            agent_id,
+            tool_use_id: field(data, "id").map(str::to_owned),
+            // Even `subagent` is no `Task`: `background: true`, or the user's
+            // ctrl+b mid-run, returns the call while the child still runs
+            // (`packages/core/src/tool/plugin/subagent.ts:229-243`,
+            // `packages/core/src/session.ts:442-455`), and a Task's end would
+            // walk the live child out. The child is its own session, parented
+            // by `parentID`.
+            detail: Some(generic_tool_display(name, None)),
+        },
+    ])
 }
 
-/// opencode-side tool detail: the `task` dispatch tool (by NAME) →
-/// `ToolDetail::Task`; everything else → a `"name: target"` display, the target
-/// pulled from the tool `input` record (opencode builtins: bash→`command`,
-/// read/edit/write→`filePath`, grep/glob→`pattern`, webfetch→`url`).
-fn oc_tool_detail(tool: &str, input: Option<&Value>) -> ToolDetail {
-    // NAME-ONLY, deliberately NOT the CC `subagent_type`-presence signal:
-    // opencode's tool `ActivityStart` carries a real `callID`, so a
-    // model-authored `subagent_type` on an ORDINARY tool would seed the
-    // reducer's `active_tasks` and, on drain, cascade the parent's real `ses_*`
-    // children out (the lifecycle-authority trap).
-    if SUBAGENT_TOOLS.contains(&tool) {
-        return ToolDetail::Task;
-    }
-    const KEYS: &[&str] = &[
-        "command",
-        "filePath",
-        "file_path",
-        "path",
-        "pattern",
-        "url",
-        "query",
-    ];
-    crate::source::decoder::generic_keyed_detail(tool, input, KEYS)
+/// Waiting, labelled by the request's `action` and keyed on its tool call
+/// (`source.id`) when it has one.
+fn permission_asked(data: &Map<String, Value>, at: Option<&str>) -> Result<Vec<AgentEvent>> {
+    let (agent_id, session_id) = session(data, PERMISSION_ASKED)?;
+    let reason = field(data, "action").map_or_else(
+        || "permission".to_owned(),
+        |a| ellipsize(a, MAX_DECODED_FIELD_CHARS),
+    );
+    Ok(vec![
+        identity(agent_id, session_id, at),
+        AgentEvent::Waiting {
+            agent_id,
+            reason,
+            tool_use_id: field(data, "source.id").map(str::to_owned),
+        },
+    ])
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    /// The exported set IS the arms: every member reaches a real arm and decodes
-    /// to at least one event. The arms dispatch on the SAME consts, so a value
-    /// can no longer drift; what this catches is a member dropped from the set,
-    /// or kept in it after its arm went away.
-    #[test]
-    fn the_decoded_event_set_is_exactly_what_the_arms_match() {
-        let payload = |ev: &str| match ev {
-            MESSAGE_PART_UPDATED => serde_json::json!({"type": ev, "properties": {
-                "sessionID": "ses_x",
-                "part": {"type": "tool", "callID": "c", "tool": "bash",
-                         "state": {"status": "running"}}}}),
-            PERMISSION_ASKED | PERMISSION_V2_ASKED => {
-                serde_json::json!({"type": ev, "properties": {"sessionID": "ses_x"}})
-            }
-            _ => serde_json::json!({"type": ev, "properties": {
-                "sessionID": "ses_m", "info": {"id": "ses_m", "directory": "/repo"}}}),
-        };
-        for ev in DECODED_EVENTS {
-            let got = decode_oc_hook_payload(&payload(ev)).expect("a decoded event decodes");
-            assert!(!got.is_empty(), "{ev} must reach a real arm");
-        }
-        assert!(
-            decode_oc_hook_payload(&payload("session.archived"))
-                .expect("an unhandled type is not an error")
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn session_created_surfaces_the_model_slug() {
-        let v = serde_json::json!({
-            "type": "session.created",
-            "properties": {"sessionID": "ses_m", "info": {
-                "id": "ses_m", "directory": "/repo",
-                "model": {"id": "deepseek-v4-flash-free", "providerID": "opencode"}
-            }}
-        });
-        let evs = decode_oc_hook_payload(&v).unwrap();
-        assert!(
-            evs.iter().any(|e| matches!(e, AgentEvent::ModelInfo { model: Some(m), effort: None, .. } if m == "deepseek-v4-flash-free")),
-            "session.created model must surface, got {evs:?}"
-        );
-        let v = serde_json::json!({
-            "type": "session.created",
-            "properties": {"sessionID": "ses_n", "info": {"id": "ses_n", "directory": "/repo"}}
-        });
-        let evs = decode_oc_hook_payload(&v).unwrap();
-        assert!(
-            evs.iter()
-                .any(|e| matches!(e, AgentEvent::SessionStart { .. }))
-        );
-        assert!(
-            !evs.iter()
-                .any(|e| matches!(e, AgentEvent::ModelInfo { .. }))
-        );
-    }
-    use crate::source::decoder::MAX_TOOL_TARGET_CHARS;
     use serde_json::json;
+
+    use super::*;
+    use crate::source::ToolDetail;
 
     fn decode_all(v: Value) -> Vec<AgentEvent> {
         decode_oc_hook_payload(&v).expect("decodes")
     }
 
-    /// The payload's MAIN event — the last decoded (activity arms prepend Identity).
+    /// The payload's MAIN event: the last decoded, after any Identity.
     fn decode(v: Value) -> AgentEvent {
         decode_all(v).pop().expect("at least one event")
     }
 
-    /// FIRST event — session.created piggybacks a ModelInfo behind the
-    /// SessionStart these lifecycle tests inspect.
-    fn decode_first(v: Value) -> AgentEvent {
-        decode_all(v)
-            .into_iter()
-            .next()
-            .expect("at least one event")
+    fn created(data: Value) -> Value {
+        json!({"type": SESSION_CREATED, "data": data, "_pid": 13358})
+    }
+
+    /// [`field`]'s assertion holds every read to the list; this holds every
+    /// listed path to a read, by blanking it.
+    #[test]
+    fn every_decoded_data_field_is_read() {
+        let full = json!({"sessionID": "s", "parentID": "p", "location": {"directory": "/r"},
+            "model": {"id": "m"}, "id": "c", "name": "bash", "action": "shell",
+            "source": {"id": "c"}});
+        let decoded = |ev: &str, data: &Value| {
+            format!(
+                "{:?}",
+                decode_oc_hook_payload(&json!({"type": ev, "data": data}))
+            )
+        };
+        for path in DECODED_DATA_FIELDS {
+            let mut blanked = full.clone();
+            *blanked
+                .pointer_mut(&format!("/{}", path.replace('.', "/")))
+                .expect("the full payload holds every listed path") = json!("");
+            assert!(
+                DECODED_EVENTS
+                    .iter()
+                    .any(|ev| decoded(ev, &full) != decoded(ev, &blanked)),
+                "{path} is in DECODED_DATA_FIELDS, but no event reads it"
+            );
+        }
+    }
+
+    /// Every exported type reaches an arm and decodes to an event, and an
+    /// unmapped one is a benign skip.
+    #[test]
+    fn the_decoded_event_set_is_exactly_what_the_arms_match() {
+        for ev in DECODED_EVENTS {
+            let got = decode_all(json!({"type": ev, "data": {
+                "sessionID": "ses_x", "id": "c", "name": "bash",
+                "location": {"directory": "/repo"}}}));
+            assert!(!got.is_empty(), "{ev} must reach a real arm");
+        }
+        assert!(
+            decode_all(json!({"type": "session.viewed", "data": {"sessionID": "ses_x"}}))
+                .is_empty()
+        );
     }
 
     #[test]
-    fn session_created_keys_on_stable_session_id() {
-        let ev = decode_first(json!({
-            "type": "session.created",
-            "properties": {
-                "sessionID": "ses_140762860ffe0d",
-                "info": {
-                    "id": "ses_140762860ffe0d",
-                    "slug": "shiny-canyon",
-                    "projectID": "13e2248518abbe",
-                    "directory": "/private/tmp/oc-capture/ws",
-                    "agent": "build",
-                    "model": {"id": "deepseek-v4-flash-free", "providerID": "opencode"}
-                }
-            },
-            "_pid": 13358
-        }));
-        match ev {
+    fn session_created_keys_on_its_session_id_and_reads_its_location() {
+        let evs = decode_all(created(json!({
+            "sessionID": "ses_140762860ffe0d", "projectID": "prj_1", "slug": "shiny-canyon",
+            "location": {"directory": "/private/tmp/oc-capture/ws"},
+            "model": {"id": "claude-sonnet-4-5", "providerID": "anthropic"}, "version": "2.0.27"
+        })));
+        match &evs[0] {
             AgentEvent::SessionStart {
                 agent_id,
                 source,
@@ -459,77 +373,56 @@ mod tests {
             } => {
                 assert_eq!(source, SOURCE_NAME);
                 assert_eq!(
-                    agent_id,
+                    *agent_id,
                     AgentId::from_parts(SOURCE_NAME, "ses_140762860ffe0d")
                 );
                 assert_eq!(session_id, "ses_140762860ffe0d");
-                assert_eq!(cwd, std::path::PathBuf::from("/private/tmp/oc-capture/ws"));
-                assert_eq!(parent_id, None);
+                assert_eq!(*cwd, std::path::PathBuf::from("/private/tmp/oc-capture/ws"));
+                assert_eq!(*parent_id, None);
             }
             other => panic!("expected SessionStart, got {other:?}"),
         }
+        assert!(
+            matches!(&evs[1], AgentEvent::ModelInfo { model: Some(m), effort: None, .. }
+            if m == "claude-sonnet-4-5")
+        );
+        let bare = decode_all(created(
+            json!({"sessionID": "ses_n", "location": {"directory": "/r"}}),
+        ));
+        assert_eq!(bare.len(), 1, "no model, no ModelInfo: {bare:?}");
     }
 
     #[test]
-    fn subagent_session_created_links_to_its_parent_session() {
-        let ev = decode_first(json!({
-            "type": "session.created",
-            "properties": { "sessionID": "ses_child", "info": {
-                "id": "ses_child", "directory": "/repo", "parentID": "ses_parent"
-            }}
-        }));
-        match ev {
+    fn a_subagent_session_links_to_its_parent_and_keeps_its_own_id() {
+        let parent = decode(created(
+            json!({"sessionID": "ses_p", "location": {"directory": "/r"}}),
+        ));
+        let child = decode_all(created(json!({
+            "sessionID": "ses_c", "location": {"directory": "/r"}, "parentID": "ses_p"})));
+        match &child[0] {
             AgentEvent::SessionStart {
                 agent_id,
                 parent_id,
                 ..
             } => {
-                assert_eq!(agent_id, AgentId::from_parts(SOURCE_NAME, "ses_child"));
-                assert_eq!(
-                    parent_id,
-                    Some(AgentId::from_parts(SOURCE_NAME, "ses_parent"))
-                );
+                assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "ses_c"));
+                assert_eq!(*parent_id, Some(parent.agent_id()));
             }
             other => panic!("expected SessionStart, got {other:?}"),
         }
     }
 
     #[test]
-    fn a_subagent_does_not_coalesce_with_its_parent() {
-        let parent = decode(json!({"type": "session.created",
-            "properties": {"info": {"id": "ses_p", "directory": "/r"}}}));
-        let child = decode(json!({"type": "session.created",
-            "properties": {"info": {"id": "ses_c", "directory": "/r", "parentID": "ses_p"}}}));
-        assert_ne!(parent.agent_id(), child.agent_id());
-    }
-
-    #[test]
-    fn spoofed_subagent_type_on_an_ordinary_tool_is_not_a_task() {
-        let spoof = json!({"command": "ls", "subagent_type": "general"});
-        assert!(!oc_tool_detail("bash", Some(&spoof)).is_task());
-        assert!(oc_tool_detail("task", Some(&json!({"description": "go"}))).is_task());
-    }
-
-    #[test]
-    fn running_tool_part_is_activity_start_keyed_on_callid() {
-        let events = decode_all(json!({
-            "type": "message.part.updated",
-            "properties": {
-                "sessionID": "ses_x",
-                "part": {
-                    "id": "prt_1", "sessionID": "ses_x", "messageID": "msg_1",
-                    "type": "tool", "callID": "call_abc", "tool": "bash",
-                    "state": {"status": "running", "input": {"command": "ls -la"},
-                              "time": {"start": 1}}
-                }
-            }
-        }));
-        assert_eq!(events.len(), 2, "Identity + ActivityStart");
-        assert!(
-            matches!(&events[0], AgentEvent::Identity { session_id, cwd, .. }
-            if session_id == "ses_x" && cwd.is_none())
+    fn a_tool_start_is_activity_start_keyed_on_its_id() {
+        let evs = decode_all(
+            json!({"type": TOOL_STARTED, "location": {"directory": "/repo"},
+            "data": {"sessionID": "ses_x", "assistantMessageID": "msg_1", "id": "call_abc", "name": "bash"}}),
         );
-        match &events[1] {
+        assert!(
+            matches!(&evs[0], AgentEvent::Identity { session_id, cwd: Some(cwd), .. }
+            if session_id == "ses_x" && cwd.as_path() == std::path::Path::new("/repo"))
+        );
+        match &evs[1] {
             AgentEvent::ActivityStart {
                 agent_id,
                 tool_use_id,
@@ -537,279 +430,149 @@ mod tests {
             } => {
                 assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "ses_x"));
                 assert_eq!(tool_use_id.as_deref(), Some("call_abc"));
-                assert_eq!(detail.as_ref().unwrap().display(), "bash: ls -la");
+                assert_eq!(detail.as_ref().map(ToolDetail::display), Some("bash"));
             }
             other => panic!("expected ActivityStart, got {other:?}"),
         }
     }
 
+    /// `session.forked`'s `parentID` is the session it was copied from, beside
+    /// a message `boundary` (`packages/schema/src/session-event.ts:187-200`),
+    /// not a parent.
     #[test]
-    fn completed_and_error_tool_parts_are_activity_end() {
-        for status in ["completed", "error"] {
-            let ev = decode(json!({
-                "type": "message.part.updated",
-                "properties": {"sessionID": "ses_x", "part": {
-                    "type": "tool", "callID": "call_abc", "tool": "bash",
-                    "state": {"status": status}
-                }}
-            }));
-            assert!(
-                matches!(ev, AgentEvent::ActivityEnd { tool_use_id, .. }
-                if tool_use_id.as_deref() == Some("call_abc")),
-                "{status} must be ActivityEnd"
-            );
-        }
-    }
-
-    #[test]
-    fn pending_tool_part_and_non_tool_parts_are_skipped() {
-        assert!(decode_all(json!({"type": "message.part.updated", "properties": {
-            "sessionID": "ses_x",
-            "part": {"type": "tool", "callID": "c", "tool": "bash", "state": {"status": "pending"}}
-        }}))
-        .is_empty());
-        for t in ["text", "reasoning", "step-start", "step-finish"] {
-            assert!(
-                decode_all(json!({"type": "message.part.updated", "properties": {
-                    "sessionID": "ses_x", "part": {"type": t}
-                }}))
-                .is_empty(),
-                "{t} part must be skipped"
-            );
-        }
-    }
-
-    #[test]
-    fn task_tool_maps_to_delegating() {
-        let ev = decode(json!({
-            "type": "message.part.updated", "properties": {"sessionID": "ses_x", "part": {
-                "type": "tool", "callID": "c", "tool": "task",
-                "state": {"status": "running", "input": {"description": "investigate X"}}
-            }}
-        }));
-        assert!(matches!(&ev, AgentEvent::ActivityStart { detail: Some(d), .. } if d.is_task()));
-    }
-
-    #[test]
-    fn spoofed_subagent_type_input_does_not_make_a_task() {
-        let ev = decode(json!({
-            "type": "message.part.updated", "properties": {"sessionID": "ses_x", "part": {
-                "type": "tool", "callID": "c", "tool": "spawn",
-                "state": {"status": "running", "input": {"subagent_type": "explore"}}
-            }}
-        }));
-        assert!(matches!(&ev, AgentEvent::ActivityStart { detail: Some(d), .. } if !d.is_task()));
-    }
-
-    #[test]
-    fn permission_asked_maps_to_waiting() {
-        for (ty, props, want) in [
-            (
-                "permission.v2.asked",
-                json!({"sessionID": "ses_x", "action": "bash", "resources": ["rm -rf build"]}),
-                "bash",
-            ),
-            (
-                "permission.asked",
-                json!({"sessionID": "ses_x", "permission": "edit"}),
-                "edit",
-            ),
-        ] {
-            let events = decode_all(json!({"type": ty, "properties": props}));
-            assert_eq!(events.len(), 2, "{ty}: Identity + Waiting");
-            match &events[1] {
-                AgentEvent::Waiting {
-                    agent_id, reason, ..
-                } => {
-                    assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "ses_x"));
-                    assert_eq!(reason, want);
-                }
-                other => panic!("{ty}: expected Waiting, got {other:?}"),
-            }
-        }
-    }
-
-    #[test]
-    fn permission_without_a_label_falls_back_to_generic_reason() {
-        let ev = decode(json!({"type": "permission.asked", "properties": {"sessionID": "ses_x"}}));
-        assert!(matches!(ev, AgentEvent::Waiting { reason, .. } if reason == "permission"));
-    }
-
-    /// Neither permission shape opencode v1.18.35 declares carries a string
-    /// under these keys (`packages/schema/src/v1/permission.ts`,
-    /// `packages/schema/src/permission.ts`), so none labels the wait.
-    #[test]
-    fn a_key_no_permission_shape_declares_labels_nothing() {
-        for key in ["title", "pattern", "type", "tool"] {
-            let ev = decode(
-                json!({"type": "permission.asked", "properties": {"sessionID": "ses_x", key: "x"}}),
-            );
-            assert!(
-                matches!(&ev, AgentEvent::Waiting { reason, .. } if reason == "permission"),
-                "{key}: {ev:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn session_deleted_root_is_a_top_level_end() {
-        let ev = decode(json!({"type": "session.deleted",
-            "properties": {"sessionID": "ses_x", "info": {"id": "ses_x", "directory": "/r"}}}));
-        assert!(matches!(
-            ev,
-            AgentEvent::SessionEnd {
-                as_child: false,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn session_deleted_child_ends_as_a_child() {
-        let ev = decode(json!({"type": "session.deleted",
-            "properties": {"info": {"id": "ses_c", "directory": "/r", "parentID": "ses_p"}}}));
-        match ev {
-            AgentEvent::SessionEnd { agent_id, as_child } => {
-                assert_eq!(agent_id, AgentId::from_parts(SOURCE_NAME, "ses_c"));
-                assert!(as_child, "a child session delete ends as_child");
-            }
-            other => panic!("expected SessionEnd, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn all_events_for_one_session_share_one_agent_id() {
-        let events = [
-            json!({"type": "session.created", "properties": {"info": {"id": "ses_1", "directory": "/p"}}}),
-            json!({"type": "message.part.updated", "properties": {"sessionID": "ses_1", "part": {
-                "type": "tool", "callID": "c1", "tool": "read",
-                "state": {"status": "running", "input": {"filePath": "x.rs"}}}}}),
-            json!({"type": "message.part.updated", "properties": {"sessionID": "ses_1", "part": {
-                "type": "tool", "callID": "c1", "tool": "read", "state": {"status": "completed"}}}}),
-            json!({"type": "permission.asked", "properties": {"sessionID": "ses_1", "permission": "x"}}),
-            json!({"type": "session.deleted", "properties": {"info": {"id": "ses_1", "directory": "/p"}}}),
-        ];
-        let ids: std::collections::BTreeSet<_> = events
-            .iter()
-            .flat_map(|v| decode_oc_hook_payload(v).unwrap())
-            .map(|e| e.agent_id())
-            .collect();
-        assert_eq!(
-            ids.len(),
-            1,
-            "all events of one session coalesce to one AgentId"
+    fn a_fork_is_no_child() {
+        assert!(
+            decode_all(json!({"type": "session.forked", "data": {
+                "sessionID": "ses_f", "parentID": "ses_p", "boundary": {}}}))
+            .is_empty()
         );
     }
 
     #[test]
-    fn unmapped_event_types_are_skipped_not_errored() {
-        for ty in [
-            "session.idle",
-            "session.updated",
-            "message.updated",
-            "session.next.step.started",
-            "server.instance.disposed",
-        ] {
+    fn a_tool_without_a_name_degrades_to_a_question_mark() {
+        let ev = decode(json!({"type": TOOL_STARTED, "data": {"sessionID": "ses_x", "id": "c"}}));
+        assert!(
+            matches!(ev, AgentEvent::ActivityStart { detail: Some(d), .. } if d.display() == "?")
+        );
+    }
+
+    #[test]
+    fn a_tool_success_or_failure_ends_its_call() {
+        for ev in [TOOL_SUCCESS, TOOL_FAILED] {
+            let got = decode_all(json!({"type": ev, "location": {"directory": "/repo"},
+                "data": {"sessionID": "ses_x", "id": "call_abc"}}));
             assert!(
-                decode_oc_hook_payload(&json!({"type": ty, "properties": {}}))
-                    .unwrap()
-                    .is_empty(),
-                "{ty} must skip, not error"
+                matches!(got.as_slice(), [AgentEvent::Identity { session_id, cwd: Some(_), .. },
+                    AgentEvent::ActivityEnd { tool_use_id: Some(id), .. }]
+                if session_id == "ses_x" && id == "call_abc"),
+                "{ev}: {got:?}"
             );
+        }
+    }
+
+    #[test]
+    fn an_execution_start_is_a_session_start_with_its_record_and_its_end_closes_the_turn() {
+        let start = decode_all(
+            json!({"type": EXECUTION_STARTED, "data": {"sessionID": "ses_c",
+            "location": {"directory": "/repo"}, "parentID": "ses_p", "model": {"id": "m-1"}}}),
+        );
+        assert!(
+            matches!(start.as_slice(), [
+                AgentEvent::SessionStart { session_id, cwd, parent_id: Some(p), .. },
+                AgentEvent::ModelInfo { model: Some(m), .. },
+            ] if session_id == "ses_c" && cwd.as_path() == std::path::Path::new("/repo")
+                && *p == AgentId::from_parts(SOURCE_NAME, "ses_p") && m == "m-1"),
+            "{start:?}"
+        );
+        let bare = decode_all(json!({"type": EXECUTION_STARTED, "data": {"sessionID": "ses_c"}}));
+        assert!(
+            matches!(
+                bare.as_slice(),
+                [
+                    AgentEvent::Identity { cwd: None, .. },
+                    AgentEvent::SessionStart { .. }
+                ]
+            ),
+            "a start with no record is process-proven: {bare:?}"
+        );
+        for ev in [EXECUTION_SUCCEEDED, EXECUTION_FAILED, EXECUTION_INTERRUPTED] {
+            let got = decode_all(json!({"type": ev, "data": {"sessionID": "ses_x"}}));
+            assert!(
+                matches!(
+                    got.as_slice(),
+                    [
+                        AgentEvent::Identity { .. },
+                        AgentEvent::ActivityEnd {
+                            tool_use_id: None,
+                            ..
+                        }
+                    ]
+                ),
+                "{ev}: {got:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_permission_ask_is_waiting_on_its_tool_call() {
+        let evs = decode_all(json!({"type": PERMISSION_ASKED, "data": {
+            "id": "per_1", "sessionID": "ses_x", "action": "bash", "resources": ["rm -rf /tmp/x"],
+            "source": {"type": "tool", "messageID": "msg_1", "id": "call_abc"}}}));
+        assert!(matches!(&evs[0], AgentEvent::Identity { .. }));
+        assert!(
+            matches!(&evs[1], AgentEvent::Waiting { reason, tool_use_id: Some(id), .. }
+            if reason == "bash" && id == "call_abc")
+        );
+        let bare = decode(json!({"type": PERMISSION_ASKED, "data": {"sessionID": "ses_x"}}));
+        assert!(
+            matches!(bare, AgentEvent::Waiting { reason, tool_use_id: None, .. } if reason == "permission")
+        );
+    }
+
+    #[test]
+    fn a_deleted_session_ends() {
+        let ev = decode(json!({"type": SESSION_DELETED, "data": {"sessionID": "ses_x"}}));
+        assert!(
+            matches!(ev, AgentEvent::SessionEnd { agent_id, as_child: false }
+            if agent_id == AgentId::from_parts(SOURCE_NAME, "ses_x"))
+        );
+    }
+
+    #[test]
+    fn every_event_of_one_session_shares_its_agent_id() {
+        let want = AgentId::from_parts(SOURCE_NAME, "ses_x");
+        for ev in DECODED_EVENTS {
+            for got in decode_all(json!({"type": ev, "data": {"sessionID": "ses_x", "id": "c"}})) {
+                assert_eq!(got.agent_id(), want, "{ev}");
+            }
         }
     }
 
     #[test]
     fn malformed_payloads_are_errors_not_panics() {
-        assert!(decode_oc_hook_payload(&json!("a string")).is_err());
-        assert!(decode_oc_hook_payload(&json!(42)).is_err());
-        assert!(
-            decode_oc_hook_payload(&json!({"properties": {}})).is_err(),
-            "missing type"
-        );
-        assert!(
-            decode_oc_hook_payload(&json!({"type": "session.created", "properties": {"info": {}}}))
-                .is_err()
-        );
-        assert!(
-            decode_oc_hook_payload(&json!({"type": "session.created", "properties": {}})).is_err()
-        );
-    }
-
-    #[test]
-    fn tool_without_target_or_name_degrades_cleanly() {
-        let ev = decode(json!({"type": "message.part.updated", "properties": {
-            "sessionID": "ses_x",
-            "part": {"type": "tool", "callID": "c", "tool": "bash", "state": {"status": "running"}}
-        }}));
-        assert!(
-            matches!(ev, AgentEvent::ActivityStart { detail: Some(d), .. } if d.display() == "bash")
-        );
-    }
-
-    #[test]
-    fn tool_part_event_without_a_part_object_is_skipped() {
-        assert!(
-            decode_all(json!({
-                "type": "message.part.updated",
-                "properties": {"sessionID": "ses_x"}
-            }))
-            .is_empty(),
-            "a part-less message.part.updated must skip, not error"
-        );
-        assert!(
-            decode_oc_hook_payload(&json!({
-                "type": "message.part.updated",
-                "properties": {"sessionID": "ses_x", "part": 42}
-            }))
-            .expect("scalar part is a skip, not an error")
-            .is_empty(),
-            "a scalar `part` must skip, not error"
-        );
-    }
-
-    #[test]
-    fn running_tool_part_without_a_tool_field_degrades_to_question_mark_detail() {
-        let events = decode_all(json!({
-            "type": "message.part.updated",
-            "properties": {
-                "sessionID": "ses_x",
-                "part": {"type": "tool", "callID": "call_x", "state": {"status": "running"}}
-            }
-        }));
-        assert_eq!(events.len(), 2, "Identity + ActivityStart");
-        match &events[1] {
-            AgentEvent::ActivityStart {
-                tool_use_id,
-                detail,
-                ..
-            } => {
-                assert_eq!(tool_use_id.as_deref(), Some("call_x"));
-                assert_eq!(
-                    detail.as_ref().unwrap().display(),
-                    "?",
-                    "a tool-less running part degrades to the \"?\" display"
-                );
-            }
-            other => panic!("expected ActivityStart, got {other:?}"),
+        assert!(decode_oc_hook_payload(&json!("x")).is_err());
+        assert!(decode_oc_hook_payload(&json!({"data": {"sessionID": "s"}})).is_err());
+        for ev in DECODED_EVENTS {
+            assert!(
+                decode_oc_hook_payload(&json!({"type": ev, "data": {}})).is_err(),
+                "{ev} without a sessionID"
+            );
+            assert!(
+                decode_oc_hook_payload(&json!({"type": ev, "data": {"sessionID": ""}})).is_err(),
+                "{ev} with an empty sessionID"
+            );
         }
     }
 
     #[test]
-    fn long_tool_target_is_truncated_at_the_decode_boundary() {
-        let long = "x".repeat(MAX_TOOL_TARGET_CHARS * 3);
-        let ev = decode(json!({"type": "message.part.updated", "properties": {
-            "sessionID": "ses_x", "part": {"type": "tool", "callID": "c", "tool": "bash",
-                "state": {"status": "running", "input": {"command": long}}}
-        }}));
-        match ev {
-            AgentEvent::ActivityStart {
-                detail: Some(d), ..
-            } => {
-                assert!(d.display().starts_with("bash: "));
-                assert!(d.display().ends_with('…'));
-            }
-            other => panic!("expected ActivityStart, got {other:?}"),
-        }
+    fn a_long_model_slug_is_truncated_at_the_decode_boundary() {
+        let long = "m".repeat(MAX_DECODED_FIELD_CHARS + 10);
+        let evs = decode_all(created(
+            json!({"sessionID": "s", "location": {"directory": "/r"}, "model": {"id": long}}),
+        ));
+        assert!(
+            matches!(&evs[1], AgentEvent::ModelInfo { model: Some(m), .. }
+            if m.chars().count() <= MAX_DECODED_FIELD_CHARS + 1)
+        );
     }
 }

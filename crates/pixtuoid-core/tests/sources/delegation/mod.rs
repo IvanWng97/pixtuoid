@@ -16,12 +16,6 @@ fn lines(cli: &str, name: &str) -> Vec<String> {
     )
 }
 
-fn opencode_events() -> Vec<AgentEvent> {
-    let d = Drive::hooks().lines(lines("opencode", "hook-payloads.jsonl"));
-    d.assert_clean("opencode delegation hooks");
-    d.events
-}
-
 fn copilot_events() -> Vec<AgentEvent> {
     // copilot keys the session on the transcript's PARENT dir, so the logical
     // path has to carry the session id the capture ran under.
@@ -67,7 +61,6 @@ fn tasks(evs: &[AgentEvent]) -> usize {
 #[test]
 fn every_name_keyed_source_mints_exactly_one_task_from_its_capture() {
     for (cli, evs) in [
-        ("opencode", opencode_events()),
         ("copilot", copilot_events()),
         ("omp", omp_events()),
         ("dsh", dsh_events()),
@@ -87,7 +80,6 @@ fn the_child_is_in_band_for_some_of_them_and_a_separate_file_for_others() {
     // rule. omp announces nothing — its child is a sibling transcript the
     // watcher discovers — so its parent capture is a single agent.
     for (cli, evs, in_band) in [
-        ("opencode", opencode_events(), true),
         ("copilot", copilot_events(), true),
         ("omp", omp_events(), false),
         ("dsh", dsh_events(), true),
@@ -139,12 +131,6 @@ fn the_task_detail_lands_on_the_call_actually_named_task() {
     // It has to BIND: counting one Task and one ordinary tool passes just as
     // well when the decoder tags the bash call and leaves the dispatch bare.
     for (cli, evs, raw, name) in [
-        (
-            "opencode",
-            opencode_events(),
-            lines("opencode", "hook-payloads.jsonl"),
-            "task",
-        ),
         (
             "copilot",
             copilot_events(),
