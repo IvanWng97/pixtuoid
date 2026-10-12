@@ -12,7 +12,9 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use pixtuoid_core::source::registry::REGISTRY;
-use pixtuoid_core::source::upstream::{At, Doc, Family, Finding, Read, Siblings, Watch, When};
+use pixtuoid_core::source::upstream::{
+    At, Doc, Family, Finding, Read, Siblings, Watch, When, Yield,
+};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
@@ -414,10 +416,9 @@ fn check_watch(source: &str, w: &Watch, fetched: &mut Fetched, report: &mut Repo
     };
     match w.when {
         When::Vanishes => {
-            let verb = match w.read {
-                Read::RustStr { .. } => Some("declares"),
-                Read::TsReturn { .. } => Some("returns"),
-                _ => None,
+            let verb = match w.read.yields() {
+                Yield::One { verb } => Some(verb),
+                Yield::Declaration | Yield::Family | Yield::Ours | Yield::Fields => None,
             };
             let now = verb.map_or_else(String::new, |verb| {
                 format!(
@@ -474,23 +475,18 @@ fn check_watch(source: &str, w: &Watch, fetched: &mut Fetched, report: &mut Repo
     }
 }
 
-/// Whether fewer names than ours means the reader degraded rather than that
-/// most of ours were renamed at once, #929's false ⛔: only for a vanish
-/// watch whose reader yields upstream's whole declaration. `Each` yields just
-/// the ones of ours it finds and a family reader just the family, so their
-/// shrink is the finding, and a shrunk parse cannot invent an appearance.
+/// Whether fewer names than ours means the reader degraded: only on a vanish
+/// watch, since a shrunk parse cannot invent an appearance.
 fn floored(w: &Watch) -> bool {
-    matches!(w.when, When::Vanishes)
-        && !matches!(w.read, Read::Each { .. })
-        && !w.read.confined_to_family()
+    matches!(w.when, When::Vanishes) && w.read.yields().floored()
 }
 
 /// What the floor counts of `names`: a `TsFields` read's `field?` and
 /// `field:"lit"` are facts beside a field, not fields.
 fn floor_count<'a>(read: &Read, names: impl Iterator<Item = &'a str>) -> usize {
-    match read {
-        Read::TsFields { .. } => names.filter(|n| read::is_bare(n)).count(),
-        _ => names.count(),
+    match read.yields() {
+        Yield::Fields => names.filter(|n| read::is_bare(n)).count(),
+        Yield::Declaration | Yield::Family | Yield::Ours | Yield::One { .. } => names.count(),
     }
 }
 

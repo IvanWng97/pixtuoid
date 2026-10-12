@@ -120,10 +120,79 @@ pub enum Read {
 }
 
 impl Read {
-    /// Whether it yields only the family a watch reads, never the rest of
-    /// upstream's declaration beside it.
-    pub const fn confined_to_family(&self) -> bool {
-        matches!(self, Self::RustArms { .. })
+    /// What it yields of upstream's declaration. Every judgement that depends
+    /// on the reader asks this, so a new reader is classified here once.
+    #[deny(clippy::wildcard_enum_match_arm)]
+    pub const fn yields(&self) -> Yield {
+        match self {
+            Self::Each { .. } => Yield::Ours,
+            Self::RustStr { .. } => Yield::One { verb: "declares" },
+            Self::TsReturn { .. } => Yield::One { verb: "returns" },
+            Self::RustArms { .. } => Yield::Family,
+            Self::TsFields { .. } => Yield::Fields,
+            Self::RustEnum { .. }
+            | Self::RustStruct { .. }
+            | Self::TsMembers { .. }
+            | Self::Matches { .. }
+            | Self::MdTable { .. }
+            | Self::MdHeadings { .. }
+            | Self::PySet { .. }
+            | Self::RustMacroRows { .. }
+            | Self::TsConstArray { .. }
+            | Self::JsonUnion { .. }
+            | Self::JsonKeys => Yield::Declaration,
+        }
+    }
+}
+
+/// What a [`Read`] yields of upstream's declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Yield {
+    /// The whole declaration a watch's names sit in.
+    Declaration,
+    /// Only the family a watch reads, never the rest beside it.
+    Family,
+    /// Only the names of ours it finds.
+    Ours,
+    /// The one value an item has, which a report says upstream now `verb`.
+    One { verb: &'static str },
+    /// A type's fields, each beside its `field?` and `field:"lit"` facts.
+    Fields,
+}
+
+#[deny(clippy::wildcard_enum_match_arm)]
+impl Yield {
+    /// Whether fewer names than ours can be a degraded parse rather than most
+    /// of ours renamed at once (#929): only a read of the whole declaration
+    /// shrinks by parsing less, while the rest yield a subset by design.
+    pub const fn floored(self) -> bool {
+        match self {
+            Self::Declaration | Self::Fields => true,
+            Self::Family | Self::Ours | Self::One { .. } => false,
+        }
+    }
+
+    /// Whether it is one value, which only one name of ours can watch.
+    pub const fn is_one(self) -> bool {
+        match self {
+            Self::One { .. } => true,
+            Self::Declaration | Self::Family | Self::Ours | Self::Fields => false,
+        }
+    }
+
+    /// Why a sibling sweep cannot run off this yield, `all` when its family
+    /// is [`Family::All`], which only a yield confined to the family can mean.
+    pub const fn sibling_refusal(self, all: bool) -> Option<&'static str> {
+        match self {
+            Self::Ours | Self::One { .. } => Some("sweeps siblings off a reader that yields none"),
+            Self::Fields => {
+                Some("sweeps siblings off a reader whose `field?` and `field:\"lit\"` are no names")
+            }
+            Self::Declaration if all => {
+                Some("sweeps `Family::All` off a reader that yields more than the family")
+            }
+            Self::Declaration | Self::Family => None,
+        }
     }
 }
 
@@ -146,36 +215,26 @@ pub struct Watch {
 impl Watch {
     /// Why a checker cannot run this watch, if it cannot: a blank name, or an
     /// `Each` pattern without `{name}`, matches whatever upstream says; a
-    /// `RustStr` or `TsReturn` read yields one name; and a sibling sweep needs
-    /// a vanish watch whose reader yields upstream's names, all of them unless
-    /// the family is `All`, which only a reader confined to the family can mean.
+    /// [`Yield::One`] read yields one name; and a sibling sweep needs a vanish
+    /// watch whose yield [`Yield::sibling_refusal`] admits.
     pub fn unrunnable(&self) -> Option<String> {
         let ours = (self.ours)();
+        let yields = self.read.yields();
         let why = if ours.is_empty() || ours.iter().any(|n| n.is_empty()) {
             "watches an empty set or a blank name".to_owned()
         } else if self.docs.is_empty() {
             "reads no document".to_owned()
         } else if matches!(self.read, Read::Each { pattern } if !pattern.contains("{name}")) {
             "has an `Each` pattern that names no name".to_owned()
-        } else if matches!(self.read, Read::RustStr { .. } | Read::TsReturn { .. })
-            && ours.len() != 1
-        {
+        } else if yields.is_one() && ours.len() != 1 {
             format!("reads one name off upstream but watches {}", ours.len())
         } else if let Some(sib) = &self.siblings {
             if !matches!(self.when, When::Vanishes) {
                 "sweeps siblings on a watch that does not fire on a vanish".to_owned()
-            } else if matches!(
-                self.read,
-                Read::Each { .. } | Read::RustStr { .. } | Read::TsReturn { .. }
-            ) {
-                "sweeps siblings off a reader that yields none".to_owned()
-            } else if matches!(self.read, Read::TsFields { .. }) {
-                "sweeps siblings off a reader whose `field?` and `field:\"lit\"` are no names"
-                    .to_owned()
-            } else if matches!(sib.family, Family::All) && !self.read.confined_to_family() {
-                "sweeps `Family::All` off a reader that yields more than the family".to_owned()
             } else {
-                return None;
+                yields
+                    .sibling_refusal(matches!(sib.family, Family::All))?
+                    .to_owned()
             }
         } else {
             return None;
@@ -381,6 +440,19 @@ mod tests {
             ),
         ];
         assert_eq!(OK.unrunnable(), None);
+        let family = Watch {
+            read: Read::RustArms {
+                name: "f",
+                arm: "x",
+            },
+            siblings: Some(ALL),
+            ..OK
+        };
+        assert_eq!(
+            family.unrunnable(),
+            None,
+            "a family reader sweeps `Family::All`"
+        );
         for (w, why) in cases {
             assert_eq!(w.unrunnable().as_deref(), Some(why));
         }
