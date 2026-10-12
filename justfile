@@ -360,8 +360,8 @@ hack:
     cargo hack --feature-powerset --no-dev-deps clippy --workspace -- -D warnings
     cargo clippy -p pixtuoid-scene --no-default-features --all-targets -- -D warnings
     just test -p pixtuoid-scene --no-default-features
-    # The powerset builds no example, and otherwise only the weekly drift job builds this one.
-    cargo clippy -p pixtuoid --no-default-features --features upstream --example drift_watch -- -D warnings
+    # The powerset builds no example or test, and the drift watch's compile only under `upstream`.
+    cargo clippy -p pixtuoid --no-default-features --features upstream --lib --tests --example drift_watch -- -D warnings
 
 # Same toolchain gotcha as `api-surface` and `gen-wasm`, and it bites HARDER
 # here because the compiler's own advice is wrong: a Homebrew cargo ahead of the
@@ -560,10 +560,10 @@ _doc-targets:
 
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
-[doc('Coverage + JUnit XML — the exact command ci-tests.yml runs on every tier, the full one uploading it (needs llvm-cov + nextest)')]
+[doc('Coverage + JUnit XML — ci-tests.yml runs it on every tier with its matrix `features` as args, the full one uploading it (needs llvm-cov + nextest)')]
 [group('rust')]
-coverage:
-    TZ={{ TEST_TZ }} cargo llvm-cov nextest --workspace --lcov --output-path lcov.info --profile ci
+coverage *args:
+    TZ={{ TEST_TZ }} cargo llvm-cov nextest --workspace --lcov --output-path lcov.info --profile ci "$@"
 
 # Runs the suite under nextest and FAILS on a
 # pending (un-accepted `.snap.new`) OR unreferenced (orphan `.snap` — e.g. a
@@ -1132,9 +1132,9 @@ npm-check:
 
 # The local gate `.githooks/pre-push` runs: lint + clippy, fast over warm build
 # caches. Tests are CI's: in the hook, every worktree's push re-ran the whole
-# suite on one shared machine. `full` adds the feature powerset and the tests —
-# the Rust recipes CI's lint/clippy/hack/test jobs run; what it still can't see
-# is in CONTRIBUTING.md#ci-gates.
+# suite on one shared machine. `full` adds the feature powerset and the tests,
+# built with linux-test's features — the Rust recipes CI's lint/clippy/hack/test
+# jobs run; what it still can't see is in CONTRIBUTING.md#ci-gates.
 [doc('Local gate: lint → clippy; `full` = lint → clippy → hack → test')]
 [group('meta')]
 preflight mode="":
@@ -1143,7 +1143,7 @@ preflight mode="":
     mode="$1"
     case "$mode" in
     "") just lint && just clippy ;;
-    full) just lint && just clippy && just hack && just test ;;
+    full) just lint && just clippy && just hack && just test --features pixtuoid/upstream ;;
     *) echo "usage: just preflight [full]" >&2; exit 2 ;;
     esac
 
@@ -1254,11 +1254,6 @@ drift-selftest:
 [group('meta')]
 drift-watch:
     cargo run -q -p pixtuoid --no-default-features --features upstream --example drift_watch
-
-[doc('Test the upstream drift watch: engine, readers, censuses (`upstream` feature)')]
-[group('rust')]
-test-upstream:
-    just test -p pixtuoid --features upstream --lib drift_watch
 
 # The pty driver's pure halves — the ANSI stripper, the composer comparison, the
 # gate/menu wording. Each fails silently, at the price of a BILLED turn: a broken

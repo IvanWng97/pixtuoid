@@ -158,14 +158,22 @@ fn serde_value(attrs: &[syn::Attribute], key: &str) -> Result<Option<String>, Un
             )
             .map_err(|e| missing(format!("an unreadable `#[serde]` attribute ({e})")))?;
         for meta in metas {
-            if let syn::Meta::NameValue(nv) = meta
-                && nv.path.is_ident(key)
-                && let syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(s),
-                    ..
-                }) = nv.value
-            {
-                found = Some(s.value());
+            match meta {
+                syn::Meta::NameValue(nv) if nv.path.is_ident(key) => {
+                    if let syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(s),
+                        ..
+                    }) = nv.value
+                    {
+                        found = Some(s.value());
+                    }
+                }
+                // `rename(serialize = …, deserialize = …)` splits the one
+                // spelling a wire name is read under.
+                syn::Meta::List(list) if list.path.is_ident(key) => {
+                    return Err(missing(format!("a list-form `{key}(…)`")));
+                }
+                _ => {}
             }
         }
     }
@@ -401,8 +409,8 @@ pub(super) fn rust_str(text: &str, item: &str) -> Result<Names, Unread> {
     }
 }
 
-/// Only each row's header: a row's body is `key: value` lines whose values
-/// carry capitalised tokens of their own.
+/// Only each row's header, and only a PascalCase one: the rows name an enum's
+/// variants.
 pub(super) fn rust_macro_rows(text: &str, name: &str) -> Result<Names, Unread> {
     let file = rust_file(text)?;
     let items = RustItems::of(&file);
@@ -445,7 +453,7 @@ fn without_attrs(mut row: &[proc_macro2::TokenTree]) -> &[proc_macro2::TokenTree
 }
 
 /// The TS declarations a reader may want: top-level, exported, and inside a
-/// `declare module` or namespace block.
+/// `declare module`, `declare global` or namespace block.
 fn ts_declarations<'b, 'a>(stmts: &'b [Statement<'a>], out: &mut Vec<&'b Declaration<'a>>) {
     for stmt in stmts {
         let decl = match stmt.as_module_declaration() {
@@ -903,6 +911,13 @@ mod tests {
             Err("no `<AgentTool as ToolSpec>::description`".to_owned())
         );
         assert!(matches!(rust_str(src, "<<>"), Err(Unread::Ours(_))));
+        let twice = format!("{src}\n{src}");
+        for item in ["METHOD", "<AgentTool as ToolSpec>::name"] {
+            assert_eq!(
+                found(rust_str(&twice, item)),
+                Err(format!("more than one `{item}`"))
+            );
+        }
     }
 
     #[test]
@@ -1072,6 +1087,8 @@ mod tests {
             found(ts_const_array("let NAMES = [\"x\"];", "NAMES")),
             Err("no `const NAMES` array".to_owned())
         );
+        let shapes = "const NAMES = ([\"own\", flag ? \"c\" : \"d\", [\"inner\"], ...[\"spread\"]]) as const;";
+        assert_eq!(found(ts_const_array(shapes, "NAMES")), names(&["own"]));
     }
 
     #[test]
@@ -1113,6 +1130,30 @@ mod tests {
             found(rust_enum(src, "E"))
                 .is_err_and(|what| what.starts_with("an unreadable `#[serde]` attribute"))
         );
+        let listed = |r: Result<Names, Unread>, key: &str| {
+            assert_eq!(found(r), Err(format!("a list-form `{key}(…)`")));
+        };
+        let all = "#[serde(rename_all(deserialize = \"PascalCase\"))]\n";
+        listed(
+            rust_struct(&format!("{all}struct S {{ a: u8 }}"), "S"),
+            "rename_all",
+        );
+        listed(
+            rust_enum(&format!("{all}enum E {{ A }}"), "E"),
+            "rename_all",
+        );
+        let one = "#[serde(rename(serialize = \"a\", deserialize = \"b\"))]";
+        listed(
+            rust_struct(&format!("struct S {{ {one} x: u8 }}"), "S"),
+            "rename",
+        );
+        listed(
+            rust_enum(
+                &format!("#[serde(rename_all = \"snake_case\")]\nenum E {{ {one} X }}"),
+                "E",
+            ),
+            "rename",
+        );
     }
 
     #[test]
@@ -1137,6 +1178,16 @@ mod tests {
             found(md_table(page, "Hook", "Lifecycle")),
             Err("no `Hook` table".to_owned())
         );
+        let coded = "## Lifecycle\n| `Event` | x |\n|---|---|\n| `Stop` | done |\n";
+        assert_eq!(
+            found(md_table(coded, "Event", "Lifecycle")),
+            names(&["Stop"])
+        );
+        let setext = "Lifecycle\n---------\nEvent | x\n---|---\n`Stop` | done\n";
+        assert_eq!(
+            found(md_table(setext, "Event", "Lifecycle")),
+            names(&["Stop"])
+        );
         assert_eq!(
             found(md_table(page, "Event", "Gone")),
             Err("no `Gone` heading".to_owned())
@@ -1149,11 +1200,19 @@ mod tests {
 
     #[test]
     fn md_headings_are_the_one_word_ones_in_their_section() {
-        let page = "# Hooks\n## Quickstart\n```sh\n# Read input\n```\n## Reference\n### Hook events\n```sh\n# stdin\n```\n#### preToolUse\n#### before / after\n##### deeper\nprose stop\n### Other\n#### elsewhere\n## Troubleshooting\n";
+        let page = "# Hooks\n## Quickstart\n```sh\n# Read input\n```\n## Reference\n### Hook events\n```sh\n# stdin\n```\n#### preToolUse\n#### `postToolUse`\n#### before / after\n##### deeper\nprose stop\n### Other\n#### elsewhere\n## Troubleshooting\n";
         assert_eq!(
             found(md_headings(page, "Hook events")),
-            names(&["preToolUse"])
+            names(&["postToolUse", "preToolUse"])
         );
+        for end in ["> ### Quoted", "Other\n-----"] {
+            let ended = format!("### Hook events\n#### a\n{end}\n#### b\n");
+            assert_eq!(
+                found(md_headings(&ended, "Hook events")),
+                names(&["a"]),
+                "{end}"
+            );
+        }
         assert_eq!(
             found(md_headings(page, "Gone")),
             Err("no `Gone` heading".to_owned())
@@ -1190,12 +1249,20 @@ mod tests {
             );
         }
         assert_eq!(found(py_set("X = {\n}", r"X\s*=")), names(&[]));
+        assert_eq!(
+            found(py_set("X = {\"a\", {\"b\"}, \"c\"}\nY = {\"d\"}", r"X\s*=")),
+            names(&["a", "b", "c"])
+        );
+        assert_eq!(
+            found(py_set("X = {\"a\",", r"X\s*=")),
+            Err("no end to set its pattern declares".to_owned())
+        );
         assert!(found(py_set(&format!("{src}{src}"), decl)).is_err());
     }
 
     #[test]
     fn macro_rows_are_the_row_headers_only() {
-        let src = "macro_rules! hook_events {\n    ($($v:ident { $($r:tt)* }),*) => { pub enum HookEventName { $($v,)* } };\n}\nhook_events! {\n    SessionStart { alias: \"start\", traits: [Blocking] },\n    // Gone { },\n    /// Legacy alias of `Stop`.\n    #[cfg(unix)]\n    StopEnd { alias: \"stop_end\" },\n    Stop { alias: \"stop\" },\n}\n";
+        let src = "macro_rules! hook_events {\n    ($($v:ident { $($r:tt)* }),*) => { pub enum HookEventName { $($v,)* } };\n}\nhook_events! {\n    SessionStart { alias: \"start\", traits: [Blocking] },\n    // Gone { },\n    /// Legacy alias of `Stop`.\n    #[cfg(unix)]\n    StopEnd { alias: \"stop_end\" },\n    Stop { alias: \"stop\" },\n    internal { alias: \"x\" },\n}\n";
         // A row's doc comment and attributes precede its header, not replace it.
         assert_eq!(
             found(rust_macro_rows(src, "hook_events")),

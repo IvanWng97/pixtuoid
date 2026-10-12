@@ -22,8 +22,9 @@ The git hooks and most CI jobs call `justfile` recipes.
 just              # list recipes
 just preflight    # pre-push gate: lint → clippy; `just preflight full` adds hack → test (CI's Rust recipes)
 just fmt          # auto-format
-just test         # the whole suite, under cargo-nextest (`just setup-tools`)
+just test         # the suite without the `upstream` feature, under cargo-nextest (`just setup-tools`)
 just test -p <crate> <filter>   # fast loop while iterating on one crate
+just test -p pixtuoid --features upstream drift_watch   # the drift watch's tests, built only under it
 ```
 
 > **Don't expect clippy to warm `test`'s build** — its check-mode (rmeta)
@@ -67,9 +68,6 @@ CodSpeed skip drafts. The jobs:
 - **npm package generator** (`just npm-check`) — the npm package generator +
   OpenClaw plugin contract.
 - **msrv** — the workspace compiles on its declared `rust-version`.
-- **drift watch** (`just test-upstream`, a step of linux-test) — the upstream
-  drift watch's engine, parser-backed readers and censuses, which build only
-  under the binary's `upstream` feature, so no other job runs their tests.
 - **packaging-build** (full tier) — a clean `cargo install --locked` on both
   Homebrew bottle platforms.
 - **hawk** (full tier) — `just hawk` fails on a `pub` item no other workspace

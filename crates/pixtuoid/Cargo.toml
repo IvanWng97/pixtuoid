@@ -114,8 +114,7 @@ portable = []
 # Ambient sound (config-OFF at runtime regardless; this gates the DEPENDENCY).
 audio = ["dep:rodio"]
 # The `drift_watch` example's checker, with every source's upstream
-# declarations, and its tests (`just test-upstream`); no shipped build enables
-# it, and no other job runs its tests.
+# declarations, and its tests; no shipped build enables it.
 upstream = [
     "pixtuoid-core/upstream",
     "dep:regex",
