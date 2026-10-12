@@ -3,7 +3,8 @@
 // an offline/local build must never fail on it: every error path yields null.
 import process from 'node:process';
 
-// The one copy of the repository's slug the site's GitHub links and calls derive from.
+// The repository's slug: the site's GitHub links and calls derive from it, and
+// gh-stars.test.mjs pins install.json's copy, which JSON can't import.
 export const REPO_SLUG = 'pixtuoid/pixtuoid';
 export const GH_API_REPO = `https://api.github.com/repos/${REPO_SLUG}`;
 // Shared with Statusline.astro's PR-feed fetch, so an offline/slow CI runner
