@@ -296,7 +296,10 @@ disposition; zero open confirmed `issue (blocking)`; each matching
 up to any colon or parenthesis, lowercased, each run of non-alphanumerics one
 `-`, leading and trailing `-` dropped, and the sha is the head the run judged;
 an update that only merges `main` in, or whose every changed line is a comment
-or prose, leaves the record standing. The
+or prose, leaves the record standing. After any other update, the re-run judges
+the change from the head the last record names to the new head, over the files
+the PR changes, each read whole at the new head; its record names both heads.
+The
 [`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
 rows. A published review passes whatever it found; a failed or missing status
 is no review: comment `/claude-review`, else split the PR smaller.

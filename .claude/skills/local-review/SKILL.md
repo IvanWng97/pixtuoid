@@ -71,7 +71,7 @@ paraphrase here.
 6. **Record** each row's run as
    [the gate](../../../docs/CONTRIBUTING.md#the-merge-gate) defines, naming
    the head the lens judged; a push the gate does not carry over needs the
-   lens run again at the new head.
+   lens run again at the new head, scoped as the gate says.
 7. **Before merge**, judge against the gate.
 
 ## Whole-codebase scope
