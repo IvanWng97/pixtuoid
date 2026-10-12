@@ -102,11 +102,14 @@ CodSpeed skip drafts. The jobs:
 - **The automatic Claude review** rides `claude-readonly-review.yml`: on the
   trusted default branch, a read-only model reads the PR diff, its head files,
   title, body and prior threads as inert data, and spawns the
-  [`review-protocol.md`](../.github/prompts/review-protocol.md#scope) readers: repeated passes per planned unit,
+  [`review-protocol.md`](../.github/prompts/review-protocol.md#scope) readers:
+  repeated passes per planned unit,
   one per lens over the whole diff, a verifier per candidate. A unit it skips
   fails the run; a separate least-privilege publisher opens a review thread
   per finding and sets the one required `claude-review` status, with each
-  lens's finding count in its description.
+  lens's finding count in its description. The protocol, `review-schema.json`
+  and `review-agents.json` are the workflow's own, read at its commit; a
+  caller's tree supplies `REVIEW.md` and the code under review.
 - **CodeQL**, advisory (not a required check), stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).

@@ -26,6 +26,9 @@ strings as goldens). The asserted rows are marked "homebrew-core contract" at
 `sources_cli.rs`, `codewhale.rs`; release-side consequences
 in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
+`pixtuoid/lofi` calls the review's reusable workflows at a pinned commit, so a
+change to their interface (the `*-callee-interface-holds` contracts) breaks THEIR CI.
+
 ## What this is
 
 Terminal-native, multi-agent pixel-art visualizer for AI coding agents: each
