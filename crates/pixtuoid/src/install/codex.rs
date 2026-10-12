@@ -29,26 +29,154 @@ pub(crate) const CODEX_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
+/// The `codex plugin` and `codex plugin marketplace` subcommands that add and
+/// remove one.
+const ADD: &str = "add";
+const REMOVE: &str = "remove";
+/// The `config.toml` tables and keys a marketplace and a plugin are recorded in.
+const MARKETPLACES: &str = "marketplaces";
+const SOURCE: &str = "source";
+const PLUGINS: &str = "plugins";
+const ENABLED: &str = "enabled";
+/// Where in a marketplace root Codex reads its manifest.
+const MARKETPLACE_MANIFEST: &str = ".agents/plugins/marketplace.json";
+
 #[cfg(feature = "upstream")]
-pub(crate) const UPSTREAM: &[Watch] = &[Watch {
-    id: "codex.hook_events",
-    ours: || CODEX_EVENTS.to_vec(),
-    docs: &[Doc {
+const fn codex(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
+    Doc {
         at: At::Path {
             repo: "openai/codex",
             branch: "main",
-            path: "codex-rs/config/src/hook_config.rs",
+            path,
         },
-        anchor: r"struct HookEventsToml\b",
-        owns: "`HookEventsToml`",
-    }],
-    read: Read::RustStruct {
-        name: "HookEventsToml",
+        anchor,
+        owns,
+    }
+}
+
+#[cfg(feature = "upstream")]
+const PLUGIN_CMD: &[Doc] = &[codex(
+    "codex-rs/cli/src/plugin_cmd.rs",
+    r"pub enum PluginSubcommand\b",
+    "`PluginSubcommand`",
+)];
+#[cfg(feature = "upstream")]
+const MARKETPLACE_CMD: &[Doc] = &[codex(
+    "codex-rs/cli/src/marketplace_cmd.rs",
+    r"enum MarketplaceSubcommand\b",
+    "`MarketplaceSubcommand`",
+)];
+#[cfg(feature = "upstream")]
+const MARKETPLACE_RECORD: &[Doc] = &[codex(
+    "codex-rs/core-plugins/src/marketplace_add/metadata.rs",
+    r"fn record_added_marketplace_entry\b",
+    "`record_added_marketplace_entry`",
+)];
+#[cfg(feature = "upstream")]
+const PLUGIN_EDIT: &[Doc] = &[codex(
+    "codex-rs/config/src/plugin_edit.rs",
+    r"fn set_plugin_enabled\b",
+    "`set_plugin_enabled`",
+)];
+
+#[cfg(feature = "upstream")]
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "codex.hook_events",
+        ours: || CODEX_EVENTS.to_vec(),
+        docs: &[codex(
+            "codex-rs/config/src/hook_config.rs",
+            r"struct HookEventsToml\b",
+            "`HookEventsToml`",
+        )],
+        read: Read::RustStruct {
+            name: "HookEventsToml",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(UNFIRED_HOOK),
+        siblings: None,
     },
-    when: When::Vanishes,
-    finding: Finding::Breaking(UNFIRED_HOOK),
-    siblings: None,
-}];
+    host_plugin::premise(
+        "codex.plugin_add",
+        || vec![ADD],
+        PLUGIN_CMD,
+        r#"bin_name = "codex plugin {name}""#,
+        "the install command `register` runs to add and reload the plugin may have changed",
+    ),
+    host_plugin::premise(
+        "codex.plugin_remove",
+        || vec![REMOVE],
+        PLUGIN_CMD,
+        r#"bin_name = "codex plugin {name}""#,
+        "the uninstall command `unregister` runs may have changed",
+    ),
+    host_plugin::premise(
+        "codex.marketplace_add",
+        || vec![ADD],
+        MARKETPLACE_CMD,
+        r#"bin_name = "codex plugin marketplace {name}""#,
+        "the marketplace add command `register` runs may have changed",
+    ),
+    host_plugin::premise(
+        "codex.marketplace_remove",
+        || vec![REMOVE],
+        MARKETPLACE_CMD,
+        r#"bin_name = "codex plugin marketplace {name}""#,
+        "the marketplace remove command `unregister` runs may have changed",
+    ),
+    host_plugin::premise(
+        "codex.marketplace_manifest",
+        || vec![MARKETPLACE_MANIFEST],
+        &[codex(
+            "codex-rs/core-plugins/src/marketplace.rs",
+            r"const MARKETPLACE_MANIFEST_RELATIVE_PATHS\b",
+            "`MARKETPLACE_MANIFEST_RELATIVE_PATHS`",
+        )],
+        r#""{name}","#,
+        "where `register` writes the marketplace manifest may have changed",
+    ),
+    host_plugin::premise(
+        "codex.marketplaces_table",
+        || vec![MARKETPLACES],
+        MARKETPLACE_RECORD,
+        r#"config\.get\("{name}"\)"#,
+        "the `config.toml` table `unregister` and `marketplace_moved_from` read a marketplace \
+         from may have changed",
+    ),
+    host_plugin::premise(
+        "codex.marketplace_source",
+        || vec![SOURCE],
+        MARKETPLACE_RECORD,
+        r#"\.get\("{name}"\)"#,
+        "the recorded source `marketplace_moved_from` compares may have changed",
+    ),
+    host_plugin::premise(
+        "codex.source_canonicalized",
+        || vec!["path.canonicalize()"],
+        &[codex(
+            "codex-rs/core-plugins/src/marketplace_add/source.rs",
+            r"fn resolve_local_source_path\b",
+            "`resolve_local_source_path`",
+        )],
+        r"{name}\.",
+        "whether a local source is recorded canonicalized, as `marketplace_moved_from` \
+         assumes, may have changed",
+    ),
+    host_plugin::premise(
+        "codex.plugins_table",
+        || vec![PLUGINS],
+        PLUGIN_EDIT,
+        r#"root\.get_mut\("{name}"\)"#,
+        "the `config.toml` table `is_registered` reads an install from may have changed",
+    ),
+    host_plugin::premise(
+        "codex.plugin_enabled_key",
+        || vec![ENABLED],
+        PLUGIN_EDIT,
+        r#"plugin\["{name}"\]"#,
+        "the key `is_registered` reads an install as enabled from may have changed",
+    ),
+];
 
 /// Codex loads the hooks through its plugin system: a local marketplace it records in
 /// place, and a plugin `codex plugin add` copies into its cache.
@@ -124,9 +252,9 @@ pub(crate) fn installed_shim(content: &str) -> ShimRef {
 }
 
 fn marketplace_manifest(root: &Path) -> PathBuf {
-    root.join(".agents")
-        .join("plugins")
-        .join("marketplace.json")
+    MARKETPLACE_MANIFEST
+        .split('/')
+        .fold(root.to_path_buf(), |path, part| path.join(part))
 }
 
 fn register(config: &Path) -> Result<()> {
@@ -161,7 +289,7 @@ fn register(config: &Path) -> Result<()> {
     CLI.run(&[
         "plugin".as_ref(),
         "marketplace".as_ref(),
-        "add".as_ref(),
+        ADD.as_ref(),
         root.as_os_str(),
     ])?;
     add_plugin()
@@ -175,9 +303,9 @@ fn register(config: &Path) -> Result<()> {
 fn marketplace_moved_from(root: &Path) -> Result<bool> {
     let doc = read_codex_config()?;
     let Some(source) = doc
-        .get("marketplaces")
+        .get(MARKETPLACES)
         .and_then(|m| m.get(NAME))
-        .and_then(|m| m.get("source"))
+        .and_then(|m| m.get(SOURCE))
         .and_then(toml::Value::as_str)
     else {
         return Ok(false);
@@ -190,7 +318,7 @@ fn remove_marketplace() -> Result<()> {
     CLI.run(&[
         "plugin".as_ref(),
         "marketplace".as_ref(),
-        "remove".as_ref(),
+        REMOVE.as_ref(),
         NAME.as_ref(),
     ])?;
     Ok(())
@@ -201,7 +329,7 @@ fn remove_marketplace() -> Result<()> {
 fn add_plugin() -> Result<()> {
     CLI.run(&[
         "plugin".as_ref(),
-        "add".as_ref(),
+        ADD.as_ref(),
         host_plugin::plugin_id().as_ref(),
     ])?;
     Ok(())
@@ -229,7 +357,7 @@ fn unregister(config: &Path) -> Result<Unregistered> {
     let doc = read_codex_config()?;
     let installed = plugin_entry(&doc).is_some();
     // The table `marketplace_moved_from` reads the source from.
-    let listed = doc.get("marketplaces").and_then(|m| m.get(NAME)).is_some();
+    let listed = doc.get(MARKETPLACES).and_then(|m| m.get(NAME)).is_some();
     if !installed && !listed {
         host_plugin::remove_if_ours(root, &marketplace_manifest(root))?;
         return Ok(Unregistered::Absent);
@@ -242,7 +370,7 @@ fn unregister(config: &Path) -> Result<Unregistered> {
     if installed {
         CLI.run(&[
             "plugin".as_ref(),
-            "remove".as_ref(),
+            REMOVE.as_ref(),
             host_plugin::plugin_id().as_ref(),
         ])?;
     }
@@ -256,7 +384,7 @@ fn unregister(config: &Path) -> Result<Unregistered> {
 fn is_registered() -> Result<bool> {
     let doc = read_codex_config()?;
     Ok(plugin_entry(&doc)
-        .and_then(|e| e.get("enabled"))
+        .and_then(|e| e.get(ENABLED))
         .and_then(toml::Value::as_bool)
         == Some(true))
 }
@@ -264,7 +392,7 @@ fn is_registered() -> Result<bool> {
 /// Where `codex plugin add` records the plugin and whether it is enabled
 /// (`codex-rs/config/src/plugin_edit.rs` @ rust-v0.162.1).
 fn plugin_entry(doc: &toml::Value) -> Option<&toml::Value> {
-    doc.get("plugins")?.get(host_plugin::plugin_id().as_str())
+    doc.get(PLUGINS)?.get(host_plugin::plugin_id().as_str())
 }
 
 /// An empty table for a missing or empty file.

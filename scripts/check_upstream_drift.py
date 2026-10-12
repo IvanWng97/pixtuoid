@@ -17,42 +17,6 @@ import typing
 import urllib.error
 import urllib.request
 
-# The dsh plugin's surface (#928) — every event name the bundled plugin
-# listens for, each declared as a single-quoted key in one of these four
-# upstream source files (index.ts declares the `session/event` bus name the
-# other three never spell).
-DSH_RUNTIME_TYPES_URL = (
-    "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/"
-    "packages/core/agent/src/runtime-types.ts"
-)
-DSH_SESSION_TYPES_URL = (
-    "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/"
-    "packages/core/session/src/types.ts"
-)
-DSH_APPROVAL_TYPES_URL = (
-    "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/"
-    "packages/interaction/user-approval/src/types.ts"
-)
-DSH_SESSION_INDEX_URL = (
-    "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/"
-    "packages/core/session/src/index.ts"
-)
-
-# The bridge extension's surface (#951) — `check_omp_extension_reads` routes
-# each name to the file that declares it.
-OMP_EXT_SHARED_EVENTS_URL = (
-    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
-    "packages/coding-agent/src/extensibility/shared-events.ts"
-)
-OMP_EXT_TYPES_URL = (
-    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
-    "packages/coding-agent/src/extensibility/extensions/types.ts"
-)
-OMP_SESSION_MANAGER_URL = (
-    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
-    "packages/coding-agent/src/session/session-manager.ts"
-)
-
 # There is no second detector for the discovery seam: install writes the file,
 # `verify_schema` reads our own bytes back, and a file omp silently skips
 # leaves no decode breadcrumb.
@@ -60,32 +24,12 @@ OMP_EXT_DISCOVERY_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
     "packages/coding-agent/src/discovery/builtin.ts"
 )
-OMP_DIRS_URL = (
-    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
-    "packages/utils/src/dirs.ts"
-)
-
-# The interface bodies carrying the approval fields the extension forwards.
-OMP_APPROVAL_EVENT_CARRIERS = ("ToolApprovalRequestedEvent", "ToolApprovalResolvedEvent")
-
 # A VALUE watch, not a name sweep: the resolved port is the daemon's runtime
 # IDENTITY, so an upstream bump our plugin does not follow stamps a gateway with a
 # stale port, and two live gateways collapse onto one mascot.
 OPENCLAW_PATHS_URL = (
     "https://raw.githubusercontent.com/openclaw/openclaw/main/src/config/paths.ts"
 )
-
-OPENCLAW_HOOK_TYPES_URL = (
-    "https://raw.githubusercontent.com/openclaw/openclaw/main/src/plugins/hook-types.ts"
-)
-
-# What openclaw_plugin.js stamps `errored` from — Degraded's only trigger: each
-# upstream type's fields it reads, and the union literal it compares one against.
-OPENCLAW_DEGRADED_FIELDS: dict[str, tuple[tuple[str, str | None], ...]] = {
-    "PluginHookAgentEndEvent": (("runId", None), ("success", None), ("error", None)),
-    "PluginHookModelCallBaseEvent": (("runId", None),),
-    "PluginHookModelCallEndedEvent": (("outcome", '"error"'), ("failureKind", '"aborted"')),
-}
 
 # URLError alone is not enough: the READ phase inside fetch() raises raw
 # socket.timeout / ConnectionResetError (OSError, NOT URLError) and
@@ -110,95 +54,6 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 CORE_LIB_FRAGMENT = "crates/pixtuoid-core/drift-surface.json"
 CORE_BIN_FRAGMENT = "crates/pixtuoid/drift-surface.json"
 
-CC_PLUGIN_COMPONENTS_URL = "https://code.claude.com/docs/en/plugins/components.md"
-CC_PLUGIN_INSTALL_URL = "https://code.claude.com/docs/en/plugins/install.md"
-CC_PLUGIN_LOADING_URL = "https://code.claude.com/docs/en/plugins/loading.md"
-
-CODEX_PLUGIN_CMD_URL = (
-    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/cli/src/plugin_cmd.rs"
-)
-CODEX_MARKETPLACE_CMD_URL = (
-    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/cli/src/marketplace_cmd.rs"
-)
-CODEX_MARKETPLACE_URL = (
-    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/core-plugins/src/marketplace.rs"
-)
-CODEX_MARKETPLACE_RECORD_URL = (
-    "https://raw.githubusercontent.com/openai/codex/main/"
-    "codex-rs/core-plugins/src/marketplace_add/metadata.rs"
-)
-CODEX_MARKETPLACE_SOURCE_URL = (
-    "https://raw.githubusercontent.com/openai/codex/main/"
-    "codex-rs/core-plugins/src/marketplace_add/source.rs"
-)
-CODEX_PLUGIN_EDIT_URL = (
-    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/config/src/plugin_edit.rs"
-)
-REASONIX_PLUGIN_DOC_URL = (
-    "https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/studio/docs/PLUGIN_PACKAGES.md"
-)
-
-
-# The installer that registers our hooks through each host's plugin contract.
-PLUGIN_HOST_INSTALLERS = {
-    "CC": "install/claude.rs",
-    "Codex": "install/codex.rs",
-    "Reasonix": "install/reasonix.rs",
-}
-
-
-class PluginDoc(typing.NamedTuple):
-    """One document of a host's plugin contract. A marker VANISHING is review-class
-    drift: upstream reshaped what the host's installer relies on."""
-
-    cli: str
-    markers: dict[str, str]
-
-
-PLUGIN_DOC_MARKERS: dict[str, PluginDoc] = {
-    CC_PLUGIN_COMPONENTS_URL: PluginDoc("CC", {
-        "same shape as the `hooks` object in `settings.json`": "hooks/hooks.json's shape",
-    }),
-    CC_PLUGIN_INSTALL_URL: PluginDoc("CC", {
-        "The entry goes in `enabledPlugins` in `~/.claude/settings.json`.": "where a user-scope install is recorded (is_registered)",
-        "Run `claude plugin install` in your shell to install a plugin without starting a Claude Code session": "the shell install command (register)",
-        "When you remove a marketplace, Claude Code uninstalls every plugin you installed from it": "unregister by marketplace removal",
-    }),
-    CC_PLUGIN_LOADING_URL: PluginDoc("CC", {
-        "the plugin loads in place from its path inside the marketplace folder": "a local-path marketplace's in-place load (no reinstall on update)",
-    }),
-    CODEX_PLUGIN_CMD_URL: PluginDoc("Codex", {
-        'bin_name = "codex plugin add"': "the install command (register, reload)",
-        'bin_name = "codex plugin remove"': "the uninstall command (unregister)",
-    }),
-    CODEX_MARKETPLACE_CMD_URL: PluginDoc("Codex", {
-        'bin_name = "codex plugin marketplace add"': "the marketplace add command (register)",
-        'bin_name = "codex plugin marketplace remove"': "the marketplace remove command (unregister)",
-    }),
-    CODEX_MARKETPLACE_URL: PluginDoc("Codex", {
-        '".agents/plugins/marketplace.json"': "where register writes the marketplace manifest",
-    }),
-    CODEX_MARKETPLACE_RECORD_URL: PluginDoc("Codex", {
-        'config.get("marketplaces")': "the config.toml table a marketplace is recorded in (unregister, marketplace_moved_from)",
-        '.get("source")': "the recorded source marketplace_moved_from compares",
-    }),
-    CODEX_MARKETPLACE_SOURCE_URL: PluginDoc("Codex", {
-        "path.canonicalize()": "a local source is recorded canonicalized (marketplace_moved_from)",
-    }),
-    CODEX_PLUGIN_EDIT_URL: PluginDoc("Codex", {
-        'root.get_mut("plugins")': "the config.toml table an install is recorded in (is_registered)",
-        'plugin["enabled"]': "the key that records it enabled (is_registered)",
-    }),
-    REASONIX_PLUGIN_DOC_URL: PluginDoc("Reasonix", {
-        "`--link` links a local plugin directory instead of copying it": "the in-place install (register; no reload)",
-        "`--yes` is required for any install that writes files.": "register's --yes",
-        "`--replace` allows the source to replace an installed plugin with the same": "a repeat connect re-links (register)",
-        "`remove` also accepts `uninstall` as an alias. It requires `--yes` because it": "the uninstall command (unregister)",
-        "~/.reasonix/plugin-packages.json": "where an install is recorded (is_registered)",
-        "Native `reasonix-plugin.json` manifests must declare the exact": "the manifest render_manifest writes",
-        'When `args` is present, including `"args": []`, the hook uses **exec form**.': "the exec form the hooks rely on",
-    }),
-}
 
 class Anchor(typing.NamedTuple):
     """The declaration that OWNS the names we check a fetched document for.
@@ -209,57 +64,16 @@ class Anchor(typing.NamedTuple):
 
     pattern: str
     owns: str
-    # A second required pattern, for an owning declaration a sibling member splits
-    # (dsh puts `interface Context` inside the module the `Events` keys live in).
-    # Both-present cannot prove the halves nest; each half is unique per document.
-    also: str | None = None
 
 
 ANCHORS: dict[str, Anchor] = {
-    # owner-grade: the anchor IS the declaration the checked names live inside.
-    # dsh declares its event keys as cordis module augmentations, so the owner is
-    # the augmented interface: a key would be a SIBLING of the names it guards.
-    DSH_RUNTIME_TYPES_URL: Anchor(
-        r"declare module '@deepseek-ai/cordis' \{\s*\n\s*interface Events \{",
-        "the cordis `Events` augmentation",
-    ),
-    DSH_SESSION_TYPES_URL: Anchor(r"export interface SessionEventMap\b", "`SessionEventMap`"),
-    DSH_APPROVAL_TYPES_URL: Anchor(
-        r"declare module '@deepseek-ai/dsh-session/types' \{\s*\n\s*interface SessionEventMap \{",
-        "the `SessionEventMap` augmentation",
-    ),
-    DSH_SESSION_INDEX_URL: Anchor(
-        r"declare module '@deepseek-ai/cordis' \{",
-        "the cordis `Events` augmentation",
-        also=r"(?m)^\s+interface Events \{",
-    ),
-    OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName\s*=", "`PluginHookName`"),
+    # owner-grade: the anchor IS the declaration the checked value lives in.
     OPENCLAW_PATHS_URL: Anchor(r"DEFAULT_GATEWAY_PORT\s*=", "`DEFAULT_GATEWAY_PORT`"),
     # identity-grade: co-located only — a name moved out still matches, so phantom
-    # renames survive it. Not upgradeable without a parser; a docs PAGE is only this.
-    OMP_EXT_SHARED_EVENTS_URL: Anchor(r"SessionShutdownEvent", "`SessionShutdownEvent`"),
-    OMP_EXT_TYPES_URL: Anchor(r"ToolApprovalRequestedEvent", "`ToolApprovalRequestedEvent`"),
-    OMP_SESSION_MANAGER_URL: Anchor(r"(?m)^export class SessionManager\b", "`SessionManager`"),
+    # renames survive it.
     OMP_EXT_DISCOVERY_URL: Anchor(
         r"discoverExtensionModulePaths", "`discoverExtensionModulePaths`"
     ),
-    OMP_DIRS_URL: Anchor(r"export function getAgentDir", "`getAgentDir`"),
-    CC_PLUGIN_COMPONENTS_URL: Anchor(r"(?m)^# Add components to a plugin", "the plugin-components page"),
-    CC_PLUGIN_INSTALL_URL: Anchor(r"(?m)^# Install and manage plugins", "the plugin-install page"),
-    CC_PLUGIN_LOADING_URL: Anchor(r"(?m)^# Plugin loading reference", "the plugin-loading page"),
-    CODEX_PLUGIN_CMD_URL: Anchor(r"pub enum PluginSubcommand\b", "`PluginSubcommand`"),
-    CODEX_MARKETPLACE_CMD_URL: Anchor(r"enum MarketplaceSubcommand\b", "`MarketplaceSubcommand`"),
-    CODEX_MARKETPLACE_URL: Anchor(
-        r"const MARKETPLACE_MANIFEST_RELATIVE_PATHS\b", "`MARKETPLACE_MANIFEST_RELATIVE_PATHS`"
-    ),
-    CODEX_PLUGIN_EDIT_URL: Anchor(r"fn set_plugin_enabled\b", "`set_plugin_enabled`"),
-    CODEX_MARKETPLACE_RECORD_URL: Anchor(
-        r"fn record_added_marketplace_entry\b", "`record_added_marketplace_entry`"
-    ),
-    CODEX_MARKETPLACE_SOURCE_URL: Anchor(
-        r"fn resolve_local_source_path\b", "`resolve_local_source_path`"
-    ),
-    REASONIX_PLUGIN_DOC_URL: Anchor(r"(?m)^## CLI Mode", "the plugin-packages CLI section"),
 }
 
 
@@ -362,9 +176,7 @@ def fetch_anchored(url: str, label: str, report: Report) -> str | None:
     text = try_fetch(url, label, report)
     if text is None:
         return None
-    if not re.search(anchor.pattern, text) or (
-        anchor.also is not None and not re.search(anchor.also, text)
-    ):
+    if not re.search(anchor.pattern, text):
         report.add_blind(
             f"{label}: the document no longer contains {anchor.owns}",
             url,
@@ -378,17 +190,6 @@ def fetch_anchored(url: str, label: str, report: Report) -> str | None:
     return text
 
 
-def plugin_marker_findings(url: str, doc: str) -> list[str]:
-    """The markers of PLUGIN_DOC_MARKERS[url] that `doc` no longer carries."""
-    entry = PLUGIN_DOC_MARKERS[url]
-    return [
-        f"{entry.cli} {url.rsplit('/', 1)[-1]} no longer says `{marker}` — {what} may "
-        f"have changed; re-verify {PLUGIN_HOST_INSTALLERS[entry.cli]}'s plugin registration."
-        for marker, what in sorted(entry.markers.items())
-        if marker not in doc
-    ]
-
-
 @dataclasses.dataclass
 class OurNames:
     """What WE depend on, read from our OWN source — one field per READER.
@@ -396,8 +197,6 @@ class OurNames:
     `None` means that reader failed; every consumer guards on `is not None`, so a
     stale parser darkens exactly what it fed and nothing else."""
 
-    dsh_plugin_events: set[str] | None = None
-    omp_extension_reads: set[str] | None = None
     omp_extension_subdir: set[str] | None = None
     openclaw_gateway_port: set[str] | None = None
 
@@ -406,8 +205,6 @@ class OurNames:
 # fragments are GENERATED by a test in the owning crate (`src/drift_surface.rs`),
 # so a rename is a test failure THERE, not a parser here returning a smaller set.
 SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
-    ("dsh_plugin_events", CORE_BIN_FRAGMENT, "shipped", "dsh.plugin_events"),
-    ("omp_extension_reads", CORE_BIN_FRAGMENT, "shipped", "omp.extension_reads"),
     ("omp_extension_subdir", CORE_LIB_FRAGMENT, "shipped", "omp.extension_subdir"),
     ("openclaw_gateway_port", CORE_BIN_FRAGMENT, "shipped", "openclaw.default_gateway_port"),
 )
@@ -457,184 +254,6 @@ def read_our_names(report: Report) -> OurNames:
     return ours
 
 
-def strip_ts_comments(body: str) -> str:
-    """Remove TypeScript `//` and `/* */` comments, PRESERVING string literals in
-    all three quotes. A scanner, not `re.sub`: `//[^\\n]*` eats a `'http://…'`
-    literal's tail. Block comments do not nest in TS: the first `*/` ends one."""
-    out: list[str] = []
-    i, n = 0, len(body)
-    while i < n:
-        pair = body[i : i + 2]
-        if pair == "/*":
-            end = body.find("*/", i + 2)
-            i = n if end < 0 else end + 2
-            continue
-        if pair == "//":
-            nl = body.find("\n", i)
-            i = n if nl < 0 else nl
-            continue
-        if body[i] in "\"'`":
-            quote = body[i]
-            j = i + 1
-            while j < n:
-                if body[j] == "\\":
-                    j += 2
-                    continue
-                if body[j] == quote:
-                    j += 1
-                    break
-                j += 1
-            out.append(body[i:j])
-            i = j
-            continue
-        out.append(body[i])
-        i += 1
-    return "".join(out)
-
-
-def fetch_all_anchored(targets: list[tuple[str, str]], report: Report) -> str | None:
-    """Every `(url, label)` joined, or `None` the moment one misses.
-
-    A checked name may be declared in exactly one half, so the UNION is the
-    document: one fetch failure is probe health, never a vanish."""
-    docs = [fetch_anchored(url, label, report) for url, label in targets]
-    return "\n".join(d for d in docs if d is not None) if all(docs) else None
-
-
-def typescript_interface_body(text: str, name: str) -> str | None:
-    """The body of one top-level exported TS interface, else `None`.
-
-    Conservative on purpose: a declaration move, duplicate, or restyle is probe
-    health, never evidence that a wire field was renamed.
-    """
-    pattern = rf"(?ms)^export\s+interface\s+{re.escape(name)}\b[^{{\n]*\{{(.*?)(?=^\}})"
-    matches = list(re.finditer(pattern, text))
-    return matches[0].group(1) if len(matches) == 1 else None
-
-
-def check_omp_extension_reads(
-    shared: str, ext_types: str, session_manager: str, fields: set[str], report: Report
-) -> None:
-    """Every name the bundled bridge extension reads is still DECLARED upstream.
-
-    Routed per name to its declaration site: approval fields inside their
-    carrier interface bodies, `previousSessionFile` in shared-events.ts,
-    `cwd` inside `ExtensionContext`, the getters by method name in
-    session-manager.ts. A name this router does not know means the template
-    grew a read without a check — flagged blind, never silently green.
-    """
-    carriers = {
-        name: typescript_interface_body(ext_types, name)
-        for name in OMP_APPROVAL_EVENT_CARRIERS
-    }
-    missing_carriers = [name for name, body in carriers.items() if body is None]
-    if missing_carriers:
-        report.add_blind(
-            "omp approval-event carriers "
-            + ", ".join(f"`{name}`" for name in missing_carriers),
-            "extensions/types.ts",
-            "The omp approval-field checks were SKIPPED.",
-        )
-    # `None`, not `""`: fields match against the JOIN, and `declares`' suppression
-    # keys on None, which a join never is.
-    approval_bodies = (
-        None
-        if missing_carriers
-        else "\n".join(body for body in carriers.values() if body)
-    )
-    ctx_body = typescript_interface_body(ext_types, "ExtensionContext")
-    if ctx_body is None:
-        report.add_blind(
-            "`ExtensionContext`",
-            "extensions/types.ts",
-            "The omp `cwd` context check was SKIPPED.",
-        )
-
-    def declares(body: str | None, field: str) -> bool:
-        if body is None:
-            # An unverifiable carrier was already reported blind above; do not
-            # double-report every field as a rename.
-            return True
-        return (
-            re.search(
-                rf"(?m)^\s*(?:readonly\s+)?{re.escape(field)}\??\s*:", body
-            )
-            is not None
-        )
-
-    # The presence matcher's `\??` cannot see required->optional, and `approved`
-    # is the one field whose optionality carries semantics.
-    if (
-        "approved" in fields
-        and approval_bodies is not None
-        and re.search(r"(?m)^\s*approved\?\s*:", approval_bodies)
-    ):
-        report.add_breaking(
-            "omp's `approved` became OPTIONAL upstream — the decoder reads an "
-            "absent value as a DENIAL, so every approval would drop the sprite "
-            "to idle mid-run with no breadcrumb. Decide an explicit missing-"
-            "field policy before trusting this event again."
-        )
-
-    for field in sorted(fields):
-        if field in ("getSessionFile", "getSessionId"):
-            ok = f"{field}(" in session_manager
-        elif field == "previousSessionFile":
-            ok = re.search(rf"(?m)^\s*{field}\??\s*:", shared) is not None
-        elif field == "cwd":
-            ok = declares(ctx_body, field)
-        elif field in ("toolCallId", "toolName", "reason", "approved"):
-            ok = declares(approval_bodies, field)
-        else:
-            report.add_blind(
-                f"omp extension read `{field}`",
-                "omp_extension.ts",
-                "The template reads a name this check has no declaration site "
-                "for — teach check_omp_extension_reads where it lives.",
-            )
-            continue
-        if not ok:
-            report.add_breaking(
-                f"omp extension-API name `{field}` (read by the installed "
-                f"omp_extension.ts) is GONE from upstream — renamed; the bridge "
-                f"forwards an undefined value and that signal quietly dies "
-                f"(approval waits, lifecycle, or identity)."
-            )
-
-
-def _braced_body(text: str, opener: str) -> str | None:
-    """The brace-balanced body after `opener`, which ends at its `{`, with
-    comments stripped."""
-    text = strip_ts_comments(text)
-    m = re.search(opener, text)
-    if not m:
-        return None
-    start = m.end() - 1
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start + 1 : i]
-    return None
-
-
-def _strip_nested(s: str) -> str:
-    """Iteratively strip innermost `(…)`/`{…}` so only a type body's top-level
-    members survive — else a nested object type's fields read as members of this
-    one. PRECONDITION: comments are already gone. Do NOT re-strip them with a
-    naive `//[^\\n]*` — inside a STRING LITERAL that eats to end-of-line, so one
-    `"http://…"` literal deletes every member after it on that line."""
-    prev = None
-    while prev != s:
-        prev = s
-        s = re.sub(r"\([^()]*\)", "", s)
-        s = re.sub(r"\{[^{}]*\}", "", s)
-    return s
-
-
 def sole_match(pattern: str, text: str) -> re.Match[str] | None:
     """The ONE match, or None when there are none OR several.
 
@@ -651,43 +270,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     partial report intact. No `read_*` here — an inline read unwinds to that
     catch-all and is filed TRANSIENT, a green-run warning where `read_our_names`
     would have filed probe health."""
-    for url, entry in PLUGIN_DOC_MARKERS.items():
-        doc = fetch_anchored(url, f"{entry.cli} plugin contract", report)
-        if doc is not None:
-            for finding in plugin_marker_findings(url, doc):
-                report.add_review(finding)
-
-
-    if ours.dsh_plugin_events is not None:
-        joined = fetch_all_anchored(
-            [
-                (DSH_RUNTIME_TYPES_URL, "dsh agent runtime-types"),
-                (DSH_SESSION_TYPES_URL, "dsh session event types"),
-                (DSH_APPROVAL_TYPES_URL, "dsh approval types"),
-                (DSH_SESSION_INDEX_URL, "dsh session bus names"),
-            ],
-            report,
-        )
-        if joined is not None:
-            for name in sorted(ours.dsh_plugin_events):
-                if f"'{name}'" not in joined:
-                    report.add_breaking(
-                        f"dsh event `{name}` (listened for by the installed "
-                        f"dsh_plugin.mjs) is GONE from the upstream type files — "
-                        f"renamed; the plugin listens to an event dsh never fires "
-                        f"(that slice of the office silently stops updating)."
-                    )
-
-    if ours.omp_extension_reads is not None:
-        shared = fetch_anchored(OMP_EXT_SHARED_EVENTS_URL, "omp extension shared-events", report)
-        ext_types = fetch_anchored(OMP_EXT_TYPES_URL, "omp extension types", report)
-        if shared is not None and ext_types is not None:
-            sm = fetch_anchored(OMP_SESSION_MANAGER_URL, "omp session-manager", report)
-            if sm is not None:
-                check_omp_extension_reads(
-                    shared, ext_types, sm, ours.omp_extension_reads, report
-                )
-
     if ours.omp_extension_subdir is not None:
         disco = fetch_anchored(OMP_EXT_DISCOVERY_URL, "omp extension discovery", report)
         if disco is not None:
@@ -699,47 +281,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"looks, installs cleanly, and never loads (no local check "
                         f"can see this)."
                     )
-        dirs = fetch_anchored(OMP_DIRS_URL, "omp dirs resolver", report)
-        if dirs is not None and re.search(
-            r"(?ms)^export function getAgentDir\(\): string \{\s*return dirs\.agentDir;",
-            dirs,
-        ) is None:
-            report.add_breaking(
-                "omp's `getAgentDir()` no longer returns the resolver's agent dir "
-                "verbatim — if it gained a redirect (XDG or otherwise), "
-                "`omp_agent_dir()`'s no-flatten rule is stale and the bridge "
-                "installs where omp never scans. Re-verify dirs.ts by hand."
-            )
-
-    text = fetch_anchored(OPENCLAW_HOOK_TYPES_URL, "OpenClaw hook types", report)
-    if text is not None:
-        for ty, fields in OPENCLAW_DEGRADED_FIELDS.items():
-            # `= Base & {` as well as `= {`: the model-call events extend a base.
-            body = _braced_body(text, rf"(?m)^(?:export\s+)?type\s+{ty}\s*=[^{{;]*\{{")
-            if body is None:
-                report.add_blind(
-                    f"OpenClaw's `{ty}` declaration",
-                    "src/plugins/hook-types.ts",
-                    "The Degraded field watch on it was SKIPPED.",
-                )
-                continue
-            members = _strip_nested(body)
-            for field, literal in fields:
-                m = re.search(
-                    rf"(?:^|[;,\n])\s*(?:readonly\s+)?{field}\??\s*:([^;]*)", members
-                )
-                if m is None:
-                    lost = f"no longer declares `{field}`"
-                elif literal is not None and literal not in m.group(1):
-                    lost = f"`{field}` no longer allows {literal}"
-                else:
-                    continue
-                report.add_breaking(
-                    f"OpenClaw's `{ty}` {lost} (src/plugins/hook-types.ts) — "
-                    f"openclaw_plugin.js stamps `errored` from it, so the Degraded "
-                    f"verdict misreads a run."
-                )
-
     if ours.openclaw_gateway_port is not None:
         text = fetch_anchored(OPENCLAW_PATHS_URL, "OpenClaw config/paths", report)
         if text is not None:

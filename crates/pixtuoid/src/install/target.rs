@@ -471,7 +471,7 @@ pub(crate) const DSH: Target = Target {
     ),
     host: None,
     #[cfg(feature = "upstream")]
-    upstream: &[],
+    upstream: crate::install::dsh::UPSTREAM,
 };
 
 pub(crate) const OMP: Target = Target {
@@ -494,7 +494,7 @@ pub(crate) const OMP: Target = Target {
     post_install_hint: Some("already-running omp sessions must restart to load the bridge"),
     host: None,
     #[cfg(feature = "upstream")]
-    upstream: &[],
+    upstream: crate::install::omp::UPSTREAM,
 };
 
 pub(crate) const TARGETS: &[&Target] = &[

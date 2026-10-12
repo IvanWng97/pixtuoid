@@ -987,6 +987,27 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         ),
         siblings: None,
     },
+    // `omp_agent_dir`'s no-flatten rule rests on it. Review: a reformat
+    // changes the text with no behavior change.
+    Watch {
+        id: "omp.agent_dir",
+        ours: || vec!["dirs.agentDir"],
+        docs: &[omp_doc(
+            "packages/utils/src/dirs.ts",
+            r"export function getAgentDir\b",
+            "`getAgentDir`",
+        )],
+        read: Read::TsReturn {
+            function: "getAgentDir",
+        },
+        when: When::Vanishes,
+        finding: Finding::Review(
+            "if `getAgentDir()` gained a redirect (XDG or otherwise), `omp_agent_dir()`'s \
+             no-flatten rule is stale and the bridge installs where omp never scans; re-verify \
+             dirs.ts",
+        ),
+        siblings: None,
+    },
 ];
 
 /// Decode one bridge-extension payload (already routed here by
