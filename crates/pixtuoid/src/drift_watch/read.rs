@@ -285,11 +285,20 @@ fn code_text(src: &str) -> Option<String> {
     spans(src.parse().ok()?, &mut ranges);
     let mut out = String::new();
     let mut end = 0;
+    // A doc comment lexes to `#[doc = …]` tokens spanning its own text.
+    let mut comment = 0..0;
     for r in ranges {
+        let piece = src.get(r.clone())?;
+        if comment.contains(&r.start) || piece.starts_with("//") || piece.starts_with("/*") {
+            if !comment.contains(&r.start) {
+                comment = r.clone();
+            }
+            continue;
+        }
         if r.start > end && !out.is_empty() {
             out.push(' ');
         }
-        out.push_str(src.get(r.clone())?);
+        out.push_str(piece);
         end = r.end;
     }
     Some(out)
@@ -897,6 +906,19 @@ mod tests {
             Err("no `<AgentTool as ToolSpec>::description`".to_owned())
         );
         assert!(matches!(rust_str(src, "<<>"), Err(Unread::Ours(_))));
+    }
+
+    #[test]
+    fn code_text_is_the_code_without_its_comments() {
+        assert_eq!(
+            code_text("Ok( /* c */ a::B ) // d").as_deref(),
+            Some("Ok( a::B )")
+        );
+        // A doc comment lexes to `#[doc = …]` tokens that all span its text.
+        assert_eq!(
+            code_text("/// doc\n#[allow(x)] Ok(b)").as_deref(),
+            Some("#[allow(x)] Ok(b)")
+        );
     }
 
     #[test]
