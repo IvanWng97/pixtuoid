@@ -74,7 +74,7 @@ pub(super) fn matches(text: &str, pattern: &str) -> Result<Names, Unread> {
 }
 
 fn rust_file(text: &str) -> Result<syn::File, Unread> {
-    syn::parse_file(text).map_err(|e| missing(format!("Rust syn cannot parse ({e})")))
+    syn::parse_file(text).map_err(|e| missing(format!("Rust that syn cannot parse ({e})")))
 }
 
 /// Every declaration of a Rust file, however deeply nested: a module, an impl
@@ -487,11 +487,9 @@ fn with_ts<T>(
 ) -> Result<T, Unread> {
     let alloc = Allocator::default();
     let parsed = oxc_parser::Parser::new(&alloc, text, oxc_span::SourceType::ts()).parse();
+    // A fatal error files a diagnostic too, so this one check refuses both.
     if let Some(d) = parsed.diagnostics.first() {
-        return Err(missing(format!("TypeScript oxc cannot parse ({d})")));
-    }
-    if parsed.fatal_error {
-        return Err(missing("TypeScript oxc cannot parse"));
+        return Err(missing(format!("TypeScript that oxc cannot parse ({d})")));
     }
     let mut decls = Vec::new();
     ts_declarations(&parsed.program.body, &mut decls);
@@ -695,9 +693,8 @@ pub(super) fn md_headings(text: &str, under: &str) -> Result<Names, Unread> {
 
 /// Comments go first: a comment quoting `{"action": "continue"}` once ended
 /// the set at its stray `}`. An empty set is an answer, not a miss. Hand-rolled
-/// on purpose: a Python parser on crates.io is pre-1.0 (`ruff_python_parser`)
-/// or unmaintained (`rustpython-parser`), a cost these three hermes watches do
-/// not repay.
+/// on purpose: a Python grammar crate for the three set literals hermes' watches
+/// read (`install/hermes.rs`) outweighs this scanner.
 pub(super) fn py_set(text: &str, decl: &str) -> Result<Names, Unread> {
     let src = strip_py_comments(text);
     let opener = Regex::new(&format!(r"(?:{decl})\s*\{{"))?;
@@ -924,12 +921,21 @@ mod tests {
     #[test]
     fn a_document_its_parser_rejects_is_never_read() {
         let rejected = |r: Result<Names, Unread>, lang: &str| {
-            assert!(found(r).is_err_and(|what| what.starts_with(lang)), "{lang}");
+            let what = found(r);
+            assert!(
+                what.as_ref().is_err_and(|w| w.starts_with(lang)),
+                "{what:?}"
+            );
         };
-        rejected(rust_enum("enum E {", "E"), "Rust syn cannot parse");
+        rejected(rust_enum("enum E {", "E"), "Rust that syn cannot parse (");
         rejected(
             ts_fields("export interface E {", "E"),
-            "TypeScript oxc cannot parse",
+            "TypeScript that oxc cannot parse (",
+        );
+        // Recoverable: oxc keeps the whole tree beside the diagnostic.
+        rejected(
+            ts_fields("export interface E { a: string }\nconst x;\n", "E"),
+            "TypeScript that oxc cannot parse (",
         );
     }
 
