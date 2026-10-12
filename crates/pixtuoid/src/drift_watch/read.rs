@@ -1508,7 +1508,7 @@ mod tests {
     /// aside: an early-return branch is the redirect a watch waits on.
     #[test]
     fn ts_return_is_every_return_of_the_one_function() {
-        let src = "export function getAgentDir(): string {\n  return dirs.agentDir;\n}\nfunction redirected(): string {\n  if (process.env.X) return process.env.X;\n  const f = () => { return 'nested'; };\n  class C { m() { return 'method'; } }\n  return dirs.agentDir;\n}\nfunction none() {}\n";
+        let src = "export function getAgentDir(): string {\n  return dirs.agentDir;\n}\nfunction redirected(): string {\n  if (process.env.X) return process.env.X;\n  const f = () => { return 'nested'; };\n  function g() { return 'decl'; }\n  const h = function () { return 'expr'; };\n  class C { m() { return 'method'; } }\n  return dirs.agentDir;\n}\nfunction none() {}\n";
         assert_eq!(
             found(ts_return(src, "getAgentDir")),
             names(&["dirs.agentDir"])

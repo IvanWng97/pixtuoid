@@ -456,6 +456,37 @@ fn a_fact_of_a_missing_field_is_blind_in_a_partial_read() {
     );
 }
 
+/// A later complete document leaves an earlier partial one's reason standing.
+#[test]
+fn a_partial_document_keeps_a_union_read_partial() {
+    const W: Watch = Watch {
+        id: "t.members",
+        ours: || vec!["a", "b"],
+        docs: &[doc("a.ts"), doc("b.ts")],
+        read: Read::TsMembers { of: &["X"] },
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
+        siblings: None,
+    };
+    let served = Served::default()
+        .with(
+            &raw("a.ts"),
+            "enum Events {}\ninterface X extends Base { a: string }\n",
+        )
+        .with(
+            &raw("b.ts"),
+            "enum Events {}\ninterface X { a: string; c: string }\n",
+        );
+    let r = check(&served, &W);
+    assert!(r.breaking.is_empty(), "{r:?}");
+    assert!(
+        r.blind.len() == 1
+            && r.blind[0].contains("`b`")
+            && r.blind[0].contains("a.ts: `interface X` extends another type"),
+        "{r:?}"
+    );
+}
+
 /// The floor counts fields, never the facts beside them: a read that kept
 /// `a` and `a?` kept one field of the two ours names.
 #[test]
