@@ -17,6 +17,10 @@ use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::merge;
 use crate::install::target::MergeOutcome;
+#[cfg(any(test, feature = "upstream"))]
+use crate::install::target::UNDOCUMENTED_HOOK;
+#[cfg(any(test, feature = "upstream"))]
+use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 /// Events we register == events we decode (`source/cursor.rs`), enforced by
 /// `every_registered_cursor_event_decodes` below. `subagentStart`/`subagentStop`
@@ -31,6 +35,23 @@ pub(crate) const CURSOR_EVENTS: &[&str] = &[
     "stop",
     "sessionEnd",
 ];
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: &[Watch] = &[Watch {
+    id: "cursor.hook_events",
+    ours: || CURSOR_EVENTS.to_vec(),
+    docs: &[Doc {
+        at: At::Url("https://cursor.com/docs/hooks.md"),
+        anchor: r"(?m)^#{2,4} Hook events",
+        owns: "the hook-events section",
+    }],
+    read: Read::MdHeadings {
+        under: "Hook events",
+    },
+    when: When::Vanishes,
+    finding: Finding::Breaking(UNDOCUMENTED_HOOK),
+    siblings: None,
+}];
 
 /// Mirrors Cursor's documented resolution: `CURSOR_CONFIG_DIR` (all platforms)
 /// wins; else on **Linux/BSD** a set `XDG_CONFIG_HOME` gives

@@ -25,7 +25,11 @@ use toml::value::Table;
 
 use crate::install::io;
 use crate::install::target::MergeOutcome;
+#[cfg(any(test, feature = "upstream"))]
+use crate::install::target::UNDOCUMENTED_HOOK;
 use pixtuoid_core::source::kimi::SOURCE_NAME;
+#[cfg(any(test, feature = "upstream"))]
+use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 /// Events we register == events we decode, enforced by
 /// `every_registered_kimi_event_decodes`. The two `*Failure` variants close a
@@ -41,6 +45,28 @@ pub(crate) const KIMI_EVENTS: &[&str] = &[
     "StopFailure",
     "SessionEnd",
 ];
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: &[Watch] = &[Watch {
+    id: "kimi.hook_events",
+    ours: || KIMI_EVENTS.to_vec(),
+    docs: &[Doc {
+        at: At::Path {
+            repo: "MoonshotAI/kimi-code",
+            branch: "main",
+            path: "docs/en/customization/hooks.md",
+        },
+        anchor: r"(?m)^## Event Reference",
+        owns: "the Event Reference table",
+    }],
+    read: Read::MdTable {
+        header: "Event",
+        under: "Event Reference",
+    },
+    when: When::Vanishes,
+    finding: Finding::Breaking(UNDOCUMENTED_HOOK),
+    siblings: None,
+}];
 
 /// Per-entry `timeout` (seconds). Kimi fails OPEN on a non-zero/timeout, so this
 /// only bounds a pathologically hung shim on the blocking-capable events

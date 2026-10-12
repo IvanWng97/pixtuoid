@@ -286,22 +286,33 @@ fn a_broken_pattern_of_ours_blames_ours() {
     }
 }
 
-/// A failed fetch is upstream's answer for the run too: re-asking per watch
-/// would file the same dark pin once per watch and wait out each timeout.
+/// A document is upstream's answer for the whole run, a failure included:
+/// re-asking per watch would file the same dark pin once per watch and wait
+/// out each timeout.
 #[test]
-fn a_failed_document_is_fetched_and_filed_once() {
+fn a_document_is_fetched_once_per_run_and_a_failure_filed_once() {
     const W1: Watch = each(&[doc("e.ts")], r#""{name}""#);
     const W2: Watch = each(&[doc("e.ts")], r#"'{name}'"#);
-    for (served, gone) in [
-        (Served::default().gone(&raw("e.ts"), 404), true),
-        (Served::default(), false),
+    let text = "enum Events {\n  \"a.b\", \"c\", 'a.b', 'c'\n}\n";
+    // (served, its blind lines, its error lines)
+    for (served, blind, errors) in [
+        (Served::default().gone(&raw("e.ts"), 404), 1, 0),
+        (Served::default(), 0, 1),
+        (Served::default().with(&raw("e.ts"), text), 0, 0),
     ] {
         let mut report = Report::default();
         let mut fetched = Fetched::new(&served);
         check_watch("src", &W1, &mut fetched, &mut report);
         check_watch("src", &W2, &mut fetched, &mut report);
-        let filed = if gone { &report.blind } else { &report.errors };
-        assert_eq!(filed.len(), 1, "{report:?}");
+        assert_eq!(
+            (
+                report.blind.len(),
+                report.errors.len(),
+                report.breaking.len()
+            ),
+            (blind, errors, 0),
+            "{report:?}"
+        );
         assert_eq!(served.fetched(&raw("e.ts")), 1);
         assert!(
             served
@@ -554,6 +565,18 @@ fn render(pattern: &str, name: &str) -> String {
     let mut out = String::new();
     let mut rest = pattern;
     while !rest.is_empty() {
+        // A `{n}` or `{n,m}` count repeats what came before it to its least.
+        let count = rest
+            .strip_prefix('{')
+            .and_then(|r| r.split_once('}'))
+            .filter(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit() || c == ','));
+        if let Some((n, _)) = count {
+            let least: usize = n.split(',').next().unwrap_or("1").parse().unwrap_or(1);
+            let last = out.chars().last().unwrap_or_default();
+            out.extend(std::iter::repeat_n(last, least.saturating_sub(1)));
+            rest = &rest[n.len() + 2..];
+            continue;
+        }
         let (emit, used) = if let Some(alts) = rest.strip_prefix("(?:") {
             let end = alts
                 .find(')')
@@ -566,6 +589,8 @@ fn render(pattern: &str, name: &str) -> String {
             let fixed: &[(&str, &str)] = &[
                 ("{name}", name),
                 (r#"([^"]+)"#, name),
+                (r"(\w+)", name),
+                (r"\w+", "w"),
                 ("(?m)", ""),
                 ("^", "\n"),
                 (r"\s*", ""),
@@ -642,10 +667,26 @@ fn page(w: &Watch, names: &[&str]) -> String {
                 .iter()
                 .map(|n| format!("    {},\n", pascal(n)))
                 .collect();
-            format!(
-                "#[serde(tag = \"type\", rename_all = \"snake_case\")]\npub enum {name} {{\n{variants}}}\n{}\n",
-                anchors.join("\n")
+            after_decl(
+                w,
+                format!(
+                    "#[serde(tag = \"type\", rename_all = \"snake_case\")]\npub enum {name} {{\n{variants}}}"
+                ),
             )
+        }
+        Read::RustStruct { name } => {
+            let fields: String = names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| {
+                    format!("    #[serde(rename = \"{n}\", default)]\n    pub pxd_{i}: Vec<u8>,\n")
+                })
+                .collect();
+            after_decl(w, format!("pub struct {name} {{\n{fields}}}"))
+        }
+        Read::TsConstArray { name } => {
+            let members: String = names.iter().map(|n| format!("  \"{n}\",\n")).collect();
+            after_decl(w, format!("const {name} = [\n{members}] as const;"))
         }
         Read::TsFields { name } => {
             let fields: String = names.iter().map(|n| format!("  {n}: string;\n")).collect();
@@ -678,7 +719,51 @@ fn page(w: &Watch, names: &[&str]) -> String {
                 serde_json::Value::Object(props)
             )
         }
+        Read::Matches { pattern } => {
+            let decls: Vec<String> = names.iter().map(|n| render(pattern, n)).collect();
+            format!("{}\n{}\n", anchors.join("\n"), decls.join("\n"))
+        }
+        Read::MdTable { header, under } => {
+            let rows: String = names.iter().map(|n| format!("| `{n}` | x |\n")).collect();
+            after_decl(
+                w,
+                format!("## {under}\n| {header} | When |\n|---|---|\n{rows}"),
+            )
+        }
+        Read::MdHeadings { under } => {
+            let heads: String = names.iter().map(|n| format!("### {n}\n")).collect();
+            after_decl(w, format!("## {under}\n{heads}"))
+        }
+        Read::PySet { decl } => {
+            let members: String = names.iter().map(|n| format!("    \"{n}\",\n")).collect();
+            // A `frozenset(` opener closes its call after the set.
+            let close = if decl.ends_with(r"\(") { ")" } else { "" };
+            format!(
+                "{}\n{} {{\n{members}}}{close}\n",
+                anchors.join("\n"),
+                render(decl, "")
+            )
+        }
+        Read::RustMacroRows { name } => {
+            let rows: String = names
+                .iter()
+                .map(|n| format!("    {n} {{ alias: \"x\" }},\n"))
+                .collect();
+            after_decl(w, format!("{name}! {{\n{rows}}}"))
+        }
     }
+}
+
+/// `decl`, then each of `w`'s anchors it does not already carry: rendering a
+/// declaration's own head again would declare it twice.
+fn after_decl(w: &Watch, decl: String) -> String {
+    let rest: Vec<String> = w
+        .docs
+        .iter()
+        .filter(|doc| !Regex::new(doc.anchor).expect("compiles").is_match(&decl))
+        .map(|doc| render(doc.anchor, ""))
+        .collect();
+    format!("{decl}\n{}\n", rest.join("\n"))
 }
 
 /// The variant a snake_case wire name derives from.
@@ -716,10 +801,26 @@ fn near_miss(w: &Watch, name: &str) -> String {
             "#[serde(rename_all = \"snake_case\")]\nenum PxdOther {{\n    {},\n}}",
             pascal(name)
         ),
-        Read::TsFields { .. } => format!("export interface PxdOther {{\n  {name}: string;\n}}"),
-        Read::Each { .. } | Read::Sole { .. } | Read::JsonUnion { .. } | Read::JsonKeys => {
-            String::new()
+        Read::RustStruct { .. } => {
+            format!(
+                "pub struct PxdOther {{\n    #[serde(rename = \"{name}\")]\n    pub pxd: u8,\n}}"
+            )
         }
+        Read::TsFields { .. } => format!("export interface PxdOther {{\n  {name}: string;\n}}"),
+        Read::TsConstArray { .. } => {
+            format!("const PXD_OTHER = [\n  \"{name}\",\n];\nif (n === \"{name}\") {{}}\n")
+        }
+        Read::MdTable { header, .. } => {
+            format!("## PxdOther\n| {header} | When |\n|---|---|\n| `{name}` | x |\n")
+        }
+        Read::MdHeadings { .. } => format!("## PxdOther\n### {name}\n"),
+        Read::PySet { .. } => format!("PXD_OTHER = {{\"{name}\"}}\n"),
+        Read::RustMacroRows { .. } => format!("pxd_other! {{\n    {name} {{ }},\n}}\n"),
+        Read::Each { .. }
+        | Read::Sole { .. }
+        | Read::Matches { .. }
+        | Read::JsonUnion { .. }
+        | Read::JsonKeys => String::new(),
     }
 }
 
@@ -780,8 +881,8 @@ fn a_declaration_form_is_not_satisfied_by_prose() {
 #[test]
 fn every_watch_fires_on_its_change_and_stays_silent_otherwise() {
     let mut proven = 0;
-    for d in REGISTRY {
-        for w in d.upstream.watches() {
+    for (source, w) in declared() {
+        {
             let ours = (w.ours)();
             let victim = ours[0];
             let run_on = |names: &[&str], absent: Option<&str>| {
@@ -789,7 +890,7 @@ fn every_watch_fires_on_its_change_and_stays_silent_otherwise() {
                 let served = serve(w, &format!("{}\n{miss}\n", page(w, names)));
                 let mut report = Report::default();
                 let mut fetched = Fetched::new(&served);
-                check_watch(d.name, w, &mut fetched, &mut report);
+                check_watch(source, w, &mut fetched, &mut report);
                 report
             };
             let fired = |r: &Report| {
@@ -860,13 +961,84 @@ fn the_report_title_carries_the_strongest_disposition_and_the_exit_code() {
     );
 }
 
+/// The installers' watches answer to the rules the registry's do, in one id
+/// space with them.
+#[test]
+fn every_declared_watch_is_runnable_and_its_id_unique() {
+    let mut ids = std::collections::BTreeSet::new();
+    for (_, w) in declared() {
+        assert!(ids.insert(w.id), "watch id {} is declared twice", w.id);
+        assert_eq!(w.unrunnable(), None, "{}", w.id);
+    }
+}
+
+/// Every `.rs` under `dir`, recursively: a module directory would otherwise
+/// hide its files from the census that exists to see them.
+fn rs_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).expect("the dir is readable") {
+        let path = entry.expect("a readable entry").path();
+        if path.is_dir() {
+            out.extend(rs_files(&path));
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            out.push(path);
+        }
+    }
+    out
+}
+
+/// Every `*EVENTS` registration set in `install/` is carried by a vanish watch
+/// in its module's `UPSTREAM` that `declared()` runs. A set no watch carries has
+/// no upstream check at all — an appearance watch cannot see a rename, and an
+/// `UPSTREAM` no target names is never run — and every
+/// gate stays green because nothing else omits it. Derived from the consts, so
+/// no exemption list drifts: opencode, omp and dsh subscribe in their plugin
+/// code and declare no `*EVENTS` const.
+#[test]
+fn every_install_events_const_is_watched() {
+    let decl = Regex::new(r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?const\s+([A-Z_]*EVENTS)\s*:")
+        .expect("compiles");
+    let upstream = Regex::new(r"(?ms)\bconst UPSTREAM\b.*?^\}?\];").expect("compiles");
+    let id = Regex::new(r#"\bid:\s*"([^"]+)""#).expect("compiles");
+    let mut found = 0;
+    for path in rs_files(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/install")) {
+        let src = std::fs::read_to_string(&path).expect("the module is readable");
+        let vanish_watches: Vec<&str> = upstream
+            .find(&src)
+            .map_or("", |m| m.as_str())
+            .split("Watch {")
+            .filter(|w| w.contains("When::Vanishes"))
+            .collect();
+        for name in decl.captures_iter(&src).filter_map(|c| c.get(1)) {
+            found += 1;
+            let named = Regex::new(&format!(r"\b{}\b", name.as_str())).expect("compiles");
+            let ids: Vec<&str> = vanish_watches
+                .iter()
+                .filter(|w| named.is_match(w))
+                .filter_map(|w| id.captures(w).and_then(|c| c.get(1)).map(|m| m.as_str()))
+                .collect();
+            assert!(
+                ids.iter().any(|&i| declared().any(|(_, w)| w.id == i)),
+                "{path:?} registers hooks as {}, but no vanish watch the checker runs \
+                 carries them (watches naming it: {ids:?}): a rename upstream would leave \
+                 the registration inert with nothing to say so",
+                name.as_str(),
+            );
+        }
+    }
+    assert!(
+        found > 0,
+        "the *EVENTS declaration shape moved — this census reads nothing"
+    );
+}
+
 /// Every declared pattern compiles under the engine that runs it, and no
 /// anchor matches a name it guards: such an anchor vanishes WITH the names on
 /// the very rename it exists to tell apart from a stale pin.
 #[test]
 fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
     let mut watches = 0;
-    for w in REGISTRY.iter().flat_map(|d| d.upstream.watches()) {
+    for (_, w) in declared() {
         watches += 1;
         let ours = (w.ours)();
         for doc in w.docs {
@@ -892,8 +1064,21 @@ fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
                 Err(Unread::Ours(e)) => Err(e),
                 _ => Ok(()),
             },
+            Read::Matches { pattern } => Regex::new(pattern).map(|re| {
+                assert!(
+                    re.captures_len() > 1,
+                    "{}: `{pattern}` captures no name",
+                    w.id
+                );
+            }),
+            Read::PySet { decl } => Regex::new(decl).map(drop),
             Read::RustEnum { .. }
+            | Read::RustStruct { .. }
             | Read::TsFields { .. }
+            | Read::TsConstArray { .. }
+            | Read::MdTable { .. }
+            | Read::MdHeadings { .. }
+            | Read::RustMacroRows { .. }
             | Read::JsonUnion { .. }
             | Read::JsonKeys => Ok(()),
         };
@@ -1114,4 +1299,203 @@ fn an_enum_off_snake_case_is_probe_health() {
         r.blind[0].contains("found `enum Item` without `rename_all = \"snake_case\"`"),
         "{r:?}"
     );
+}
+
+/// Every wire literal a decoder equality-compares is carried by a declared
+/// vanish watch — a source's or an installer's, so it lives here, where both
+/// rosters are — or a drift-surface fragment, or exempted below with its
+/// adjudicated reason (#943's gate).
+///
+/// Three accepted loosenesses, adjudicated on #943: membership is
+/// global across sets, so a cross-source spelling collision passes; a
+/// literal behind a non-exported const escapes the scan; and the scan is
+/// `==`/`!=`-shaped only — a MATCH ARM pattern, a `.starts_with` prefix
+/// gate, or a `matches!` is outside its population. Export such
+/// vocabularies instead (opencode's part statuses are the precedent).
+/// Stale exemptions fail the OTHER direction.
+#[test]
+fn every_equality_compared_wire_literal_is_accounted_for() {
+    // (file stem, literal, why no upstream watch is owed)
+    const EXEMPT: &[(&str, &str, &str)] = &[
+        (
+            "antigravity",
+            "PLANNER_RESPONSE",
+            "capture-verified step type; a rename lands in the \
+             non-PLANNER_RESPONSE + tool_calls breadcrumb (antigravity.rs)",
+        ),
+        (
+            "antigravity",
+            "ask_permission",
+            "unverified reverse-engineered tool name (antigravity.rs comment); \
+             no watchable upstream, silent on rename — accepted",
+        ),
+        ("antigravity", "ask_question", "same as ask_permission"),
+        (
+            "admit",
+            "jsonl",
+            "file-extension guard; resolver/path axis (#880)",
+        ),
+        (
+            "cc_probe",
+            "json",
+            "file-extension guard; resolver/path axis (#880)",
+        ),
+        (
+            "cc_probe",
+            "projects",
+            "dirname guard; resolver/path axis (#880)",
+        ),
+        (
+            "claude_code",
+            "<synthetic>",
+            "CC's placeholder model value; a rename degrades to a cosmetic \
+             flame label until the next real model string arrives",
+        ),
+        (
+            "claude_code",
+            "tool_use",
+            "Messages-API block type; no CC doc declares it apart from \
+             `tool_use_id`, and the hook transport carries the same activity \
+             — headless-only degradation, corpus-census detectable",
+        ),
+        ("claude_code", "tool_result", "same as tool_use"),
+        (
+            "antigravity",
+            "USER_INPUT",
+            "no watchable upstream doc; the decoder breadcrumbs unknown \
+             vocabulary (the runtime detector)",
+        ),
+        ("antigravity", "CONVERSATION_HISTORY", "same as USER_INPUT"),
+        (
+            "claude_code",
+            "attachment",
+            "undocumented transcript surface; its marker KINDS are \
+             appearance-watched by `claude_code.effort_attachments`",
+        ),
+        (
+            "copilot",
+            "task",
+            "name-only BY DESIGN (subagent_type is spoofable, see \
+             copilot_tool_detail) — and unwatchable: the schema types \
+             toolName as a free string and never declares tool-name values",
+        ),
+        (
+            "cursor",
+            "Task",
+            "detection is semantic (subagent_type, capture-verified), so a \
+             rename degrades to a Generic tool, never a missed delegation",
+        ),
+        (
+            "grok",
+            "spawn_subagent",
+            "semantic subagent_type fallback exists on the same arm",
+        ),
+        (
+            "omp",
+            "default",
+            "resolver/path axis, deliberately unwatched (#880)",
+        ),
+        (
+            "omp",
+            "sessions",
+            "resolver/path axis, deliberately unwatched (#880)",
+        ),
+        (
+            "omp",
+            "task",
+            "children register via PATH NESTING regardless (module doc); the \
+             name only styles the parent's pose",
+        ),
+        (
+            "opencode",
+            "tool",
+            "part-type inside the watched `message.part.updated`; a rename is \
+             #943-class value drift, accepted residual",
+        ),
+    ];
+
+    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut carried: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    fn walk(v: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
+        match v {
+            serde_json::Value::String(s) => {
+                out.insert(s.clone());
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+            serde_json::Value::Object(o) => o.values().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
+    for krate in ["pixtuoid-core", "pixtuoid"] {
+        let path = crates.join(krate).join("drift-surface.json");
+        let frag = std::fs::read_to_string(&path).expect("committed fragment is readable");
+        walk(
+            &serde_json::from_str(&frag).expect("fragment parses"),
+            &mut carried,
+        );
+    }
+    // An appearance watch fires only when a name lands, so it cannot see one
+    // renamed: only the vanish watches' names are carried.
+    for (_, w) in declared().filter(|(_, w)| matches!(w.when, When::Vanishes)) {
+        carried.extend((w.ours)().into_iter().map(str::to_owned));
+    }
+    let sources: std::collections::BTreeSet<&str> =
+        pixtuoid_core::source::registry::registered_source_names().collect();
+
+    let paths = rs_files(&crates.join("pixtuoid-core/src/source"));
+
+    let mut found: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
+    let mut unaccounted: Vec<String> = Vec::new();
+    for path in paths {
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("a utf-8 stem")
+            .to_owned();
+        // mod/native/tests are the runtime+resolver axis, deliberately
+        // unwatched (#880); drift/registry are the breadcrumb infra itself.
+        if ["mod", "native", "tests", "drift", "registry"].contains(&stem.as_str()) {
+            continue;
+        }
+        let src = std::fs::read_to_string(&path).expect("the module is readable");
+        let prod = src
+            .split("#[cfg(test)]\nmod ")
+            .next()
+            .expect("split never yields zero parts");
+        for line in prod.lines() {
+            // Comments first: a doc example quoting `== "x"` is not a read.
+            let code = line.split("//").next().unwrap_or("");
+            for pat in ["== Some(\"", "== \"", "!= Some(\"", "!= \""] {
+                for (i, _) in code.match_indices(pat) {
+                    let rest = &code[i + pat.len()..];
+                    let Some(end) = rest.find('\"') else { continue };
+                    let lit = &rest[..end];
+                    found.insert((stem.clone(), lit.to_owned()));
+                    let ok = carried.contains(lit)
+                        || sources.contains(lit)
+                        || lit.starts_with('.')
+                        || lit.ends_with(".jsonl")
+                        || EXEMPT.iter().any(|(f, l, _)| *f == stem && *l == lit);
+                    if !ok {
+                        unaccounted.push(format!("{stem}.rs: == \"{lit}\""));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        unaccounted.is_empty(),
+        "a decoder equality-compares wire literals the drift surface never \
+         carries — watch them (a `Watch` in the source's or installer's \
+         `UPSTREAM`), breadcrumb the miss, or exempt them here with the \
+         adjudicated reason:\n  {}",
+        unaccounted.join("\n  "),
+    );
+    for (file, lit, _) in EXEMPT {
+        assert!(
+            found.contains(&((*file).to_owned(), (*lit).to_owned())),
+            "the exemption for {file}.rs == \"{lit}\" outlived the \
+             comparison it excused — delete the row",
+        );
+    }
 }

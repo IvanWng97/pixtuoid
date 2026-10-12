@@ -89,37 +89,25 @@ def test_plugin_doc_markers_fire_on_vanish() -> None:
         )
 
 
-def test_plugin_contract_findings_reach_review_only_for_registered_hosts() -> None:
-    """A host's plugin documents are fetched only while we register its events, and
-    a vanished marker files a review naming that host's installer."""
+def test_a_vanished_plugin_contract_marker_files_a_review() -> None:
+    """A vanished marker files a review naming that host's installer."""
     real = d.fetch
     try:
         url = d.CODEX_PLUGIN_CMD_URL
         entry = d.PLUGIN_DOC_MARKERS[url]
         first = sorted(entry.markers)[0]
         maimed = ANCHOR_SAMPLES[url] + "\n".join(m for m in entry.markers if m != first)
-        served: list[str] = []
-
         def stub(u: str) -> str:
-            served.append(u)
             if u == url:
                 return maimed
             raise urllib.error.URLError("offline: not this case's document")
 
         d.fetch = stub
         rep = d.Report()
-        d.run_checks(d.OurNames(codex={"SessionStart"}), report=rep)
+        d.run_checks(d.OurNames(), report=rep)
         check(
             any(first in r and "install/codex.rs" in r for r in rep.review),
             f"a vanished Codex plugin marker files a review: {rep.review!r}",
-        )
-
-        served.clear()
-        d.run_checks(d.OurNames(cc={"SessionStart"}), report=d.Report())
-        codex_docs = {u for u, e in d.PLUGIN_DOC_MARKERS.items() if e.cli == "Codex"}
-        check(
-            not codex_docs & set(served),
-            f"an unregistered host's plugin documents are not fetched: {sorted(served)}",
         )
     finally:
         d.fetch = real
@@ -138,14 +126,6 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.CODEX_MARKETPLACE_RECORD_URL: "pub(super) fn record_added_marketplace_entry(\n) {\n}\n",
     d.CODEX_MARKETPLACE_SOURCE_URL: "fn resolve_local_source_path(source: &str) {\n}\n",
     d.REASONIX_PLUGIN_DOC_URL: "\n## CLI Mode\n",
-    d.CURSOR_HOOKS_URL: "\n### Hook events\n\n#### preToolUse\n",
-    d.KIMI_HOOKS_URL: '"hook_event_name": "PreToolUse"',
-    d.CC_HOOKS_URL: "\n# Hooks reference\n",
-    d.REASONIX_HOOK_URL: 'const (\n    SessionStart Event = "SessionStart"\n)\n',
-    d.CODEWHALE_HOOK_URL: "pub enum HookEvent {\n    SessionStart,\n}\n",
-    d.CODEX_PROTOCOL_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
-    d.HERMES_PLUGINS_URL: 'VALID_HOOKS: set[str] = {\n    "on_session_start",\n}\n',
-    d.HERMES_SHELL_HOOK_URL: '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n',
     d.OMP_EXT_SHARED_EVENTS_URL:
         'export interface SessionShutdownEvent { type: "session_shutdown"; }\n',
     d.OMP_EXT_TYPES_URL:
@@ -168,7 +148,6 @@ ANCHOR_SAMPLES: dict[str, str] = {
         'export async function discoverExtensionModulePaths() {}\n',
     d.OMP_DIRS_URL:
         'export function getAgentDir(): string {\n\treturn dirs.agentDir;\n}\n',
-    d.GROK_HOOK_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "agent_end"\n',
     d.OPENCLAW_PATHS_URL: "export const DEFAULT_GATEWAY_PORT = 18789;\n",
 }
@@ -229,52 +208,6 @@ def test_anchor_gate_fires_in_both_directions() -> None:
                     d.fetch_anchored(url, "T", r) is None and len(r.blind) == 1,
                     f"{anchor.owns}: {drop} missing -> blind, got blind={r.blind}",
                 )
-    finally:
-        d.fetch = real
-
-
-def test_one_document_is_fetched_once_per_run() -> None:
-    """A document is upstream's answer for the whole run, and several checks read
-    the same one — two read hermes's `plugins.py`."""
-    real = d.fetch
-    try:
-        calls: list[str] = []
-
-        def dead(u: str) -> str:
-            calls.append(u)
-            raise urllib.error.HTTPError(u, 404, "gone", {}, None)  # type: ignore[arg-type]
-
-        d.fetch = dead
-        rep = d.Report()
-        d.run_checks(d.read_our_names(rep), report=rep)
-        # A floor: a run that swept nothing would satisfy every check below.
-        check(len(calls) > 20, f"the run actually swept, got {len(calls)} fetches")
-        check(
-            not (dupes := sorted({u for u in calls if calls.count(u) > 1})),
-            f"each document is fetched once per run; repeated: {dupes}",
-        )
-        check(
-            not (twice := sorted({b for b in rep.blind if rep.blind.count(b) > 1})),
-            f"a dead pin files ONE blind line, not one per reader; repeated: {twice}",
-        )
-
-        # A SUCCESSFUL document is reused as well, not only a failed one.
-        served: list[str] = []
-
-        def live(u: str, _s: str = ANCHOR_SAMPLES[d.HERMES_PLUGINS_URL]) -> str:
-            served.append(u)
-            if u == d.HERMES_PLUGINS_URL:
-                return _s
-            raise urllib.error.URLError("offline: not this case's document")
-
-        d.fetch = live
-        rep = d.Report()
-        d.run_checks(d.read_our_names(rep), report=rep)
-        check(
-            served.count(d.HERMES_PLUGINS_URL) == 1,
-            f"a document that ANSWERED is cached too, got "
-            f"{served.count(d.HERMES_PLUGINS_URL)} fetches of plugins.py",
-        )
     finally:
         d.fetch = real
 
@@ -417,11 +350,8 @@ def test_the_openclaw_degraded_watch_tells_a_vanished_field_from_a_missing_type(
 
     real = d.fetch
     try:
-        rep0 = d.Report()
-        hooks = sorted(d.read_our_names(rep0).openclaw or ())
-        check(bool(hooks), "the fragment supplies the openclaw hook set")
-        # The anchor and every registered hook, so only the event types vary.
-        names = "export type PluginHookName =\n" + "".join(f'  | "{h}"\n' for h in hooks)
+        # The anchor, so only the event types vary.
+        names = 'export type PluginHookName =\n  | "agent_end"\n'
 
         def member(f: str, literal: str | None, drop_literal: bool) -> str:
             """A literal's union wraps one member per line, as upstream's formatter
@@ -672,228 +602,16 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
     )
 
 
-def test_the_hermes_blocking_watch_fires_on_an_appearance_not_a_vanish() -> None:
-    """The one APPEARANCE watch among the name checks, so the vanish census cannot
-    cover it: exit 0 on a blocking approval hook ANSWERS the prompt (invariant #5).
-    """
-    real = d.fetch
-    try:
-        rep0 = d.Report()
-        ours = d.read_our_names(rep0)
-        unsafe = sorted(d.HERMES_BLOCKING_UNSAFE & (ours.hermes or set()))
-        check(bool(unsafe), f"we register something the watch calls unsafe: {unsafe}")
-
-        def drive(members: list[str]) -> d.Report:
-            body = "_BLOCKING_EVENTS = frozenset({%s})\n" % ", ".join(
-                f'"{m}"' for m in members
-            )
-
-            def stub(u: str, _b: str = body) -> str:
-                if u == d.HERMES_SHELL_HOOK_URL:
-                    return _b
-                raise urllib.error.URLError("offline: not this case's document")
-
-            d.fetch = stub
-            rep = d.Report()
-            d.run_checks(d.read_our_names(rep), report=rep)
-            return rep
-
-        quiet = drive(["pre_tool_call"])
-        check(not quiet.breaking, f"an observer-only set stays silent: {quiet.breaking}")
-        loud = drive(["pre_tool_call", unsafe[0]])
-        check(any(unsafe[0] in x for x in loud.breaking),
-              f"`{unsafe[0]}` turning blocking must fire; got {loud.breaking}")
-
-        # The OTHER appearance direction on the plugins document: a hook we
-        # register being reclassified as unservable by a shell hook.
-        registered = sorted(ours.hermes or ())
-        check(bool(registered), "the fragment supplies hermes' registration set")
-
-        def plugins(unservable: list[str]) -> d.Report:
-            body = (
-                "VALID_HOOKS: set[str] = {\n"
-                + "".join(f'    "{h}",\n' for h in registered)
-                + "}\n"
-                + "SHELL_UNSUPPORTED_HOOKS: set[str] = {\n"
-                + "".join(f'    "{h}",\n' for h in unservable)
-                + "}\n"
-            )
-
-            def stub(u: str, _b: str = body) -> str:
-                if u == d.HERMES_PLUGINS_URL:
-                    return _b
-                raise urllib.error.URLError("offline: not this case's document")
-
-            d.fetch = stub
-            rep = d.Report()
-            d.run_checks(d.read_our_names(rep), report=rep)
-            return rep
-
-        ok = plugins(["transform_api_error_classification"])
-        check(not ok.breaking, f"a hook we do not register stays silent: {ok.breaking}")
-        bad = plugins([registered[0]])
-        check(any(registered[0] in x for x in bad.breaking),
-              f"`{registered[0]}` turning unservable must fire; got {bad.breaking}")
-        # The anchor is the declaration itself, so a moved set is probe health.
-        d.fetch = lambda _u: "BLOCK_EXIT_CODE = 2\n"
-        gone = d.Report()
-        d.run_checks(d.read_our_names(gone), report=gone)
-        check(not gone.breaking, f"a moved declaration is not drift: {gone.breaking}")
-    finally:
-        d.fetch = real
-
-
-def test_enum_body_survives_struct_variants_and_indentation() -> None:
-    """`(.*?)\\}` stopped at the first `}` (a struct variant truncated the enum);
-    `(.*?)\\n\\}` additionally demanded a column-0 closing brace, so an indented
-    enum read as "moved upstream" (#793).
-    """
-    struct_variant = (
-        "pub enum HookEvent {\n"
-        "    SessionStart,\n"
-        "    ToolCallBefore { name: String, args: Value },\n"
-        "    SessionEnd,\n"
-        "}\n"
-    )
-    got = d.upstream_codewhale_hooks(struct_variant)
-    check(
-        got is not None and "session_end" in got,
-        f"a variant AFTER a struct variant survives (no first-`}}` truncation): {got}",
-    )
-
-    # The OVER-capture direction: a spill into the following `impl` becomes a
-    # phantom variant, worse than a miss — it makes a real rename look present.
-    indented = (
-        "mod outer {\n"
-        "    pub enum HookEventName {\n"
-        "        PreToolUse,\n"
-        "    }\n"
-        "\n"
-        "    impl HookEventName {\n"
-        "        fn f(&self) -> PhantomVariant { PhantomVariant }\n"
-        "    }\n"
-        "}\n"
-    )
-    got = d.upstream_codex_hooks(indented)
-    check(got is not None and "PreToolUse" in got, f"the real variant is found: {got}")
-    check(
-        got is not None and "PhantomVariant" not in got,
-        f"the body STOPS at the enum's own brace — no spill into the impl: {got}",
-    )
-
-    commented = (
-        "pub enum HookEvent {\n"
-        "    /// Fires like `Foo { bar }` does.\n"
-        "    SessionStart,\n"
-        "    SessionEnd,\n"
-        "}\n"
-    )
-    got = d.upstream_codewhale_hooks(commented)
-    check(
-        got is not None and {"session_start", "session_end"} <= got,
-        f"a brace in a comment does not truncate the body: {got}",
-    )
-
-    # An empty set would report every registered event as GONE.
-    check(d.upstream_codewhale_hooks("struct Other {}") is None, "absent enum -> None")
-    check(d.upstream_codex_hooks("struct Other {}") is None, "absent enum -> None")
-    check(
-        d.upstream_codewhale_hooks("pub enum HookEventName {\n    PreToolUse,\n}") is None,
-        "`HookEvent` must not match `enum HookEventName`",
-    )
-
-
-def test_every_block_reader_strips_comments_before_counting_braces() -> None:
-    """The rule two of the three readers state in their own docstrings, and the
-    third re-broke: a brace inside a comment moves the bounds. The dangerous
-    outcome is not the empty parse (loud) but the TRUNCATED one — the size floor
-    still passes and the tail of the set silently leaves the sweep."""
-    clean = 'VALID_HOOKS: set[str] = {\n    "a_one",\n    "b_two",\n}\n'
-    want = {"a_one", "b_two"}
-    check(d.python_set_literal(clean, "VALID_HOOKS: set[str] = {") == want, "clean baseline")
-    for label, comment in (
-        ("unmatched open", '    # returns {"action": "continue"\n'),
-        ("stray close", "    # anything else } lets the turn finish\n"),
-        ("both", '    # {"a": 1} and a trailing }\n'),
-    ):
-        poisoned = 'VALID_HOOKS: set[str] = {\n    "a_one",\n' + comment + '    "b_two",\n}\n'
-        got = d.python_set_literal(poisoned, "VALID_HOOKS: set[str] = {")
-        check(
-            got == want,
-            f"a comment with an {label} brace must not move the bounds: got {sorted(got)}",
-        )
-
-
-def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
-    """Tracking `'` as a string opener swallows the comment AFTER an odd number of
-    lifetimes into a fake literal, re-admitting every word inside it. An EVEN count
-    cannot show this — the fake span closes before the comment — so a two-lifetime
-    fixture passes under both implementations and proves nothing."""
-    odd = "fn f<'a>(x: &'a str) -> &'static u8 { /* PxGhost */ }"
-    check("PxGhost" not in d.strip_rust_comments(odd),
-          f"lifetimes must not open a string: {d.strip_rust_comments(odd)}")
-
-    # `//` inside a string literal: a blind `//[^\n]*` eats the rest of the line.
-    in_string = 'const U: &str = "https://x/y"; const K: &str = "PxKeep";'
-    check(d.strip_rust_comments(in_string) == in_string,
-          f"a `//` inside a string is not a comment: {d.strip_rust_comments(in_string)}")
-
-    # NESTED: `/\\*.*?\\*/` stops at the first `*/` and re-admits `PxGhost`.
-    nested = 'A, /* outer /* inner */ PxGhost */ B,'
-    stripped = d.strip_rust_comments(nested)
-    check("PxGhost" not in stripped, f"a nested comment leaks: {stripped}")
-    check("A," in stripped and "B," in stripped, f"code around it survives: {stripped}")
-
-
-def test_the_floor_is_what_we_already_handle() -> None:
-    """A parse returning fewer names than we already decode is broken or degraded,
-    and must file probe health rather than five ⛔ against working decoders —
-    document. Proven by running the sweep, not by reading the comparison."""
-    rep = d.Report()
-    ours = d.OurNames(cc={f"ev{i}" for i in range(9)})
-    check(
-        not d.parse_is_believable("cc", {f"ev{i}" for i in range(7)}, ours, rep),
-        "a parse below what we handle must not be believed",
-    )
-    check(
-        any("SKIPPED for cc" in f for f in rep.blind),
-        f"and must file probe health naming the source: {rep.blind}",
-    )
-    rep2 = d.Report()
-    check(
-        d.parse_is_believable("cc", ours.cc | {"brand_new"}, ours, rep2),
-        "at/above the floor must be believed",
-    )
-    check(not rep2.blind, f"and must file nothing: {rep2.blind}")
-
-
-def test_every_believability_gate_can_name_the_document_it_doubts() -> None:
-    """`parse_is_believable` reads `PARSE_SOURCES[source]` to say WHICH pin to
-    re-check, so a caller missing from that table raises KeyError — and only on
-    the day a parse actually degrades, which is the day the report matters."""
-    src = (pathlib.Path(__file__).resolve().parent / "check_upstream_drift.py").read_text()
-    callers = set(re.findall(r'parse_is_believable\(\s*"(\w+)"', src))
-    check(bool(callers), "the gate still has callers")
-    missing = sorted(callers - set(d.PARSE_SOURCES))
-    check(
-        not missing,
-        f"{missing} call parse_is_believable but declare no PARSE_SOURCES row, so a "
-        f"degraded parse would raise KeyError instead of filing probe health.",
-    )
-    stale = sorted(set(d.PARSE_SOURCES) - callers)
-    check(not stale, f"PARSE_SOURCES lists {stale}, which no longer gates anything.")
-    # The gate must still REFUSE: a floor nothing can fail is not a floor.
-    rep = d.Report()
-    caller = sorted(callers)[0]
-    ours = d.OurNames(**{caller: {f"h{i}" for i in range(4)}})
-    check(
-        not d.parse_is_believable(caller, {"only_one"}, ours, rep),
-        f"a one-name parse must fail {caller}'s floor",
-    )
-    check(
-        any(f"SKIPPED for {caller}" in f for f in rep.blind),
-        f"and must name {caller} in the probe-health line: {rep.blind}",
-    )
+def test_ts_comment_strip_keeps_strings_in_all_three_quotes() -> None:
+    """A `//` inside any TS literal is not a comment: a blind `//[^\\n]*` eats the
+    rest of the line, members included."""
+    for quoted in ('"https://x/y"', "'https://x/y'", "`https://x/y`"):
+        line = f"const U = {quoted}; const K = 'PxKeep';"
+        check(d.strip_ts_comments(line) == line,
+              f"a `//` inside {quoted[0]} is not a comment: {d.strip_ts_comments(line)}")
+    # TS block comments do not nest: the first `*/` ends one.
+    stripped = d.strip_ts_comments("A, /* outer /* inner */ B, // gone\nC,")
+    check(stripped == "A,  B, \nC,", f"comments go, code stays: {stripped!r}")
 
 
 def test_every_swept_url_declares_an_anchor() -> None:
@@ -953,15 +671,21 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         full = {rel: real(rel) for rel in (d.CORE_LIB_FRAGMENT, d.CORE_BIN_FRAGMENT)}
 
         holed = {rel: json.loads(json.dumps(f)) for rel, f in full.items()}
-        del holed[d.CORE_BIN_FRAGMENT]["registered"]["claude-code"]
+        del holed[d.CORE_BIN_FRAGMENT]["shipped"]["dsh.plugin_events"]
         d.load_fragment = lambda rel: holed[rel]
         rep = d.Report()
         ours = d.read_our_names(rep)
-        check(ours.cc is None, f"the holed field is dark, got {ours.cc!r}")
-        for other in ("cursor", "kimi", "codex", "omp_extension_subdir"):
+        check(
+            ours.dsh_plugin_events is None,
+            f"the holed field is dark, got {ours.dsh_plugin_events!r}",
+        )
+        for other in ("omp_extension_reads", "openclaw_gateway_port", "omp_extension_subdir"):
             check(getattr(ours, other), f"{other} must survive a sibling's gap")
-        named = [b for b in rep.blind if "`cc`" in b]
-        check(len(named) == 1, f"exactly one probe-health line names cc: {rep.blind}")
+        named = [b for b in rep.blind if "`dsh_plugin_events`" in b]
+        check(
+            len(named) == 1,
+            f"exactly one probe-health line names dsh_plugin_events: {rep.blind}",
+        )
 
         # A fragment that does not load at all darkens only what IT feeds.
         def half(rel):
@@ -972,30 +696,16 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         d.load_fragment = half
         rep2 = d.Report()
         ours2 = d.read_our_names(rep2)
-        check(ours2.cc is None, "a registration field is dark when its fragment is gone")
+        check(
+            ours2.dsh_plugin_events is None,
+            "a field of the missing fragment is dark when its fragment is gone",
+        )
         check(
             bool(ours2.omp_extension_subdir),
             "a field of the other fragment survives it going missing",
         )
     finally:
         d.load_fragment = real
-
-
-def test_the_cc_hook_table_parser_extracts_from_a_snippet() -> None:
-    """The parser, against a hand-made document of the shape it reads. It fails
-    SAFE (an empty parse becomes probe health, not a ⛔), but a regex-parser
-    regression is a silent monitor death."""
-    cc = d.upstream_cc_hook_events(
-        "# Hooks reference\n\n"
-        "| Event | When it fires |\n|---|---|\n"
-        "| `PreToolUse` | before a tool |\n"
-        "| `PermissionRequest` | on a gate |\n"
-    )
-    check(cc is not None and {"PreToolUse", "PermissionRequest"} <= cc, f"cc table: {cc}")
-    check(
-        d.upstream_cc_hook_events("# Hooks reference\n\nprose with no table\n") in (None, set()),
-        "a table-less page must not read as a full parse",
-    )
 
 
 def test_omp_approved_optionality_is_watched() -> None:
@@ -1036,8 +746,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
     """The gate #941 asks for: EVERY surface row's check, both directions, offline.
 
     Each document is BUILT from the set we depend on, so an added event cannot make
-    this stale, and in the UPSTREAM spelling — the trap that hid codewhale's arm in
-    review (upstream declares `MessageSubmit`, we register `message_submit`)."""
+    this stale."""
     real = d.fetch
     try:
         rep0 = d.Report()
@@ -1046,12 +755,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
         full: dict[str, list[str]] = {
             f: sorted(getattr(ours, f) or ()) for f, *_ in d.SURFACE_ROWS
         }
-
-        def pascal(name: str) -> str:
-            return "".join(p.title() for p in name.split("_"))
-
-        def bare_enum(enum: str, names: list[str]) -> str:
-            return f"pub enum {enum} {{\n" + "".join(f"    {n},\n" for n in names) + "}\n"
 
         def omp_extension_docs(reads: list[str]) -> dict[str, str]:
             """The three extension-API docs, shaped like upstream: the anchors'
@@ -1096,34 +799,10 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             }
 
         cases = [
-            ("reasonix", str, lambda ns: {
-                d.REASONIX_HOOK_URL:
-                    "const (\n" + "".join(f'    {n} Event = "{n}"\n' for n in ns) + ")\n"}),
-            ("codewhale", pascal, lambda ns: {
-                d.CODEWHALE_HOOK_URL: bare_enum("HookEvent", ns)}),
-            ("codex", str, lambda ns: {
-                d.CODEX_PROTOCOL_URL: bare_enum("HookEventName", ns)}),
-            ("hermes", str, lambda ns: {
-                d.HERMES_PLUGINS_URL:
-                    "VALID_HOOKS: set[str] = {\n" + "".join(f'    "{n}",\n' for n in ns) + "}\n"}),
-            ("grok", str, lambda ns: {
-                d.GROK_HOOK_URL:
-                    "macro_rules! hook_events {\n"
-                    "    ($($variant:ident { $($rest:tt)* }),* $(,)?) => {\n"
-                    "        pub enum HookEventName {\n"
-                    "            $($variant,)*\n"
-                    "        }\n"
-                    "    };\n"
-                    "}\n\n"
-                    "hook_events! {\n"
-                    + "".join(f'    {n} {{ alias: "x" }},\n' for n in ns) + "}\n"}),
-            ("openclaw_gateway_port", str, lambda ns: {
+            ("openclaw_gateway_port", lambda ns: {
                 d.OPENCLAW_PATHS_URL: f"export const DEFAULT_GATEWAY_PORT = {ns[0]};\n"}),
-            ("openclaw", str, lambda ns: {
-                d.OPENCLAW_HOOK_TYPES_URL:
-                    "export type PluginHookName =\n" + "".join(f'  | "{n}"\n' for n in ns)}),
-            ("omp_extension_reads", str, omp_extension_docs),
-            ("omp_extension_subdir", str, lambda ns: {
+            ("omp_extension_reads", omp_extension_docs),
+            ("omp_extension_subdir", lambda ns: {
                 d.OMP_EXT_DISCOVERY_URL:
                     "export async function discoverExtensionModulePaths() {}\n"
                     + "".join(
@@ -1133,14 +812,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 d.OMP_DIRS_URL:
                     "export function getAgentDir(): string {\n"
                     "\treturn dirs.agentDir;\n}\n"}),
-            ("cursor", str, lambda ns: {
-                d.CURSOR_HOOKS_URL: "### Hook events\n\n" + "".join(f"#### {n}\n\n" for n in ns)}),
-            ("kimi", str, lambda ns: {
-                d.KIMI_HOOKS_URL: "hook_event_name\n\n" + "".join(f"| `{n}` | x |\n" for n in ns)}),
-            ("cc", str, lambda ns: {
-                d.CC_HOOKS_URL: "# Hooks reference\n\n| Event | When it fires |\n|---|---|\n"
-                + "".join(f"| `{n}` | x |\n" for n in ns)}),
-            ("dsh_plugin_events", str, lambda ns: {
+            ("dsh_plugin_events", lambda ns: {
                 d.DSH_RUNTIME_TYPES_URL:
                     "declare module '@deepseek-ai/cordis' {\n  interface Events {\n"
                     + "\n".join(f"'{n}'" for n in ns),
@@ -1171,27 +843,24 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             d.run_checks(d.read_our_names(rep), report=rep)
             return rep
 
-        for field, spell, build in cases:
+        for field, build in cases:
             names = full[field]
             check(bool(names), f"{field}: the fragment supplies a set")
             victims = names[:1]
-            # The vanish arm ADDS as it drops, in the name's own shape — below the
-            # floor the check SKIPS. `_` not case is the axis (cursor's lone `stop`).
-            # The decoy is built from the VICTIM, so the mutated document carries the
-            # dropped name's spelling in a NON-declaration position: that is the only
-            # shape that can tell `f'"{name}"' not in text` from `name not in text`.
-            stem = spell(victims[0])
+            # The vanish arm ADDS as it drops, in the name's own shape. The decoy is
+            # built from the VICTIM, so the mutated document carries the dropped
+            # name's spelling in a NON-declaration position: that is the only shape
+            # that can tell `f'"{name}"' not in text` from `name not in text`.
+            stem = victims[0]
             if stem.isdigit():
                 # A numeric VALUE row: a `Pxd` suffix leaves our digits at the front,
                 # where the reader's `(\d+)` finds them and the arm reads unchanged.
                 sfx = ("0", "00")
-            elif "_" in stem:
-                sfx = ("_pxd", "_pxdb")
             else:
                 sfx = ("Pxd", "Pxdb")
-            kept = [spell(n) for n in names if n not in victims]
+            kept = [n for n in names if n not in victims]
 
-            intact = drive(build([spell(n) for n in names]))
+            intact = drive(build(names))
             check(not intact.breaking,
                   f"{field}: an intact document must stay silent; got {intact.breaking}")
             rep = drive(build(kept + [stem + s for s in sfx]))

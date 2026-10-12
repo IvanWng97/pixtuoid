@@ -77,8 +77,30 @@ pub enum Read {
     /// its ident in snake_case. Read only under `rename_all = "snake_case"`,
     /// the one spelling it derives.
     RustEnum { name: &'static str },
+    /// The serde wire names of the ONE `struct name`'s fields.
+    RustStruct { name: &'static str },
     /// The fields of the ONE `export interface name`.
     TsFields { name: &'static str },
+    /// Every first group of `pattern`: `Each` turned round, so the floor can
+    /// tell a degraded parse from a rename.
+    Matches { pattern: &'static str },
+    /// The backticked first-column names of the first Markdown table in the
+    /// section of the ONE heading `under` whose header row begins with
+    /// `header`; other tables repeat names in other columns.
+    MdTable {
+        header: &'static str,
+        under: &'static str,
+    },
+    /// The one-word titles of the direct subsections of the ONE heading
+    /// `under`; a page's other sections carry one-word headings of their own.
+    MdHeadings { under: &'static str },
+    /// The string members of the `{…}` opened after the ONE match of `decl`,
+    /// comments first.
+    PySet { decl: &'static str },
+    /// The row headers of the `name! { … }` table, comments first.
+    RustMacroRows { name: &'static str },
+    /// The string members of the ONE `const name = [ … ]`, comments first.
+    TsConstArray { name: &'static str },
     /// JSON Schema: each member of `def`'s `oneOf`/`anyOf` union, as the
     /// const of its `prop` property, or its own const when `prop` is `None`.
     JsonUnion {
@@ -111,6 +133,39 @@ pub struct Watch {
     pub when: When,
     pub finding: Finding,
     pub siblings: Option<Siblings>,
+}
+
+impl Watch {
+    /// Why a checker cannot run this watch, if it cannot: a blank name, or an
+    /// `Each` pattern without `{name}`, matches whatever upstream says; a `Sole`
+    /// read yields one name; and a sibling sweep needs a vanish watch whose
+    /// reader yields upstream's names, all of them unless the family is `All`,
+    /// which only a reader confined to the family can mean.
+    pub fn unrunnable(&self) -> Option<String> {
+        let ours = (self.ours)();
+        let why = if ours.is_empty() || ours.iter().any(|n| n.is_empty()) {
+            "watches an empty set or a blank name".to_owned()
+        } else if self.docs.is_empty() {
+            "reads no document".to_owned()
+        } else if matches!(self.read, Read::Each { pattern } if !pattern.contains("{name}")) {
+            "has an `Each` pattern that names no name".to_owned()
+        } else if matches!(self.read, Read::Sole { .. }) && ours.len() != 1 {
+            format!("reads one name off upstream but watches {}", ours.len())
+        } else if let Some(sib) = &self.siblings {
+            if !matches!(self.when, When::Vanishes) {
+                "sweeps siblings on a watch that does not fire on a vanish".to_owned()
+            } else if matches!(self.read, Read::Each { .. } | Read::Sole { .. }) {
+                "sweeps siblings off a reader that yields none".to_owned()
+            } else if matches!(sib.family, Family::All) && !self.read.confined_to_family() {
+                "sweeps `Family::All` off a reader that yields more than the family".to_owned()
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        };
+        Some(why)
+    }
 }
 
 /// Which change to one of a watch's names is the finding.
@@ -176,55 +231,94 @@ mod tests {
         }
     }
 
-    /// Every watch is one a checker can run: a blank name, or an `Each` pattern
-    /// without `{name}`, matches whatever upstream says; a `Sole` read yields
-    /// one name; and a sibling sweep needs a vanish watch whose reader yields
-    /// upstream's names, all of them unless the family is `All`, which only a
-    /// reader confined to the family can mean.
+    /// Each rule refuses the watch it exists for; the roster is held to them by
+    /// the binary's `every_declared_watch_is_runnable_and_its_id_unique`.
     #[test]
-    fn every_watch_is_one_a_checker_can_run() {
-        let mut ids = std::collections::BTreeSet::new();
-        for d in REGISTRY {
-            for w in d.upstream.watches() {
-                assert!(ids.insert(w.id), "watch id {} is declared twice", w.id);
-                let ours = (w.ours)();
-                assert!(
-                    !ours.is_empty() && ours.iter().all(|n| !n.is_empty()),
-                    "{} watches an empty set or a blank name",
-                    w.id
-                );
-                assert!(!w.docs.is_empty(), "{} reads no document", w.id);
-                if let Read::Each { pattern } = w.read {
-                    assert!(
-                        pattern.contains("{name}"),
-                        "{}: `{pattern}` names no name",
-                        w.id
-                    );
-                }
-                assert!(
-                    !matches!(w.read, Read::Sole { .. }) || ours.len() == 1,
-                    "{} reads one name off upstream but watches {}",
-                    w.id,
-                    ours.len()
-                );
-                if let Some(sib) = &w.siblings {
-                    assert!(
-                        matches!(w.when, When::Vanishes),
-                        "{} sweeps siblings on a watch that does not fire on a vanish",
-                        w.id
-                    );
-                    assert!(
-                        !matches!(w.read, Read::Each { .. } | Read::Sole { .. }),
-                        "{} sweeps siblings off a reader that yields none",
-                        w.id
-                    );
-                    assert!(
-                        !matches!(sib.family, Family::All) || w.read.confined_to_family(),
-                        "{}: `Family::All` off a reader that yields more than the family",
-                        w.id
-                    );
-                }
-            }
+    fn unrunnable_names_each_watch_a_checker_cannot_run() {
+        const OK: Watch = Watch {
+            id: "t.ok",
+            ours: || vec!["a", "b"],
+            docs: &[Doc {
+                at: At::Url("https://example.com/x.md"),
+                anchor: "x",
+                owns: "x",
+            }],
+            read: Read::Each {
+                pattern: r"\b{name}\b",
+            },
+            when: When::Vanishes,
+            finding: Finding::Breaking("x"),
+            siblings: None,
+        };
+        const ALL: Siblings = Siblings {
+            family: Family::All,
+            ignored: &[],
+        };
+        let arms = Read::RustArms {
+            name: "f",
+            arm: "x",
+        };
+        let cases = [
+            (
+                Watch {
+                    ours: || vec![],
+                    ..OK
+                },
+                "watches an empty set or a blank name",
+            ),
+            (
+                Watch {
+                    ours: || vec![""],
+                    ..OK
+                },
+                "watches an empty set or a blank name",
+            ),
+            (Watch { docs: &[], ..OK }, "reads no document"),
+            (
+                Watch {
+                    read: Read::Each { pattern: "x" },
+                    ..OK
+                },
+                "has an `Each` pattern that names no name",
+            ),
+            (
+                Watch {
+                    read: Read::Sole { pattern: "(x)" },
+                    ..OK
+                },
+                "reads one name off upstream but watches 2",
+            ),
+            (
+                Watch {
+                    read: arms,
+                    when: When::Appears,
+                    siblings: Some(ALL),
+                    ..OK
+                },
+                "sweeps siblings on a watch that does not fire on a vanish",
+            ),
+            (
+                Watch {
+                    siblings: Some(ALL),
+                    ..OK
+                },
+                "sweeps siblings off a reader that yields none",
+            ),
+            (
+                Watch {
+                    read: Read::MdTable {
+                        header: "E",
+                        under: "S",
+                    },
+                    siblings: Some(ALL),
+                    ..OK
+                },
+                "sweeps `Family::All` off a reader that yields more than the family",
+            ),
+        ];
+        assert_eq!(OK.unrunnable(), None);
+        for (w, why) in cases {
+            assert_eq!(w.unrunnable().as_deref(), Some(why));
         }
     }
 }

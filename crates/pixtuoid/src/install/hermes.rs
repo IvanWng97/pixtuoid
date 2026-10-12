@@ -24,11 +24,15 @@ use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
+#[cfg(any(test, feature = "upstream"))]
+use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
+
+const PRE_APPROVAL_REQUEST: &str = "pre_approval_request";
 
 /// Every event here decodes — `every_registered_hermes_event_decodes` enforces
 /// that direction, and only that one: an event the DECODER handles and this list
 /// omits is the shape that shipped `pre_approval_request` unregistered (#930),
-/// and it is `check_upstream_drift.py`'s job, not this test's. Wire values from a
+/// and nothing checks that direction. Wire values from a
 /// real capture — session events carry the `on_` prefix, tool events don't.
 pub(crate) const HERMES_EVENTS: &[&str] = &[
     "on_session_start",
@@ -36,7 +40,7 @@ pub(crate) const HERMES_EVENTS: &[&str] = &[
     // The approval gate. Observer-only upstream, so registering it cannot affect
     // the decision — unregistered, a session parked on an approval prompt kept
     // rendering as whatever `pre_tool_call` left it (#930).
-    "pre_approval_request",
+    PRE_APPROVAL_REQUEST,
     "post_tool_call",
     "on_session_end",
     // The SESSION end that `on_session_end` turned out not to be (that one fires
@@ -44,6 +48,79 @@ pub(crate) const HERMES_EVENTS: &[&str] = &[
     // registered, so no capture could ever have shown us one while it sat on the
     // omit list.
     "on_session_finalize",
+];
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "hermes.hook_events",
+        ours: || HERMES_EVENTS.to_vec(),
+        docs: &[Doc {
+            at: At::Path {
+                repo: "NousResearch/hermes-agent",
+                branch: "main",
+                path: "hermes_cli/plugins.py",
+            },
+            anchor: r"VALID_HOOKS\s*:",
+            owns: "`VALID_HOOKS`",
+        }],
+        read: Read::PySet {
+            decl: r"VALID_HOOKS\s*:\s*set\[str\]\s*=",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the shell hook we install into config.yaml fires nothing (no sprite)",
+        ),
+        siblings: None,
+    },
+    Watch {
+        id: "hermes.shell_unsupported",
+        ours: || HERMES_EVENTS.to_vec(),
+        docs: &[Doc {
+            at: At::Path {
+                repo: "NousResearch/hermes-agent",
+                branch: "main",
+                path: "hermes_cli/plugins.py",
+            },
+            anchor: r"SHELL_UNSUPPORTED_HOOKS\s*:",
+            owns: "`SHELL_UNSUPPORTED_HOOKS`",
+        }],
+        read: Read::PySet {
+            decl: r"SHELL_UNSUPPORTED_HOOKS\s*:\s*set\[str\]\s*=",
+        },
+        when: When::Appears,
+        finding: Finding::Breaking(
+            "a shell hook cannot serve it, so the command we install into config.yaml fires nothing (no sprite, no activity)",
+        ),
+        siblings: None,
+    },
+    Watch {
+        id: "hermes.blocking",
+        ours: || {
+            HERMES_EVENTS
+                .iter()
+                .copied()
+                .filter(|&e| e == PRE_APPROVAL_REQUEST)
+                .collect()
+        },
+        docs: &[Doc {
+            at: At::Path {
+                repo: "NousResearch/hermes-agent",
+                branch: "main",
+                path: "agent/shell_hooks.py",
+            },
+            anchor: r"_BLOCKING_EVENTS\s*=",
+            owns: "`_BLOCKING_EVENTS`",
+        }],
+        read: Read::PySet {
+            decl: r"_BLOCKING_EVENTS\s*=\s*frozenset\(",
+        },
+        when: When::Appears,
+        finding: Finding::Breaking(
+            "a shell hook's exit code can now stall it, so the shim's silent exit 0 would ANSWER a real approval prompt: unregister it, or make the shim decline explicitly",
+        ),
+        siblings: None,
+    },
 ];
 
 /// The shim's send is watchdog-bounded (pixtuoid-hook's `transport::WRITE_TIMEOUT`),

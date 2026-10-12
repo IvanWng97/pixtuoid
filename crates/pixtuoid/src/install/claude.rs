@@ -7,8 +7,12 @@ use serde_json::{Value, json};
 use crate::install::host_plugin::{self, NAME};
 use crate::install::io;
 use crate::install::merge;
+#[cfg(any(test, feature = "upstream"))]
+use crate::install::target::UNDOCUMENTED_HOOK;
 use crate::install::target::{HostRegistration, LegacyConfig, Unregistered};
 use crate::install::verify::ShimRef;
+#[cfg(any(test, feature = "upstream"))]
+use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 pub(crate) const EVENTS: &[&str] = &[
     "SessionStart",
@@ -26,6 +30,24 @@ pub(crate) const EVENTS: &[&str] = &[
     "SubagentStop",
     "SessionEnd",
 ];
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: &[Watch] = &[Watch {
+    id: "claude.hook_events",
+    ours: || EVENTS.to_vec(),
+    docs: &[Doc {
+        at: At::Url("https://code.claude.com/docs/en/hooks.md"),
+        anchor: r"(?m)^# Hooks reference",
+        owns: "the hooks-reference page",
+    }],
+    read: Read::MdTable {
+        header: "Event",
+        under: "Hook lifecycle",
+    },
+    when: When::Vanishes,
+    finding: Finding::Breaking(UNDOCUMENTED_HOOK),
+    siblings: None,
+}];
 
 /// Claude Code loads the hooks through its plugin system
 /// (code.claude.com/docs/en/plugins): a local marketplace whose one plugin loads

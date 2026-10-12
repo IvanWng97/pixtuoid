@@ -16,6 +16,8 @@ use pixtuoid_core::source::upstream::{At, Doc, Family, Finding, Read, Siblings, 
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
+use crate::install::target::TARGETS;
+
 use net::Platform;
 use read::{Names, Unread};
 
@@ -56,7 +58,8 @@ trait Fetch {
 }
 
 /// One bucket per DISPOSITION, because each calls for a different action:
-/// `breaking` fix the decoder, `review` adopt, ignore or re-verify, `blind` repin by hand,
+/// `breaking` fix the decoder or the registration, `review` adopt, ignore or re-verify,
+/// `blind` repin by hand,
 /// `errors` transient. Collapsing `blind` into `breaking` is what made #793
 /// report five phantom renames.
 #[derive(Debug, Default)]
@@ -132,10 +135,11 @@ impl Report {
             out.push(String::new());
         };
         section(
-            "## ⛔ Verified upstream change — decoder will silently drop events",
+            "## ⛔ Verified upstream change — events will silently drop",
             Some(
                 "Each line was read off the upstream surface that OWNS the name: the \
-                 declaration is present and the name is gone. Fix the decoder.",
+                 declaration is present and the name is gone. Fix what the line names: \
+                 the decoder, or the hook we register.",
             ),
             &self.breaking,
         );
@@ -480,7 +484,14 @@ fn read_docs(
             Read::Sole { pattern } => read::sole(text, path, pattern),
             Read::RustArms { name, arm } => read::rust_arms(text, name, arm),
             Read::RustEnum { name } => read::rust_enum(text, name),
+            Read::RustStruct { name } => read::rust_struct(text, name),
             Read::TsFields { name } => read::ts_fields(text, name),
+            Read::Matches { pattern } => read::matches(text, pattern),
+            Read::MdTable { header, under } => read::md_table(text, header, under),
+            Read::MdHeadings { under } => read::md_headings(text, under),
+            Read::PySet { decl } => read::py_set(text, decl),
+            Read::RustMacroRows { name } => read::rust_macro_rows(text, name),
+            Read::TsConstArray { name } => read::ts_const_array(text, name),
             Read::JsonUnion { def, prop } => read::json_union(text, def, prop),
             Read::JsonKeys => read::json_keys(text),
         };
@@ -582,17 +593,29 @@ fn code_span(name: &str) -> String {
         .collect()
 }
 
-/// Every watch every registered source declares, over the network.
+/// Every watch the registered sources and the install targets declare, over the
+/// network.
 pub fn run(report: &mut Report) {
     check_all(&Platform, report);
 }
 
+/// Every declared watch with the source it reads for: the decoders' off the
+/// registry, then the installers' off their targets.
+fn declared() -> impl Iterator<Item = (&'static str, &'static Watch)> {
+    REGISTRY
+        .iter()
+        .flat_map(|d| d.upstream.watches().map(move |w| (d.name, w)))
+        .chain(
+            TARGETS
+                .iter()
+                .flat_map(|t| t.upstream.iter().map(move |w| (t.core_source, w))),
+        )
+}
+
 fn check_all(fetch: &dyn Fetch, report: &mut Report) {
     let mut fetched = Fetched::new(fetch);
-    for d in REGISTRY {
-        for w in d.upstream.watches() {
-            check_watch(d.name, w, &mut fetched, report);
-        }
+    for (source, w) in declared() {
+        check_watch(source, w, &mut fetched, report);
     }
 }
 

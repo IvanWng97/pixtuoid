@@ -22,6 +22,10 @@ use toml::value::Table;
 use crate::install::SENTINEL_KEY;
 use crate::install::io;
 use crate::install::target::MergeOutcome;
+#[cfg(any(test, feature = "upstream"))]
+use crate::install::target::UNFIRED_HOOK;
+#[cfg(any(test, feature = "upstream"))]
+use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 /// Events we register == events we decode (`source/codewhale.rs`). The `bool` is
 /// `env_mode`: `true` events carry identity via `DEEPSEEK_*` env vars, so their
@@ -40,6 +44,25 @@ pub(crate) const CODEWHALE_EVENTS: &[(&str, bool)] = &[
     ("subagent_spawn", false),
     ("subagent_complete", false),
 ];
+
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UPSTREAM: &[Watch] = &[Watch {
+    id: "codewhale.hook_events",
+    ours: || CODEWHALE_EVENTS.iter().map(|(name, _)| *name).collect(),
+    docs: &[Doc {
+        at: At::Path {
+            repo: "Hmbown/CodeWhale",
+            branch: "main",
+            path: "crates/tui/src/hooks/config.rs",
+        },
+        anchor: r"pub enum HookEvent\b",
+        owns: "`HookEvent`",
+    }],
+    read: Read::RustEnum { name: "HookEvent" },
+    when: When::Vanishes,
+    finding: Finding::Breaking(UNFIRED_HOOK),
+    siblings: None,
+}];
 
 /// The config CodeWhale actually reads: the `CODEWHALE_CONFIG_PATH` /
 /// `DEEPSEEK_CONFIG_PATH` overrides (each a FULL file path), else

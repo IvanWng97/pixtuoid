@@ -444,12 +444,13 @@ step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
 10. **Add the per-source badge hue** — a `SourceColors` field + value in EVERY
     theme file + `badge_color` in the manifest row; the coverage, legibility
     and site-bridge tests fail until it exists.
-11. **Drift-watch in the same PR**: the module's `UPSTREAM`, named in its
-    registry row — a `Watch` beside each decoded set, unless REVIEW.md's
+11. **Drift-watch in the same PR**: the source module's `UPSTREAM`, named in
+    its registry row — a `Watch` beside each decoded set, unless REVIEW.md's
     **Wire format** check settles it with a breadcrumb or an adjudicated
-    `EXEMPT` row; the types are in
-    `source/upstream.rs`, and `just drift-watch` runs it. A registered hook set is still a
-    `check_upstream_drift.py` row: the const, the `insert` in that crate's
+    `EXEMPT` row — and the installer's, named in its `Target` row, a `Watch`
+    over each hook set it registers. The types are in `source/upstream.rs`,
+    and `just drift-watch` runs them. A value a shipped template bakes in is
+    still a `check_upstream_drift.py` row: the `insert` in that crate's
     `src/drift_surface.rs`, `just gen-drift-surface` (commit both fragments),
     and the `SURFACE_ROWS` row plus its selftest case.
 12. **Three roster literals in three test binaries** (a scoped run misses

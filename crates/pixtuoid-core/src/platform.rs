@@ -65,38 +65,6 @@ pub fn user_home_opt() -> Option<PathBuf> {
     resolve_user_home_opt(cfg!(windows), path_env("USERPROFILE"), path_env("HOME"))
 }
 
-/// The Codex home dir, matching codex's own precedence (`codex-rs`
-/// `find_codex_home`): `CODEX_HOME` if it's set to an EXISTING directory, else
-/// `<user_home>/.codex`.
-///
-/// Not mirrored: upstream `canonicalize`s the ENV value (the default branch it
-/// leaves alone) — the inverse scoping of grok's, which canonicalizes only its
-/// DEFAULT. Same class, same reason it is unobservable here.
-pub(crate) fn codex_home() -> PathBuf {
-    resolve_codex_home(path_env("CODEX_HOME"), user_home())
-}
-
-/// The grok home dir, matching grok-build's own resolution (`xai-grok-config`
-/// `paths.rs::grok_home`): `GROK_HOME` UNCONDITIONALLY when set (upstream takes
-/// the env var without an exists-check and `create_dir_all`s it — the opposite
-/// of codex's existing-dir gate), else `<home>/.grok` on EVERY OS (no XDG, no
-/// APPDATA). Upstream resolves home via `std::env::home_dir()` (USERPROFILE on
-/// Windows, `$HOME` never consulted there), which `user_home` mirrors.
-///
-/// Not mirrored: upstream `dunce::canonicalize`s the DEFAULT home before joining
-/// `.grok` (never `$GROK_HOME`), so under a SYMLINKED `$HOME` its path string
-/// differs from ours while naming the same directory. Unobservable because the
-/// exposed surface — the sessions WATCH ROOT — is opened, not string-compared,
-/// and both forms resolve through the link to one dir.
-pub(crate) fn grok_home() -> PathBuf {
-    resolve_grok_home(path_env("GROK_HOME"), user_home())
-}
-
-/// Pure precedence core, separated so it's unit-testable without env mutation.
-fn resolve_grok_home(grok_home_env: Option<PathBuf>, home: PathBuf) -> PathBuf {
-    grok_home_env.unwrap_or_else(|| home.join(".grok"))
-}
-
 /// Hand back a CLI's env home override unchanged, warning when it is RELATIVE.
 ///
 /// Of the call sites only omp's is absolutized upstream (`path.resolve`, against
@@ -116,17 +84,6 @@ pub(crate) fn warn_if_relative_override(var: &str, dir: PathBuf) -> PathBuf {
         );
     }
     dir
-}
-
-/// Pure precedence core, separated so it's unit-testable without env mutation.
-/// On a set-but-absent `CODEX_HOME` upstream codex returns a FATAL error; we
-/// deliberately fall back to `~/.codex` — benign for a visualizer, since codex
-/// itself won't run (and writes no rollouts) when its home dir is missing.
-fn resolve_codex_home(codex_home_env: Option<PathBuf>, home: PathBuf) -> PathBuf {
-    if let Some(p) = codex_home_env.filter(|p| p.is_dir()) {
-        return p;
-    }
-    home.join(".codex")
 }
 
 /// `HOME`-FIRST home resolution, then `USERPROFILE` on Windows — the OPPOSITE
@@ -433,31 +390,6 @@ mod tests {
     }
 
     #[test]
-    fn grok_home_takes_env_unconditionally_even_when_missing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let missing = tmp.path().join("missing");
-        assert_eq!(
-            resolve_grok_home(Some(missing.clone()), PathBuf::from("/home/u")),
-            missing
-        );
-    }
-
-    #[test]
-    fn grok_home_falls_back_to_dot_grok_when_env_unset() {
-        let expected = PathBuf::from("/home/u").join(".grok");
-        assert_eq!(resolve_grok_home(None, PathBuf::from("/home/u")), expected);
-    }
-
-    #[test]
-    fn codex_home_uses_env_when_it_points_at_an_existing_dir() {
-        let tmp = tempfile::tempdir().unwrap();
-        assert_eq!(
-            resolve_codex_home(Some(tmp.path().to_path_buf()), PathBuf::from("/home/u")),
-            tmp.path()
-        );
-    }
-
-    #[test]
     fn home_first_is_home_then_userprofile_on_windows() {
         assert_eq!(
             resolve_home_first(true, s(r"C:\Users\me"), s(r"C:\Users\other")),
@@ -492,18 +424,6 @@ mod tests {
             resolve_home_first(true, home.clone(), userprofile),
             home,
             "HOME-first resolver picks HOME — the two MUST diverge here"
-        );
-    }
-
-    #[test]
-    fn codex_home_falls_back_to_dot_codex_when_env_unset_or_missing_dir() {
-        let expected = PathBuf::from("/home/u").join(".codex");
-        assert_eq!(resolve_codex_home(None, PathBuf::from("/home/u")), expected);
-        let tmp = tempfile::tempdir().unwrap();
-        let missing = tmp.path().join("missing");
-        assert_eq!(
-            resolve_codex_home(Some(missing.clone()), PathBuf::from("/home/u")),
-            expected
         );
     }
 }
