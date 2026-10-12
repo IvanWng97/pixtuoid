@@ -46,6 +46,10 @@ pub(crate) fn plugin_events() -> Vec<&'static str> {
     names
 }
 
+/// What the plugin reads off a tool result's message.
+#[cfg(feature = "upstream")]
+pub(crate) const TOOL_RESULT_FIELDS: &[&str] = &["toolCallId"];
+
 #[cfg(feature = "upstream")]
 const fn dsh(path: &'static str) -> At {
     At::Path {
@@ -97,7 +101,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     },
     Watch {
         id: "dsh.tool_result_call_id",
-        ours: || vec!["toolCallId"],
+        ours: || TOOL_RESULT_FIELDS.to_vec(),
         docs: &[Doc {
             at: dsh("packages/llm/llm/src/message.ts"),
             anchor: r"(?m)^export interface ToolResultMessage\b",
