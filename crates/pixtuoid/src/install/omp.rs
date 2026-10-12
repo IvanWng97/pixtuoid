@@ -54,63 +54,78 @@ pub(crate) fn extension_reads() -> Vec<&'static str> {
 const READ_GONE: &str = "the installed bridge forwards an undefined value, so that signal quietly \
                          dies (approval waits, lifecycle, or identity)";
 
+#[cfg(feature = "upstream")]
+const fn omp(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
+    Doc {
+        at: At::Path {
+            repo: "can1357/oh-my-pi",
+            branch: "main",
+            path,
+        },
+        anchor,
+        owns,
+    }
+}
+
+#[cfg(feature = "upstream")]
+const EXTENSION_TYPES_TS: &str = "packages/coding-agent/src/extensibility/extensions/types.ts";
+#[cfg(feature = "upstream")]
+const SHARED_EVENTS_TS: &str = "packages/coding-agent/src/extensibility/shared-events.ts";
+
+/// The fields of the ONE type `name` that the bridge forwards.
+#[cfg(feature = "upstream")]
+const fn forwarded(
+    id: &'static str,
+    ours: fn() -> Vec<&'static str>,
+    docs: &'static [Doc],
+    name: &'static str,
+) -> Watch {
+    Watch {
+        id,
+        ours,
+        docs,
+        read: Read::TsFields { name },
+        when: When::Vanishes,
+        finding: Finding::Breaking(READ_GONE),
+        siblings: None,
+    }
+}
+
 /// Split by declaring type, so a field moving between the approval events
 /// can't read as present off their union (`ToolApprovalResolvedEvent` has two,
 /// split by verdict). `each_template_read_is_watched` holds `extension_reads`
 /// to the union of every watch's bare names.
 #[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
-    Watch {
-        id: "omp.approval_requested",
-        ours: || vec!["toolCallId", "toolName", "reason"],
-        docs: &[Doc {
-            at: At::Path {
-                repo: "can1357/oh-my-pi",
-                branch: "main",
-                path: "packages/coding-agent/src/extensibility/extensions/types.ts",
-            },
-            anchor: r"(?m)^export interface ToolApprovalRequestedEvent\b",
-            owns: "`ToolApprovalRequestedEvent`",
-        }],
-        read: Read::TsFields {
-            name: "ToolApprovalRequestedEvent",
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(READ_GONE),
-        siblings: None,
-    },
-    Watch {
-        id: "omp.approval_resolved",
+    forwarded(
+        "omp.approval_requested",
+        || vec!["toolCallId", "toolName", "reason"],
+        &[omp(
+            EXTENSION_TYPES_TS,
+            r"(?m)^export interface ToolApprovalRequestedEvent\b",
+            "`ToolApprovalRequestedEvent`",
+        )],
+        "ToolApprovalRequestedEvent",
+    ),
+    forwarded(
+        "omp.approval_resolved",
         // No `reason`: the decoder reads it off the requested event alone.
-        ours: || vec!["toolCallId", "toolName", "approved"],
-        docs: &[Doc {
-            at: At::Path {
-                repo: "can1357/oh-my-pi",
-                branch: "main",
-                path: "packages/coding-agent/src/extensibility/extensions/types.ts",
-            },
-            anchor: r"(?m)^export interface ToolApprovalResolvedEvent\b",
-            owns: "`ToolApprovalResolvedEvent`",
-        }],
-        read: Read::TsFields {
-            name: "ToolApprovalResolvedEvent",
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(READ_GONE),
-        siblings: None,
-    },
+        || vec!["toolCallId", "toolName", "approved"],
+        &[omp(
+            EXTENSION_TYPES_TS,
+            r"(?m)^export interface ToolApprovalResolvedEvent\b",
+            "`ToolApprovalResolvedEvent`",
+        )],
+        "ToolApprovalResolvedEvent",
+    ),
     Watch {
         id: "omp.approved_required",
         ours: || vec!["approved?"],
-        docs: &[Doc {
-            at: At::Path {
-                repo: "can1357/oh-my-pi",
-                branch: "main",
-                path: "packages/coding-agent/src/extensibility/extensions/types.ts",
-            },
-            anchor: r"(?m)^export interface ToolApprovalResolvedEvent\b",
-            owns: "`ToolApprovalResolvedEvent`",
-        }],
+        docs: &[omp(
+            EXTENSION_TYPES_TS,
+            r"(?m)^export interface ToolApprovalResolvedEvent\b",
+            "`ToolApprovalResolvedEvent`",
+        )],
         read: Read::TsFields {
             name: "ToolApprovalResolvedEvent",
         },
@@ -122,75 +137,44 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         ),
         siblings: None,
     },
-    Watch {
-        id: "omp.extension_context",
-        ours: || vec!["cwd", "sessionManager"],
-        docs: &[Doc {
-            at: At::Path {
-                repo: "can1357/oh-my-pi",
-                branch: "main",
-                path: "packages/coding-agent/src/extensibility/extensions/types.ts",
-            },
-            anchor: r"(?m)^export interface ExtensionContext\b",
-            owns: "`ExtensionContext`",
-        }],
-        read: Read::TsFields {
-            name: "ExtensionContext",
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(READ_GONE),
-        siblings: None,
-    },
-    Watch {
-        id: "omp.session_switch",
-        ours: || vec!["previousSessionFile"],
-        docs: &[Doc {
-            at: At::Path {
-                repo: "can1357/oh-my-pi",
-                branch: "main",
-                path: "packages/coding-agent/src/extensibility/shared-events.ts",
-            },
-            anchor: r"(?m)^export interface SessionSwitchEvent\b",
-            owns: "`SessionSwitchEvent`",
-        }],
-        read: Read::TsFields {
-            name: "SessionSwitchEvent",
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(READ_GONE),
-        siblings: None,
-    },
-    Watch {
-        id: "omp.session_branch",
-        ours: || vec!["previousSessionFile"],
-        docs: &[Doc {
-            at: At::Path {
-                repo: "can1357/oh-my-pi",
-                branch: "main",
-                path: "packages/coding-agent/src/extensibility/shared-events.ts",
-            },
-            anchor: r"(?m)^export interface SessionBranchEvent\b",
-            owns: "`SessionBranchEvent`",
-        }],
-        read: Read::TsFields {
-            name: "SessionBranchEvent",
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(READ_GONE),
-        siblings: None,
-    },
+    forwarded(
+        "omp.extension_context",
+        || vec!["cwd", "sessionManager"],
+        &[omp(
+            EXTENSION_TYPES_TS,
+            r"(?m)^export interface ExtensionContext\b",
+            "`ExtensionContext`",
+        )],
+        "ExtensionContext",
+    ),
+    forwarded(
+        "omp.session_switch",
+        || vec!["previousSessionFile"],
+        &[omp(
+            SHARED_EVENTS_TS,
+            r"(?m)^export interface SessionSwitchEvent\b",
+            "`SessionSwitchEvent`",
+        )],
+        "SessionSwitchEvent",
+    ),
+    forwarded(
+        "omp.session_branch",
+        || vec!["previousSessionFile"],
+        &[omp(
+            SHARED_EVENTS_TS,
+            r"(?m)^export interface SessionBranchEvent\b",
+            "`SessionBranchEvent`",
+        )],
+        "SessionBranchEvent",
+    ),
     Watch {
         id: "omp.session_getters",
         ours: || vec!["getSessionFile", "getSessionId"],
-        docs: &[Doc {
-            at: At::Path {
-                repo: "can1357/oh-my-pi",
-                branch: "main",
-                path: "packages/coding-agent/src/session/session-manager.ts",
-            },
-            anchor: r"(?m)^export class SessionManager\b",
-            owns: "`SessionManager`",
-        }],
+        docs: &[omp(
+            "packages/coding-agent/src/session/session-manager.ts",
+            r"(?m)^export class SessionManager\b",
+            "`SessionManager`",
+        )],
         read: Read::TsMembers {
             of: &["SessionManager"],
         },

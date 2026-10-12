@@ -1102,9 +1102,13 @@ mod tests {
         Ok(xs.iter().map(|s| (*s).to_owned()).collect())
     }
 
-    /// Why the read is partial, if it read its declaration at all.
+    /// Why the read is partial; a read that failed fails the test.
     fn partial(read: Result<Declared, Unread>) -> Option<String> {
-        read.ok().and_then(|d| d.partial)
+        match read {
+            Ok(read) => read.partial,
+            Err(Unread::Missing(what)) => panic!("the read found {what}"),
+            Err(Unread::Ours(e)) => panic!("a test pattern does not compile: {e}"),
+        }
     }
 
     #[test]
