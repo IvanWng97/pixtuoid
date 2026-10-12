@@ -8,8 +8,8 @@ metadata:
 
 # local-review — local orchestration of REVIEW.md
 
-Every rule is [`REVIEW.md`](../../../REVIEW.md)'s; fill briefs from it, never a
-paraphrase here.
+Every rule is [`REVIEW.md`](../../../REVIEW.md)'s or the shared review's
+contract; fill briefs from them, never a paraphrase here.
 
 ## When to run
 
