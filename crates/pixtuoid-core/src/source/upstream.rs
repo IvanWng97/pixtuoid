@@ -84,9 +84,13 @@ pub enum Read {
     /// Every first group of `pattern`: `Each` turned round, so the floor can
     /// tell a degraded parse from a rename.
     Matches { pattern: &'static str },
-    /// The backticked first-column names of the Markdown table whose header
-    /// row begins with `header`; other tables repeat names in other columns.
-    MdTable { header: &'static str },
+    /// The backticked first-column names of the first Markdown table in the
+    /// section of the ONE heading `under` whose header row begins with
+    /// `header`; other tables repeat names in other columns.
+    MdTable {
+        header: &'static str,
+        under: &'static str,
+    },
     /// The one-word titles of the direct subsections of the ONE heading
     /// `under`; a page's other sections carry one-word headings of their own.
     MdHeadings { under: &'static str },
@@ -302,7 +306,10 @@ mod tests {
             ),
             (
                 Watch {
-                    read: Read::MdTable { header: "E" },
+                    read: Read::MdTable {
+                        header: "E",
+                        under: "S",
+                    },
                     siblings: Some(ALL),
                     ..OK
                 },

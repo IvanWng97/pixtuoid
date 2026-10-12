@@ -40,7 +40,10 @@ pub(crate) const UPSTREAM: &[Watch] = &[Watch {
         anchor: r"(?m)^# Hooks reference",
         owns: "the hooks-reference page",
     }],
-    read: Read::MdTable { header: "Event" },
+    read: Read::MdTable {
+        header: "Event",
+        under: "Hook lifecycle",
+    },
     when: When::Vanishes,
     finding: Finding::Breaking(UNDOCUMENTED_HOOK),
     siblings: None,

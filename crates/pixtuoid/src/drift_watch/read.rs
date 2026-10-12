@@ -33,7 +33,7 @@ fn missing(what: impl Into<String>) -> Unread {
 /// The ONE match of `decl`: a first-match read is silently wrong the day
 /// upstream grows a second declaration above the real one (a `#[cfg(test)]`
 /// twin, a macro body), so none or several is probe health.
-fn the_one<'s>(src: &'s str, decl: &Regex, what: &str) -> Result<regex::Match<'s>, Unread> {
+fn sole_match<'s>(src: &'s str, decl: &Regex, what: &str) -> Result<regex::Match<'s>, Unread> {
     let mut all = decl.find_iter(src);
     match (all.next(), all.next()) {
         (Some(one), None) => Ok(one),
@@ -62,7 +62,7 @@ pub(super) fn sole(text: &str, path: &str, pattern: &str) -> Result<Names, Unrea
         text.to_owned()
     };
     let re = Regex::new(pattern)?;
-    let at = the_one(&src, &re, "match of its pattern")?.start();
+    let at = sole_match(&src, &re, "match of its pattern")?.start();
     re.captures_at(&src, at)
         .and_then(|c| c.get(1))
         .map(|m| [m.as_str().to_owned()].into())
@@ -264,13 +264,14 @@ pub(super) fn matches(text: &str, pattern: &str) -> Result<Names, Unread> {
 }
 
 /// The first table under that header: a page's later tables repeat its names.
-pub(super) fn md_table(text: &str, header: &str) -> Result<Names, Unread> {
+pub(super) fn md_table(text: &str, header: &str, under: &str) -> Result<Names, Unread> {
+    let (section, _) = md_section(text, under)?;
     let table = Regex::new(&format!(
         r"(?m)^\|\s*{}\s*\|[^\n]*\n\|[\s:|-]*\n((?:\|[^\n]*\n?)+)",
         regex::escape(header)
     ))?;
     let rows = table
-        .captures(text)
+        .captures(&section)
         .and_then(|c| c.get(1))
         .ok_or_else(|| missing(format!("no `{header}` table")))?;
     let name = Regex::new(r"(?m)^\|\s*`([^`]+)`\s*\|")?;
@@ -284,27 +285,34 @@ pub(super) fn md_table(text: &str, header: &str) -> Result<Names, Unread> {
     Ok(found)
 }
 
-/// Fenced code goes first: a shell sample's `# comment` reads as a heading.
 pub(super) fn md_headings(text: &str, under: &str) -> Result<Names, Unread> {
-    let text = Regex::new(r"(?ms)^```.*?^```")?.replace_all(text, "");
-    let parent = Regex::new(&format!(r"(?m)^#+[ \t]+{}[ \t]*$", regex::escape(under)))?;
-    let at = the_one(&text, &parent, &format!("`{under}` heading"))?;
-    let level = at.as_str().bytes().take_while(|&b| b == b'#').count();
-    let rest = &text[at.end()..];
-    let next = Regex::new(&format!(r"(?m)^#{{1,{level}}}[ \t]"))?;
-    let section = next.find(rest).map_or(rest, |m| &rest[..m.start()]);
+    let (section, level) = md_section(text, under)?;
     let heading = Regex::new(&format!(
         r"(?m)^#{{{}}}[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$",
         level + 1
     ))?;
     let found: Names = heading
-        .captures_iter(section)
+        .captures_iter(&section)
         .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
         .collect();
     if found.is_empty() {
         return Err(missing(format!("no one-word heading under `{under}`")));
     }
     Ok(found)
+}
+
+/// The body of the ONE heading `under`, up to the next heading at its level or
+/// above, and that level. Fenced code goes first: a shell sample's `# comment`
+/// reads as a heading.
+fn md_section(text: &str, under: &str) -> Result<(String, usize), Unread> {
+    let text = Regex::new(r"(?ms)^```.*?^```")?.replace_all(text, "");
+    let parent = Regex::new(&format!(r"(?m)^#+[ \t]+{}[ \t]*$", regex::escape(under)))?;
+    let at = sole_match(&text, &parent, &format!("`{under}` heading"))?;
+    let level = at.as_str().bytes().take_while(|&b| b == b'#').count();
+    let rest = &text[at.end()..];
+    let next = Regex::new(&format!(r"(?m)^#{{1,{level}}}[ \t]"))?;
+    let section = next.find(rest).map_or(rest, |m| &rest[..m.start()]);
+    Ok((section.to_owned(), level))
 }
 
 /// Comments go first: a comment quoting `{"action": "continue"}` once ended
@@ -518,7 +526,7 @@ fn body_of<'s>(
     decl: &Regex,
     what: &str,
 ) -> Result<(regex::Match<'s>, String), Unread> {
-    let at = the_one(src, decl, what)?;
+    let at = sole_match(src, decl, what)?;
     let start = at.end().saturating_sub(1);
     let (open, close) = match src[start..].chars().next() {
         Some('{') => ('{', '}'),
@@ -698,11 +706,13 @@ mod tests {
                 pub(crate) session_start: Vec<Group>,
                 #[serde(rename = "Stop", alias = "Halt")]
                 pub stop: Vec<Group>,
+                #[serde(default = "crate::defaults::events")]
+                pub events: Vec<Group>,
             }
             struct HookEventsTomlExtra { not_this: u8 }"#;
         assert_eq!(
             found(rust_struct(src, "HookEventsToml")),
-            names(&["PreToolUse", "Stop", "session_start"])
+            names(&["PreToolUse", "Stop", "events", "session_start"])
         );
         // Another spelling would re-spell every ident; it is never guessed at.
         let pascal = "#[serde(rename_all = \"PascalCase\")]\nstruct S { one_two: u8 }";
@@ -760,14 +770,22 @@ mod tests {
 
     #[test]
     fn an_md_table_is_read_by_its_header_and_first_column() {
-        let page = "| Event | When it fires |\n|---|---|\n| `PreToolUse` | before `Bash` |\n| `Stop` | done |\n\n| Field | Event |\n|---|---|\n| `x` | `Other` |\n\n| Event | Payload |\n|---|---|\n| `Later` | x |\n";
+        let page = "## Intro\n| Event | x |\n|---|---|\n| `Before` | x |\n## Lifecycle\n| Event | When it fires |\n|---|---|\n| `PreToolUse` | before `Bash` |\n| `Stop` | done |\n\n| Field | Event |\n|---|---|\n| `x` | `Other` |\n\n| Event | Payload |\n|---|---|\n| `Later` | x |\n";
         assert_eq!(
-            found(md_table(page, "Event")),
+            found(md_table(page, "Event", "Lifecycle")),
             names(&["PreToolUse", "Stop"])
         );
         assert_eq!(
-            found(md_table(page, "Hook")),
+            found(md_table(page, "Hook", "Lifecycle")),
             Err("no `Hook` table".to_owned())
+        );
+        assert_eq!(
+            found(md_table(page, "Event", "Gone")),
+            Err("no `Gone` heading".to_owned())
+        );
+        assert_eq!(
+            found(md_table(&format!("{page}{page}"), "Event", "Lifecycle")),
+            Err("more than one `Lifecycle` heading".to_owned())
         );
     }
 
@@ -781,6 +799,10 @@ mod tests {
         assert_eq!(
             found(md_headings(page, "Gone")),
             Err("no `Gone` heading".to_owned())
+        );
+        assert_eq!(
+            found(md_headings(&format!("{page}{page}"), "Hook events")),
+            Err("more than one `Hook events` heading".to_owned())
         );
     }
 

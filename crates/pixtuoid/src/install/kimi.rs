@@ -59,7 +59,10 @@ pub(crate) const UPSTREAM: &[Watch] = &[Watch {
         anchor: r"(?m)^## Event Reference",
         owns: "the Event Reference table",
     }],
-    read: Read::MdTable { header: "Event" },
+    read: Read::MdTable {
+        header: "Event",
+        under: "Event Reference",
+    },
     when: When::Vanishes,
     finding: Finding::Breaking(UNDOCUMENTED_HOOK),
     siblings: None,

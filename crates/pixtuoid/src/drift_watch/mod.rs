@@ -487,7 +487,7 @@ fn read_docs(
             Read::RustStruct { name } => read::rust_struct(text, name),
             Read::TsFields { name } => read::ts_fields(text, name),
             Read::Matches { pattern } => read::matches(text, pattern),
-            Read::MdTable { header } => read::md_table(text, header),
+            Read::MdTable { header, under } => read::md_table(text, header, under),
             Read::MdHeadings { under } => read::md_headings(text, under),
             Read::PySet { decl } => read::py_set(text, decl),
             Read::RustMacroRows { name } => read::rust_macro_rows(text, name),

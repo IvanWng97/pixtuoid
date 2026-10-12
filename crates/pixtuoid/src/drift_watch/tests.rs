@@ -723,11 +723,11 @@ fn page(w: &Watch, names: &[&str]) -> String {
             let decls: Vec<String> = names.iter().map(|n| render(pattern, n)).collect();
             format!("{}\n{}\n", anchors.join("\n"), decls.join("\n"))
         }
-        Read::MdTable { header } => {
+        Read::MdTable { header, under } => {
             let rows: String = names.iter().map(|n| format!("| `{n}` | x |\n")).collect();
-            format!(
-                "{}\n| {header} | When |\n|---|---|\n{rows}\n",
-                anchors.join("\n")
+            after_decl(
+                w,
+                format!("## {under}\n| {header} | When |\n|---|---|\n{rows}"),
             )
         }
         Read::MdHeadings { under } => {
@@ -810,7 +810,9 @@ fn near_miss(w: &Watch, name: &str) -> String {
         Read::TsConstArray { .. } => {
             format!("const PXD_OTHER = [\n  \"{name}\",\n];\nif (n === \"{name}\") {{}}\n")
         }
-        Read::MdTable { .. } => format!("| Other | When |\n|---|---|\n| `{name}` | x |\n"),
+        Read::MdTable { header, .. } => {
+            format!("## PxdOther\n| {header} | When |\n|---|---|\n| `{name}` | x |\n")
+        }
         Read::MdHeadings { .. } => format!("## PxdOther\n### {name}\n"),
         Read::PySet { .. } => format!("PXD_OTHER = {{\"{name}\"}}\n"),
         Read::RustMacroRows { .. } => format!("pxd_other! {{\n    {name} {{ }},\n}}\n"),
@@ -986,8 +988,9 @@ fn rs_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 }
 
 /// Every `*EVENTS` registration set in `install/` is carried by a vanish watch
-/// in its module's `UPSTREAM`. A set no watch carries has no upstream check at
-/// all — an appearance watch cannot see a rename — and every
+/// in its module's `UPSTREAM` that `declared()` runs. A set no watch carries has
+/// no upstream check at all — an appearance watch cannot see a rename, and an
+/// `UPSTREAM` no target names is never run — and every
 /// gate stays green because nothing else omits it. Derived from the consts, so
 /// no exemption list drifts: opencode, omp and dsh subscribe in their plugin
 /// code and declare no `*EVENTS` const.
@@ -996,6 +999,7 @@ fn every_install_events_const_is_watched() {
     let decl = Regex::new(r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?const\s+([A-Z_]*EVENTS)\s*:")
         .expect("compiles");
     let upstream = Regex::new(r"(?ms)\bconst UPSTREAM\b.*?^\}?\];").expect("compiles");
+    let id = Regex::new(r#"\bid:\s*"([^"]+)""#).expect("compiles");
     let mut found = 0;
     for path in rs_files(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/install")) {
         let src = std::fs::read_to_string(&path).expect("the module is readable");
@@ -1008,11 +1012,16 @@ fn every_install_events_const_is_watched() {
         for name in decl.captures_iter(&src).filter_map(|c| c.get(1)) {
             found += 1;
             let named = Regex::new(&format!(r"\b{}\b", name.as_str())).expect("compiles");
+            let ids: Vec<&str> = vanish_watches
+                .iter()
+                .filter(|w| named.is_match(w))
+                .filter_map(|w| id.captures(w).and_then(|c| c.get(1)).map(|m| m.as_str()))
+                .collect();
             assert!(
-                vanish_watches.iter().any(|w| named.is_match(w)),
-                "{path:?} registers hooks as {}, but no vanish watch in its `UPSTREAM` \
-                 carries them: a rename upstream would leave the registration inert with \
-                 nothing to say so",
+                ids.iter().any(|&i| declared().any(|(_, w)| w.id == i)),
+                "{path:?} registers hooks as {}, but no vanish watch the checker runs \
+                 carries them (watches naming it: {ids:?}): a rename upstream would leave \
+                 the registration inert with nothing to say so",
                 name.as_str(),
             );
         }

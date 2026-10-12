@@ -457,41 +457,30 @@ def read_our_names(report: Report) -> OurNames:
     return ours
 
 
-def strip_rust_comments(body: str) -> str:
-    """Remove Rust `//` and `/* */` comments, PRESERVING string literals. A scanner,
-    not `re.sub`: both regex forms fail SILENTLY OPEN (`/\\*.*?\\*/` stops at the
-    first `*/`, re-admitting a nested comment's tail). Only `"` opens a string — an
-    apostrophe is a lifetime, and an ODD count would swallow the FOLLOWING comment
-    (`test_rust_comment_strip_is_not_confused_by_lifetimes`)."""
+def strip_ts_comments(body: str) -> str:
+    """Remove TypeScript `//` and `/* */` comments, PRESERVING string literals in
+    all three quotes. A scanner, not `re.sub`: `//[^\\n]*` eats a `'http://…'`
+    literal's tail. Block comments do not nest in TS: the first `*/` ends one."""
     out: list[str] = []
-    i, n, depth = 0, len(body), 0
+    i, n = 0, len(body)
     while i < n:
         pair = body[i : i + 2]
-        if depth:
-            if pair == "/*":
-                depth += 1
-                i += 2
-            elif pair == "*/":
-                depth -= 1
-                i += 2
-            else:
-                i += 1
-            continue
         if pair == "/*":
-            depth = 1
-            i += 2
+            end = body.find("*/", i + 2)
+            i = n if end < 0 else end + 2
             continue
         if pair == "//":
             nl = body.find("\n", i)
             i = n if nl < 0 else nl
             continue
-        if body[i] == '"':
+        if body[i] in "\"'`":
+            quote = body[i]
             j = i + 1
             while j < n:
                 if body[j] == "\\":
                     j += 2
                     continue
-                if body[j] == '"':
+                if body[j] == quote:
                     j += 1
                     break
                 j += 1
@@ -616,7 +605,7 @@ def check_omp_extension_reads(
 def _braced_body(text: str, opener: str) -> str | None:
     """The brace-balanced body after `opener`, which ends at its `{`, with
     comments stripped."""
-    text = strip_rust_comments(text)
+    text = strip_ts_comments(text)
     m = re.search(opener, text)
     if not m:
         return None

@@ -97,10 +97,7 @@ def test_a_vanished_plugin_contract_marker_files_a_review() -> None:
         entry = d.PLUGIN_DOC_MARKERS[url]
         first = sorted(entry.markers)[0]
         maimed = ANCHOR_SAMPLES[url] + "\n".join(m for m in entry.markers if m != first)
-        served: list[str] = []
-
         def stub(u: str) -> str:
-            served.append(u)
             if u == url:
                 return maimed
             raise urllib.error.URLError("offline: not this case's document")
@@ -605,25 +602,16 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
     )
 
 
-def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
-    """Tracking `'` as a string opener swallows the comment AFTER an odd number of
-    lifetimes into a fake literal, re-admitting every word inside it. An EVEN count
-    cannot show this — the fake span closes before the comment — so a two-lifetime
-    fixture passes under both implementations and proves nothing."""
-    odd = "fn f<'a>(x: &'a str) -> &'static u8 { /* PxGhost */ }"
-    check("PxGhost" not in d.strip_rust_comments(odd),
-          f"lifetimes must not open a string: {d.strip_rust_comments(odd)}")
-
-    # `//` inside a string literal: a blind `//[^\n]*` eats the rest of the line.
-    in_string = 'const U: &str = "https://x/y"; const K: &str = "PxKeep";'
-    check(d.strip_rust_comments(in_string) == in_string,
-          f"a `//` inside a string is not a comment: {d.strip_rust_comments(in_string)}")
-
-    # NESTED: `/\\*.*?\\*/` stops at the first `*/` and re-admits `PxGhost`.
-    nested = 'A, /* outer /* inner */ PxGhost */ B,'
-    stripped = d.strip_rust_comments(nested)
-    check("PxGhost" not in stripped, f"a nested comment leaks: {stripped}")
-    check("A," in stripped and "B," in stripped, f"code around it survives: {stripped}")
+def test_ts_comment_strip_keeps_strings_in_all_three_quotes() -> None:
+    """A `//` inside any TS literal is not a comment: a blind `//[^\\n]*` eats the
+    rest of the line, members included."""
+    for quoted in ('"https://x/y"', "'https://x/y'", "`https://x/y`"):
+        line = f"const U = {quoted}; const K = 'PxKeep';"
+        check(d.strip_ts_comments(line) == line,
+              f"a `//` inside {quoted[0]} is not a comment: {d.strip_ts_comments(line)}")
+    # TS block comments do not nest: the first `*/` ends one.
+    stripped = d.strip_ts_comments("A, /* outer /* inner */ B, // gone\nC,")
+    check(stripped == "A,  B, \nC,", f"comments go, code stays: {stripped!r}")
 
 
 def test_every_swept_url_declares_an_anchor() -> None:
