@@ -80,8 +80,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             anchor: r"impl\s+ToolSpec\s+for\s+AgentTool\b",
             owns: "`AgentTool`'s `ToolSpec` impl",
         }],
-        read: Read::Sole {
-            pattern: r#"impl\s+ToolSpec\s+for\s+AgentTool\s*\{\s*fn\s+name\(&self\)\s*->\s*&'static\s+str\s*\{\s*"([^"]+)""#,
+        read: Read::RustStr {
+            item: "<AgentTool as ToolSpec>::name",
         },
         when: When::Vanishes,
         finding: Finding::Breaking("no call reads as a delegation"),

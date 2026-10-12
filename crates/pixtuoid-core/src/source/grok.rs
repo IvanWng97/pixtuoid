@@ -98,8 +98,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             r"const XAI_SESSION_UPDATE_METHOD\s*:",
             "`XAI_SESSION_UPDATE_METHOD`",
         )],
-        read: Read::Sole {
-            pattern: r#"const XAI_SESSION_UPDATE_METHOD\s*:\s*&(?:'static\s+)?str\s*=\s*"([^"]+)""#,
+        read: Read::RustStr {
+            item: "XAI_SESSION_UPDATE_METHOD",
         },
         when: When::Vanishes,
         finding: Finding::Breaking(

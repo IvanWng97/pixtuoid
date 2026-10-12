@@ -396,17 +396,10 @@ fn check_watch(source: &str, w: &Watch, fetched: &mut Fetched, report: &mut Repo
         .collect::<Vec<_>>()
         .join(", ");
     let ours: BTreeSet<&str> = (w.ours)().into_iter().collect();
-    let read_from: Vec<(&str, &str, &str)> = located
+    let read_from: Vec<(&str, &str)> = located
         .iter()
         .zip(&texts)
-        .map(|((_, label, doc), text)| {
-            let path = match doc.at {
-                At::Path { path, .. } => path,
-                At::ReleaseAsset { member, .. } => member,
-                At::Url(url) => url,
-            };
-            (label.as_str(), path, text.as_str())
-        })
+        .map(|((_, label, _), text)| (label.as_str(), text.as_str()))
         .collect();
     let Some(upstream) = read_docs(w, source, &read_from, &ours, report) else {
         return;
@@ -473,15 +466,16 @@ fn floored(w: &Watch) -> bool {
 fn read_docs(
     w: &Watch,
     source: &str,
-    docs: &[(&str, &str, &str)],
+    docs: &[(&str, &str)],
     ours: &BTreeSet<&str>,
     report: &mut Report,
 ) -> Option<Names> {
     let mut upstream = Names::new();
-    for (label, path, text) in docs {
+    for (label, text) in docs {
         let read = match w.read {
             Read::Each { pattern } => read::each(text, pattern, ours),
-            Read::Sole { pattern } => read::sole(text, path, pattern),
+            Read::Sole { pattern } => read::sole(text, pattern),
+            Read::RustStr { item } => read::rust_str(text, item),
             Read::RustArms { name, arm } => read::rust_arms(text, name, arm),
             Read::RustEnum { name } => read::rust_enum(text, name),
             Read::RustStruct { name } => read::rust_struct(text, name),
@@ -518,7 +512,7 @@ fn read_docs(
         }
     }
     if floored(w) && upstream.len() < ours.len() {
-        let at: Vec<&str> = docs.iter().map(|(label, _, _)| *label).collect();
+        let at: Vec<&str> = docs.iter().map(|(label, _)| *label).collect();
         report.add_blind(
             &format!("the names `{}` reads", w.id),
             &at.join(", "),

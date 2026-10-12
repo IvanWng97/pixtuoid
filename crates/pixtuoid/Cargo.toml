@@ -58,6 +58,15 @@ tracing-subscriber = { workspace = true }
 which              = "8"
 regex              = { workspace = true, optional = true }
 sha2               = { workspace = true, optional = true }
+# `printing` for the span a reader slices an arm's source by.
+syn                = { workspace = true, optional = true, features = ["printing"] }
+# A reader slices the source a syntax node spans.
+proc-macro2        = { workspace = true, optional = true, features = ["span-locations"] }
+oxc_allocator      = { workspace = true, optional = true }
+oxc_ast            = { workspace = true, optional = true }
+oxc_parser         = { workspace = true, optional = true }
+oxc_span           = { workspace = true, optional = true }
+pulldown-cmark     = { workspace = true, optional = true }
 # clock feature gives us Local::now() w/ system timezone for the wall clock.
 chrono             = { workspace = true, features = ["clock"] }
 open               = "5"
@@ -106,7 +115,18 @@ portable = []
 audio = ["dep:rodio"]
 # The `drift_watch` example's checker, with every source's upstream
 # declarations; no shipped build enables it.
-upstream = ["pixtuoid-core/upstream", "dep:regex", "dep:sha2"]
+upstream = [
+    "pixtuoid-core/upstream",
+    "dep:regex",
+    "dep:sha2",
+    "dep:syn",
+    "dep:proc-macro2",
+    "dep:oxc_allocator",
+    "dep:oxc_ast",
+    "dep:oxc_parser",
+    "dep:oxc_span",
+    "dep:pulldown-cmark",
+]
 
 # termios/select for `term::query_tty` (the truecolor and graphics probes),
 # O_NOFOLLOW in install/io.rs, the stderr dup in audio/sink.rs.
@@ -158,11 +178,16 @@ windows-sys = { workspace = true, features = [
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", features = ["harness", "upstream"] }
 regex = { workspace = true }
 sha2  = { workspace = true }
+oxc_allocator  = { workspace = true }
+oxc_ast        = { workspace = true }
+oxc_parser     = { workspace = true }
+oxc_span       = { workspace = true }
+pulldown-cmark = { workspace = true }
 tempfile = { workspace = true }
 temp-env = { workspace = true }
 # tests/text_coverage.rs parses the source of everything that renders text.
-syn         = { workspace = true }
-proc-macro2 = { workspace = true }
+syn         = { workspace = true, features = ["printing"] }
+proc-macro2 = { workspace = true, features = ["span-locations"] }
 # End-to-end CLI golden for `sources --json`, the Raycast contract (tests/cli_json.rs).
 # Goldens update with SNAPSHOTS=overwrite.
 snapbox  = { workspace = true, features = ["json"] }

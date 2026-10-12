@@ -655,10 +655,25 @@ fn page(w: &Watch, names: &[&str]) -> String {
                 .iter()
                 .map(|n| format!("\"{n}\" => {},\n", render(arm, "")))
                 .collect();
-            format!(
-                "{}\nfn {name}() {{ match a {{\n{arms} _ => Err(()) }} }}\n",
-                anchors.join("\n")
+            after_decl(
+                w,
+                format!("fn {name}() {{ match a {{\n{arms} _ => Err(()) }} }}"),
             )
+        }
+        Read::RustStr { item } => {
+            let value = names.first().copied().unwrap_or_default();
+            let decl = match item.strip_prefix('<').and_then(|i| i.split_once(">::")) {
+                Some((ty_trait, method)) => {
+                    let (ty, tr) = ty_trait
+                        .split_once(" as ")
+                        .expect("`<Type as Trait>::method`");
+                    format!(
+                        "impl {tr} for {ty} {{\n    fn {method}(&self) -> &'static str {{\n        \"{value}\"\n    }}\n}}"
+                    )
+                }
+                None => format!("const {item}: &str = \"{value}\";"),
+            };
+            after_decl(w, decl)
         }
         // The declaration first: an anchor that names the enum would otherwise
         // be read as its opening, attributes and all.
@@ -690,10 +705,7 @@ fn page(w: &Watch, names: &[&str]) -> String {
         }
         Read::TsFields { name } => {
             let fields: String = names.iter().map(|n| format!("  {n}: string;\n")).collect();
-            format!(
-                "{}\nexport interface {name} {{\n{fields}}}\n",
-                anchors.join("\n")
-            )
+            after_decl(w, format!("export interface {name} {{\n{fields}}}"))
         }
         // A JSON document's anchor renders as a key, so each one opens a member.
         Read::JsonUnion { def, prop } => {
@@ -755,7 +767,9 @@ fn page(w: &Watch, names: &[&str]) -> String {
 }
 
 /// `decl`, then each of `w`'s anchors it does not already carry: rendering a
-/// declaration's own head again would declare it twice.
+/// declaration's own head again would declare it twice. In source a parser
+/// reads, the anchors sit in a block comment, which the anchor check still
+/// sees and the parser skips.
 fn after_decl(w: &Watch, decl: String) -> String {
     let rest: Vec<String> = w
         .docs
@@ -763,7 +777,11 @@ fn after_decl(w: &Watch, decl: String) -> String {
         .filter(|doc| !Regex::new(doc.anchor).expect("compiles").is_match(&decl))
         .map(|doc| render(doc.anchor, ""))
         .collect();
-    format!("{decl}\n{}\n", rest.join("\n"))
+    if rest.is_empty() || matches!(w.read, Read::MdTable { .. } | Read::MdHeadings { .. }) {
+        format!("{decl}\n{}\n", rest.join("\n"))
+    } else {
+        format!("{decl}\n/*\n{}\n*/\n", rest.join("\n"))
+    }
 }
 
 /// The variant a snake_case wire name derives from.
@@ -780,19 +798,13 @@ fn pascal(snake: &str) -> String {
 }
 
 /// `name` where `w`'s reader must not find it: another item of the reader's
-/// kind, or for `Sole`, a commented-out declaration. An `Each` pattern's
-/// strictness cannot be read off the pattern under test, so
-/// `a_declaration_form_is_not_satisfied_by_prose` pins it where a declaration
-/// names the prose it must reject, and a JSON reader reads its whole document
-/// by design.
+/// kind. A plain-text pattern's strictness cannot be read off the pattern under
+/// test, so `a_declaration_form_is_not_satisfied_by_prose` pins it where a
+/// declaration names the prose it must reject, and a JSON reader reads its
+/// whole document by design.
 fn near_miss(w: &Watch, name: &str) -> String {
-    let in_rust = w.docs.iter().all(|doc| match doc.at {
-        At::Path { path, .. } => path.ends_with(".rs"),
-        At::ReleaseAsset { member, .. } => member.ends_with(".rs"),
-        At::Url(url) => url.ends_with(".rs"),
-    });
     match w.read {
-        Read::Sole { pattern } if in_rust => format!("// {}", render(pattern, name)),
+        Read::RustStr { .. } => format!("const PXD_OTHER: &str = \"{name}\";"),
         Read::RustArms { arm, .. } => format!(
             "fn pxd_other() {{ match a {{ \"{name}\" => {}, _ => Err(()) }} }}",
             render(arm, "")
@@ -1051,27 +1063,31 @@ fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
                 );
             }
         }
-        let compiled = match w.read {
-            Read::Each { pattern } => Regex::new(&pattern.replace("{name}", "n")).map(drop),
-            Read::Sole { pattern } => Regex::new(pattern).map(|re| {
+        let captures = |pattern: &str| {
+            Regex::new(pattern).map(|re| {
                 assert!(
                     re.captures_len() > 1,
                     "{}: `{pattern}` captures no name",
                     w.id
                 );
-            }),
+            })
+        };
+        let compiled: Result<(), String> = match w.read {
+            Read::Each { pattern } => Regex::new(&pattern.replace("{name}", "n"))
+                .map(drop)
+                .map_err(|e| e.to_string()),
+            Read::Sole { pattern } | Read::Matches { pattern } => {
+                captures(pattern).map_err(|e| e.to_string())
+            }
             Read::RustArms { name, arm } => match read::rust_arms("", name, arm) {
                 Err(Unread::Ours(e)) => Err(e),
                 _ => Ok(()),
             },
-            Read::Matches { pattern } => Regex::new(pattern).map(|re| {
-                assert!(
-                    re.captures_len() > 1,
-                    "{}: `{pattern}` captures no name",
-                    w.id
-                );
-            }),
-            Read::PySet { decl } => Regex::new(decl).map(drop),
+            Read::RustStr { item } => match read::rust_str("", item) {
+                Err(Unread::Ours(e)) => Err(e),
+                _ => Ok(()),
+            },
+            Read::PySet { decl } => Regex::new(decl).map(drop).map_err(|e| e.to_string()),
             Read::RustEnum { .. }
             | Read::RustStruct { .. }
             | Read::TsFields { .. }

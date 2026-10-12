@@ -1,20 +1,30 @@
 //! The readers: how a document yields upstream's names, one per
 //! [`Read`](pixtuoid_core::source::upstream::Read) variant. A reader that
 //! cannot find its declaration says what it found instead, which the watch
-//! files as probe health, never as a rename.
+//! files as probe health, never as a rename. Source is parsed by the
+//! language's own parser (syn, oxc, pulldown-cmark); a document it rejects is
+//! probe health too, and a partial tree is never read.
 
 use std::collections::BTreeSet;
 
+use oxc_allocator::Allocator;
+use oxc_ast::ast::{
+    ArrayExpressionElement, BindingPattern, Declaration, Expression, ModuleDeclaration, Statement,
+    TSNamespaceDeclarationBody, TSSignature,
+};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use serde_json::Value;
+use syn::spanned::Spanned;
+use syn::visit::Visit;
 
 pub(super) type Names = BTreeSet<String>;
 
 /// Why a reader yields no names.
 #[derive(Debug)]
 pub(super) enum Unread {
-    /// A pattern of ours does not compile.
-    Ours(regex::Error),
+    /// A pattern or item spec of ours does not compile.
+    Ours(String),
     /// The document lacks what the reader reads: this is what it found
     /// instead, worded to follow "the reader found".
     Missing(String),
@@ -22,7 +32,7 @@ pub(super) enum Unread {
 
 impl From<regex::Error> for Unread {
     fn from(e: regex::Error) -> Self {
-        Self::Ours(e)
+        Self::Ours(e.to_string())
     }
 }
 
@@ -30,13 +40,12 @@ fn missing(what: impl Into<String>) -> Unread {
     Unread::Missing(what.into())
 }
 
-/// The ONE match of `decl`: a first-match read is silently wrong the day
-/// upstream grows a second declaration above the real one (a `#[cfg(test)]`
-/// twin, a macro body), so none or several is probe health.
-fn sole_match<'s>(src: &'s str, decl: &Regex, what: &str) -> Result<regex::Match<'s>, Unread> {
-    let mut all = decl.find_iter(src);
-    match (all.next(), all.next()) {
-        (Some(one), None) => Ok(one),
+/// The ONE item found: a first-match read is silently wrong the day upstream
+/// grows a second declaration above the real one (a `#[cfg(test)]` twin, a
+/// macro body), so none or several is probe health.
+fn one<T>(mut found: impl Iterator<Item = T>, what: &str) -> Result<T, Unread> {
+    match (found.next(), found.next()) {
+        (Some(it), None) => Ok(it),
         (None, _) => Err(missing(format!("no {what}"))),
         (Some(_), Some(_)) => Err(missing(format!("more than one {what}"))),
     }
@@ -53,77 +62,134 @@ pub(super) fn each(text: &str, pattern: &str, ours: &BTreeSet<&str>) -> Result<N
     Ok(found)
 }
 
-/// A Rust document is read with its comments stripped, so a commented-out
-/// declaration is not one.
-pub(super) fn sole(text: &str, path: &str, pattern: &str) -> Result<Names, Unread> {
-    let src = if path.ends_with(".rs") {
-        strip_comments(text, &RUST)
-    } else {
-        text.to_owned()
-    };
+pub(super) fn sole(text: &str, pattern: &str) -> Result<Names, Unread> {
     let re = Regex::new(pattern)?;
-    let at = sole_match(&src, &re, "match of its pattern")?.start();
-    re.captures_at(&src, at)
+    let at = one(re.find_iter(text), "match of its pattern")?.start();
+    re.captures_at(text, at)
         .and_then(|c| c.get(1))
         .map(|m| [m.as_str().to_owned()].into())
         .ok_or_else(|| missing("a match of its pattern with no name in it"))
 }
 
-/// Off the brace-balanced, comment-stripped body of `fn name`.
-pub(super) fn rust_arms(text: &str, name: &str, arm: &str) -> Result<Names, Unread> {
-    let opener = Regex::new(&format!(r"fn\s+{}\b[^{{]*\{{", regex::escape(name)))?;
-    let heads = Regex::new(&format!(r#"((?:"[^"]*"\s*\|\s*)*"[^"]*")\s*=>\s*{arm}"#))?;
-    let quoted = Regex::new(r#""([^"]*)""#)?;
-    let (_, body) = body_of(
-        &strip_comments(text, &RUST),
-        &opener,
-        &format!("`fn {name}`"),
-    )?;
-    let found: Names = heads
-        .captures_iter(&body)
-        .flat_map(|h| {
-            quoted
-                .captures_iter(h.get(1).map_or("", |m| m.as_str()))
-                .filter_map(|q| q.get(1).map(|m| m.as_str().to_owned()))
-                .collect::<Vec<_>>()
-        })
-        .filter(|s| !s.is_empty())
+pub(super) fn matches(text: &str, pattern: &str) -> Result<Names, Unread> {
+    let found: Names = Regex::new(pattern)?
+        .captures_iter(text)
+        .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
         .collect();
     if found.is_empty() {
-        return Err(missing(format!(
-            "no arm of `fn {name}` yielding its target"
-        )));
+        return Err(missing("no match of its pattern"));
     }
     Ok(found)
 }
 
-/// Comments go first, and a struct variant's own fields never name a variant,
-/// so only the top level is read.
+fn rust_file(text: &str) -> Result<syn::File, Unread> {
+    syn::parse_file(text).map_err(|e| missing(format!("Rust syn cannot parse ({e})")))
+}
+
+/// Every declaration of a Rust file, however deeply nested: a module, an impl
+/// or a fn body may hold the one a reader wants.
+#[derive(Default)]
+struct RustItems<'ast> {
+    enums: Vec<&'ast syn::ItemEnum>,
+    structs: Vec<&'ast syn::ItemStruct>,
+    consts: Vec<&'ast syn::ItemConst>,
+    impls: Vec<&'ast syn::ItemImpl>,
+    fns: Vec<(&'ast syn::Ident, &'ast syn::Block)>,
+    macros: Vec<&'ast syn::Macro>,
+}
+
+impl<'ast> RustItems<'ast> {
+    fn of(file: &'ast syn::File) -> Self {
+        let mut items = Self::default();
+        items.visit_file(file);
+        items
+    }
+}
+
+impl<'ast> Visit<'ast> for RustItems<'ast> {
+    fn visit_item_enum(&mut self, i: &'ast syn::ItemEnum) {
+        self.enums.push(i);
+        syn::visit::visit_item_enum(self, i);
+    }
+
+    fn visit_item_struct(&mut self, i: &'ast syn::ItemStruct) {
+        self.structs.push(i);
+        syn::visit::visit_item_struct(self, i);
+    }
+
+    fn visit_item_const(&mut self, i: &'ast syn::ItemConst) {
+        self.consts.push(i);
+        syn::visit::visit_item_const(self, i);
+    }
+
+    fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
+        self.impls.push(i);
+        syn::visit::visit_item_impl(self, i);
+    }
+
+    fn visit_item_fn(&mut self, i: &'ast syn::ItemFn) {
+        self.fns.push((&i.sig.ident, &i.block));
+        syn::visit::visit_item_fn(self, i);
+    }
+
+    fn visit_impl_item_fn(&mut self, i: &'ast syn::ImplItemFn) {
+        self.fns.push((&i.sig.ident, &i.block));
+        syn::visit::visit_impl_item_fn(self, i);
+    }
+
+    fn visit_macro(&mut self, i: &'ast syn::Macro) {
+        self.macros.push(i);
+        syn::visit::visit_macro(self, i);
+    }
+}
+
+/// The value `key` takes in an item's `#[serde(...)]`, as a string literal.
+/// Only `key = "…"` counts: `rename` alone, never an `alias`, which serde only
+/// ever reads, so a name moved into one is gone from the wire.
+fn serde_value(attrs: &[syn::Attribute], key: &str) -> Result<Option<String>, Unread> {
+    let mut found = None;
+    for attr in attrs.iter().filter(|a| a.path().is_ident("serde")) {
+        let metas = attr
+            .parse_args_with(
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+            )
+            .map_err(|e| missing(format!("an unreadable `#[serde]` attribute ({e})")))?;
+        for meta in metas {
+            if let syn::Meta::NameValue(nv) = meta
+                && nv.path.is_ident(key)
+                && let syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(s),
+                    ..
+                }) = nv.value
+            {
+                found = Some(s.value());
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// A struct variant's own fields never name a variant: only variants are read.
 pub(super) fn rust_enum(text: &str, name: &str) -> Result<Names, Unread> {
-    let src = strip_comments(text, &RUST);
-    let opener = Regex::new(&format!(r"enum\s+{}\b[^{{;]*\{{", regex::escape(name)))?;
+    let file = rust_file(text)?;
+    let items = RustItems::of(&file);
     let what = format!("`enum {name}`");
-    let (decl, body) = body_of(&src, &opener, &what)?;
-    if rename_all(item_attrs(&src, decl.start()))?.as_deref() != Some("snake_case") {
+    let item = one(items.enums.iter().filter(|e| e.ident == name), &what)?;
+    if serde_value(&item.attrs, "rename_all")?.as_deref() != Some("snake_case") {
         return Err(missing(format!(
             "{what} without `rename_all = \"snake_case\"`"
         )));
     }
-    let variants = top_level(&body, '{', '}');
-    let rename = Regex::new(SERDE_RENAME)?;
-    let ident = Regex::new(r"\b([A-Z][A-Za-z0-9]*)\b")?;
-    let names: Names = split_top_level(&variants)
-        .into_iter()
-        .filter_map(|variant| match rename.captures(variant) {
-            Some(renamed) => renamed.get(1).map(|m| m.as_str().to_owned()),
-            None => ident
-                .captures(&top_level(variant, '[', ']'))
-                .and_then(|c| c.get(1))
-                .map(|m| snake_case(m.as_str())),
-        })
-        .collect();
+    let names =
+        item.variants
+            .iter()
+            .map(|v| {
+                Ok(serde_value(&v.attrs, "rename")?
+                    .unwrap_or_else(|| snake_case(&v.ident.to_string())))
+            })
+            .collect::<Result<Names, Unread>>()?;
     if names.is_empty() {
-        return Err(missing(format!("no variant in `enum {name}`")));
+        return Err(missing(format!("no variant in {what}")));
     }
     Ok(names)
 }
@@ -132,51 +198,31 @@ pub(super) fn rust_enum(text: &str, name: &str) -> Result<Names, Unread> {
 /// ident, which only a `snake_case` `rename_all` leaves as written; another
 /// spelling is never guessed at.
 pub(super) fn rust_struct(text: &str, name: &str) -> Result<Names, Unread> {
-    let src = strip_comments(text, &RUST);
-    let opener = Regex::new(&format!(r"struct\s+{}\b[^{{;(]*\{{", regex::escape(name)))?;
+    let file = rust_file(text)?;
+    let items = RustItems::of(&file);
     let what = format!("`struct {name}`");
-    let (decl, body) = body_of(&src, &opener, &what)?;
-    if let Some(spelling) =
-        rename_all(item_attrs(&src, decl.start()))?.filter(|s| s != "snake_case")
-    {
+    let item = one(
+        items
+            .structs
+            .iter()
+            .filter(|s| s.ident == name && matches!(s.fields, syn::Fields::Named(_))),
+        &what,
+    )?;
+    if let Some(spelling) = serde_value(&item.attrs, "rename_all")?.filter(|s| s != "snake_case") {
         return Err(missing(format!(
             "{what} with `rename_all = \"{spelling}\"`"
         )));
     }
-    let rename = Regex::new(SERDE_RENAME)?;
-    let ident = Regex::new(r"\b([a-z_][a-z0-9_]*)\s*:")?;
-    let names: Names = split_top_level(&body)
-        .into_iter()
-        .filter_map(|field| match rename.captures(field) {
-            Some(renamed) => renamed.get(1).map(|m| m.as_str().to_owned()),
-            None => ident
-                .captures(&top_level(field, '[', ']'))
-                .and_then(|c| c.get(1))
-                .map(|m| m.as_str().to_owned()),
-        })
-        .collect();
+    let names = item
+        .fields
+        .iter()
+        .filter_map(|f| f.ident.as_ref().map(|ident| (f, ident)))
+        .map(|(f, ident)| Ok(serde_value(&f.attrs, "rename")?.unwrap_or_else(|| ident.to_string())))
+        .collect::<Result<Names, Unread>>()?;
     if names.is_empty() {
         return Err(missing(format!("no field in {what}")));
     }
     Ok(names)
-}
-
-/// `rename` only: an `alias` is only ever read by serde, so a name moved into
-/// one is gone from the wire.
-const SERDE_RENAME: &str = r#"#\[serde\([^\]]*\brename\s*=\s*"([^"]+)""#;
-
-/// The item's own attributes: whatever follows the item before it.
-fn item_attrs(src: &str, at: usize) -> &str {
-    let head = &src[..at];
-    &head[head.rfind(['{', '}', ';']).map_or(0, |i| i + 1)..]
-}
-
-fn rename_all(attrs: &str) -> Result<Option<String>, Unread> {
-    let re = Regex::new(r#"#\[serde\([^\]]*\brename_all\s*=\s*"([^"]+)""#)?;
-    Ok(re
-        .captures(attrs)
-        .and_then(|c| c.get(1))
-        .map(|m| m.as_str().to_owned()))
 }
 
 /// serde's own `snake_case` (serde_derive's `internals/case.rs`): an `_`
@@ -192,92 +238,384 @@ fn snake_case(ident: &str) -> String {
     out
 }
 
-/// `src` cut at each comma outside every bracket.
-fn split_top_level(src: &str) -> Vec<&str> {
-    let (mut out, mut depth, mut start) = (Vec::new(), 0usize, 0);
-    for (i, c) in src.char_indices() {
-        match c {
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                out.push(&src[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
+/// Every `match` arm inside a fn, nested matches included.
+#[derive(Default)]
+struct Arms<'ast>(Vec<&'ast syn::Arm>);
+
+impl<'ast> Visit<'ast> for Arms<'ast> {
+    fn visit_arm(&mut self, i: &'ast syn::Arm) {
+        self.0.push(i);
+        syn::visit::visit_arm(self, i);
     }
-    out.push(&src[start..]);
-    out
 }
 
-/// `src` without anything between `open` and its `close`, nested pairs
-/// included.
-fn top_level(src: &str, open: char, close: char) -> String {
-    let mut depth = 0usize;
-    src.chars()
-        .filter(|&c| {
-            if c == open {
-                depth += 1;
-            } else if c == close {
-                depth = depth.saturating_sub(1);
-                return false;
-            }
-            depth == 0
+/// The string literals a pattern matches: a literal, or an or-pattern of them.
+fn pattern_strings(pat: &syn::Pat) -> Vec<String> {
+    match pat {
+        syn::Pat::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) => vec![s.value()],
+        syn::Pat::Or(or) => or.cases.iter().flat_map(pattern_strings).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The literal-matching arms of the ONE `fn name` whose body begins with what
+/// `arm` matches, read off the arm's own source text.
+pub(super) fn rust_arms(text: &str, name: &str, arm: &str) -> Result<Names, Unread> {
+    let target = Regex::new(&format!(r"\A(?:{arm})"))?;
+    let file = rust_file(text)?;
+    let items = RustItems::of(&file);
+    let (_, body) = one(
+        items.fns.iter().filter(|(ident, _)| *ident == name),
+        &format!("`fn {name}`"),
+    )?;
+    let mut arms = Arms::default();
+    arms.visit_block(body);
+    let found: Names = arms
+        .0
+        .iter()
+        .filter(|a| {
+            text.get(a.body.span().byte_range())
+                .is_some_and(|src| target.is_match(src))
         })
-        .collect()
-}
-
-/// A duplicate or restyled declaration is probe health, never a rename, so
-/// exactly one must match.
-pub(super) fn ts_fields(text: &str, name: &str) -> Result<Names, Unread> {
-    let decl = Regex::new(&format!(
-        r"(?ms)^export\s+interface\s+{}\b[^{{\n]*\{{(.*?)^\}}",
-        regex::escape(name)
-    ))?;
-    let mut all = decl.captures_iter(text);
-    let body = match (all.next(), all.next()) {
-        (Some(one), None) => one.get(1).map_or("", |m| m.as_str()),
-        _ => return Err(missing(format!("no single `export interface {name}`"))),
-    };
-    let field =
-        Regex::new(r#"(?m)^\s*(?:readonly\s+)?(?:"([^"]+)"|'([^']+)'|([A-Za-z_$][\w$]*))\??\s*:"#)?;
-    let names: Names = field
-        .captures_iter(body)
-        .filter_map(|c| c.get(1).or_else(|| c.get(2)).or_else(|| c.get(3)))
-        .map(|m| m.as_str().to_owned())
-        .collect();
-    if names.is_empty() {
-        return Err(missing(format!("no field in `{name}`")));
-    }
-    Ok(names)
-}
-
-pub(super) fn matches(text: &str, pattern: &str) -> Result<Names, Unread> {
-    let found: Names = Regex::new(pattern)?
-        .captures_iter(text)
-        .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
+        .flat_map(|a| pattern_strings(&a.pat))
+        .filter(|s| !s.is_empty())
         .collect();
     if found.is_empty() {
-        return Err(missing("no match of its pattern"));
+        return Err(missing(format!(
+            "no arm of `fn {name}` yielding its target"
+        )));
     }
     Ok(found)
 }
 
-/// The first table under that header: a page's later tables repeat its names.
+/// The string literal the ONE `item` evaluates to: a const by its name, or a
+/// method as `<Type as Trait>::method`, whose body's tail is the literal.
+pub(super) fn rust_str(text: &str, item: &str) -> Result<Names, Unread> {
+    let spec: syn::ExprPath =
+        syn::parse_str(item).map_err(|e| Unread::Ours(format!("`{item}`: {e}")))?;
+    let last = |p: &syn::Path| p.segments.last().map(|s| s.ident.to_string());
+    let file = rust_file(text)?;
+    let items = RustItems::of(&file);
+    let what = format!("`{item}`");
+    let value: &syn::Expr = match &spec.qself {
+        None => {
+            let name = last(&spec.path).unwrap_or_default();
+            &one(items.consts.iter().filter(|c| c.ident == name), &what)?.expr
+        }
+        Some(qself) => {
+            let ty = match qself.ty.as_ref() {
+                syn::Type::Path(p) => last(&p.path),
+                _ => None,
+            };
+            let segments: Vec<String> = spec
+                .path
+                .segments
+                .iter()
+                .map(|s| s.ident.to_string())
+                .collect();
+            let (method, trait_) = match segments.split_last() {
+                Some((m, t)) => (m.clone(), t.last().cloned()),
+                None => return Err(Unread::Ours(format!("`{item}` names no method"))),
+            };
+            let block = one(
+                items
+                    .impls
+                    .iter()
+                    .filter(|i| {
+                        i.trait_.as_ref().and_then(|(t, _)| last(t)) == trait_
+                            && matches!(i.self_ty.as_ref(), syn::Type::Path(p) if last(&p.path) == ty)
+                    })
+                    .flat_map(|i| i.items.iter())
+                    .filter_map(|it| match it {
+                        syn::ImplItem::Fn(f) if f.sig.ident == method => Some(&f.block),
+                        _ => None,
+                    }),
+                &what,
+            )?;
+            match block.stmts.last() {
+                Some(syn::Stmt::Expr(tail, None)) => tail,
+                _ => return Err(missing(format!("{what} with no tail expression"))),
+            }
+        }
+    };
+    match value {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) => Ok([s.value()].into()),
+        _ => Err(missing(format!("{what} not a string literal"))),
+    }
+}
+
+/// Only each row's header: a row's body is `key: value` lines whose values
+/// carry capitalised tokens of their own.
+pub(super) fn rust_macro_rows(text: &str, name: &str) -> Result<Names, Unread> {
+    let file = rust_file(text)?;
+    let items = RustItems::of(&file);
+    let mac = one(
+        items.macros.iter().filter(|m| m.path.is_ident(name)),
+        &format!("`{name}!` table"),
+    )?;
+    let tokens: Vec<proc_macro2::TokenTree> = mac.tokens.clone().into_iter().collect();
+    let found: Names = tokens
+        .split(|t| matches!(t, proc_macro2::TokenTree::Punct(p) if p.as_char() == ','))
+        .filter_map(|row| match without_attrs(row) {
+            [
+                proc_macro2::TokenTree::Ident(header),
+                proc_macro2::TokenTree::Group(g),
+                ..,
+            ] if g.delimiter() == proc_macro2::Delimiter::Brace => Some(header.to_string()),
+            _ => None,
+        })
+        .filter(|h| h.starts_with(|c: char| c.is_ascii_uppercase()))
+        .collect();
+    if found.is_empty() {
+        return Err(missing(format!("no row in `{name}!`")));
+    }
+    Ok(found)
+}
+
+/// `row` past its leading attributes: a doc comment arrives as `#[doc = …]`.
+fn without_attrs(mut row: &[proc_macro2::TokenTree]) -> &[proc_macro2::TokenTree] {
+    use proc_macro2::{Delimiter, TokenTree};
+    loop {
+        match row {
+            [TokenTree::Punct(p), TokenTree::Group(g), rest @ ..]
+                if p.as_char() == '#' && g.delimiter() == Delimiter::Bracket =>
+            {
+                row = rest;
+            }
+            _ => return row,
+        }
+    }
+}
+
+/// The TS declarations a reader may want: top-level, exported, and inside a
+/// `declare module` or namespace block.
+fn ts_declarations<'b, 'a>(stmts: &'b [Statement<'a>], out: &mut Vec<&'b Declaration<'a>>) {
+    for stmt in stmts {
+        let decl = match stmt.as_module_declaration() {
+            Some(ModuleDeclaration::ExportDeclaration(e)) => Some(&e.declaration),
+            _ => stmt.as_declaration(),
+        };
+        let Some(decl) = decl else { continue };
+        out.push(decl);
+        match decl {
+            Declaration::TSExternalModuleDeclaration(m) => {
+                if let Some(block) = &m.body {
+                    ts_declarations(&block.body, out);
+                }
+            }
+            Declaration::TSNamespaceDeclaration(ns) => {
+                let mut body = &ns.body;
+                loop {
+                    match body {
+                        TSNamespaceDeclarationBody::TSNamespaceDeclaration(inner) => {
+                            body = &inner.body;
+                        }
+                        TSNamespaceDeclarationBody::TSModuleBlock(block) => {
+                            ts_declarations(&block.body, out);
+                            break;
+                        }
+                    }
+                }
+            }
+            Declaration::TSGlobalDeclaration(g) => ts_declarations(&g.body.body, out),
+            _ => {}
+        }
+    }
+}
+
+/// `f` over the declarations of a TS document oxc parses without a diagnostic.
+fn with_ts<T>(
+    text: &str,
+    f: impl FnOnce(&[&Declaration<'_>]) -> Result<T, Unread>,
+) -> Result<T, Unread> {
+    let alloc = Allocator::default();
+    let parsed = oxc_parser::Parser::new(&alloc, text, oxc_span::SourceType::ts()).parse();
+    if let Some(d) = parsed.diagnostics.first() {
+        return Err(missing(format!("TypeScript oxc cannot parse ({d})")));
+    }
+    if parsed.fatal_error {
+        return Err(missing("TypeScript oxc cannot parse"));
+    }
+    let mut decls = Vec::new();
+    ts_declarations(&parsed.program.body, &mut decls);
+    f(&decls)
+}
+
+/// The top-level fields of the ONE `interface name`: a nested object's fields
+/// and its methods are not fields of the interface.
+pub(super) fn ts_fields(text: &str, name: &str) -> Result<Names, Unread> {
+    with_ts(text, |decls| {
+        let what = format!("`interface {name}`");
+        let body = one(
+            decls.iter().filter_map(|d| match d {
+                Declaration::TSInterfaceDeclaration(i) if i.id.name.as_str() == name => {
+                    Some(&i.body.body)
+                }
+                _ => None,
+            }),
+            &what,
+        )?;
+        let names: Names = body
+            .iter()
+            .filter_map(|member| match member {
+                TSSignature::TSPropertySignature(p) if !p.computed => {
+                    p.key.static_name().map(|k| k.into_owned())
+                }
+                _ => None,
+            })
+            .collect();
+        if names.is_empty() {
+            return Err(missing(format!("no field in {what}")));
+        }
+        Ok(names)
+    })
+}
+
+/// The string elements of the ONE `const name = [ … ]`: the type derived from
+/// it and every comparison against it repeat its names but declare none.
+pub(super) fn ts_const_array(text: &str, name: &str) -> Result<Names, Unread> {
+    with_ts(text, |decls| {
+        let array = one(
+            decls
+                .iter()
+                .filter_map(|d| match d {
+                    Declaration::VariableDeclaration(v) => Some(v.declarations.iter()),
+                    _ => None,
+                })
+                .flatten()
+                .filter(|v| {
+                    matches!(&v.id, BindingPattern::BindingIdentifier(b) if b.name.as_str() == name)
+                })
+                .filter_map(|v| match v.init.as_ref()?.get_inner_expression() {
+                    Expression::ArrayExpression(a) => Some(a),
+                    _ => None,
+                }),
+            &format!("`const {name}` array"),
+        )?;
+        Ok(array
+            .elements
+            .iter()
+            .filter_map(|e| match e {
+                ArrayExpressionElement::StringLiteral(s) => Some(s.value.as_str().to_owned()),
+                _ => None,
+            })
+            .collect())
+    })
+}
+
+/// A heading's events: where it starts and ends, its level, and its text.
+struct Heading {
+    start: usize,
+    end: usize,
+    level: usize,
+    text: String,
+}
+
+/// The events of the ONE heading `under`'s section, up to the next heading at
+/// its level or above, and that level. Fenced code arrives as text, never as a
+/// heading, so a shell sample's `# comment` cannot end the section.
+fn md_section<'t>(text: &'t str, under: &str) -> Result<(Vec<Event<'t>>, usize), Unread> {
+    let events: Vec<Event<'t>> = Parser::new_ext(text, Options::ENABLE_TABLES).collect();
+    let headings = md_headings_of(&events);
+    let parent = one(
+        headings.iter().filter(|h| h.text.trim() == under),
+        &format!("`{under}` heading"),
+    )?;
+    let end = headings
+        .iter()
+        .find(|h| h.start > parent.end && h.level <= parent.level)
+        .map_or(events.len(), |h| h.start);
+    Ok((events[parent.end + 1..end].to_vec(), parent.level))
+}
+
+fn md_headings_of(events: &[Event<'_>]) -> Vec<Heading> {
+    let mut out = Vec::new();
+    let mut open: Option<(usize, usize, String)> = None;
+    for (i, event) in events.iter().enumerate() {
+        match event {
+            Event::Start(Tag::Heading { level, .. }) => {
+                open = Some((i, *level as usize, String::new()));
+            }
+            Event::Text(t) | Event::Code(t) => {
+                if let Some((_, _, text)) = open.as_mut() {
+                    text.push_str(t);
+                }
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                if let Some((start, level, text)) = open.take() {
+                    out.push(Heading {
+                        start,
+                        end: i,
+                        level,
+                        text,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The backticked first-column names of the first table in the section whose
+/// header row begins with `header`: a page's later tables repeat its names.
 pub(super) fn md_table(text: &str, header: &str, under: &str) -> Result<Names, Unread> {
     let (section, _) = md_section(text, under)?;
-    let table = Regex::new(&format!(
-        r"(?m)^\|\s*{}\s*\|[^\n]*\n\|[\s:|-]*\n((?:\|[^\n]*\n?)+)",
-        regex::escape(header)
-    ))?;
-    let rows = table
-        .captures(&section)
-        .and_then(|c| c.get(1))
+    // Each table as rows of cells, each cell its events.
+    let mut tables: Vec<Vec<Vec<Vec<Event<'_>>>>> = Vec::new();
+    let mut cell: Option<Vec<Event<'_>>> = None;
+    for event in section {
+        match event {
+            Event::Start(Tag::Table(_)) => tables.push(Vec::new()),
+            Event::Start(Tag::TableHead | Tag::TableRow) => {
+                if let Some(t) = tables.last_mut() {
+                    t.push(Vec::new());
+                }
+            }
+            Event::Start(Tag::TableCell) => cell = Some(Vec::new()),
+            Event::End(TagEnd::TableCell) => {
+                if let (Some(c), Some(row)) =
+                    (cell.take(), tables.last_mut().and_then(|t| t.last_mut()))
+                {
+                    row.push(c);
+                }
+            }
+            e => {
+                if let Some(c) = cell.as_mut() {
+                    c.push(e);
+                }
+            }
+        }
+    }
+    let cell_text = |c: &[Event<'_>]| -> String {
+        c.iter()
+            .map(|e| match e {
+                Event::Text(t) | Event::Code(t) => t.as_ref(),
+                _ => "",
+            })
+            .collect()
+    };
+    let table = tables
+        .iter()
+        .find(|t| {
+            t.first()
+                .and_then(|head| head.first())
+                .is_some_and(|c| cell_text(c).trim() == header)
+        })
         .ok_or_else(|| missing(format!("no `{header}` table")))?;
-    let name = Regex::new(r"(?m)^\|\s*`([^`]+)`\s*\|")?;
-    let found: Names = name
-        .captures_iter(rows.as_str())
-        .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
+    let found: Names = table
+        .iter()
+        .skip(1)
+        .filter_map(|row| match row.first().map(Vec::as_slice) {
+            Some([Event::Code(name)]) => Some(name.to_string()),
+            _ => None,
+        })
         .collect();
     if found.is_empty() {
         return Err(missing(format!("no name in the `{header}` table")));
@@ -285,15 +623,16 @@ pub(super) fn md_table(text: &str, header: &str, under: &str) -> Result<Names, U
     Ok(found)
 }
 
+/// The one-word titles of the direct subsections of the ONE heading `under`; a
+/// page's other sections carry one-word headings of their own.
 pub(super) fn md_headings(text: &str, under: &str) -> Result<Names, Unread> {
     let (section, level) = md_section(text, under)?;
-    let heading = Regex::new(&format!(
-        r"(?m)^#{{{}}}[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$",
-        level + 1
-    ))?;
-    let found: Names = heading
-        .captures_iter(&section)
-        .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
+    let word = Regex::new(r"\A[A-Za-z_][A-Za-z0-9_]*\z")?;
+    let found: Names = md_headings_of(&section)
+        .into_iter()
+        .filter(|h| h.level == level + 1)
+        .map(|h| h.text.trim().to_owned())
+        .filter(|t| word.is_match(t))
         .collect();
     if found.is_empty() {
         return Err(missing(format!("no one-word heading under `{under}`")));
@@ -301,29 +640,32 @@ pub(super) fn md_headings(text: &str, under: &str) -> Result<Names, Unread> {
     Ok(found)
 }
 
-/// The body of the ONE heading `under`, up to the next heading at its level or
-/// above, and that level. Fenced code goes first: a shell sample's `# comment`
-/// reads as a heading.
-fn md_section(text: &str, under: &str) -> Result<(String, usize), Unread> {
-    let text = Regex::new(r"(?ms)^```.*?^```")?.replace_all(text, "");
-    let parent = Regex::new(&format!(r"(?m)^#+[ \t]+{}[ \t]*$", regex::escape(under)))?;
-    let at = sole_match(&text, &parent, &format!("`{under}` heading"))?;
-    let level = at.as_str().bytes().take_while(|&b| b == b'#').count();
-    let rest = &text[at.end()..];
-    let next = Regex::new(&format!(r"(?m)^#{{1,{level}}}[ \t]"))?;
-    let section = next.find(rest).map_or(rest, |m| &rest[..m.start()]);
-    Ok((section.to_owned(), level))
-}
-
 /// Comments go first: a comment quoting `{"action": "continue"}` once ended
-/// the set at its stray `}`. An empty set is an answer, not a miss.
+/// the set at its stray `}`. An empty set is an answer, not a miss. Hand-rolled
+/// on purpose: a Python parser on crates.io is pre-1.0 (`ruff_python_parser`)
+/// or unmaintained (`rustpython-parser`), a cost these three hermes watches do
+/// not repay.
 pub(super) fn py_set(text: &str, decl: &str) -> Result<Names, Unread> {
     let src = strip_py_comments(text);
     let opener = Regex::new(&format!(r"(?:{decl})\s*\{{"))?;
-    let (_, body) = body_of(&src, &opener, "set its pattern declares")?;
+    let what = "set its pattern declares";
+    let start = one(opener.find_iter(&src), what)?.end();
+    let mut depth = 1usize;
+    let close = src[start..]
+        .char_indices()
+        .find(|&(_, c)| {
+            match c {
+                '{' => depth += 1,
+                '}' => depth -= 1,
+                _ => {}
+            }
+            depth == 0
+        })
+        .map(|(i, _)| start + i)
+        .ok_or_else(|| missing(format!("no end to {what}")))?;
     let member = Regex::new(r#""([^"\\\n]+)""#)?;
     Ok(member
-        .captures_iter(&body)
+        .captures_iter(&src[start..close])
         .filter_map(|c| c.get(1).map(|m| m.as_str().to_owned()))
         .collect())
 }
@@ -345,40 +687,6 @@ fn strip_py_comments(src: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// The string members of the ONE `const name = [ … ]`: the type derived from
-/// it and every comparison against it repeat its names but declare none.
-pub(super) fn ts_const_array(text: &str, name: &str) -> Result<Names, Unread> {
-    let src = strip_comments(text, &TS);
-    let opener = Regex::new(&format!(
-        r"\bconst\s+{}\b[^=\n]*=\s*\[",
-        regex::escape(name)
-    ))?;
-    let (_, body) = body_of(&src, &opener, &format!("`const {name}` array"))?;
-    let member = Regex::new(r#""([^"\\\n]+)"|'([^'\\\n]+)'"#)?;
-    Ok(member
-        .captures_iter(&body)
-        .filter_map(|c| c.get(1).or_else(|| c.get(2)))
-        .map(|m| m.as_str().to_owned())
-        .collect())
-}
-
-/// Only each row's header: a row's body is `key: value` lines whose values
-/// carry capitalised tokens of their own.
-pub(super) fn rust_macro_rows(text: &str, name: &str) -> Result<Names, Unread> {
-    let src = strip_comments(text, &RUST);
-    let opener = Regex::new(&format!(r"(?m)^\s*{}!\s*\{{", regex::escape(name)))?;
-    let (_, body) = body_of(&src, &opener, &format!("`{name}!` table"))?;
-    let header = Regex::new(r"^\s*([A-Z][A-Za-z0-9_]*)\s*\{")?;
-    let found: Names = split_top_level(&body)
-        .into_iter()
-        .filter_map(|row| header.captures(row)?.get(1).map(|m| m.as_str().to_owned()))
-        .collect();
-    if found.is_empty() {
-        return Err(missing(format!("no row in `{name}!`")));
-    }
-    Ok(found)
 }
 
 /// Scoped to the union ON PURPOSE: every definition's `type` const also yields
@@ -449,104 +757,6 @@ pub(super) fn json_keys(text: &str) -> Result<Names, Unread> {
     Ok(out)
 }
 
-/// How a C-family language spells its strings and block comments.
-struct Syntax {
-    quotes: &'static [u8],
-    nested_blocks: bool,
-}
-
-/// An apostrophe is a lifetime, and an odd count would swallow the following
-/// comment.
-const RUST: Syntax = Syntax {
-    quotes: b"\"",
-    nested_blocks: true,
-};
-
-const TS: Syntax = Syntax {
-    quotes: b"\"'`",
-    nested_blocks: false,
-};
-
-/// Source without `//` and `/* */` comments, string literals kept. A scanner,
-/// not a regex: `/\*.*?\*/` stops at the first `*/` and re-admits a nested
-/// comment's tail.
-fn strip_comments(src: &str, syntax: &Syntax) -> String {
-    let b = src.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let (mut i, mut depth) = (0, 0usize);
-    while i < b.len() {
-        let pair = b.get(i..i + 2);
-        if depth > 0 {
-            match pair {
-                Some(b"/*") if syntax.nested_blocks => (depth, i) = (depth + 1, i + 2),
-                Some(b"*/") => (depth, i) = (depth - 1, i + 2),
-                _ => i += 1,
-            }
-            continue;
-        }
-        match pair {
-            Some(b"/*") => (depth, i) = (1, i + 2),
-            Some(b"//") => {
-                i = b[i..]
-                    .iter()
-                    .position(|&c| c == b'\n')
-                    .map_or(b.len(), |n| i + n)
-            }
-            _ if syntax.quotes.contains(&b[i]) => {
-                let quote = b[i];
-                let mut j = i + 1;
-                while j < b.len() {
-                    match b[j] {
-                        b'\\' => j += 2,
-                        c if c == quote => {
-                            j += 1;
-                            break;
-                        }
-                        _ => j += 1,
-                    }
-                }
-                let j = j.min(b.len());
-                out.extend_from_slice(&b[i..j]);
-                i = j;
-            }
-            _ => {
-                out.push(b[i]);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-/// The ONE match of `decl`, which ends at its opening bracket, and the
-/// bracket-balanced body after it. Never a regex: `(.*?)\}` stops at the first
-/// `}`, so one nested block truncates it.
-fn body_of<'s>(
-    src: &'s str,
-    decl: &Regex,
-    what: &str,
-) -> Result<(regex::Match<'s>, String), Unread> {
-    let at = sole_match(src, decl, what)?;
-    let start = at.end().saturating_sub(1);
-    let (open, close) = match src[start..].chars().next() {
-        Some('{') => ('{', '}'),
-        Some('[') => ('[', ']'),
-        _ => return Err(missing(format!("{what} not opening a bracket"))),
-    };
-    let mut depth = 0usize;
-    for (i, c) in src[start..].char_indices() {
-        if c == open {
-            depth += 1;
-        } else if c == close {
-            depth -= 1;
-            if depth == 0 {
-                return Ok((at, src[start + 1..start + i].to_owned()));
-            }
-        }
-    }
-    Err(missing(format!("no end to {what}")))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,21 +818,68 @@ mod tests {
     #[test]
     fn a_sole_read_refuses_a_second_declaration() {
         let p = r#"const M: &str = "([^"]+)""#;
-        let read = |text: &str, path: &str| found(sole(text, path, p));
-        assert_eq!(read(r#"const M: &str = "a";"#, "x.rs"), names(&["a"]));
+        let read = |text: &str| found(sole(text, p));
+        assert_eq!(read(r#"const M: &str = "a";"#), names(&["a"]));
         // A `#[cfg(test)]` twin above the real one would make a first match wrong.
         assert_eq!(
-            read("const M: &str = \"a\";\nconst M: &str = \"b\";", "x.rs"),
+            read("const M: &str = \"a\";\nconst M: &str = \"b\";"),
             Err("more than one match of its pattern".to_owned())
         );
         assert_eq!(
-            read("const N: &str = \"a\";", "x.rs"),
+            read("const N: &str = \"a\";"),
             Err("no match of its pattern".to_owned())
         );
-        // A commented-out declaration is not one, but only in Rust.
-        let old = "// const M: &str = \"old\";\nconst M: &str = \"a\";";
-        assert_eq!(read(old, "x.rs"), names(&["a"]));
-        assert!(read(old, "x.ts").is_err());
+        // Plain text: a commented-out copy is a second match, which a source
+        // declaration is read by `RustStr` to avoid.
+        assert!(read("// const M: &str = \"old\";\nconst M: &str = \"a\";").is_err());
+    }
+
+    #[test]
+    fn a_rust_str_is_the_literal_its_one_item_evaluates_to() {
+        let src = r#"
+            pub(crate) const METHOD: &str = "_x.ai/session/update";
+            const OTHER: u8 = 1;
+            impl ToolSpec for AgentTool {
+                fn name(&self) -> &'static str {
+                    // "old"
+                    "agent"
+                }
+            }
+            impl ToolSpec for ShellTool {
+                fn name(&self) -> &'static str { "shell" }
+            }
+            impl Display for AgentTool {
+                fn name(&self) -> &'static str { "display" }
+            }"#;
+        assert_eq!(
+            found(rust_str(src, "METHOD")),
+            names(&["_x.ai/session/update"])
+        );
+        assert_eq!(
+            found(rust_str(src, "<AgentTool as ToolSpec>::name")),
+            names(&["agent"])
+        );
+        assert_eq!(
+            found(rust_str(src, "OTHER")),
+            Err("`OTHER` not a string literal".to_owned())
+        );
+        assert_eq!(
+            found(rust_str(src, "<AgentTool as ToolSpec>::description")),
+            Err("no `<AgentTool as ToolSpec>::description`".to_owned())
+        );
+        assert!(matches!(rust_str(src, "<<>"), Err(Unread::Ours(_))));
+    }
+
+    #[test]
+    fn a_document_its_parser_rejects_is_never_read() {
+        let rejected = |r: Result<Names, Unread>, lang: &str| {
+            assert!(found(r).is_err_and(|what| what.starts_with(lang)), "{lang}");
+        };
+        rejected(rust_enum("enum E {", "E"), "Rust syn cannot parse");
+        rejected(
+            ts_fields("export interface E {", "E"),
+            "TypeScript oxc cannot parse",
+        );
     }
 
     #[test]
@@ -638,7 +895,9 @@ mod tests {
                     _ => { Err(()) }
                 }
             }
-            fn other() { "x" => Ok(Action::Start) }"#;
+            fn other(b: &str) -> Result<Action> {
+                match b { "x" => Ok(Action::Start), _ => Err(()) }
+            }"#;
         let read = |t: &str| found(rust_arms(t, "parse", arm));
         assert_eq!(read(src), names(&["spawn", "start", "wait"]));
         assert_eq!(read("fn parsed() {}"), Err("no `fn parse`".to_owned()));
@@ -664,7 +923,7 @@ mod tests {
                 Struct {
                     #[serde(rename = "agentAddress")]
                     agent_address: String,
-                    nested: Inner { Deep },
+                    nested: Inner<Deep>,
                 },
                 // Gone,
             }
@@ -744,17 +1003,36 @@ mod tests {
 
     #[test]
     fn ts_fields_read_the_one_interface() {
-        let src = "export interface Entry extends Base {\n  readonly type: \"x\";\n  title?: string;\n  \"quoted-key\": number;\n  nested: {\n    inner: string;\n  };\n}\nexport interface Other {\n  title: string;\n  only_other: string;\n}\n";
+        let src = "export interface Entry extends Base {\n  readonly type: \"x\";\n  title?: string;\n  \"quoted-key\": number;\n  nested: {\n    inner: string;\n  };\n  /** hidden: in a comment */\n  later(): void;\n}\nexport interface Other {\n  title: string;\n  only_other: string;\n}\n";
+        // A nested object's fields, a comment and a method are no fields of it.
         assert_eq!(
             found(ts_fields(src, "Entry")),
-            names(&["inner", "nested", "quoted-key", "title", "type"])
+            names(&["nested", "quoted-key", "title", "type"])
         );
         assert_eq!(
             found(ts_fields(src, "Gone")),
-            Err("no single `export interface Gone`".to_owned())
+            Err("no `interface Gone`".to_owned())
         );
         let twice = format!("{src}export interface Other {{\n  b: string;\n}}\n");
-        assert!(found(ts_fields(&twice, "Other")).is_err());
+        assert_eq!(
+            found(ts_fields(&twice, "Other")),
+            Err("more than one `interface Other`".to_owned())
+        );
+    }
+
+    #[test]
+    fn ts_fields_read_an_interface_inside_a_module_block() {
+        let src = "declare module '@x/core' {\n  interface Context {\n    session: Session\n  }\n  interface Events {\n    'agent/created'(payload: {}): void\n    status: string\n  }\n}\n";
+        assert_eq!(found(ts_fields(src, "Events")), names(&["status"]));
+    }
+
+    #[test]
+    fn an_unreadable_serde_attribute_is_never_read() {
+        let src = "#[serde(rename_all = )]\nenum E { A }";
+        assert!(
+            found(rust_enum(src, "E"))
+                .is_err_and(|what| what.starts_with("an unreadable `#[serde]` attribute"))
+        );
     }
 
     #[test]
@@ -837,10 +1115,11 @@ mod tests {
 
     #[test]
     fn macro_rows_are_the_row_headers_only() {
-        let src = "macro_rules! hook_events {\n    ($($v:ident { $($r:tt)* }),*) => { pub enum HookEventName { $($v,)* } };\n}\nhook_events! {\n    SessionStart { alias: \"start\", traits: [Blocking] },\n    // Gone { },\n    Stop { alias: \"stop\" },\n}\n";
+        let src = "macro_rules! hook_events {\n    ($($v:ident { $($r:tt)* }),*) => { pub enum HookEventName { $($v,)* } };\n}\nhook_events! {\n    SessionStart { alias: \"start\", traits: [Blocking] },\n    // Gone { },\n    /// Legacy alias of `Stop`.\n    #[cfg(unix)]\n    StopEnd { alias: \"stop_end\" },\n    Stop { alias: \"stop\" },\n}\n";
+        // A row's doc comment and attributes precede its header, not replace it.
         assert_eq!(
             found(rust_macro_rows(src, "hook_events")),
-            names(&["SessionStart", "Stop"])
+            names(&["SessionStart", "Stop", "StopEnd"])
         );
         assert_eq!(
             found(rust_macro_rows("fn x() {}", "hook_events")),
@@ -862,55 +1141,5 @@ mod tests {
             Err("no `properties`".to_owned())
         );
         assert_eq!(found(json_keys("not json")), Err("no JSON".to_owned()));
-    }
-
-    #[test]
-    fn comment_stripping_keeps_strings_and_lifetimes() {
-        let src = "let a = \"// kept\"; // gone\n/* gone /* nested */ gone */fn f<'a>(x: &'a str) {} // gone";
-        assert_eq!(
-            strip_comments(src, &RUST),
-            "let a = \"// kept\"; \nfn f<'a>(x: &'a str) {} "
-        );
-        // An escaped quote does not end the string, so what follows it is kept.
-        let escaped = r#"let b = "a \" // kept"; // gone"#;
-        assert_eq!(
-            strip_comments(escaped, &RUST),
-            r#"let b = "a \" // kept"; "#
-        );
-        // TS quotes three ways, and its block comments end at the first `*/`.
-        let ts = "a = 'http://x' + `//y`; // gone\n/* gone /* gone */ kept";
-        assert_eq!(strip_comments(ts, &TS), "a = 'http://x' + `//y`; \n kept");
-    }
-
-    #[test]
-    fn a_body_is_the_one_declarations_balanced_brackets() {
-        let body =
-            |src: &str, decl: &str| match body_of(src, &Regex::new(decl).expect("compiles"), "`E`")
-            {
-                Ok((_, body)) => Ok(body),
-                Err(Unread::Missing(what)) => Err(what),
-                Err(Unread::Ours(e)) => panic!("{e}"),
-            };
-        let src = "enum E {\n    A { x: u8 },\n    B,\n}\nimpl E {}";
-        assert_eq!(
-            body(src, r"enum E\s*\{"),
-            Ok("\n    A { x: u8 },\n    B,\n".to_owned())
-        );
-        assert_eq!(
-            body("enum E { A", r"enum E\s*\{"),
-            Err("no end to `E`".to_owned())
-        );
-        assert_eq!(
-            body(&format!("{src}\n{src}"), r"enum E\s*\{"),
-            Err("more than one `E`".to_owned())
-        );
-        assert_eq!(
-            body("E = [a, [b], c]", r"E = \["),
-            Ok("a, [b], c".to_owned())
-        );
-        assert_eq!(
-            body("E = a", r"E = a"),
-            Err("`E` not opening a bracket".to_owned())
-        );
     }
 }
