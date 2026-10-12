@@ -270,10 +270,10 @@
            | ($arms | length > 0)
              and all($arms[]; contains("contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), github.event.comment.author_association)")))
   break:
-    - (.jobs[] | select(has("uses")) | .with.allow_fork) = true
-    - (.jobs[] | select(has("uses")) | .if) |= sub("github.event.comment.author_association"; "github.event.comment.user.login")
-    - (.jobs[] | select(has("uses")) | .if) += " || (github.event_name == 'issue_comment' && github.event.issue.pull_request)"
-    - .jobs.second = (.jobs[] | select(has("uses")))
+    - .jobs.review.with.allow_fork = true
+    - .jobs.review.if |= sub("github.event.comment.author_association"; "github.event.comment.user.login")
+    - .jobs.review.if += " || (github.event_name == 'issue_comment' && github.event.issue.pull_request)"
+    - .jobs.second = .jobs.review
 
 - id: reviewer-fork-head-needs-a-maintainer-in-the-callee
   file: .github/workflows/claude-readonly-review.yml

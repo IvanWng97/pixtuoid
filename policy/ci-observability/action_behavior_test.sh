@@ -128,8 +128,9 @@ schema_lenses="$(jq -r '.properties.findings.items.properties.lens.enum[]' "$REV
 review_context="$(yq -e -r '.env.REVIEW_CONTEXT' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
     fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_CONTEXT"
 # The exemption posts the same one context main requires.
-[[ "$(yq -e -r '.jobs.exempt.steps[0].env.REVIEW_CONTEXT' .github/workflows/claude-review.yml)" == "$review_context" ]] ||
-    fail "claude-review.yml's exemption posts a context other than $review_context"
+exempt_workflow=.github/workflows/claude-review-exempt.yml
+[[ "$(yq -e -r '.jobs.exempt.steps[0].env.REVIEW_CONTEXT' "$exempt_workflow")" == "$review_context" ]] ||
+    fail "$exempt_workflow posts a context other than $review_context"
 review_title="$(yq -e -r '.env.REVIEW_TITLE' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
     fail "$CLAUDE_REVIEW_WORKFLOW_FILE has no workflow-level REVIEW_TITLE"
 unit_passes="$(yq -e -r '.env.UNIT_PASSES' "$CLAUDE_REVIEW_WORKFLOW_FILE")" ||
@@ -787,9 +788,11 @@ assert_brew "a dropped subcommand and a failing connect" \
     fail "the homebrew step didn't name each miss with its cause: $(<"$brew_dir/summary")"
 assert_brew "a test block this tree runs" $'  test do\n    shell_output("#{bin}/pixtuoid connect works --json")\n  end' 0
 
-# ── claude-review.yml's Dependabot exemption: posts the `claude-review` status
-# only for a bump that changes Dependabot's manifests and nothing else.
-exempt_script="$(workflow_step_script .github/workflows/claude-review.yml "Exempt a Dependabot bump")"
+# ── The Dependabot exemption: posts the `claude-review` status only for a
+# bump that changes the manifests claude-review.yml allows and nothing else.
+exempt_script="$(workflow_step_script "$exempt_workflow" "Exempt a Dependabot bump")"
+exempt_allow="$(yq -e -r '.jobs.exempt.with.allow' .github/workflows/claude-review.yml)" ||
+    fail "claude-review.yml's exempt job passes no allow pattern"
 exempt_dir="$test_dir/exempt"
 exempt_bin="$exempt_dir/bin"
 mkdir -p "$exempt_bin"
@@ -823,7 +826,7 @@ run_exempt() {
     local fixtures="$1" current_head="${2:-head123}"
     PATH="$exempt_bin:$PATH" EXEMPT_FIXTURES="$fixtures" EXEMPT_CURRENT_HEAD="$current_head" \
         GH_TOKEN=test-token REPOSITORY=owner/repo PR_NUMBER=42 HEAD_SHA=head123 BASE_SHA=main123 \
-        REVIEW_CONTEXT=claude-review RUN_URL=https://example.test/run \
+        ALLOW="$exempt_allow" REVIEW_CONTEXT=claude-review RUN_URL=https://example.test/run \
         bash -c "$exempt_script" >/dev/null 2>&1 || fail "the exemption exited non-zero on $3"
 }
 assert_exempt() {
@@ -1074,6 +1077,11 @@ f="$(exempt_case newline-name)"
 file_row $'Cargo.toml\n' >"$f/files.jsonl"
 run_exempt "$f" head123 "a manifest name with a trailing newline"
 assert_exempt "$f" pending "a manifest name with a trailing newline"
+
+f="$(exempt_case nested-name)"
+file_row scripts/Cargo.toml >"$f/files.jsonl"
+run_exempt "$f" head123 "a manifest name below a directory the pattern names"
+assert_exempt "$f" pending "a manifest name below a directory the pattern names"
 
 # The mask covers a whole version string and nothing else, in the order lines
 # appear; requirements-dev.txt bumps a pin; a Cargo.lock reads only as Cargo
