@@ -298,11 +298,11 @@ up to any colon or parenthesis, lowercased, each run of non-alphanumerics one
 an update that only merges `main` in, or whose every changed line is a comment
 or prose, leaves the record standing. After any other update, the re-run judges
 the change from the head the last record names to the new head, over the files
-the PR changes, reading each file it touches whole at the new head; its record
-names both heads.
-The
-[`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
-rows. A published review passes whatever it found; a failed or missing status
+the PR changes, reading each file that change touches whole at the new head;
+its marker names the new head and its text the old one. When that old head is
+no longer an ancestor of the new one (a rebase), the re-run judges the whole
+PR. The [`local-review`](../.claude/skills/local-review/SKILL.md) skill runs
+those rows. A published review passes whatever it found; a failed or missing status
 is no review: comment `/claude-review`, else split the PR smaller.
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
