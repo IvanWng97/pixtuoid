@@ -163,6 +163,8 @@ mod tests {
     }
 
     /// The `data` paths `allowlisted` copies, dotted, read out of the template.
+    /// A line in any form but the two below panics, so a field cannot ride a
+    /// line in unseen or copy something other than its own name.
     fn allowlisted_fields() -> std::collections::BTreeSet<String> {
         let block = PLUGIN_TEMPLATE
             .split_once("const allowlisted = (data: any) => ({")
@@ -171,12 +173,23 @@ mod tests {
             .expect("the template defines allowlisted");
         block
             .lines()
-            .filter_map(|line| {
-                let (key, rest) = line.trim().split_once(':')?;
-                Some(match rest.split_once("&& {") {
-                    Some((_, inner)) => format!("{key}.{}", inner.split_once(':')?.0.trim()),
-                    None => key.to_owned(),
-                })
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(|line| {
+                let (key, _) = line.split_once(':').unwrap_or(("", ""));
+                if line == format!("{key}: data?.{key},") {
+                    return key.to_owned();
+                }
+                let sub = line
+                    .split_once("&& { ")
+                    .and_then(|(_, inner)| inner.split_once(':'))
+                    .map_or("", |(sub, _)| sub);
+                assert_eq!(
+                    line,
+                    format!("{key}: data?.{key} && {{ {sub}: data.{key}.{sub} }},"),
+                    "an allowlisted line copies something other than its own path"
+                );
+                format!("{key}.{sub}")
             })
             .collect()
     }

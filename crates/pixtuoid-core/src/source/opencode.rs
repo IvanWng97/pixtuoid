@@ -307,8 +307,6 @@ mod tests {
         json!({"type": SESSION_CREATED, "data": data, "_pid": 13358})
     }
 
-    /// Every exported type reaches an arm and decodes to an event, and an
-    /// unmapped one is a benign skip.
     /// [`field`]'s assertion holds every read to the list; this holds every
     /// listed path to a read, by blanking it.
     #[test]
@@ -336,6 +334,8 @@ mod tests {
         }
     }
 
+    /// Every exported type reaches an arm and decodes to an event, and an
+    /// unmapped one is a benign skip.
     #[test]
     fn the_decoded_event_set_is_exactly_what_the_arms_match() {
         for ev in DECODED_EVENTS {
@@ -442,8 +442,10 @@ mod tests {
     }
 
     /// `session.forked`'s `parentID` is the session it was copied from, beside
-    /// a message `boundary` (`packages/schema/src/session-event.ts:187-200`), so a fork
-    /// registers as its own root on its first turn.
+    /// a message `boundary` (`packages/schema/src/session-event.ts:187-200`),
+    /// and the fork's own record keeps it as `fork`, not `parentID`
+    /// (`packages/core/src/session/projector.ts:160-161`), so a fork registers
+    /// as its own root on its first turn.
     #[test]
     fn a_fork_is_its_own_root_not_a_child() {
         assert!(
