@@ -658,9 +658,9 @@ fn check_all(fetch: &dyn Fetch, report: &mut Report) {
     }
 }
 
-/// The watches still in `check_upstream_drift.py`:
-/// its buckets join this report, so each watch has one checker and the run one
-/// issue. Its traceback, if it has one, goes straight to our stderr.
+/// The watches still in `check_upstream_drift.py`, each also a Rust `Watch`
+/// until the script is deleted: its buckets join this report, so the run files
+/// one issue. Its traceback, if it has one, goes straight to our stderr.
 pub fn run_legacy(report: &mut Report) {
     let script = concat!(
         env!("CARGO_MANIFEST_DIR"),
