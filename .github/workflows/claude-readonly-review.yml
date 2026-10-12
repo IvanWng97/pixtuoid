@@ -31,8 +31,8 @@ on:
 permissions: {}
 
 env:
-  # main requires this context by name, and claude-review.yml's exemption posts
-  # it too; renaming it leaves every PR at Expected.
+  # main requires this context by name, and claude-review-exempt.yml posts it
+  # too; renaming it leaves every PR at Expected.
   REVIEW_CONTEXT: claude-review
   REVIEW_TITLE: Claude review
   # Repeated passes over a unit, aggregated, find what one misses
