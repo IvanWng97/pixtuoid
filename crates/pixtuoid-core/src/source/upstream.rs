@@ -65,9 +65,9 @@ pub enum Read {
     /// A name is declared where `pattern` matches, `{name}` standing for it,
     /// regex-escaped.
     Each { pattern: &'static str },
-    /// The first group of the ONE match of `pattern`: a second declaration
-    /// (a `#[cfg(test)]` twin, a macro body) is as unreadable as none.
-    Sole { pattern: &'static str },
+    /// The string literal the ONE Rust `item` evaluates to: a const by name,
+    /// or a method as `<Type as Trait>::method`, its body's tail.
+    RustStr { item: &'static str },
     /// The string patterns of `fn name`'s match arms whose result matches `arm`.
     RustArms {
         name: &'static str,
@@ -79,7 +79,7 @@ pub enum Read {
     RustEnum { name: &'static str },
     /// The serde wire names of the ONE `struct name`'s fields.
     RustStruct { name: &'static str },
-    /// The fields of the ONE `export interface name`.
+    /// The top-level fields of the ONE `interface name`.
     TsFields { name: &'static str },
     /// Every first group of `pattern`: `Each` turned round, so the floor can
     /// tell a degraded parse from a rename.
@@ -97,9 +97,9 @@ pub enum Read {
     /// The string members of the `{…}` opened after the ONE match of `decl`,
     /// comments first.
     PySet { decl: &'static str },
-    /// The row headers of the `name! { … }` table, comments first.
+    /// The row headers of the ONE `name! { … }` invocation.
     RustMacroRows { name: &'static str },
-    /// The string members of the ONE `const name = [ … ]`, comments first.
+    /// The string elements of the ONE `const name = [ … ]`.
     TsConstArray { name: &'static str },
     /// JSON Schema: each member of `def`'s `oneOf`/`anyOf` union, as the
     /// const of its `prop` property, or its own const when `prop` is `None`.
@@ -137,8 +137,8 @@ pub struct Watch {
 
 impl Watch {
     /// Why a checker cannot run this watch, if it cannot: a blank name, or an
-    /// `Each` pattern without `{name}`, matches whatever upstream says; a `Sole`
-    /// read yields one name; and a sibling sweep needs a vanish watch whose
+    /// `Each` pattern without `{name}`, matches whatever upstream says; a
+    /// `RustStr` read yields one name; and a sibling sweep needs a vanish watch whose
     /// reader yields upstream's names, all of them unless the family is `All`,
     /// which only a reader confined to the family can mean.
     pub fn unrunnable(&self) -> Option<String> {
@@ -149,12 +149,12 @@ impl Watch {
             "reads no document".to_owned()
         } else if matches!(self.read, Read::Each { pattern } if !pattern.contains("{name}")) {
             "has an `Each` pattern that names no name".to_owned()
-        } else if matches!(self.read, Read::Sole { .. }) && ours.len() != 1 {
+        } else if matches!(self.read, Read::RustStr { .. }) && ours.len() != 1 {
             format!("reads one name off upstream but watches {}", ours.len())
         } else if let Some(sib) = &self.siblings {
             if !matches!(self.when, When::Vanishes) {
                 "sweeps siblings on a watch that does not fire on a vanish".to_owned()
-            } else if matches!(self.read, Read::Each { .. } | Read::Sole { .. }) {
+            } else if matches!(self.read, Read::Each { .. } | Read::RustStr { .. }) {
                 "sweeps siblings off a reader that yields none".to_owned()
             } else if matches!(sib.family, Family::All) && !self.read.confined_to_family() {
                 "sweeps `Family::All` off a reader that yields more than the family".to_owned()
@@ -283,10 +283,19 @@ mod tests {
             ),
             (
                 Watch {
-                    read: Read::Sole { pattern: "(x)" },
+                    read: Read::RustStr { item: "X" },
                     ..OK
                 },
                 "reads one name off upstream but watches 2",
+            ),
+            (
+                Watch {
+                    ours: || vec!["a"],
+                    read: Read::RustStr { item: "X" },
+                    siblings: Some(ALL),
+                    ..OK
+                },
+                "sweeps siblings off a reader that yields none",
             ),
             (
                 Watch {

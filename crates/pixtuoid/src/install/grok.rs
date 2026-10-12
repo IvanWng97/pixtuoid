@@ -23,10 +23,10 @@ use serde_json::{Value, json};
 
 use crate::install::io;
 use crate::install::target::MergeOutcome;
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use crate::install::target::UNFIRED_HOOK;
 use crate::install::verify::{SchemaParse, ShimRef};
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 /// The KEY is the detection signal; the value is only a human note for anyone
@@ -62,7 +62,7 @@ pub(crate) const GROK_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[Watch {
     id: "grok.hook_events",
     ours: || GROK_EVENTS.to_vec(),

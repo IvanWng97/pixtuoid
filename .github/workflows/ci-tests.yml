@@ -74,6 +74,11 @@ jobs:
       - name: Unit tests under coverage + JUnit XML
         id: tests
         run: just coverage
+      # The drift watch's parsers build only under `upstream`, and its readers
+      # read fetched text alike on every OS: one platform pays for them.
+      - name: Drift watch tests (`upstream` feature)
+        if: ${{ matrix.platform == 'linux' }}
+        run: just test-upstream
       - name: Upload coverage to Codecov
         if: ${{ inputs.full }}
         uses: ./.github/actions/upload-codecov

@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use crate::install::io;
 use crate::install::merge::{prune_empty, prune_empty_root};
 use crate::install::target::MergeOutcome;
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 const PLUGIN_ID: &str = "pixtuoid";
@@ -53,7 +53,7 @@ pub(crate) const OPENCLAW_EVENTS: &[&str] = &[
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const OPENCLAW_VERDICT_EVENTS: &[&str] = &["model_call_ended"];
 
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[Watch {
     id: "openclaw.hook_events",
     ours: || [OPENCLAW_EVENTS, OPENCLAW_VERDICT_EVENTS].concat(),

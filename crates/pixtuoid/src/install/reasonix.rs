@@ -21,11 +21,11 @@ use serde_json::{Value, json};
 use crate::install::host_plugin::{self, NAME};
 use crate::install::io;
 use crate::install::merge;
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use crate::install::target::UNFIRED_HOOK;
 use crate::install::target::{HostRegistration, LegacyConfig, MergeOutcome, Unregistered};
 use crate::install::verify::{SchemaParse, ShimRef};
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 /// Events we register == events we decode, enforced by
@@ -45,7 +45,7 @@ pub(crate) const REASONIX_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-#[cfg(any(test, feature = "upstream"))]
+#[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[Watch {
     id: "reasonix.hook_events",
     ours: || REASONIX_EVENTS.to_vec(),

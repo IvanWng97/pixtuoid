@@ -114,7 +114,7 @@ fn a_vanished_name_is_breaking_and_a_present_one_is_silent() {
     assert_eq!(r.breaking.len(), 1, "{r:?}");
     assert!(
         !r.breaking[0].contains("there now"),
-        "only a sole read names upstream's value"
+        "only a `RustStr` read names upstream's value"
     );
     assert!(
         r.breaking[0].contains("`a.b`") && r.breaking[0].contains("no sprite"),
@@ -254,15 +254,6 @@ fn one_unreadable_document_skips_the_whole_union() {
 #[test]
 fn a_broken_pattern_of_ours_blames_ours() {
     const EACH: Watch = each(&[doc("e.ts")], r"({name}");
-    const SOLE: Watch = Watch {
-        id: "t.sole",
-        ours: || vec!["agent"],
-        docs: &[doc("e.ts")],
-        read: Read::Sole { pattern: "(" },
-        when: When::Vanishes,
-        finding: Finding::Breaking("x"),
-        siblings: None,
-    };
     const ARMS: Watch = Watch {
         id: "t.arms",
         ours: || vec!["start"],
@@ -275,7 +266,7 @@ fn a_broken_pattern_of_ours_blames_ours() {
         finding: Finding::Breaking("x"),
         siblings: None,
     };
-    for w in [&EACH, &SOLE, &ARMS] {
+    for w in [&EACH, &ARMS] {
         let r = check(&Served::default().with(&raw("e.ts"), "enum Events {\n"), w);
         assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
         assert!(r.blind[0].contains("Our own declaration"), "{r:?}");
@@ -325,22 +316,18 @@ fn a_document_is_fetched_once_per_run_and_a_failure_filed_once() {
 }
 
 #[test]
-fn a_sole_read_names_what_upstream_declares_now() {
+fn a_rust_str_read_names_what_upstream_declares_now() {
     const W: Watch = Watch {
-        id: "t.sole",
+        id: "t.str",
         ours: || vec!["agent"],
         docs: &[doc("t.rs")],
-        read: Read::Sole {
-            pattern: r#"fn name\(\) -> &str \{ "([^"]+)""#,
-        },
+        read: Read::RustStr { item: "NAME" },
         when: When::Vanishes,
         finding: Finding::Breaking("no delegation"),
         siblings: None,
     };
-    let renamed = Served::default().with(
-        &raw("t.rs"),
-        "enum Events {}\nfn name() -> &str { \"task\" }",
-    );
+    let renamed =
+        Served::default().with(&raw("t.rs"), "enum Events {}\nconst NAME: &str = \"task\";");
     let r = check(&renamed, &W);
     assert_eq!(r.breaking.len(), 1, "{r:?}");
     assert!(r.breaking[0].contains("declares `task` there now"), "{r:?}");
@@ -582,13 +569,10 @@ fn render(pattern: &str, name: &str) -> String {
                 .find(')')
                 .unwrap_or_else(|| panic!("unclosed group in {pattern}"));
             let first = alts[..end].split('|').next().unwrap_or_default();
-            // An optional group renders present: its first branch still matches.
-            let optional = usize::from(alts[end + 1..].starts_with('?'));
-            (render(first, name), 3 + end + 1 + optional)
+            (render(first, name), 3 + end + 1)
         } else {
             let fixed: &[(&str, &str)] = &[
                 ("{name}", name),
-                (r#"([^"]+)"#, name),
                 (r"(\w+)", name),
                 (r"\w+", "w"),
                 ("(?m)", ""),
@@ -630,11 +614,6 @@ fn rendering_a_pattern_yields_text_it_matches() {
         (r#""x-method"\s*:\s*"{name}""#, "session/update"),
         (r"Schema\.Literal\({name}\)", "a.b"),
         (r"(?m)^export const \b{name} = \{", "Event"),
-        (
-            r#"impl\s+X\s*\{\s*fn\s+(?:a|b)\(\)\s*\{\s*"([^"]+)""#,
-            "agent",
-        ),
-        (r#"const M\s*:\s*&(?:'static\s+)?str\s*=\s*"([^"]+)""#, "m"),
     ] {
         let text = render(pattern, name);
         let re = Regex::new(&pattern.replace("{name}", &regex::escape(name))).expect("compiles");
@@ -646,7 +625,7 @@ fn rendering_a_pattern_yields_text_it_matches() {
 fn page(w: &Watch, names: &[&str]) -> String {
     let anchors: Vec<String> = w.docs.iter().map(|doc| render(doc.anchor, "")).collect();
     match w.read {
-        Read::Each { pattern } | Read::Sole { pattern } => {
+        Read::Each { pattern } => {
             let decls: Vec<String> = names.iter().map(|n| render(pattern, n)).collect();
             format!("{}\n{}\n", anchors.join("\n"), decls.join("\n"))
         }
@@ -655,10 +634,25 @@ fn page(w: &Watch, names: &[&str]) -> String {
                 .iter()
                 .map(|n| format!("\"{n}\" => {},\n", render(arm, "")))
                 .collect();
-            format!(
-                "{}\nfn {name}() {{ match a {{\n{arms} _ => Err(()) }} }}\n",
-                anchors.join("\n")
+            after_decl(
+                w,
+                format!("fn {name}() {{ match a {{\n{arms} _ => Err(()) }} }}"),
             )
+        }
+        Read::RustStr { item } => {
+            let value = names.first().copied().unwrap_or_default();
+            let decl = match item.strip_prefix('<').and_then(|i| i.split_once(">::")) {
+                Some((ty_trait, method)) => {
+                    let (ty, tr) = ty_trait
+                        .split_once(" as ")
+                        .expect("`<Type as Trait>::method`");
+                    format!(
+                        "impl {tr} for {ty} {{\n    fn {method}(&self) -> &'static str {{\n        \"{value}\"\n    }}\n}}"
+                    )
+                }
+                None => format!("const {item}: &str = \"{value}\";"),
+            };
+            after_decl(w, decl)
         }
         // The declaration first: an anchor that names the enum would otherwise
         // be read as its opening, attributes and all.
@@ -690,10 +684,7 @@ fn page(w: &Watch, names: &[&str]) -> String {
         }
         Read::TsFields { name } => {
             let fields: String = names.iter().map(|n| format!("  {n}: string;\n")).collect();
-            format!(
-                "{}\nexport interface {name} {{\n{fields}}}\n",
-                anchors.join("\n")
-            )
+            after_decl(w, format!("export interface {name} {{\n{fields}}}"))
         }
         // A JSON document's anchor renders as a key, so each one opens a member.
         Read::JsonUnion { def, prop } => {
@@ -755,7 +746,9 @@ fn page(w: &Watch, names: &[&str]) -> String {
 }
 
 /// `decl`, then each of `w`'s anchors it does not already carry: rendering a
-/// declaration's own head again would declare it twice.
+/// declaration's own head again would declare it twice. In Rust and TypeScript
+/// source the anchors sit in a block comment, which the anchor check still sees
+/// and the parser skips; Markdown has none, so its anchors follow as plain lines.
 fn after_decl(w: &Watch, decl: String) -> String {
     let rest: Vec<String> = w
         .docs
@@ -763,7 +756,11 @@ fn after_decl(w: &Watch, decl: String) -> String {
         .filter(|doc| !Regex::new(doc.anchor).expect("compiles").is_match(&decl))
         .map(|doc| render(doc.anchor, ""))
         .collect();
-    format!("{decl}\n{}\n", rest.join("\n"))
+    if rest.is_empty() || matches!(w.read, Read::MdTable { .. } | Read::MdHeadings { .. }) {
+        format!("{decl}\n{}\n", rest.join("\n"))
+    } else {
+        format!("{decl}\n/*\n{}\n*/\n", rest.join("\n"))
+    }
 }
 
 /// The variant a snake_case wire name derives from.
@@ -780,19 +777,13 @@ fn pascal(snake: &str) -> String {
 }
 
 /// `name` where `w`'s reader must not find it: another item of the reader's
-/// kind, or for `Sole`, a commented-out declaration. An `Each` pattern's
-/// strictness cannot be read off the pattern under test, so
-/// `a_declaration_form_is_not_satisfied_by_prose` pins it where a declaration
-/// names the prose it must reject, and a JSON reader reads its whole document
-/// by design.
+/// kind. A plain-text pattern's strictness cannot be read off the pattern under
+/// test, so `a_declaration_form_is_not_satisfied_by_prose` pins it where a
+/// declaration names the prose it must reject, and a JSON reader reads its
+/// whole document by design.
 fn near_miss(w: &Watch, name: &str) -> String {
-    let in_rust = w.docs.iter().all(|doc| match doc.at {
-        At::Path { path, .. } => path.ends_with(".rs"),
-        At::ReleaseAsset { member, .. } => member.ends_with(".rs"),
-        At::Url(url) => url.ends_with(".rs"),
-    });
     match w.read {
-        Read::Sole { pattern } if in_rust => format!("// {}", render(pattern, name)),
+        Read::RustStr { .. } => format!("const PXD_OTHER: &str = \"{name}\";"),
         Read::RustArms { arm, .. } => format!(
             "fn pxd_other() {{ match a {{ \"{name}\" => {}, _ => Err(()) }} }}",
             render(arm, "")
@@ -816,11 +807,9 @@ fn near_miss(w: &Watch, name: &str) -> String {
         Read::MdHeadings { .. } => format!("## PxdOther\n### {name}\n"),
         Read::PySet { .. } => format!("PXD_OTHER = {{\"{name}\"}}\n"),
         Read::RustMacroRows { .. } => format!("pxd_other! {{\n    {name} {{ }},\n}}\n"),
-        Read::Each { .. }
-        | Read::Sole { .. }
-        | Read::Matches { .. }
-        | Read::JsonUnion { .. }
-        | Read::JsonKeys => String::new(),
+        Read::Each { .. } | Read::Matches { .. } | Read::JsonUnion { .. } | Read::JsonKeys => {
+            String::new()
+        }
     }
 }
 
@@ -1051,27 +1040,29 @@ fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
                 );
             }
         }
-        let compiled = match w.read {
-            Read::Each { pattern } => Regex::new(&pattern.replace("{name}", "n")).map(drop),
-            Read::Sole { pattern } => Regex::new(pattern).map(|re| {
+        let captures = |pattern: &str| {
+            Regex::new(pattern).map(|re| {
                 assert!(
                     re.captures_len() > 1,
                     "{}: `{pattern}` captures no name",
                     w.id
                 );
-            }),
+            })
+        };
+        let compiled: Result<(), String> = match w.read {
+            Read::Each { pattern } => Regex::new(&pattern.replace("{name}", "n"))
+                .map(drop)
+                .map_err(|e| e.to_string()),
+            Read::Matches { pattern } => captures(pattern).map_err(|e| e.to_string()),
             Read::RustArms { name, arm } => match read::rust_arms("", name, arm) {
                 Err(Unread::Ours(e)) => Err(e),
                 _ => Ok(()),
             },
-            Read::Matches { pattern } => Regex::new(pattern).map(|re| {
-                assert!(
-                    re.captures_len() > 1,
-                    "{}: `{pattern}` captures no name",
-                    w.id
-                );
-            }),
-            Read::PySet { decl } => Regex::new(decl).map(drop),
+            Read::RustStr { item } => match read::rust_str("", item) {
+                Err(Unread::Ours(e)) => Err(e),
+                _ => Ok(()),
+            },
+            Read::PySet { decl } => Regex::new(decl).map(drop).map_err(|e| e.to_string()),
             Read::RustEnum { .. }
             | Read::RustStruct { .. }
             | Read::TsFields { .. }
