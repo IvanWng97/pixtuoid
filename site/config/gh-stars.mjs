@@ -3,7 +3,9 @@
 // an offline/local build must never fail on it: every error path yields null.
 import process from 'node:process';
 
-const API = 'https://api.github.com/repos/pixtuoid/pixtuoid';
+// The one copy of the repository's slug the site's GitHub links and calls derive from.
+export const REPO_SLUG = 'pixtuoid/pixtuoid';
+export const GH_API_REPO = `https://api.github.com/repos/${REPO_SLUG}`;
 // Shared with Statusline.astro's PR-feed fetch, so an offline/slow CI runner
 // fails every build-time GitHub call the same way.
 export const GH_FETCH_TIMEOUT_MS = 5000;
@@ -26,7 +28,10 @@ export async function fetchStarCount(fetchImpl = fetch, token = process.env.GITH
     /** @type {Record<string, string>} */
     const headers = { accept: 'application/vnd.github+json' };
     if (token) headers.authorization = `Bearer ${token}`;
-    const res = await fetchImpl(API, { headers, signal: AbortSignal.timeout(GH_FETCH_TIMEOUT_MS) });
+    const res = await fetchImpl(GH_API_REPO, {
+      headers,
+      signal: AbortSignal.timeout(GH_FETCH_TIMEOUT_MS),
+    });
     if (!res.ok) return null;
     const repo = await res.json();
     const n = repo?.stargazers_count;

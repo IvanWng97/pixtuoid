@@ -645,10 +645,10 @@ def test_fetch_follows_cursors_until_the_last_page() -> None:
         seen.append(variables)
         return pages[len(seen) - 1]
 
-    got = fetch_star_dates("pixtuoid/pixtuoid", "t", post=post)
+    got = fetch_star_dates("o/r", "t", post=post)
     check(got == [_d("2026-05-24"), _d("2026-05-24"), _d("2026-05-25")], f"fetch must flatten pages to dates, got {got}")
     check([v.get("after") for v in seen] == [None, "c1"], f"fetch must thread the cursor, sent {seen}")
-    check(seen[0]["owner"] == "pixtuoid" and seen[0]["name"] == "pixtuoid", "fetch must split owner/name")
+    check(seen[0]["owner"] == "o" and seen[0]["name"] == "r", "fetch must split owner/name")
 
 
 def test_fetch_refuses_a_withheld_list() -> None:
