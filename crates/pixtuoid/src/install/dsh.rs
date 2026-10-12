@@ -18,7 +18,9 @@ use saphyr::{LoadableYamlNode, MappingOwned, ScalarOwned, Yaml, YamlEmitter, Yam
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
 #[cfg(feature = "upstream")]
-use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
+use pixtuoid_core::source::dsh::REPO;
+#[cfg(feature = "upstream")]
+use pixtuoid_core::source::upstream::{Finding, Read, Watch, When};
 
 /// The mount entry's `id` — uninstall and the one-entry verify key on it.
 const PLUGIN_ID: &str = "pixtuoid";
@@ -51,15 +53,6 @@ pub(crate) fn plugin_events() -> Vec<&'static str> {
 pub(crate) const TOOL_RESULT_FIELDS: &[&str] = &["toolCallId"];
 
 #[cfg(feature = "upstream")]
-const fn dsh(path: &'static str) -> At {
-    At::Path {
-        repo: "deepseek-ai/deepseek-harness",
-        branch: "master",
-        path,
-    }
-}
-
-#[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "dsh.plugin_events",
@@ -68,26 +61,26 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         // session's `SessionEventMap`, each augmented across packages, so one
         // key may live in any of these.
         docs: &[
-            Doc {
-                at: dsh("packages/core/agent/src/runtime-types.ts"),
-                anchor: r"declare module '@deepseek-ai/cordis' \{\s*interface Events \{",
-                owns: "the cordis `Events` augmentation",
-            },
-            Doc {
-                at: dsh("packages/core/session/src/types.ts"),
-                anchor: r"export interface SessionEventMap\b",
-                owns: "`SessionEventMap`",
-            },
-            Doc {
-                at: dsh("packages/interaction/user-approval/src/types.ts"),
-                anchor: r"declare module '@deepseek-ai/dsh-session/types' \{\s*interface SessionEventMap \{",
-                owns: "the `SessionEventMap` augmentation",
-            },
-            Doc {
-                at: dsh("packages/core/session/src/index.ts"),
-                anchor: r"declare module '@deepseek-ai/cordis' \{",
-                owns: "the cordis augmentation",
-            },
+            REPO.doc(
+                "packages/core/agent/src/runtime-types.ts",
+                r"declare module '@deepseek-ai/cordis' \{\s*interface Events \{",
+                "the cordis `Events` augmentation",
+            ),
+            REPO.doc(
+                "packages/core/session/src/types.ts",
+                r"export interface SessionEventMap\b",
+                "`SessionEventMap`",
+            ),
+            REPO.doc(
+                "packages/interaction/user-approval/src/types.ts",
+                r"declare module '@deepseek-ai/dsh-session/types' \{\s*interface SessionEventMap \{",
+                "the `SessionEventMap` augmentation",
+            ),
+            REPO.doc(
+                "packages/core/session/src/index.ts",
+                r"declare module '@deepseek-ai/cordis' \{",
+                "the cordis augmentation",
+            ),
         ],
         read: Read::TsMembers {
             of: &["Events", "SessionEventMap"],
@@ -102,11 +95,11 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "dsh.tool_result_call_id",
         ours: || TOOL_RESULT_FIELDS.to_vec(),
-        docs: &[Doc {
-            at: dsh("packages/llm/llm/src/message.ts"),
-            anchor: r"(?m)^export interface ToolResultMessage\b",
-            owns: "`ToolResultMessage`",
-        }],
+        docs: &[REPO.doc(
+            "packages/llm/llm/src/message.ts",
+            r"(?m)^export interface ToolResultMessage\b",
+            "`ToolResultMessage`",
+        )],
         read: Read::TsFields {
             name: "ToolResultMessage",
         },

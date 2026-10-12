@@ -20,7 +20,9 @@ use anyhow::{Result, bail};
 
 use crate::install::target::MergeOutcome;
 #[cfg(feature = "upstream")]
-use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
+use pixtuoid_core::source::omp::REPO;
+#[cfg(feature = "upstream")]
+use pixtuoid_core::source::upstream::{Doc, Finding, Read, Watch, When};
 
 /// Marks the extension as ours — absent from the removed-stub, so an uninstall
 /// of a foreign/removed file is a clean no-op.
@@ -55,19 +57,6 @@ const READ_GONE: &str = "the installed bridge forwards an undefined value, so th
                          dies (approval waits, lifecycle, or identity)";
 
 #[cfg(feature = "upstream")]
-const fn omp(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
-    Doc {
-        at: At::Path {
-            repo: "can1357/oh-my-pi",
-            branch: "main",
-            path,
-        },
-        anchor,
-        owns,
-    }
-}
-
-#[cfg(feature = "upstream")]
 const EXTENSION_TYPES_TS: &str = "packages/coding-agent/src/extensibility/extensions/types.ts";
 #[cfg(feature = "upstream")]
 const SHARED_EVENTS_TS: &str = "packages/coding-agent/src/extensibility/shared-events.ts";
@@ -100,7 +89,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     forwarded(
         "omp.approval_requested",
         || vec!["toolCallId", "toolName", "reason"],
-        &[omp(
+        &[REPO.doc(
             EXTENSION_TYPES_TS,
             r"(?m)^export interface ToolApprovalRequestedEvent\b",
             "`ToolApprovalRequestedEvent`",
@@ -111,7 +100,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         "omp.approval_resolved",
         // No `reason`: the decoder reads it off the requested event alone.
         || vec!["toolCallId", "toolName", "approved"],
-        &[omp(
+        &[REPO.doc(
             EXTENSION_TYPES_TS,
             r"(?m)^export interface ToolApprovalResolvedEvent\b",
             "`ToolApprovalResolvedEvent`",
@@ -121,7 +110,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "omp.approved_required",
         ours: || vec!["approved?"],
-        docs: &[omp(
+        docs: &[REPO.doc(
             EXTENSION_TYPES_TS,
             r"(?m)^export interface ToolApprovalResolvedEvent\b",
             "`ToolApprovalResolvedEvent`",
@@ -140,7 +129,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     forwarded(
         "omp.extension_context",
         || vec!["cwd", "sessionManager"],
-        &[omp(
+        &[REPO.doc(
             EXTENSION_TYPES_TS,
             r"(?m)^export interface ExtensionContext\b",
             "`ExtensionContext`",
@@ -150,7 +139,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     forwarded(
         "omp.session_switch",
         || vec!["previousSessionFile"],
-        &[omp(
+        &[REPO.doc(
             SHARED_EVENTS_TS,
             r"(?m)^export interface SessionSwitchEvent\b",
             "`SessionSwitchEvent`",
@@ -160,7 +149,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     forwarded(
         "omp.session_branch",
         || vec!["previousSessionFile"],
-        &[omp(
+        &[REPO.doc(
             SHARED_EVENTS_TS,
             r"(?m)^export interface SessionBranchEvent\b",
             "`SessionBranchEvent`",
@@ -170,7 +159,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "omp.session_getters",
         ours: || vec!["getSessionFile", "getSessionId"],
-        docs: &[omp(
+        docs: &[REPO.doc(
             "packages/coding-agent/src/session/session-manager.ts",
             r"(?m)^export class SessionManager\b",
             "`SessionManager`",

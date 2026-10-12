@@ -74,6 +74,24 @@
     - '.jobs.publish.steps[0].with["persist-credentials"] = true'
     - '.jobs.publish.steps += [{"run": "bash scripts/x.sh"}]'
 
+- id: drift-watch-hands-its-token-only-to-the-run
+  file: .github/workflows/upstream-drift.yml
+  why: >-
+    The watch reads GITHUB_TOKEN for GitHub's rate limit, and the job's token
+    can write issues; a step that also built would hand it to every
+    dependency's build script.
+  assert: |
+    [.jobs.drift.steps[] | select(.env.GITHUB_TOKEN)] as $t
+    | ($t | length) == 1
+      and ($t[0].run | test("just --no-deps drift-watch"))
+      and (.env // {} | has("GITHUB_TOKEN") | not)
+      and (.jobs.drift.env // {} | has("GITHUB_TOKEN") | not)
+  break:
+    - '(.jobs.drift.steps[] | select(.env.GITHUB_TOKEN) | .run) |= sub("--no-deps "; "")'
+    - '(.jobs.drift.steps[] | select(.name == "Build the drift watch")) += {"env": {"GITHUB_TOKEN": "x"}}'
+    - '.jobs.drift.env = {"GITHUB_TOKEN": "x"}'
+    - '.env = {"GITHUB_TOKEN": "x"}'
+
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml
   why: >-

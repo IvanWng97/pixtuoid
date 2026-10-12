@@ -27,7 +27,9 @@ use crate::install::target::MergeOutcome;
 use crate::install::target::UNFIRED_HOOK;
 use crate::install::verify::{SchemaParse, ShimRef};
 #[cfg(feature = "upstream")]
-use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
+use pixtuoid_core::source::grok::REPO;
+#[cfg(feature = "upstream")]
+use pixtuoid_core::source::upstream::{Finding, Read, Watch, When};
 
 /// The KEY is the detection signal; the value is only a human note for anyone
 /// who opens the file.
@@ -66,15 +68,11 @@ pub(crate) const GROK_EVENTS: &[&str] = &[
 pub(crate) const UPSTREAM: &[Watch] = &[Watch {
     id: "grok.hook_events",
     ours: || GROK_EVENTS.to_vec(),
-    docs: &[Doc {
-        at: At::Path {
-            repo: "xai-org/grok-build",
-            branch: "main",
-            path: "crates/codegen/xai-grok-hooks/src/event.rs",
-        },
-        anchor: r"pub enum HookEventName\b",
-        owns: "`HookEventName`",
-    }],
+    docs: &[REPO.doc(
+        "crates/codegen/xai-grok-hooks/src/event.rs",
+        r"pub enum HookEventName\b",
+        "`HookEventName`",
+    )],
     read: Read::RustMacroRows {
         name: "hook_events",
     },

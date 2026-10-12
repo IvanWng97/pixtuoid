@@ -30,7 +30,7 @@ use crate::source::decoder::{
     DecodeError, DecodeResult as Result, MAX_DECODED_FIELD_CHARS, ellipsize, generic_tool_display,
 };
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{At, Doc, Finding, Read, Watch, When};
+use crate::source::upstream::{Doc, Finding, Read, Release, Repo, Watch, When};
 
 /// The opencode CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "opencode";
@@ -83,30 +83,28 @@ pub const DECODED_DATA_FIELDS: &[&str] = &[
 /// events in `permission.ts`'s, so the union is the document.
 #[cfg(any(test, feature = "upstream"))]
 const EVENT_DECLARATIONS: &[Doc] = &[
-    declarations(
+    REPO.doc(
         "packages/schema/src/session-event.ts",
         r"(?m)^export const Definitions = Event\.inventory\(",
         "the session `Definitions` inventory",
     ),
-    declarations(
+    REPO.doc(
         "packages/schema/src/permission.ts",
         r"(?m)^export const Event = \{",
         "the permission `Event` inventory",
     ),
 ];
 
+/// Its GitHub `releases/latest` is still the v1 line; v2 installs as npm's
+/// `@opencode/cli` (`services/www/src/docs/content/index.mdx:16`, v2.0.27).
 #[cfg(any(test, feature = "upstream"))]
-const fn declarations(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
-    Doc {
-        at: At::Path {
-            repo: "anomalyco/opencode",
-            path,
-            branch: "dev",
-        },
-        anchor,
-        owns,
-    }
-}
+pub(crate) const REPO: Repo = Repo {
+    name: "anomalyco/opencode",
+    release: Release::Npm {
+        package: "@opencode/cli",
+        tag_prefix: "v",
+    },
+};
 
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const UPSTREAM: &[Watch] = &[Watch {

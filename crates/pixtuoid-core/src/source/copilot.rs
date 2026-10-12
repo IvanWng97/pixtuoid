@@ -24,7 +24,7 @@ use serde_json::Value;
 use crate::AgentId;
 use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{At, Doc, Finding, Read, Watch, When};
+use crate::source::upstream::{At, Doc, Finding, Read, Release, Repo, Watch, When};
 use crate::source::{AgentEvent, ToolDetail};
 
 #[cfg(feature = "native")]
@@ -145,13 +145,19 @@ pub(crate) const DECODED_FIELDS: &[&str] = &[
     "toolName",
 ];
 
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const REPO: Repo = Repo {
+    name: "github/copilot-cli",
+    release: Release::GithubLatest,
+};
+
 /// Since 1.0.85 the npm packages carry no schema; the release's platform
 /// tarball does, which is where github/copilot-sdk's codegen reads it
 /// (`java/scripts/codegen/fetch-schemas.mjs`).
 #[cfg(any(test, feature = "upstream"))]
 const SESSION_EVENTS_SCHEMA: &[Doc] = &[Doc {
     at: At::ReleaseAsset {
-        repo: "github/copilot-cli",
+        repo: &REPO,
         asset: "github-copilot-{version}-linux-x64.tgz",
         member: "package/schemas/session-events.schema.json",
         sums: "SHA256SUMS.txt",

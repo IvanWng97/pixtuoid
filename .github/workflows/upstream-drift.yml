@@ -29,12 +29,17 @@ jobs:
           # so a saved target dir would rarely be restored.
           enable-cache: 'false'
 
+      - name: Build the drift watch
+        run: just drift-watch-build
+
       - name: Check upstream drift
         id: check
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set +e
-          just drift-watch | tee drift-report.md
+          just --no-deps drift-watch | tee drift-report.md
           echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Open or update tracking issue
@@ -77,9 +82,8 @@ jobs:
 
       - name: Fail on an unexpected checker exit
         # exit 0 = no findings; 1 = actionable; 2 = transient fetch trouble
-        # (warn-only by design). ANY other code — 101 (a panic or a failed
-        # build), 137 (OOM-kill) — is a dead watcher, and without this it reads
-        # as healthy.
+        # (warn-only by design). ANY other code — 101 (a panic), 137
+        # (OOM-kill) — is a dead watcher, and without this it reads as healthy.
         if: ${{ !contains(fromJSON('["0","1","2"]'), steps.check.outputs.exit) }}
         env:
           CODE: ${{ steps.check.outputs.exit }}

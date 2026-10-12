@@ -26,7 +26,9 @@ use crate::install::target::UNFIRED_HOOK;
 use crate::install::target::{HostRegistration, LegacyConfig, MergeOutcome, Unregistered};
 use crate::install::verify::{SchemaParse, ShimRef};
 #[cfg(feature = "upstream")]
-use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
+use pixtuoid_core::source::reasonix::REPO;
+#[cfg(feature = "upstream")]
+use pixtuoid_core::source::upstream::{Doc, Finding, Read, Watch, When};
 
 /// Events we register == events we decode, enforced by
 /// `every_registered_reasonix_event_decodes` below. PostToolUseFailure /
@@ -57,30 +59,22 @@ const REMOVE: &str = "remove";
 const PACKAGES: &str = "plugin-packages.json";
 
 #[cfg(feature = "upstream")]
-const PACKAGES_DOC: &[Doc] = &[Doc {
-    at: At::Path {
-        repo: "esengine/DeepSeek-Reasonix",
-        branch: "studio",
-        path: "docs/PLUGIN_PACKAGES.md",
-    },
-    anchor: r"(?m)^## CLI Mode",
-    owns: "the plugin-packages CLI section",
-}];
+const PACKAGES_DOC: &[Doc] = &[REPO.doc(
+    "docs/PLUGIN_PACKAGES.md",
+    r"(?m)^## CLI Mode",
+    "the plugin-packages CLI section",
+)];
 
 #[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "reasonix.hook_events",
         ours: || REASONIX_EVENTS.to_vec(),
-        docs: &[Doc {
-            at: At::Path {
-                repo: "esengine/DeepSeek-Reasonix",
-                branch: "studio",
-                path: "internal/ext/hook/hook.go",
-            },
-            anchor: r"type Event string\b",
-            owns: "the `Event` type",
-        }],
+        docs: &[REPO.doc(
+            "internal/ext/hook/hook.go",
+            r"type Event string\b",
+            "the `Event` type",
+        )],
         read: Read::Matches {
             pattern: r#"\w+\s+Event\s*=\s*"(\w+)""#,
         },

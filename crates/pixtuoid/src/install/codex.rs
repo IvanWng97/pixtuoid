@@ -13,7 +13,9 @@ use crate::install::target::{
 };
 use crate::install::verify::{SchemaParse, ShimRef};
 #[cfg(feature = "upstream")]
-use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
+use pixtuoid_core::source::codex::REPO;
+#[cfg(feature = "upstream")]
+use pixtuoid_core::source::upstream::{Doc, Finding, Read, Watch, When};
 
 pub(crate) const CODEX_EVENTS: &[&str] = &[
     "SessionStart",
@@ -49,44 +51,31 @@ const PLUGINS_CACHE: &str = "plugins/cache";
 const LOCAL_VERSION: &str = "local";
 
 #[cfg(feature = "upstream")]
-const fn codex(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
-    Doc {
-        at: At::Path {
-            repo: "openai/codex",
-            branch: "main",
-            path,
-        },
-        anchor,
-        owns,
-    }
-}
-
-#[cfg(feature = "upstream")]
 const INSTALLED_RS: &str = "codex-rs/core-plugin-common/src/installed.rs";
 #[cfg(feature = "upstream")]
 const STALE_COPY: &str = "`copy_is_stale` reads where Codex no longer keeps the plugin, so every \
                           pass re-adds it and every launch asks to restart codex for nothing";
 
 #[cfg(feature = "upstream")]
-const PLUGIN_CMD: &[Doc] = &[codex(
+const PLUGIN_CMD: &[Doc] = &[REPO.doc(
     "codex-rs/cli/src/plugin_cmd.rs",
     r"pub enum PluginSubcommand\b",
     "`PluginSubcommand`",
 )];
 #[cfg(feature = "upstream")]
-const MARKETPLACE_CMD: &[Doc] = &[codex(
+const MARKETPLACE_CMD: &[Doc] = &[REPO.doc(
     "codex-rs/cli/src/marketplace_cmd.rs",
     r"enum MarketplaceSubcommand\b",
     "`MarketplaceSubcommand`",
 )];
 #[cfg(feature = "upstream")]
-const MARKETPLACE_RECORD: &[Doc] = &[codex(
+const MARKETPLACE_RECORD: &[Doc] = &[REPO.doc(
     "codex-rs/core-plugins/src/marketplace_add/metadata.rs",
     r"fn record_added_marketplace_entry\b",
     "`record_added_marketplace_entry`",
 )];
 #[cfg(feature = "upstream")]
-const PLUGIN_EDIT: &[Doc] = &[codex(
+const PLUGIN_EDIT: &[Doc] = &[REPO.doc(
     "codex-rs/config/src/plugin_edit.rs",
     r"fn set_plugin_enabled\b",
     "`set_plugin_enabled`",
@@ -97,7 +86,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "codex.hook_events",
         ours: || CODEX_EVENTS.to_vec(),
-        docs: &[codex(
+        docs: &[REPO.doc(
             "codex-rs/config/src/hook_config.rs",
             r"struct HookEventsToml\b",
             "`HookEventsToml`",
@@ -140,7 +129,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     host_plugin::premise(
         "codex.marketplace_manifest",
         || vec![MARKETPLACE_MANIFEST],
-        &[codex(
+        &[REPO.doc(
             "codex-rs/core-plugins/src/marketplace.rs",
             r"const MARKETPLACE_MANIFEST_RELATIVE_PATHS\b",
             "`MARKETPLACE_MANIFEST_RELATIVE_PATHS`",
@@ -166,7 +155,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     host_plugin::premise(
         "codex.source_canonicalized",
         || vec!["path.canonicalize()"],
-        &[codex(
+        &[REPO.doc(
             "codex-rs/core-plugins/src/marketplace_add/source.rs",
             r"fn resolve_local_source_path\b",
             "`resolve_local_source_path`",
@@ -192,7 +181,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "codex.plugin_cache_dir",
         ours: || vec![PLUGINS_CACHE],
-        docs: &[codex(
+        docs: &[REPO.doc(
             INSTALLED_RS,
             r"pub const PLUGINS_CACHE_DIR\b",
             "`PLUGINS_CACHE_DIR`",
@@ -207,7 +196,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "codex.local_plugin_version",
         ours: || vec![LOCAL_VERSION],
-        docs: &[codex(
+        docs: &[REPO.doc(
             INSTALLED_RS,
             r"pub const DEFAULT_PLUGIN_VERSION\b",
             "`DEFAULT_PLUGIN_VERSION`",

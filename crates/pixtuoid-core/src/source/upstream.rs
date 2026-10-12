@@ -26,6 +26,57 @@ impl Upstream {
     }
 }
 
+/// An upstream repository and the ref of it users run. Each is one CLI's
+/// `REPO`, and one repository has one release policy across the crates that
+/// read it (`one_repository_has_one_release_policy`).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Repo {
+    /// `owner/name` as GitHub spells it now: a renamed repository answers
+    /// through a redirect only until its old name is reused
+    /// (docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository),
+    /// so a move is probe health until repinned, never a rename upstream (#793).
+    pub name: &'static str,
+    pub release: Release,
+}
+
+impl Repo {
+    /// The document at `path` of this repository.
+    pub const fn doc(
+        &'static self,
+        path: &'static str,
+        anchor: &'static str,
+        owns: &'static str,
+    ) -> Doc {
+        Doc {
+            at: At::Path { repo: self, path },
+            anchor,
+            owns,
+        }
+    }
+}
+
+/// Which ref of a [`Repo`] its documents are read at: only the latest released
+/// version of each agent CLI is supported, so a default branch would judge
+/// what no user runs.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Release {
+    /// The tag of its latest GitHub release.
+    GithubLatest,
+    /// The tag `{tag_prefix}{version}` of `package`'s npm `latest` version,
+    /// for a repository whose GitHub releases are not the CLI users install.
+    Npm {
+        package: &'static str,
+        tag_prefix: &'static str,
+    },
+    /// One tag, for an upstream users run at the version another CLI locks.
+    Pinned {
+        tag: &'static str,
+        why: &'static str,
+    },
+    /// Its default branch, for a repository that publishes no release.
+    Branch { why: &'static str },
+}
+
 /// A document upstream declares names in.
 #[derive(Debug)]
 pub struct Doc {
@@ -41,17 +92,16 @@ pub struct Doc {
 /// Where a [`Doc`] is fetched from.
 #[derive(Debug)]
 pub enum At {
-    /// A file of public repository `repo`'s tree at `branch`.
+    /// A file of `repo`'s tree at the ref its [`Release`] resolves to.
     Path {
-        repo: &'static str,
-        branch: &'static str,
+        repo: &'static Repo,
         path: &'static str,
     },
     /// `member` of `repo`'s latest release tarball `asset` (`{version}` = its
     /// tag, `v`-stripped), admitted only when the release's `sums` file vouches
     /// for it.
     ReleaseAsset {
-        repo: &'static str,
+        repo: &'static Repo,
         asset: &'static str,
         member: &'static str,
         sums: &'static str,
@@ -218,8 +268,9 @@ pub struct Watch {
 impl Watch {
     /// Why a checker cannot run this watch, if it cannot: a blank name, or an
     /// `Each` pattern without `{name}`, matches whatever upstream says; a
-    /// [`Yield::One`] read yields one name; and a sibling sweep needs a vanish
-    /// watch whose yield [`Yield::sibling_refusal`] admits.
+    /// release asset hangs off a GitHub release; a [`Yield::One`] read yields
+    /// one name; and a sibling sweep needs a vanish watch whose yield
+    /// [`Yield::sibling_refusal`] admits.
     pub fn unrunnable(&self) -> Option<String> {
         let ours = (self.ours)();
         let yields = self.read.yields();
@@ -229,6 +280,11 @@ impl Watch {
             "reads no document".to_owned()
         } else if matches!(self.read, Read::Each { pattern } if !pattern.contains("{name}")) {
             "has an `Each` pattern that names no name".to_owned()
+        } else if self.docs.iter().any(|d| {
+            matches!(d.at, At::ReleaseAsset { repo, .. }
+                if !matches!(repo.release, Release::GithubLatest))
+        }) {
+            "reads a release asset off a repository that resolves no GitHub release".to_owned()
         } else if yields.is_one() && ours.len() != 1 {
             format!("reads one name off upstream but watches {}", ours.len())
         } else if let Some(sib) = &self.siblings {
@@ -347,6 +403,10 @@ mod tests {
             family: Family::All,
             ignored: &[],
         };
+        const UNRELEASED: Repo = Repo {
+            name: "o/r",
+            release: Release::Branch { why: "x" },
+        };
         let arms = Read::RustArms {
             name: "f",
             arm: "x",
@@ -367,6 +427,22 @@ mod tests {
                 "watches an empty set or a blank name",
             ),
             (Watch { docs: &[], ..OK }, "reads no document"),
+            (
+                Watch {
+                    docs: &[Doc {
+                        at: At::ReleaseAsset {
+                            repo: &UNRELEASED,
+                            asset: "a",
+                            member: "m",
+                            sums: "s",
+                        },
+                        anchor: "x",
+                        owns: "x",
+                    }],
+                    ..OK
+                },
+                "reads a release asset off a repository that resolves no GitHub release",
+            ),
             (
                 Watch {
                     read: Read::Each { pattern: "x" },

@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use pixtuoid_core::source::registry::REGISTRY;
 use pixtuoid_core::source::upstream::{
-    At, Doc, Family, Finding, Read, Siblings, Watch, When, Yield,
+    At, Doc, Family, Finding, Read, Release, Repo, Siblings, Watch, When, Yield,
 };
 use regex::Regex;
 use sha2::{Digest, Sha256};
@@ -30,6 +30,7 @@ const RELEASE_ASSET_TIMEOUT: Duration = Duration::from_secs(120);
 
 const RAW_URL: &str = "https://raw.githubusercontent.com";
 const API_URL: &str = "https://api.github.com/repos";
+const NPM_URL: &str = "https://registry.npmjs.org";
 
 /// Why a fetch returned nothing. Neither is ever a vanish.
 #[derive(Debug, PartialEq, Eq)]
@@ -190,6 +191,30 @@ impl Report {
     }
 }
 
+/// The ref of a [`Repo`] a run reads its documents at.
+#[derive(Debug, Clone)]
+enum Ref {
+    Tag(String),
+    Branch(String),
+}
+
+impl Ref {
+    fn name(&self) -> &str {
+        match self {
+            Self::Tag(name) | Self::Branch(name) => name,
+        }
+    }
+
+    /// Spelled whole for raw.githubusercontent.com: a tag and a branch may
+    /// share a name.
+    fn qualified(&self) -> String {
+        match self {
+            Self::Tag(tag) => format!("refs/tags/{tag}"),
+            Self::Branch(branch) => format!("refs/heads/{branch}"),
+        }
+    }
+}
+
 /// Where one declared document is read from.
 enum Located {
     Raw {
@@ -197,48 +222,19 @@ enum Located {
     },
     Release {
         repo: &'static str,
+        tag: String,
         asset: &'static str,
         member: &'static str,
         sums: &'static str,
     },
 }
 
-/// `at`'s [`Located`], and the label the report names it by.
-fn locate(at: &At) -> (Located, String) {
-    match *at {
-        At::Path { repo, branch, path } => (
-            Located::Raw {
-                url: format!("{RAW_URL}/{repo}/{branch}/{path}"),
-            },
-            format!("{repo}@{branch}:{path}"),
-        ),
-        At::ReleaseAsset {
-            repo,
-            asset,
-            member,
-            sums,
-        } => (
-            Located::Release {
-                repo,
-                asset,
-                member,
-                sums,
-            },
-            format!("{repo}'s latest release ({asset}: {member})"),
-        ),
-        At::Url(url) => (
-            Located::Raw {
-                url: url.to_owned(),
-            },
-            url.trim_start_matches("https://").to_owned(),
-        ),
-    }
-}
-
 /// One run's documents: each is upstream's answer for the whole run, fetched
-/// once however many watches read it, and a missed anchor is filed once.
+/// once however many watches read it, and a missed anchor is filed once, as
+/// is each repository's ref.
 struct Fetched<'f> {
     fetch: &'f dyn Fetch,
+    refs: HashMap<&'static str, Option<Ref>>,
     texts: HashMap<String, Option<String>>,
     unanchored: HashSet<(String, &'static str)>,
 }
@@ -247,9 +243,150 @@ impl<'f> Fetched<'f> {
     fn new(fetch: &'f dyn Fetch) -> Self {
         Self {
             fetch,
+            refs: HashMap::new(),
             texts: HashMap::new(),
             unanchored: HashSet::new(),
         }
+    }
+
+    /// `at`'s [`Located`], and the label the report names it by; `None` once
+    /// its repository's ref has filed why it could not resolve.
+    fn locate(&mut self, at: &At, report: &mut Report) -> Option<(Located, String)> {
+        Some(match *at {
+            At::Path { repo, path } => {
+                let at_ref = self.resolve(repo, report)?;
+                (
+                    Located::Raw {
+                        url: format!("{RAW_URL}/{}/{}/{path}", repo.name, at_ref.qualified()),
+                    },
+                    format!("{}@{}:{path}", repo.name, at_ref.name()),
+                )
+            }
+            At::ReleaseAsset {
+                repo,
+                asset,
+                member,
+                sums,
+            } => {
+                let tag = self.resolve(repo, report)?.name().to_owned();
+                let label = format!("{}@{tag} ({asset}: {member})", repo.name);
+                (
+                    Located::Release {
+                        repo: repo.name,
+                        tag,
+                        asset,
+                        member,
+                        sums,
+                    },
+                    label,
+                )
+            }
+            At::Url(url) => (
+                Located::Raw {
+                    url: url.to_owned(),
+                },
+                url.trim_start_matches("https://").to_owned(),
+            ),
+        })
+    }
+
+    /// The ref of `repo` users run, asked once per run.
+    fn resolve(&mut self, repo: &'static Repo, report: &mut Report) -> Option<Ref> {
+        if let Some(r) = self.refs.get(repo.name) {
+            return r.clone();
+        }
+        let resolved = match self.resolve_now(repo) {
+            Ok(r) => Some(r),
+            Err(FetchError::Gone { why }) => {
+                report.add_blind(
+                    &format!("which ref of `{}` users run", repo.name),
+                    &format!("{API_URL}/{}", repo.name),
+                    &format!("{why}. Every watch reading it was SKIPPED."),
+                    false,
+                );
+                None
+            }
+            Err(FetchError::Transient(e)) => {
+                report.add_error(format!("{}: {e}", repo.name));
+                None
+            }
+        };
+        if let (Some(_), Release::Branch { .. }) = (&resolved, &repo.release) {
+            match self.json_str(
+                &format!("{API_URL}/{}/releases/latest", repo.name),
+                "tag_name",
+            ) {
+                Ok(tag) => report.add_review(format!(
+                    "`{}` now publishes `{}`, and its documents are still read at its default \
+                     branch. Choose its `Release`.",
+                    repo.name,
+                    code_span(&tag)
+                )),
+                Err(FetchError::Gone { .. }) => {}
+                Err(FetchError::Transient(e)) => report.add_error(format!("{}: {e}", repo.name)),
+            }
+        }
+        self.refs.insert(repo.name, resolved.clone());
+        resolved
+    }
+
+    /// A moved repository is never followed: [`Repo::name`] says why.
+    fn resolve_now(&self, repo: &Repo) -> Result<Ref, FetchError> {
+        let api = format!("{API_URL}/{}", repo.name);
+        let meta = self.json(&api)?;
+        let full_name = field(&meta, &api, "full_name")?;
+        if !full_name.eq_ignore_ascii_case(repo.name) {
+            return Err(FetchError::Gone {
+                why: format!("It moved to `{}`: repin its `Repo`", code_span(&full_name)),
+            });
+        }
+        let tag = |tag: String, missing: String| match self
+            .fetch
+            .get(&format!("{api}/git/ref/tags/{tag}"), FETCH_TIMEOUT)
+        {
+            Ok(_) => Ok(Ref::Tag(tag)),
+            Err(FetchError::Gone { .. }) => Err(FetchError::Gone { why: missing }),
+            Err(e) => Err(e),
+        };
+        match repo.release {
+            Release::GithubLatest => {
+                match self.json_str(&format!("{api}/releases/latest"), "tag_name") {
+                    Err(FetchError::Gone { why }) => Err(FetchError::Gone {
+                        why: format!("No release resolves for it (its latest release: {why})"),
+                    }),
+                    got => got.map(Ref::Tag),
+                }
+            }
+            Release::Npm {
+                package,
+                tag_prefix,
+            } => {
+                let version = self.json_str(&format!("{NPM_URL}/{package}/latest"), "version")?;
+                let want = format!("{tag_prefix}{version}");
+                let missing = format!(
+                    "No release resolves for it: npm's `{package}` is at `{}`, which it does not \
+                     tag `{}`",
+                    code_span(&version),
+                    code_span(&want)
+                );
+                tag(want, missing)
+            }
+            Release::Pinned { tag: pinned, .. } => tag(
+                pinned.to_owned(),
+                format!("Its pinned tag `{pinned}` is gone"),
+            ),
+            Release::Branch { .. } => field(&meta, &api, "default_branch").map(Ref::Branch),
+        }
+    }
+
+    fn json(&self, url: &str) -> Result<serde_json::Value, FetchError> {
+        let body = self.fetch.get(url, FETCH_TIMEOUT)?;
+        serde_json::from_slice(&body)
+            .map_err(|e| FetchError::Transient(format!("{url} is no JSON document ({e})")))
+    }
+
+    fn json_str(&self, url: &str, key: &str) -> Result<String, FetchError> {
+        field(&self.json(url)?, url, key)
     }
 
     fn text(&mut self, located: &Located, label: &str, report: &mut Report) -> Option<String> {
@@ -263,10 +400,11 @@ impl<'f> Fetched<'f> {
                 .map(|b| String::from_utf8_lossy(&b).into_owned()),
             Located::Release {
                 repo,
+                tag,
                 asset,
                 member,
                 sums,
-            } => self.release_member(repo, asset, member, sums),
+            } => self.release_member(repo, tag, asset, member, sums),
         };
         let text = match got {
             Ok(t) => Some(t),
@@ -293,19 +431,11 @@ impl<'f> Fetched<'f> {
     fn release_member(
         &self,
         repo: &str,
+        tag: &str,
         asset: &str,
         member: &str,
         sums: &str,
     ) -> Result<String, FetchError> {
-        let release = self
-            .fetch
-            .get(&format!("{API_URL}/{repo}/releases/latest"), FETCH_TIMEOUT)?;
-        let tag = serde_json::from_slice::<serde_json::Value>(&release)
-            .ok()
-            .and_then(|v| v.get("tag_name")?.as_str().map(str::to_owned))
-            .ok_or_else(|| {
-                FetchError::Transient(format!("{repo}'s latest release names no tag"))
-            })?;
         let base = format!("https://github.com/{repo}/releases/download/{tag}/");
         let name = asset.replace("{version}", tag.trim_start_matches('v'));
         let tarball = self
@@ -374,17 +504,28 @@ impl<'f> Fetched<'f> {
     }
 }
 
+/// `key`'s string in `v`, the JSON document at `url`.
+fn field(v: &serde_json::Value, url: &str, key: &str) -> Result<String, FetchError> {
+    v.get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| FetchError::Transient(format!("{url} names no `{key}`")))
+}
+
 fn check_watch(source: &str, w: &Watch, fetched: &mut Fetched, report: &mut Report) {
-    let located: Vec<_> = w
-        .docs
-        .iter()
-        .map(|doc| {
-            let (l, label) = locate(&doc.at);
-            (l, label, doc)
-        })
-        .collect();
     // All or nothing: a name may live in any one of them, so a partial read
     // would report it gone. Each miss has already filed its own line.
+    let mut located = Vec::new();
+    for doc in w.docs {
+        located.push(
+            fetched
+                .locate(&doc.at, report)
+                .map(|(l, label)| (l, label, doc)),
+        );
+    }
+    let Some(located) = located.into_iter().collect::<Option<Vec<_>>>() else {
+        return;
+    };
     let mut texts = Vec::new();
     for (l, label, doc) in &located {
         texts.push(fetched.anchored(l, label, doc, report));

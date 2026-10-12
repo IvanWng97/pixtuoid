@@ -33,6 +33,18 @@ use crate::source::{AgentEvent, ToolDetail};
 /// The Reasonix CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "reasonix";
 
+/// Each version publishes a CLI release (`v…`) and a Studio app release
+/// (`studio-v…`), so `releases/latest` may name the app; npm's `reasonix` is
+/// the CLI.
+#[cfg(any(test, feature = "upstream"))]
+pub const REPO: crate::source::upstream::Repo = crate::source::upstream::Repo {
+    name: "esengine/DeepSeek-Reasonix",
+    release: crate::source::upstream::Release::Npm {
+        package: "reasonix",
+        tag_prefix: "v",
+    },
+};
+
 /// Reasonix tools that dispatch an in-process subagent (`internal/agent/task.go`
 /// plus `internal/skill/tools.go`), so the slot reads "Delegating" while
 /// the hook-invisible subagent works. `run_skill` is excluded: it is only

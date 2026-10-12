@@ -38,7 +38,9 @@ use serde_json::Value;
 
 use crate::AgentId;
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{At, Doc, Family, Finding, Read, Siblings, Watch, When};
+use crate::source::upstream::{
+    At, Doc, Family, Finding, Read, Release, Repo, Siblings, Watch, When,
+};
 use crate::source::{AgentEvent, ToolDetail};
 
 /// The CodeWhale CLI source's registry name (its `SourceDescriptor.name`).
@@ -63,9 +65,15 @@ pub(crate) const DELEGATING_ACTIONS: &[&str] =
 
 #[cfg(any(test, feature = "upstream"))]
 const SUBAGENT_MODULE: At = At::Path {
-    repo: "Hmbown/CodeWhale",
+    repo: &REPO,
     path: "crates/tui/src/tools/subagent/mod.rs",
-    branch: "main",
+};
+
+/// The repository its drift watches read.
+#[cfg(any(test, feature = "upstream"))]
+pub const REPO: Repo = Repo {
+    name: "codewhale-hq/Codewhale",
+    release: Release::GithubLatest,
 };
 
 /// Only the delegation is watched here; the hooks CodeWhale fires are watched

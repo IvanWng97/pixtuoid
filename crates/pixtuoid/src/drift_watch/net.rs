@@ -5,7 +5,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use super::{Fetch, FetchError};
+use super::{API_URL, Fetch, FetchError, RAW_URL};
 
 /// A status that means OUR pin is gone, so the watch is dark for that document:
 /// probe health, never transient. Every other failure may pass on a retry.
@@ -15,19 +15,42 @@ const PERMANENT_HTTP_STATUS: [u16; 3] = [404, 410, 451];
 /// and a curl error message lands above it; [`classify`] reads it there.
 const WRITE_OUT: &str = "%{stderr}\n%{http_code}";
 
+/// The token upstream-drift.yml hands the run, for GitHub's rate limit.
+const TOKEN_ENV: &str = "GITHUB_TOKEN";
+
 #[derive(Debug)]
 pub(super) struct Platform;
 
 impl Fetch for Platform {
     fn get(&self, url: &str, timeout: Duration) -> Result<Vec<u8>, FetchError> {
-        let out = Command::new("curl")
-            .args(["--silent", "--show-error", "--location", "--max-time"])
-            .arg(timeout.as_secs().to_string())
-            .args(["--user-agent", "pixtuoid-drift-watch"])
-            .args(["--write-out", WRITE_OUT])
-            .arg(url)
-            .output()
+        let header = authorized(url)
+            .then(|| std::env::var(TOKEN_ENV).ok())
+            .flatten()
+            .filter(|token| !token.is_empty())
+            .map(|token| format!("Authorization: Bearer {token}\n"));
+        let mut child = Command::new("curl")
+            .args(curl_args(url, timeout, header.is_some()))
+            .stdin(if header.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|e| FetchError::Transient(format!("could not run curl: {e}")))?;
+        if let (Some(header), Some(mut stdin)) = (header, child.stdin.take())
+            && let Err(e) = stdin.write_all(header.as_bytes())
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FetchError::Transient(format!(
+                "could not hand curl the token: {e}"
+            )));
+        }
+        let out = child
+            .wait_with_output()
+            .map_err(|e| FetchError::Transient(format!("curl failed: {e}")))?;
         classify(
             out.status.success(),
             &String::from_utf8_lossy(&out.stderr),
@@ -47,6 +70,39 @@ impl Fetch for Platform {
         }
         tar(&["-xzOf", "-", member], tarball).map(Some)
     }
+}
+
+/// Whether `url` is GitHub's API or raw content, the only hosts the token is for.
+fn authorized(url: &str) -> bool {
+    [API_URL, RAW_URL].iter().any(|base| {
+        url.strip_prefix(base)
+            .is_some_and(|rest| rest.starts_with('/'))
+    })
+}
+
+/// curl's arguments. A token rides stdin (`--header @-`), never the argument
+/// list, which every local process can read; and a redirect to another origin
+/// drops it, since `--location` is not `--location-trusted`
+/// (curl.se/docs/manpage.html#-H).
+fn curl_args(url: &str, timeout: Duration, authorized: bool) -> Vec<String> {
+    let mut args: Vec<String> = ["--silent", "--show-error", "--location", "--max-time"]
+        .map(str::to_owned)
+        .into();
+    args.push(timeout.as_secs().to_string());
+    args.extend(
+        [
+            "--user-agent",
+            "pixtuoid-drift-watch",
+            "--write-out",
+            WRITE_OUT,
+        ]
+        .map(str::to_owned),
+    );
+    if authorized {
+        args.extend(["--header", "@-"].map(str::to_owned));
+    }
+    args.push(url.to_owned());
+    args
 }
 
 /// `tar <args>` over `tarball` on stdin: its stdout, or why it failed.
@@ -180,6 +236,43 @@ mod tests {
             Platform.untar(b"not a tarball", "pkg/schema.json"),
             Err(FetchError::Transient(_))
         ));
+    }
+
+    /// The token goes only to GitHub's API and raw hosts, never to npm, a
+    /// closed CLI's page, a release download or a lookalike host, and never
+    /// into curl's arguments.
+    #[test]
+    fn the_token_goes_only_to_github_and_never_into_the_arguments() {
+        for url in [
+            format!("{API_URL}/o/r"),
+            format!("{RAW_URL}/o/r/refs/heads/main/e.ts"),
+        ] {
+            assert!(authorized(&url), "{url}");
+        }
+        for url in [
+            "https://registry.npmjs.org/reasonix/latest",
+            "https://code.claude.com/docs/en/hooks.md",
+            "https://github.com/o/r/releases/download/v1.0.0/x.tgz",
+            "https://api.github.com/users/o",
+            "https://api.github.com/reposx/o/r",
+            "https://raw.githubusercontent.com.example/o/r",
+            "http://api.github.com/repos/o/r",
+        ] {
+            assert!(!authorized(url), "{url}");
+        }
+        let timeout = Duration::from_secs(1);
+        let headed = curl_args("u", timeout, true);
+        assert!(
+            headed.windows(2).any(|w| w == ["--header", "@-"]),
+            "{headed:?}"
+        );
+        assert!(
+            !headed.iter().any(|a| a.contains("location-trusted")),
+            "{headed:?}"
+        );
+        let bare = curl_args("u", timeout, false);
+        assert!(!bare.iter().any(|a| a == "--header"), "{bare:?}");
+        assert_eq!(bare.last().map(String::as_str), Some("u"));
     }
 
     /// What `--write-out` makes curl print is what `classify` reads: curl

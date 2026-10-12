@@ -18,7 +18,7 @@ use serde_json::Value;
 use crate::AgentId;
 use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize};
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{At, Doc, Finding, Read, Watch, When};
+use crate::source::upstream::{Doc, Finding, Read, Release, Repo, Watch, When};
 use crate::source::{AgentEvent, ToolDetail};
 
 #[cfg(feature = "native")]
@@ -841,18 +841,12 @@ pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
     HOOK_APPROVAL_RESOLVED,
 ];
 
+/// The repository its drift watches read.
 #[cfg(any(test, feature = "upstream"))]
-const fn omp_doc(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
-    Doc {
-        at: At::Path {
-            repo: "can1357/oh-my-pi",
-            branch: "main",
-            path,
-        },
-        anchor,
-        owns,
-    }
-}
+pub const REPO: Repo = Repo {
+    name: "can1357/oh-my-pi",
+    release: Release::GithubLatest,
+};
 
 #[cfg(any(test, feature = "upstream"))]
 const SESSION_ENTRIES: &str = "packages/coding-agent/src/session/session-entries.ts";
@@ -881,7 +875,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "omp.entry_types",
         ours: || DECODED_ENTRY_TYPES.to_vec(),
-        docs: &[omp_doc(
+        docs: &[REPO.doc(
             SESSION_ENTRIES,
             r"export type SessionEntry\b",
             "the session-entry union",
@@ -898,7 +892,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     },
     title_watch(
         "omp.title_fields.slot",
-        &[omp_doc(
+        &[REPO.doc(
             SESSION_ENTRIES,
             r"export interface SessionTitleSlotEntry\b",
             "`SessionTitleSlotEntry`",
@@ -907,7 +901,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     ),
     title_watch(
         "omp.title_fields.change",
-        &[omp_doc(
+        &[REPO.doc(
             SESSION_ENTRIES,
             r"export interface TitleChangeEntry\b",
             "`TitleChangeEntry`",
@@ -917,7 +911,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "omp.exit_marker",
         ours: || vec![DECODED_EXIT_MARKER],
-        docs: &[omp_doc(
+        docs: &[REPO.doc(
             "packages/coding-agent/src/session/exit-diagnostics.ts",
             "SESSION_EXIT_CUSTOM_TYPE",
             "`SESSION_EXIT_CUSTOM_TYPE`",
@@ -938,12 +932,12 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         // Split upstream: the roles and block type are the shared LLM types',
         // `ask` its tool module's.
         docs: &[
-            omp_doc(
+            REPO.doc(
                 "packages/ai/src/types.ts",
                 r"(?m)^export type Message\s*=",
                 "the `Message` union",
             ),
-            omp_doc(
+            REPO.doc(
                 "packages/coding-agent/src/tools/ask.ts",
                 r"export class AskTool\b",
                 "the `AskTool` class",
@@ -962,12 +956,12 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         id: "omp.hook_events",
         ours: || DECODED_HOOK_EVENTS.to_vec(),
         docs: &[
-            omp_doc(
+            REPO.doc(
                 "packages/coding-agent/src/extensibility/shared-events.ts",
                 r"SessionShutdownEvent\b",
                 "`SessionShutdownEvent`",
             ),
-            omp_doc(
+            REPO.doc(
                 "packages/coding-agent/src/extensibility/extensions/types.ts",
                 r"ToolApprovalRequestedEvent\b",
                 "`ToolApprovalRequestedEvent`",
@@ -989,7 +983,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "omp.agent_dir",
         ours: || vec!["dirs.agentDir"],
-        docs: &[omp_doc(
+        docs: &[REPO.doc(
             "packages/utils/src/dirs.ts",
             r"export function getAgentDir\b",
             "`getAgentDir`",
@@ -1008,7 +1002,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "omp.extension_subdir",
         ours: || vec![EXTENSIONS_SUBDIR],
-        docs: &[omp_doc(
+        docs: &[REPO.doc(
             "packages/coding-agent/src/discovery/builtin.ts",
             r"(?m)^async function loadExtensionModules\b",
             "`loadExtensionModules`",

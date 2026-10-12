@@ -24,21 +24,61 @@ impl Served {
         self
     }
 
-    /// `repo`'s latest release `v1.0.0`, whose vouched tarball `asset` holds
-    /// `text` at `member`.
-    fn release(mut self, repo: &str, asset: &str, member: &str, sums: &str, text: &str) -> Self {
-        let base = format!("https://github.com/{repo}/releases/download/v1.0.0/");
-        let name = asset.replace("{version}", "1.0.0");
+    /// `repo` as the resolver finds it: under its own name, its default
+    /// branch `main`, its latest release `v1.0.0`, npm's `latest` `1.0.0`, and
+    /// every tag present; a [`Release::Branch`] repository publishes none.
+    fn resolving(self, repo: &Repo) -> Self {
+        let api = format!("{API_URL}/{}", repo.name);
+        let found = self.with(
+            &api,
+            &format!(
+                r#"{{"full_name": "{}", "default_branch": "main"}}"#,
+                repo.name
+            ),
+        );
+        match repo.release {
+            Release::GithubLatest => found.with(
+                &format!("{api}/releases/latest"),
+                r#"{"tag_name": "v1.0.0"}"#,
+            ),
+            Release::Npm {
+                package,
+                tag_prefix,
+            } => found
+                .with(
+                    &format!("{NPM_URL}/{package}/latest"),
+                    r#"{"version": "1.0.0"}"#,
+                )
+                .with(&format!("{api}/git/ref/tags/{tag_prefix}1.0.0"), "{}"),
+            Release::Pinned { tag, .. } => found.with(&format!("{api}/git/ref/tags/{tag}"), "{}"),
+            Release::Branch { .. } => found.gone(&format!("{api}/releases/latest"), 404),
+        }
+    }
+
+    /// `repo` resolving to its latest release `v1.0.0`, whose vouched tarball
+    /// `asset` holds `text` at `member`.
+    fn release(self, repo: &Repo, asset: &str, member: &str, sums: &str, text: &str) -> Self {
+        self.resolving(repo)
+            .release_files(repo.name, "v1.0.0", asset, member, sums, text)
+    }
+
+    fn release_files(
+        mut self,
+        repo: &str,
+        tag: &str,
+        asset: &str,
+        member: &str,
+        sums: &str,
+        text: &str,
+    ) -> Self {
+        let base = format!("https://github.com/{repo}/releases/download/{tag}/");
+        let name = asset.replace("{version}", tag.trim_start_matches('v'));
         let tarball = format!("TARBALL {repo} {name}");
         let digest = format!("{:x}", Sha256::digest(tarball.as_bytes()));
         self.tarballs
             .insert(format!("{tarball}#{member}"), text.as_bytes().to_vec());
-        self.with(
-            &format!("{API_URL}/{repo}/releases/latest"),
-            r#"{"tag_name": "v1.0.0"}"#,
-        )
-        .with(&format!("{base}{name}"), &tarball)
-        .with(&format!("{base}{sums}"), &format!("{digest}  {name}\n"))
+        self.with(&format!("{base}{name}"), &tarball)
+            .with(&format!("{base}{sums}"), &format!("{digest}  {name}\n"))
     }
 
     fn fetched(&self, url: &str) -> usize {
@@ -64,22 +104,25 @@ impl Fetch for Served {
     }
 }
 
+/// The repository most tests read, at its default branch.
+const OR: Repo = Repo {
+    name: "o/r",
+    release: Release::Branch { why: "a test" },
+};
+
+/// The network answering every question [`OR`] raises.
+fn served() -> Served {
+    Served::default().resolving(&OR)
+}
+
 fn raw(path: &str) -> String {
-    format!("{RAW_URL}/o/r/main/{path}")
+    format!("{RAW_URL}/o/r/refs/heads/main/{path}")
 }
 
 const ANCHORED: &str = r"(?m)^enum Events \{";
 
 const fn doc(path: &'static str) -> Doc {
-    Doc {
-        at: At::Path {
-            repo: "o/r",
-            path,
-            branch: "main",
-        },
-        anchor: ANCHORED,
-        owns: "`Events`",
-    }
+    OR.doc(path, ANCHORED, "`Events`")
 }
 
 const fn each(docs: &'static [Doc], pattern: &'static str) -> Watch {
@@ -104,12 +147,12 @@ fn check(served: &Served, w: &Watch) -> Report {
 #[test]
 fn a_vanished_name_is_breaking_and_a_present_one_is_silent() {
     const W: Watch = each(&[doc("e.ts")], r#""{name}""#);
-    let both = Served::default().with(&raw("e.ts"), "enum Events {\n\"a.b\" \"c\"");
+    let both = served().with(&raw("e.ts"), "enum Events {\n\"a.b\" \"c\"");
     let r = check(&both, &W);
     assert!(r.breaking.is_empty() && r.blind.is_empty(), "{r:?}");
 
     // `a.b` is escaped: a regex `.` would let `axb` stand in for it.
-    let renamed = Served::default().with(&raw("e.ts"), "enum Events {\n\"axb\" \"c\"");
+    let renamed = served().with(&raw("e.ts"), "enum Events {\n\"axb\" \"c\"");
     let r = check(&renamed, &W);
     assert_eq!(r.breaking.len(), 1, "{r:?}");
     assert!(
@@ -127,7 +170,7 @@ fn a_multi_document_watch_is_all_or_nothing() {
     const W: Watch = each(&[doc("1.ts"), doc("2.ts")], r#""{name}""#);
     // `c` lives only in the second half, so reading the first alone would
     // report it gone when the second merely failed to fetch.
-    let half = Served::default()
+    let half = served()
         .with(&raw("1.ts"), "enum Events {\n\"a.b\"")
         .gone(&raw("2.ts"), 404);
     let r = check(&half, &W);
@@ -138,7 +181,7 @@ fn a_multi_document_watch_is_all_or_nothing() {
     assert_eq!(r.blind.len(), 1, "a gone pin is probe health: {r:?}");
     assert!(r.blind[0].contains("HTTP 404"), "{r:?}");
 
-    let flaky = Served::default().with(&raw("1.ts"), "enum Events {\n\"a.b\"");
+    let flaky = served().with(&raw("1.ts"), "enum Events {\n\"a.b\"");
     let r = check(&flaky, &W);
     assert!(r.breaking.is_empty() && r.blind.is_empty(), "{r:?}");
     assert_eq!(
@@ -153,7 +196,7 @@ fn a_missing_anchor_is_probe_health_filed_once_per_document() {
     const W1: Watch = each(&[doc("e.ts")], r#""{name}""#);
     const W2: Watch = each(&[doc("e.ts")], r#"'{name}'"#);
     // A re-export facade: it fetches, and declares nothing.
-    let facade = Served::default().with(&raw("e.ts"), "export * from './events';");
+    let facade = served().with(&raw("e.ts"), "export * from './events';");
     let mut report = Report::default();
     let mut fetched = Fetched::new(&facade);
     check_watch("src", &W1, &mut fetched, &mut report);
@@ -178,9 +221,8 @@ fn a_reader_that_finds_no_declaration_is_probe_health() {
         ours: || vec!["c"],
         docs: &[Doc {
             at: At::Path {
-                repo: "o/r",
+                repo: &OR,
                 path: "s.json",
-                branch: "main",
             },
             anchor: r#""Events""#,
             owns: "`Events`",
@@ -194,7 +236,7 @@ fn a_reader_that_finds_no_declaration_is_probe_health() {
         siblings: None,
     };
     // Anchored, and the union moved out from under the reader.
-    let moved = Served::default().with(&raw("s.json"), r#"{"Events": 1}"#);
+    let moved = served().with(&raw("s.json"), r#"{"Events": 1}"#);
     let r = check(&moved, &W);
     assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
     assert!(r.blind[0].contains("found no `Events` union"), "{r:?}");
@@ -206,9 +248,8 @@ fn a_reader_that_finds_no_declaration_is_probe_health() {
 fn one_unreadable_document_skips_the_whole_union() {
     const UNION: Doc = Doc {
         at: At::Path {
-            repo: "o/r",
+            repo: &OR,
             path: "a.json",
-            branch: "main",
         },
         anchor: r#""Events""#,
         owns: "`Events`",
@@ -220,9 +261,8 @@ fn one_unreadable_document_skips_the_whole_union() {
             UNION,
             Doc {
                 at: At::Path {
-                    repo: "o/r",
+                    repo: &OR,
                     path: "b.json",
-                    branch: "main",
                 },
                 ..UNION
             },
@@ -235,7 +275,7 @@ fn one_unreadable_document_skips_the_whole_union() {
         finding: Finding::Breaking("x"),
         siblings: None,
     };
-    let served = Served::default()
+    let served = served()
         .with(
             &raw("a.json"),
             r#"{"$defs": {"Events": {"oneOf": [{"const": "c"}]}}}"#,
@@ -276,7 +316,7 @@ fn a_broken_spec_of_ours_blames_ours() {
         siblings: None,
     };
     for w in [&EACH, &ARMS, &STR] {
-        let r = check(&Served::default().with(&raw("e.ts"), "enum Events {\n"), w);
+        let r = check(&served().with(&raw("e.ts"), "enum Events {\n"), w);
         assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
         assert!(r.blind[0].contains("Our own declaration"), "{r:?}");
         assert!(
@@ -300,9 +340,9 @@ fn a_document_is_fetched_once_per_run_and_a_failure_filed_once() {
     let text = "enum Events {\n  \"a.b\", \"c\", 'a.b', 'c'\n}\n";
     // (served, its blind lines, its error lines)
     for (served, blind, errors) in [
-        (Served::default().gone(&raw("e.ts"), 404), 1, 0),
-        (Served::default(), 0, 1),
-        (Served::default().with(&raw("e.ts"), text), 0, 0),
+        (served().gone(&raw("e.ts"), 404), 1, 0),
+        (served(), 0, 1),
+        (served().with(&raw("e.ts"), text), 0, 0),
     ] {
         let mut report = Report::default();
         let mut fetched = Fetched::new(&served);
@@ -339,8 +379,7 @@ fn a_rust_str_read_names_what_upstream_declares_now() {
         finding: Finding::Breaking("no delegation"),
         siblings: None,
     };
-    let renamed =
-        Served::default().with(&raw("t.rs"), "enum Events {}\nconst NAME: &str = \"task\";");
+    let renamed = served().with(&raw("t.rs"), "enum Events {}\nconst NAME: &str = \"task\";");
     let r = check(&renamed, &W);
     assert_eq!(r.breaking.len(), 1, "{r:?}");
     assert!(r.breaking[0].contains("declares `task` there now"), "{r:?}");
@@ -357,14 +396,13 @@ fn a_ts_const_read_names_what_upstream_declares_now() {
         finding: Finding::Breaking("stale port"),
         siblings: None,
     };
-    let reformatted = Served::default().with(
+    let reformatted = served().with(
         &raw("t.ts"),
         "enum Events {}\nexport const PORT: number =\n  18_789;\n",
     );
     let r = check(&reformatted, &W);
     assert!(r.breaking.is_empty() && r.blind.is_empty(), "{r:?}");
-    let bumped =
-        Served::default().with(&raw("t.ts"), "enum Events {}\nexport const PORT = 18790;\n");
+    let bumped = served().with(&raw("t.ts"), "enum Events {}\nexport const PORT = 18790;\n");
     let r = check(&bumped, &W);
     assert_eq!(r.breaking.len(), 1, "{r:?}");
     assert!(
@@ -385,7 +423,7 @@ fn a_ts_return_read_names_what_upstream_returns_now() {
         finding: Finding::Review("re-verify"),
         siblings: None,
     };
-    let redirected = Served::default().with(
+    let redirected = served().with(
         &raw("t.ts"),
         "enum Events {}\nexport function f() {\n  if (x) return y;\n  return dirs.agentDir;\n}\n",
     );
@@ -411,8 +449,7 @@ fn a_name_missing_from_a_partial_read_is_blind() {
         finding: Finding::Breaking("x"),
         siblings: None,
     };
-    let page =
-        |decl: &str| Served::default().with(&raw("t.ts"), &format!("enum Events {{}}\n{decl}\n"));
+    let page = |decl: &str| served().with(&raw("t.ts"), &format!("enum Events {{}}\n{decl}\n"));
     let partial = check(
         &page("export interface X extends Base { a: string; c: string }"),
         &W,
@@ -444,7 +481,7 @@ fn a_partial_read_judges_a_fact_by_whether_its_field_is_seen() {
         finding: Finding::Breaking("x"),
         siblings: None,
     };
-    let narrowed = Served::default().with(
+    let narrowed = served().with(
         &raw("t.ts"),
         "enum Events {}\nexport type X = Base & { a: \"y\" };\n",
     );
@@ -471,7 +508,7 @@ fn a_partial_document_keeps_a_union_read_partial() {
         finding: Finding::Breaking("x"),
         siblings: None,
     };
-    let served = Served::default()
+    let served = served()
         .with(
             &raw("a.ts"),
             "enum Events {}\ninterface X extends Base { a: string }\n",
@@ -503,7 +540,7 @@ fn a_ts_fields_floor_counts_fields_not_their_facts() {
         finding: Finding::Breaking("x"),
         siblings: None,
     };
-    let truncated = Served::default().with(
+    let truncated = served().with(
         &raw("t.ts"),
         "enum Events {}\nexport interface X { a?: string }\n",
     );
@@ -520,9 +557,8 @@ fn the_floor_skips_a_degraded_parse_but_not_a_family_reader() {
     const SCHEMA: &str = r#"{"$defs": {"Events": {"oneOf": [{"const": "c"}]}}}"#;
     const DOC: Doc = Doc {
         at: At::Path {
-            repo: "o/r",
+            repo: &OR,
             path: "s.json",
-            branch: "main",
         },
         anchor: r#""Events""#,
         owns: "`Events`",
@@ -540,7 +576,7 @@ fn the_floor_skips_a_degraded_parse_but_not_a_family_reader() {
         siblings: None,
     };
     // One name back where we read two: the reader degraded, nothing is renamed.
-    let r = check(&Served::default().with(&raw("s.json"), SCHEMA), &UNION);
+    let r = check(&served().with(&raw("s.json"), SCHEMA), &UNION);
     assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
     assert!(r.blind[0].contains("floor 2"), "{r:?}");
 
@@ -556,7 +592,7 @@ fn the_floor_skips_a_degraded_parse_but_not_a_family_reader() {
     };
     let one_variant =
         "enum Events {}\n#[serde(rename_all = \"snake_case\")]\nenum Item {\n    C,\n}\n";
-    let r = check(&Served::default().with(&raw("e.rs"), one_variant), &ENUM);
+    let r = check(&served().with(&raw("e.rs"), one_variant), &ENUM);
     assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
     assert!(r.blind[0].contains("floor 2"), "{r:?}");
 
@@ -574,7 +610,7 @@ fn the_floor_skips_a_degraded_parse_but_not_a_family_reader() {
         siblings: None,
     };
     let src = "enum Events {}\nfn parse() { match s { \"start\" => Ok(Go), _ => Err(()) } }";
-    let r = check(&Served::default().with(&raw("a.rs"), src), &ARMS);
+    let r = check(&served().with(&raw("a.rs"), src), &ARMS);
     assert!(r.blind.is_empty(), "{r:?}");
     assert!(
         r.breaking.len() == 1 && r.breaking[0].contains("`wait`"),
@@ -594,9 +630,8 @@ fn a_sibling_in_the_family_is_reviewed_and_a_stale_ignore_is_reported() {
         ours: || vec!["tool_call", "tool_call_update"],
         docs: &[Doc {
             at: At::Path {
-                repo: "o/r",
+                repo: &OR,
                 path: "s.json",
-                branch: "main",
             },
             anchor: r#""Events""#,
             owns: "`Events`",
@@ -615,7 +650,7 @@ fn a_sibling_in_the_family_is_reviewed_and_a_stale_ignore_is_reported() {
             ],
         }),
     };
-    let r = check(&Served::default().with(&raw("s.json"), SCHEMA), &W);
+    let r = check(&served().with(&raw("s.json"), SCHEMA), &W);
     assert!(r.breaking.is_empty() && r.blind.is_empty(), "{r:?}");
     assert_eq!(r.review.len(), 3, "{r:?}");
     // A fetched name stays inside its code span, its controls dropped.
@@ -646,12 +681,16 @@ fn a_sibling_in_the_family_is_reviewed_and_a_stale_ignore_is_reported() {
 #[test]
 fn a_release_member_is_read_only_once_its_sums_vouch_for_it() {
     const MEMBER: &str = "pkg/schema.json";
+    const RELEASED: Repo = Repo {
+        name: "o/r",
+        release: Release::GithubLatest,
+    };
     const W: Watch = Watch {
         id: "t.asset",
         ours: || vec!["a.b"],
         docs: &[Doc {
             at: At::ReleaseAsset {
-                repo: "o/r",
+                repo: &RELEASED,
                 asset: "cli-{version}-linux.tgz",
                 member: MEMBER,
                 sums: "SUMS.txt",
@@ -667,8 +706,13 @@ fn a_release_member_is_read_only_once_its_sums_vouch_for_it() {
     let schema = r#"{"Events": 1, "properties": {"a.b": {}}}"#;
     let base = "https://github.com/o/r/releases/download/v1.0.0/";
     let tarball = format!("{base}cli-1.0.0-linux.tgz");
-    let ok =
-        Served::default().release("o/r", "cli-{version}-linux.tgz", MEMBER, "SUMS.txt", schema);
+    let ok = served().release(
+        &RELEASED,
+        "cli-{version}-linux.tgz",
+        MEMBER,
+        "SUMS.txt",
+        schema,
+    );
     let r = check(&ok, &W);
     assert!(
         r.breaking.is_empty() && r.blind.is_empty() && r.errors.is_empty(),
@@ -683,8 +727,14 @@ fn a_release_member_is_read_only_once_its_sums_vouch_for_it() {
         .collect();
     assert_eq!(long, [tarball], "only the tarball waits long");
 
-    let unvouched = Served::default()
-        .release("o/r", "cli-{version}-linux.tgz", MEMBER, "SUMS.txt", schema)
+    let unvouched = served()
+        .release(
+            &RELEASED,
+            "cli-{version}-linux.tgz",
+            MEMBER,
+            "SUMS.txt",
+            schema,
+        )
         .with(&format!("{base}SUMS.txt"), "0000  cli-1.0.0-linux.tgz\n");
     let r = check(&unvouched, &W);
     assert!(
@@ -693,8 +743,14 @@ fn a_release_member_is_read_only_once_its_sums_vouch_for_it() {
     );
     // The right digest vouches only for the name it is listed under.
     let digest = format!("{:x}", Sha256::digest(b"TARBALL o/r cli-1.0.0-linux.tgz"));
-    let misnamed = Served::default()
-        .release("o/r", "cli-{version}-linux.tgz", MEMBER, "SUMS.txt", schema)
+    let misnamed = served()
+        .release(
+            &RELEASED,
+            "cli-{version}-linux.tgz",
+            MEMBER,
+            "SUMS.txt",
+            schema,
+        )
         .with(
             &format!("{base}SUMS.txt"),
             &format!("{digest}  other.tgz\n"),
@@ -702,8 +758,13 @@ fn a_release_member_is_read_only_once_its_sums_vouch_for_it() {
     let r = check(&misnamed, &W);
     assert!(r.errors.len() == 1, "{r:?}");
 
-    let mut moved =
-        Served::default().release("o/r", "cli-{version}-linux.tgz", MEMBER, "SUMS.txt", schema);
+    let mut moved = served().release(
+        &RELEASED,
+        "cli-{version}-linux.tgz",
+        MEMBER,
+        "SUMS.txt",
+        schema,
+    );
     moved.tarballs.clear();
     let r = check(&moved, &W);
     assert!(
@@ -716,14 +777,208 @@ fn a_release_member_is_read_only_once_its_sums_vouch_for_it() {
         "no request 404'd, so the line says what is missing: {r:?}"
     );
 
-    let tagless = Served::default()
-        .release("o/r", "cli-{version}-linux.tgz", MEMBER, "SUMS.txt", schema)
+    let tagless = served()
+        .release(
+            &RELEASED,
+            "cli-{version}-linux.tgz",
+            MEMBER,
+            "SUMS.txt",
+            schema,
+        )
         .with(&format!("{API_URL}/o/r/releases/latest"), "{}");
     let r = check(&tagless, &W);
     assert!(
         r.blind.is_empty() && r.errors.len() == 1,
         "a tagless reply is retried: {r:?}"
     );
+}
+
+/// Each [`Release`] is read at the ref users run, named in the report.
+#[test]
+fn each_release_resolves_to_the_ref_users_run() {
+    const LATEST: Repo = Repo {
+        name: "o/latest",
+        release: Release::GithubLatest,
+    };
+    const NPM: Repo = Repo {
+        name: "o/npm",
+        release: Release::Npm {
+            package: "@o/cli",
+            tag_prefix: "cli-v",
+        },
+    };
+    const PINNED: Repo = Repo {
+        name: "o/pinned",
+        release: Release::Pinned {
+            tag: "v0.1.0",
+            why: "a test",
+        },
+    };
+    let found = |repo: &Repo| {
+        Served::default().with(
+            &format!("{API_URL}/{}", repo.name),
+            &format!(
+                r#"{{"full_name": "{}", "default_branch": "trunk"}}"#,
+                repo.name
+            ),
+        )
+    };
+    for (repo, served, at_ref) in [
+        (
+            &LATEST,
+            found(&LATEST).with(
+                &format!("{API_URL}/o/latest/releases/latest"),
+                r#"{"tag_name": "v2.0.0"}"#,
+            ),
+            "refs/tags/v2.0.0",
+        ),
+        (
+            &NPM,
+            found(&NPM)
+                .with(
+                    &format!("{NPM_URL}/@o/cli/latest"),
+                    r#"{"version": "3.1.0"}"#,
+                )
+                .with(&format!("{API_URL}/o/npm/git/ref/tags/cli-v3.1.0"), "{}"),
+            "refs/tags/cli-v3.1.0",
+        ),
+        (
+            &PINNED,
+            found(&PINNED).with(&format!("{API_URL}/o/pinned/git/ref/tags/v0.1.0"), "{}"),
+            "refs/tags/v0.1.0",
+        ),
+        (
+            &OR,
+            found(&OR).gone(&format!("{API_URL}/o/r/releases/latest"), 404),
+            "refs/heads/trunk",
+        ),
+    ] {
+        let mut report = Report::default();
+        let located = Fetched::new(&served).locate(&repo.doc("e.ts", "x", "x").at, &mut report);
+        let Some((Located::Raw { url }, label)) = located else {
+            panic!("{}: unresolved: {report:?}", repo.name);
+        };
+        assert_eq!(url, format!("{RAW_URL}/{}/{at_ref}/e.ts", repo.name));
+        let short = at_ref.rsplit('/').next().unwrap_or_default();
+        assert_eq!(label, format!("{}@{short}:e.ts", repo.name));
+        assert!(
+            report.blind.is_empty() && report.errors.is_empty() && report.review.is_empty(),
+            "{report:?}"
+        );
+    }
+}
+
+/// A moved repository is never followed: its documents stay unread until it
+/// is repinned, and only a case change is the same name.
+#[test]
+fn a_moved_repository_is_probe_health_until_repinned() {
+    const W: Watch = each(&[doc("e.ts")], r#""{name}""#);
+    let text = "enum Events {\n\"a.b\" \"c\"";
+    let moved = served()
+        .with(
+            &format!("{API_URL}/o/r"),
+            r#"{"full_name": "n/r", "default_branch": "main"}"#,
+        )
+        .with(&raw("e.ts"), text);
+    let r = check(&moved, &W);
+    assert!(
+        r.breaking.is_empty() && r.errors.is_empty() && r.blind.len() == 1,
+        "{r:?}"
+    );
+    assert!(r.blind[0].contains("moved to `n/r`"), "{r:?}");
+    assert_eq!(moved.fetched(&raw("e.ts")), 0, "{r:?}");
+
+    let recased = served()
+        .with(
+            &format!("{API_URL}/o/r"),
+            r#"{"full_name": "O/R", "default_branch": "main"}"#,
+        )
+        .with(&raw("e.ts"), text);
+    let r = check(&recased, &W);
+    assert!(r.blind.is_empty() && r.errors.is_empty(), "{r:?}");
+}
+
+/// A release policy that resolves no tag is probe health, named per cause.
+#[test]
+fn a_release_that_resolves_no_tag_is_probe_health() {
+    const LATEST: Repo = Repo {
+        name: "o/r",
+        release: Release::GithubLatest,
+    };
+    const NPM: Repo = Repo {
+        name: "o/r",
+        release: Release::Npm {
+            package: "x",
+            tag_prefix: "v",
+        },
+    };
+    const PINNED: Repo = Repo {
+        name: "o/r",
+        release: Release::Pinned {
+            tag: "v0.1.0",
+            why: "a test",
+        },
+    };
+    for (repo, served, says) in [
+        (
+            &LATEST,
+            served().gone(&format!("{API_URL}/o/r/releases/latest"), 404),
+            "No release resolves for it",
+        ),
+        (
+            &NPM,
+            served()
+                .with(&format!("{NPM_URL}/x/latest"), r#"{"version": "1.2.0"}"#)
+                .gone(&format!("{API_URL}/o/r/git/ref/tags/v1.2.0"), 404),
+            "which it does not tag `v1.2.0`",
+        ),
+        (
+            &PINNED,
+            served().gone(&format!("{API_URL}/o/r/git/ref/tags/v0.1.0"), 404),
+            "Its pinned tag `v0.1.0` is gone",
+        ),
+    ] {
+        let mut report = Report::default();
+        let mut fetched = Fetched::new(&served);
+        let at = repo.doc("e.ts", "x", "x").at;
+        assert!(fetched.locate(&at, &mut report).is_none());
+        assert!(fetched.locate(&at, &mut report).is_none());
+        assert!(
+            report.errors.is_empty() && report.blind.len() == 1,
+            "filed once per run: {report:?}"
+        );
+        assert!(report.blind[0].contains(says), "{report:?}");
+    }
+}
+
+/// A repository read at its default branch is reviewed the run it first
+/// publishes a release, and resolved once however many documents it holds.
+#[test]
+fn a_branch_repository_that_starts_releasing_is_reviewed() {
+    const W1: Watch = each(&[doc("e.ts")], r#""{name}""#);
+    const W2: Watch = each(&[doc("f.ts")], r#""{name}""#);
+    let text = "enum Events {\n\"a.b\" \"c\"";
+    let served = served()
+        .with(
+            &format!("{API_URL}/o/r/releases/latest"),
+            r#"{"tag_name": "v0.1.0"}"#,
+        )
+        .with(&raw("e.ts"), text)
+        .with(&raw("f.ts"), text);
+    let mut report = Report::default();
+    let mut fetched = Fetched::new(&served);
+    check_watch("src", &W1, &mut fetched, &mut report);
+    check_watch("src", &W2, &mut fetched, &mut report);
+    assert!(
+        report.breaking.is_empty() && report.blind.is_empty() && report.errors.is_empty(),
+        "{report:?}"
+    );
+    assert_eq!(report.review.len(), 1, "{report:?}");
+    assert!(
+        report.review[0].contains("`o/r` now publishes `v0.1.0`"),
+        "{report:?}"
+    );
+    assert_eq!(served.fetched(&format!("{API_URL}/o/r")), 1);
 }
 
 /// A declared pattern as text it matches, `{name}` and its one capture group
@@ -756,6 +1011,7 @@ fn render(pattern: &str, name: &str) -> String {
             let fixed: &[(&str, &str)] = &[
                 ("{name}", name),
                 (r"(\w+)", name),
+                (r#"([^"]+)"#, name),
                 (r"\w+", "w"),
                 ("(?m)", ""),
                 ("^", "\n"),
@@ -796,6 +1052,7 @@ fn rendering_a_pattern_yields_text_it_matches() {
         (r#""x-method"\s*:\s*"{name}""#, "session/update"),
         (r"Schema\.Literal\({name}\)", "a.b"),
         (r"(?m)^export const \b{name} = \{", "Event"),
+        (r#"(?m)^version = "([^"]+)""#, "0.11.4"),
     ] {
         let text = render(pattern, name);
         let re = Regex::new(&pattern.replace("{name}", &regex::escape(name))).expect("compiles");
@@ -1041,19 +1298,39 @@ fn near_miss(w: &Watch, name: &str) -> String {
     }
 }
 
-/// `text` as every document `w` reads.
+/// `text` as every document `w` reads, where the engine itself locates it.
 fn serve(w: &Watch, text: &str) -> Served {
-    w.docs
+    let resolving = w
+        .docs
         .iter()
-        .fold(Served::default(), |s, doc| match locate(&doc.at).0 {
-            Located::Raw { url } => s.with(&url, text),
-            Located::Release {
-                repo,
-                asset,
-                member,
-                sums,
-            } => s.release(repo, asset, member, sums, text),
+        .fold(Served::default(), |s, doc| match doc.at {
+            At::Path { repo, .. } | At::ReleaseAsset { repo, .. } => s.resolving(repo),
+            At::Url(_) => s,
+        });
+    let mut report = Report::default();
+    let mut fetched = Fetched::new(&resolving);
+    let located: Vec<Located> = w
+        .docs
+        .iter()
+        .map(|doc| {
+            let (l, _) = fetched
+                .locate(&doc.at, &mut report)
+                .expect("the fake resolves it");
+            l
         })
+        .collect();
+    let served = located.into_iter().fold(resolving, |s, l| match l {
+        Located::Raw { url } => s.with(&url, text),
+        Located::Release {
+            repo,
+            tag,
+            asset,
+            member,
+            sums,
+        } => s.release_files(repo, &tag, asset, member, sums, text),
+    });
+    served.calls.borrow_mut().clear();
+    served
 }
 
 /// A watch read in its declaration form must not take the name's mention
@@ -1337,6 +1614,26 @@ fn every_registered_hook_is_watched() {
 /// pattern captures the name it reads. A pattern of ours that does not compile
 /// is a blind line, which `every_watch_fires_on_its_change_and_stays_silent_otherwise`
 /// fails on.
+/// One repository, whichever crate reads it, is read at one ref.
+#[test]
+fn one_repository_has_one_release_policy() {
+    let mut seen: HashMap<String, &Repo> = HashMap::new();
+    for (_, w) in declared() {
+        for doc in w.docs {
+            let (At::Path { repo, .. } | At::ReleaseAsset { repo, .. }) = doc.at else {
+                continue;
+            };
+            let first = *seen.entry(repo.name.to_ascii_lowercase()).or_insert(repo);
+            assert_eq!(
+                first, repo,
+                "`{}` is declared twice, differently",
+                repo.name
+            );
+        }
+    }
+    assert!(!seen.is_empty(), "the roster reads repositories");
+}
+
 #[test]
 fn no_anchor_is_a_guarded_name_and_every_matches_pattern_captures() {
     let mut watches = 0;
@@ -1442,7 +1739,7 @@ fn every_name_a_family_reader_yields_beyond_ours_is_a_sibling() {
     };
     let src =
         "enum Events {}\nfn parse() { match s { \"start\" | \"begin\" => Ok(Go), _ => Err(()) } }";
-    let r = check(&Served::default().with(&raw("a.rs"), src), &W);
+    let r = check(&served().with(&raw("a.rs"), src), &W);
     assert!(r.breaking.is_empty() && r.blind.is_empty(), "{r:?}");
     assert!(
         r.review.len() == 1 && r.review[0].contains("`begin`"),
@@ -1468,13 +1765,13 @@ fn an_appearing_name_files_its_finding_where_its_severity_says() {
         finding: Finding::Review("adopt it"),
         siblings: None,
     };
-    let absent = Served::default().with(PAGE, "# Hooks reference\nSessionEnd fires last.");
+    let absent = served().with(PAGE, "# Hooks reference\nSessionEnd fires last.");
     let r = check(&absent, &W);
     assert!(
         r.breaking.is_empty() && r.review.is_empty() && r.blind.is_empty(),
         "{r:?}"
     );
-    let landed = Served::default().with(PAGE, "# Hooks reference\nA `session_end` record.");
+    let landed = served().with(PAGE, "# Hooks reference\nA `session_end` record.");
     let r = check(&landed, &W);
     assert!(
         r.breaking.is_empty(),
@@ -1495,9 +1792,8 @@ fn an_appearing_name_files_its_finding_where_its_severity_says() {
 fn a_word_family_is_the_word_ours_share() {
     const DOC: Doc = Doc {
         at: At::Path {
-            repo: "o/r",
+            repo: &OR,
             path: "e.rs",
-            branch: "main",
         },
         anchor: r"pub enum Item\b",
         owns: "`Item`",
@@ -1525,7 +1821,7 @@ fn a_word_family_is_the_word_ours_share() {
     };
     let item = "#[serde(rename_all = \"snake_case\")]\npub enum Item {\n    FunctionCall,\n    CustomToolCall,\n    SubagentSpawned,\n    SubagentProgress,\n    Message,\n    UserMessage,\n    MessageDelta,\n}\n";
     for (w, sibling) in [(&LAST, "custom_tool_call"), (&FIRST, "subagent_progress")] {
-        let r = check(&Served::default().with(&raw("e.rs"), item), w);
+        let r = check(&served().with(&raw("e.rs"), item), w);
         assert!(r.breaking.is_empty() && r.blind.is_empty(), "{r:?}");
         assert!(
             r.review.len() == 1 && r.review[0].contains(&format!("`{sibling}`")),
@@ -1550,7 +1846,7 @@ fn an_enum_off_snake_case_is_probe_health() {
     };
     let camel =
         "enum Events {}\n#[serde(rename_all = \"camelCase\")]\npub enum Item {\n    EventMsg,\n}\n";
-    let r = check(&Served::default().with(&raw("e.rs"), camel), &W);
+    let r = check(&served().with(&raw("e.rs"), camel), &W);
     assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
     assert!(
         r.blind[0].contains("found `enum Item` without `rename_all = \"snake_case\"`"),

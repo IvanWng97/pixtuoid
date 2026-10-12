@@ -12,6 +12,8 @@ use crate::install::target::UNDOCUMENTED_HOOK;
 use crate::install::target::{HostRegistration, LegacyConfig, Unregistered};
 use crate::install::verify::ShimRef;
 #[cfg(feature = "upstream")]
+use pixtuoid_core::source::claude_code::HOOKS_PAGE;
+#[cfg(feature = "upstream")]
 use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 pub(crate) const EVENTS: &[&str] = &[
@@ -57,11 +59,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "claude.hook_events",
         ours: || EVENTS.to_vec(),
-        docs: &[page(
-            "https://code.claude.com/docs/en/hooks.md",
-            r"(?m)^# Hooks reference",
-            "the hooks-reference page",
-        )],
+        docs: &[HOOKS_PAGE],
         read: Read::MdTable {
             header: "Event",
             under: "Hook lifecycle",
