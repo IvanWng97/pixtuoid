@@ -1180,12 +1180,12 @@ fn the_report_title_carries_the_strongest_disposition_and_the_exit_code() {
 
 /// What a shipped template reads is what its watches read. omp, both ways: a
 /// read added without its watch, or a watch outliving its read, fails here.
-/// OpenClaw, one way: each field, literal and id its consts name is still read,
-/// compared or forwarded; a new read is not detected. dsh's watch reads its scan
-/// itself, so it needs no leg.
+/// OpenClaw and dsh, one way: each field, literal and id their consts name is
+/// still read, compared or forwarded; a new read is not detected. dsh's event
+/// watch reads its scan itself.
 #[test]
 fn each_template_read_is_watched() {
-    use crate::install::{omp, openclaw};
+    use crate::install::{dsh, omp, openclaw};
     let bare = |watches: &[Watch]| -> BTreeSet<&str> {
         watches
             .iter()
@@ -1193,6 +1193,13 @@ fn each_template_read_is_watched() {
             .filter(|n| read::is_bare(n))
             .collect()
     };
+    for field in dsh::TOOL_RESULT_FIELDS {
+        let read = format!("d.message?.{field}");
+        assert!(
+            dsh::PLUGIN_TEMPLATE.contains(&read),
+            "the dsh plugin no longer reads `{read}`"
+        );
+    }
     let omp_reads: BTreeSet<&str> = omp::extension_reads().into_iter().collect();
     assert!(!omp_reads.is_empty(), "the template scan reads nothing");
     assert_eq!(omp_reads, bare(omp::UPSTREAM));
