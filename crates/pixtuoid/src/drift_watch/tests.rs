@@ -1335,11 +1335,13 @@ fn every_install_events_const_is_watched() {
     );
 }
 
-/// Every declared pattern compiles under the engine that runs it, and no
-/// anchor matches a name it guards: such an anchor vanishes WITH the names on
-/// the very rename it exists to tell apart from a stale pin.
+/// No anchor matches a name it guards: such an anchor vanishes WITH the names
+/// on the very rename it exists to tell apart from a stale pin. A `Matches`
+/// pattern captures the name it reads. A pattern of ours that does not compile
+/// is a blind line, which `every_watch_fires_on_its_change_and_stays_silent_otherwise`
+/// fails on.
 #[test]
-fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
+fn no_anchor_is_a_guarded_name_and_every_matches_pattern_captures() {
     let mut watches = 0;
     for (_, w) in declared() {
         watches += 1;
@@ -1354,43 +1356,14 @@ fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
                 );
             }
         }
-        let captures = |pattern: &str| {
-            Regex::new(pattern).map(|re| {
-                assert!(
-                    re.captures_len() > 1,
-                    "{}: `{pattern}` captures no name",
-                    w.id
-                );
-            })
-        };
-        let compiled: Result<(), String> = match w.read {
-            Read::Each { pattern } => Regex::new(&pattern.replace("{name}", "n"))
-                .map(drop)
-                .map_err(|e| e.to_string()),
-            Read::Matches { pattern } => captures(pattern).map_err(|e| e.to_string()),
-            Read::RustArms { name, arm } => match read::rust_arms("", name, arm) {
-                Err(Unread::Ours(e)) => Err(e),
-                _ => Ok(()),
-            },
-            Read::RustStr { item } => match read::rust_str("", item) {
-                Err(Unread::Ours(e)) => Err(e),
-                _ => Ok(()),
-            },
-            Read::PySet { decl } => Regex::new(decl).map(drop).map_err(|e| e.to_string()),
-            Read::RustEnum { .. }
-            | Read::RustStruct { .. }
-            | Read::TsFields { .. }
-            | Read::TsMembers { .. }
-            | Read::TsReturn { .. }
-            | Read::TsConstArray { .. }
-            | Read::TsConst { .. }
-            | Read::MdTable { .. }
-            | Read::MdHeadings { .. }
-            | Read::RustMacroRows { .. }
-            | Read::JsonUnion { .. }
-            | Read::JsonKeys => Ok(()),
-        };
-        compiled.unwrap_or_else(|e| panic!("{}: {e}", w.id));
+        if let Read::Matches { pattern } = w.read {
+            let re = Regex::new(pattern).unwrap_or_else(|e| panic!("{}: {e}", w.id));
+            assert!(
+                re.captures_len() > 1,
+                "{}: `{pattern}` captures no name",
+                w.id
+            );
+        }
     }
     assert!(watches > 0, "the registry declares watches");
 }

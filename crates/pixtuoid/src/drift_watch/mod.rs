@@ -63,7 +63,7 @@ trait Fetch {
 /// `breaking` fix the decoder or the registration, `review` adopt, ignore or re-verify,
 /// `blind` repin by hand,
 /// `errors` transient. Collapsing `blind` into `breaking` is what made #793
-/// report five phantom renames.
+/// report phantom renames.
 #[derive(Debug, Default)]
 pub struct Report {
     breaking: Vec<String>,
@@ -154,7 +154,7 @@ impl Report {
                  facade at the old path all land here, and every check riding the \
                  affected surface was SKIPPED rather than reported as drift. **Verify \
                  upstream by hand and repin — do NOT change a decoder on these lines \
-                 alone** (#793 did, against three working env vars).",
+                 alone** (#793 did, against working env vars).",
             ),
             &self.blind,
         );

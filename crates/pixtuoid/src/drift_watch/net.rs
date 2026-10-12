@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn a_permanent_status_darkens_the_pin_and_the_rest_may_retry() {
         assert_eq!(classify(true, "\n200", b"ok".to_vec()), Ok(b"ok".to_vec()));
-        for s in PERMANENT_HTTP_STATUS {
+        for s in [404, 410, 451] {
             assert_eq!(
                 classify(true, &format!("\n{s}"), vec![]),
                 Err(FetchError::Gone {
