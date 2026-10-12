@@ -8,7 +8,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        ver="$(just wasm-bindgen-version)"
+        ver="$(just _wasm-bindgen-version)"
         echo "version=$ver" >> "$GITHUB_OUTPUT"
     # The pinned install-action knows only the wasm-bindgen versions released
     # by its own date, and Cargo.lock moves on its own lane: a fallback keeps a

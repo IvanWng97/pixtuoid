@@ -944,10 +944,9 @@ gen-media *args:
 gen-icons:
     .venv/bin/python3 scripts/gen-pix-icons.py
 
-# The wasm-bindgen CLI must match the crate's version exactly, and Cargo.lock is
-# that authority: gen-wasm checks the CLI against it, CI installs it.
+# The wasm-bindgen CLI must match the crate's version exactly; Cargo.lock is that authority.
 [private]
-wasm-bindgen-version:
+_wasm-bindgen-version:
     @awk '$0 == "name = \"wasm-bindgen\"" { getline; gsub(/"/, "", $3); print $3; found = 1 } END { exit !found }' Cargo.lock
 
 # The output is gitignored; CI builds it through .github/actions/gen-wasm.
@@ -960,7 +959,7 @@ wasm-bindgen-version:
 gen-wasm:
     #!/usr/bin/env sh
     set -eu
-    want="$(just wasm-bindgen-version)"
+    want="$(just _wasm-bindgen-version)"
     have="$(wasm-bindgen --version 2>/dev/null || true)"
     [ "${have#wasm-bindgen }" = "$want" ] || { echo "needs wasm-bindgen-cli $want (Cargo.lock's), found ${have:-none}: cargo install wasm-bindgen-cli --locked --version $want"; exit 1; }
     command -v wasm-opt >/dev/null || { echo "needs wasm-opt: brew install binaryen"; exit 1; }
