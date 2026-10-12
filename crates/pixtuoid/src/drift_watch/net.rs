@@ -24,7 +24,7 @@ pub(super) struct Platform;
 impl Fetch for Platform {
     fn get(&self, url: &str, timeout: Duration) -> Result<Vec<u8>, FetchError> {
         let header = authorized(url)
-            .then(|| std::env::var(TOKEN_ENV).ok())
+            .then(|| pixtuoid_core::platform::text_env(TOKEN_ENV))
             .flatten()
             .filter(|token| !token.is_empty())
             .map(|token| format!("Authorization: Bearer {token}\n"));

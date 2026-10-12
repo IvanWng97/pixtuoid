@@ -1239,7 +1239,7 @@ drift-watch-build:
 [doc('Check every name the sources read and the installers register against upstream (network)')]
 [group('meta')]
 drift-watch: drift-watch-build
-    target/debug/examples/drift_watch
+    "${CARGO_TARGET_DIR:-target}/debug/examples/drift_watch"
 
 # The pty driver's pure halves — the ANSI stripper, the composer comparison, the
 # gate/menu wording. Each fails silently, at the price of a BILLED turn: a broken

@@ -81,16 +81,19 @@
     can write issues; a step that also built would hand it to every
     dependency's build script.
   assert: |
-    [.jobs.drift.steps[] | select(.env.GITHUB_TOKEN)] as $t
-    | ($t | length) == 1
-      and ($t[0].run | test("just --no-deps drift-watch"))
-      and (.env // {} | has("GITHUB_TOKEN") | not)
-      and (.jobs.drift.env // {} | has("GITHUB_TOKEN") | not)
+    def holds: tostring | test("github\\.token|secrets\\.");
+    [.jobs.drift.steps[] | select(.env // {} | holds)] as $held
+    | ($held | all(.run // "" | test("\\bcargo\\b|drift-watch-build") | not))
+      and ([$held[] | .run // "" | split("\n")[] | select(test("drift-watch"))]
+           == ["just --no-deps drift-watch | tee drift-report.md"])
+      and (.env // {} | holds | not)
+      and (.jobs.drift.env // {} | holds | not)
   break:
     - '(.jobs.drift.steps[] | select(.env.GITHUB_TOKEN) | .run) |= sub("--no-deps "; "")'
-    - '(.jobs.drift.steps[] | select(.name == "Build the drift watch")) += {"env": {"GITHUB_TOKEN": "x"}}'
-    - '.jobs.drift.env = {"GITHUB_TOKEN": "x"}'
-    - '.env = {"GITHUB_TOKEN": "x"}'
+    - '(.jobs.drift.steps[] | select(.env.GITHUB_TOKEN) | .run) |= "just drift-watch-build\n" + .'
+    - '(.jobs.drift.steps[] | select(.name == "Build the drift watch")) += {"env": {"GH_TOKEN": "${{ github.token }}"}}'
+    - '.jobs.drift.env = {"GITHUB_TOKEN": "${{ github.token }}"}'
+    - '.env = {"GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}'
 
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml
