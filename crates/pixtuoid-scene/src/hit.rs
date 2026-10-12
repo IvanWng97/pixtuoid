@@ -175,9 +175,8 @@ mod tests {
         assert_eq!(act(SceneHit::Furniture("Desk"), None), None);
     }
 
-    /// The README's button, the issue chooser and the site link the coffee
-    /// account too, and none of them can read this const; so does any copy a
-    /// later change adds anywhere in the tree.
+    /// Files outside Rust can't read [`COFFEE_URL`], so this holds every tracked
+    /// `https://buymeacoffee.com/` link to it.
     #[test]
     fn every_coffee_link_in_the_workspace_is_coffee_url() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
