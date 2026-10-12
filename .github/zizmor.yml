@@ -8,10 +8,14 @@ rules:
     disable: true
   unpinned-uses:
     config:
-      # Every other action is hash-pinned, zizmor's default since v1.20: a tag
-      # can move, and "Pinning an action to a full-length commit SHA is currently
-      # the only way to use an action as an immutable release" (GitHub's
-      # secure-use reference). `actions/*` floats on a major under
-      # .github/dependabot.yml's ignore, which names the same namespace.
+      # Every action outside these namespaces is hash-pinned, zizmor's default
+      # since v1.20: a tag can move, and "Pinning an action to a full-length
+      # commit SHA is currently the only way to use an action as an immutable
+      # release" (GitHub's secure-use reference).
       policies:
+        # Floats on a major under .github/dependabot.yml's ignore, which names
+        # the same namespace.
         actions/*: ref-pin
+        # The org's one shared review runs at `@main`, which changes only
+        # through a PR (https://github.com/pixtuoid/.github/rules/24918053).
+        pixtuoid/.github/*: ref-pin

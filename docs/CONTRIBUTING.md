@@ -98,16 +98,14 @@ CodSpeed skip drafts. The jobs:
   workflows' own shell) and
   `just fixture-pii` (gitleaks over the committed capture tree); the
   capture-tree rules ride `just test` instead.
-- **zizmor** — workflow/action security: SHA pins (`actions/*` may float on a major),
+- **zizmor** — workflow/action security: SHA pins outside the namespaces
+  [`.github/zizmor.yml`](../.github/zizmor.yml) relaxes,
   credential-dropping checkouts, exact inline suppressions.
-- **The automatic Claude review** rides `claude-readonly-review.yml`: on the
-  trusted default branch, a read-only model reads the PR diff, its head files,
-  title, body and prior threads as inert data, and spawns the
-  [`REVIEW.md`](../REVIEW.md#scope) readers: repeated passes per planned unit,
-  one per lens over the whole diff, a verifier per candidate. A unit it skips
-  fails the run; a separate least-privilege publisher opens a review thread
-  per finding and sets the one required `claude-review` status, with each
-  lens's finding count in its description.
+- **The automatic Claude review** is the org's shared
+  [`claude-review.yml`](https://github.com/pixtuoid/.github/blob/main/.github/workflows/claude-review.yml),
+  which this repo's [caller](../.github/workflows/claude-review.yml) runs as
+  the required `claude-review / claude-review` check; [`REVIEW.md`](../REVIEW.md#scope)
+  holds what it checks here.
 - **CodeQL**, advisory (not a required check), stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
@@ -223,7 +221,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    whole-file comment audit: every file the PR touches — even by one line —
    gets its entire comment population re-read against `AGENTS.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
-   [`REVIEW.md`](../REVIEW.md#unit)'s comment audit). Not the merge gate.
+   [`REVIEW.md`](../REVIEW.md#every-changed-file)'s comment audit). Not the merge gate.
 8. **Merge gate** — [the gate](#the-merge-gate); the `local-review` skill
    runs its local rows; merging is `@mergifyio queue`, a release PR by hand.
 9. **Wrap** — retro; a durable lesson becomes a mechanism (a test, a gate) or
@@ -288,9 +286,8 @@ invariants"), which every contributor and agent reads first.
 
 ### The merge gate
 
-Green `ci-gate`; the required `claude-review` status
-`success` at the final head, from a published review or Dependabot's policy
-exemption; every finding's review thread resolved by its
+Green `ci-gate`; the required `claude-review / claude-review` check green at
+the final head; every finding's review thread resolved by its
 disposition; zero open confirmed `issue (blocking)`; each matching
 [local row](../REVIEW.md#escalation)'s run recorded as a PR comment starting
 `<!-- local-row:<row>:<head sha> -->`, where `<row>` is the row's first column
@@ -304,11 +301,10 @@ the new head, or at the old one when the change deletes it; its marker names
 the new head and its text the old one. When that old head is no longer an
 ancestor of the new one (a rebase), the re-run judges the whole PR. The
 [`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
-rows. A published review passes whatever it found, unless it kept findings
-past its ceiling: it then fails at that head, and its summary names them; fold
-those with its threads, then comment `/claude-review`. A failed status with no
-published review, or a missing one, is no review: comment `/claude-review`,
-else split the PR smaller.
+rows. A refuted blocking finding clears without a push: once its thread is
+resolved with the disposition, re-run the review (`gh run rerun <id> --failed`).
+A bot's push onto a human's PR fails the review until a human pushes: a re-run
+keeps the bot as its `github.actor`, which the action refuses.
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
 entry is a command because no queue condition can confirm a finding or match a
@@ -322,17 +318,11 @@ bot PR (`bot/media-regen`, `docs/images/` only) queues itself and needs no
 generated-art record: it renders main's merged code, which each look PR's lens
 already read as evidence.
 
-The bots never review a fork PR on their own: a maintainer approves its CI
-run, then comments `/claude-review`, again after every push. Its author can
-resolve their own threads, so before merging read each thread's `resolvedBy`
-and its reply. Its bot verdict is advisory, since the
-author can steer it through the diff, so the maintainer reads the diff too.
-A Dependabot PR is not reviewed: [`claude-review.yml`](../.github/workflows/claude-review.yml)'s
-`exempt` job posts the `claude-review` status when every commit is
-Dependabot's and the PR only moves versions in its manifests or an action's
-`uses:` pin, with no
-package, install script or source new to it. Anything else gets `pending`, and
-a maintainer comments `/claude-review`.
+The review skips a fork's or a bot's PR, and its skipped check passes. A
+maintainer reviews a fork's or Dependabot's PR by hand before queueing it; a
+fork's author can resolve their own threads, so read each thread's
+`resolvedBy` and its reply. The media-regen PR above is unreviewed by design,
+held to `docs/images/` by its queue rule's file filter.
 
 ### Dispositions
 
@@ -343,8 +333,7 @@ sweep shows it isn't, that test is the mechanism and no defensive code lands) ·
 RE-SCOPED → #N (real and INTRODUCED — or first made reachable — by this
 change, and bigger than the PR: split it off into #N; a redesign that brings
 the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
-or introduced, non-blocking, no bigger than the PR and found after round 2
-per the [convergence contract](#convergence-contract), and not FIXED in place
+and not FIXED in place
 — in place fits a small defect inside code this change already touches,
 adding no local row — so it is fixed in #N; a defect in another session's
 tree cites that session's PR). A
@@ -364,22 +353,14 @@ before re-litigating.
   change that both adds and deletes at scale is two PRs.
 - **Deletion census** — before deleting N members of a class, the full list
   and its criterion land in the first commit or the PR body (#943).
-- **Fixes are never put off; severity ends the loop.** The folds answering
-  rounds 1 and 2 (the review's [`Round:`](../REVIEW.md#re-review)) each take
-  every accepted finding, whatever code it names, into ONE commit: a
-  defect this change introduced is FIXED in it, since a clean-up left for
-  later rarely lands ([Google](https://google.github.io/eng-practices/review/reviewer/pushback.html#cleaning-it-up-later)).
-  After that a fold takes only what [the merge gate](#the-merge-gate)
-  confirms blocks the merge, plus, in at most one fold,
-  [in-place](#dispositions) fixes that change no behavior: a comment or doc
-  change, or a refactor the existing tests cover (its commit names, for each
-  branch it rewrites, the test that fails when that branch takes another
-  branch's action); any other non-blocking finding is a FOLLOW-UP, one PR
-  answering as many as it fixes: a
-  review moves on once only non-blocking suggestions remain
-  ([GitLab](https://docs.gitlab.com/development/code_review/)). A blocking
-  issue confirmed in a fold STOPS the loop: revert the fold and re-land
-  smaller, or re-scope.
+- **Fixes are never put off.** Each fold takes every accepted finding,
+  whatever code it names, into ONE commit: a defect this change introduced is
+  FIXED in it, since a clean-up left for later rarely lands
+  ([Google](https://google.github.io/eng-practices/review/reviewer/pushback.html#cleaning-it-up-later)).
+  The loop converges because a re-review judges only the PR's own change since
+  the last reviewed head (the [shared review](https://github.com/pixtuoid/.github/blob/main/.github/workflows/claude-review.yml)'s
+  scope), so a fold's findings are the fold's. A blocking issue confirmed in a
+  fold STOPS the loop: revert the fold and re-land smaller, or re-scope.
 - **A fold's behavior change**, a user-visible string included (a doc
   comment clap renders as `--help` is one), ships a test that fails without
   it; the rest of a fold is a revert, a deletion, a

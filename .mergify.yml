@@ -4,7 +4,7 @@
 # Two-step CI (docs.mergify.com/merge-queue/two-step): a PR's pushes run the
 # light tier, and the queue's draft PR (`mergify/merge-queue/…`) runs the full
 # tier, batching several PRs into one run. Branch protection is not injected:
-# the bots review the PR, never the queue's draft, so an injected `claude-review`
+# the bots review the PR, never the queue's draft, so an injected review
 # condition, which the queue also checks on that draft
 # (docs.mergify.com/merge-queue/rules: "the merge conditions for checks are
 # evaluated against the temporary pull request"), would never pass there.
@@ -37,7 +37,11 @@ queue_rules:
       - -head ~= ^release-plz-
       - check-success = ci-gate
       - check-success = GitGuardian Security Checks
-      - check-success = claude-review
+      # The review skips a fork's or a bot's PR (pixtuoid/.github's
+      # claude-review.yml), which a human reviews.
+      - or:
+          - check-success = claude-review / claude-review
+          - check-skipped = claude-review / claude-review
       - "#review-threads-unresolved = 0"
     # The queue's draft PR, where ci-gate is the full tier.
     merge_conditions:
