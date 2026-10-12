@@ -24,7 +24,7 @@
     "label": "GitHub Releases",
     "cmds": [
       "# prebuilt binaries (macOS · Linux · Windows .zip) + Debian .debs:",
-      "# https://github.com/IvanWng97/pixtuoid/releases/latest"
+      "# https://github.com/pixtuoid/pixtuoid/releases/latest"
     ],
     "readme": false
   }

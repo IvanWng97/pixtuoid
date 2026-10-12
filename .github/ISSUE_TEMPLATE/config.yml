@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: 💬 Questions & ideas
-    url: https://github.com/IvanWng97/pixtuoid/discussions
+    url: https://github.com/pixtuoid/pixtuoid/discussions
     about: Ask a question, share a theme, or float an idea before opening an issue.
   - name: ☕ Support the project
     url: https://buymeacoffee.com/IvanWng97

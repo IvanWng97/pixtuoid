@@ -50,7 +50,7 @@ AFTER the local `ray publish` marker `__raycast_latest_publish_ext/pixtuoid__`
 folded `failed: <msg>` form: it prefix-strips, and renders a bare `failed` toast
 with the reason dropped. The parse in `src/` is already correct, so a republish
 is the whole fix. That tag is never pushed, so a fresh clone has no copy — check
-your own, then the listing at `raycast.com/IvanWng97/pixtuoid`, before assuming
+your own, then the listing at `raycast.com/pixtuoid/pixtuoid`, before assuming
 it is clear.
 
 ## Toolchain policy

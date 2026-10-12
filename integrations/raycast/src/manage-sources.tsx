@@ -13,7 +13,7 @@ import {
 import { usePromise } from "@raycast/utils";
 import { BinaryNotFoundError, getSources, SourceStatus, toggleSource } from "./pixtuoid";
 
-const REPO_URL = "https://github.com/IvanWng97/pixtuoid";
+const REPO_URL = "https://github.com/pixtuoid/pixtuoid";
 
 export default function ManageSources() {
   const { data, isLoading, revalidate, error } = usePromise(getSources);

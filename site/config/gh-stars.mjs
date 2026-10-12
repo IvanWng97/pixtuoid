@@ -3,7 +3,7 @@
 // an offline/local build must never fail on it: every error path yields null.
 import process from 'node:process';
 
-const API = 'https://api.github.com/repos/IvanWng97/pixtuoid';
+const API = 'https://api.github.com/repos/pixtuoid/pixtuoid';
 // Shared with Statusline.astro's PR-feed fetch, so an offline/slow CI runner
 // fails every build-time GitHub call the same way.
 export const GH_FETCH_TIMEOUT_MS = 5000;

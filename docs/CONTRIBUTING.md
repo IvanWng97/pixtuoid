@@ -199,7 +199,7 @@ intervene only if it reds.
 Publishing uses **OIDC trusted publishing** — CI carries no registry tokens;
 the per-crate/per-package Trusted Publishers, each naming environment
 `release`, must exist before the tag
-([#216](https://github.com/IvanWng97/pixtuoid/issues/216)).
+([#216](https://github.com/pixtuoid/pixtuoid/issues/216)).
 
 ## The arc loop
 

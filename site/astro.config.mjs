@@ -118,7 +118,7 @@ for (const [chId, name] of featureChannelOwner) {
 
 // Rewrite repo-relative markdown links to GitHub so they resolve once deployed.
 function rehypeRepoLinks() {
-  const repo = 'https://github.com/IvanWng97/pixtuoid/blob/main/';
+  const repo = 'https://github.com/pixtuoid/pixtuoid/blob/main/';
   const DOC_DIR = 'docs'; // the rendered docs live in docs/ — links resolve from there
   const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
   const DANGEROUS = /^\s*(?:javascript|data|vbscript):/i;
