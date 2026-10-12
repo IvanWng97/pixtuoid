@@ -57,7 +57,8 @@ API_PUBLIC_API := "0.52.0"
 
 # The cargo-hawk `hawk` runs, and the exact rustc it links (its
 # rust-toolchain.toml): hawk refuses any other, so a bump moves both, and the
-# installer's hash with them.
+# installer's hash with them; a workspace `rust-version` past HAWK_RUST fails
+# `just hawk` until they move.
 HAWK_VERSION := "0.1.15"
 HAWK_RUST := "1.99.0"
 HAWK_INSTALLER_SHA256 := "4e1b85fc15d3d4efa9b3bd7c62620655cc5504b7164272292043e3794f54111f"
@@ -1120,7 +1121,7 @@ npm-check:
 # caches. Tests are CI's: in the hook, every worktree's push re-ran the whole
 # suite on one shared machine. `full` adds the feature powerset and the tests,
 # built with linux-test's features — the Rust recipes CI's lint/clippy/hack/test
-# jobs run; what it still can't see is in CONTRIBUTING.md#ci-gates.
+# jobs run; what it still can't see are ci.yml's other jobs.
 [doc('Local gate: lint → clippy; `full` = lint → clippy → hack → test')]
 [group('meta')]
 preflight mode="":

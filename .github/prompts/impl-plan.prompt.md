@@ -65,8 +65,8 @@ Every section gets an answer; "n/a" counts only with a reason.
    marked local that the change matches, and the `beautify-decoration` loop
    for sprite changes. Verification steps are blocking plan
    items, not checkboxes — PR #61 shipped five walk regressions behind an
-   unchecked "live run" checkbox. Name the CI-ONLY gates the change can red
-   (`docs/CONTRIBUTING.md#ci-gates` lists them): `just preflight full` is blind to all of them, so "preflight green"
+   unchecked "live run" checkbox. Name the CI-ONLY gates the change can red:
+   `just preflight full` is blind to all of them, so "preflight green"
    is a claim about a SUBSET and must say so — the ghost-gate arc reported
    all-green with api-surface and doc-check both red. And reproduce the
    REPORTED scenario, including its ordering (item 3b), not a convenient one:
