@@ -320,7 +320,7 @@ citation_problems() {
     true
 }
 while IFS= read -r reader; do
-    [[ "$reader" == *"$protocol_dest#common"* && "$reader" == *"$rules_name#"* ]] ||
+    [[ "$reader" == *"$protocol_dest#common"* && -n "$(cites "$rules_name" <<<"$reader")" ]] ||
         fail "a review prompt does not apply $protocol_dest#common and cite $rules_name: $reader"
 done < <(jq -r '.[].prompt' .github/prompts/review-agents.json && printf '%s\n' "$prompt")
 problems="$(citation_problems .github/prompts/review-agents.json "$prompt" .github/prompts/review-protocol.md "$REVIEW_RULES_FILE")"
@@ -333,8 +333,10 @@ mkdir -p "$cite_dir"
 assert_caught() {
     sed -E "$2" .github/prompts/review-agents.json >"$cite_dir/agents.json"
     sed -E "${3:-}" .github/prompts/review-protocol.md >"$cite_dir/protocol.md"
-    ! { cmp -s "$cite_dir/agents.json" .github/prompts/review-agents.json &&
-        cmp -s "$cite_dir/protocol.md" .github/prompts/review-protocol.md; } || fail "the citation break \"$1\" edits nothing"
+    [[ -z "$2" ]] || ! cmp -s "$cite_dir/agents.json" .github/prompts/review-agents.json ||
+        fail "the citation break \"$1\" edits no prompt"
+    [[ -z "${3:-}" ]] || ! cmp -s "$cite_dir/protocol.md" .github/prompts/review-protocol.md ||
+        fail "the citation break \"$1\" edits nothing in the protocol"
     [[ -n "$(citation_problems "$cite_dir/agents.json" "$prompt" "$cite_dir/protocol.md" "$REVIEW_RULES_FILE")" ]] ||
         fail "the citation check misses $1"
 }
