@@ -280,11 +280,28 @@ staged="$(cd "$own_dir/work/.claude-review" && find . -type f)"
 protocol_dest=".claude-review/${staged#./}"
 cmp -s "$own_dir/work/$protocol_dest" .github/prompts/review-protocol.md ||
     fail "the review's own files step staged something other than review-protocol.md at $protocol_dest"
-# Every reader reads the caller's rules where the checkout put them.
+# A reader cites a section as <file>#<anchor>, of the staged protocol or of the
+# caller's REVIEW.md. Each must be a heading there, so a renamed heading reds
+# here, not as a protocol and five prompts silently out of step.
+anchors_of() {
+    # github-slugger's slug, for an ASCII heading.
+    awk '/^#+ / { h = tolower($0); sub(/^#+ /, "", h); gsub(/[^a-z0-9 _-]/, "", h); gsub(/ /, "-", h); print h }' "$1"
+}
+cites() { { grep -oE "${1//./\\.}#[a-z0-9-]+" || true; } | sed 's/.*#//' | sort -u; }
+readers() { jq -r '.[].prompt' .github/prompts/review-agents.json && printf '%s\n' "$prompt"; }
+rules_name="$(basename "$REVIEW_RULES_FILE")"
 while IFS= read -r reader; do
-    [[ "$reader" == *"$protocol_dest"* && "$reader" == *"$REVIEW_RULES_FILE's"* ]] ||
-        fail "a review prompt does not name the protocol at $protocol_dest and $REVIEW_RULES_FILE: $reader"
-done < <(jq -r '.[].prompt' .github/prompts/review-agents.json && printf '%s\n' "$prompt")
+    [[ "$reader" == *"$protocol_dest#common"* && "$reader" == *"$rules_name#"* ]] ||
+        fail "a review prompt does not apply $protocol_dest#common and cite $rules_name: $reader"
+done < <(readers)
+for cited in "$protocol_dest:.github/prompts/review-protocol.md" "$rules_name:$REVIEW_RULES_FILE"; do
+    missing="$(comm -23 <({ readers && cat .github/prompts/review-protocol.md; } | cites "${cited%%:*}") \
+        <(anchors_of "${cited#*:}" | sort -u))"
+    [[ -z "$missing" ]] || fail "the review cites ${cited%%:*}#[${missing//$'\n'/ }], headings ${cited#*:} lacks"
+done
+# A citation in prose would escape the check above.
+prose="$({ readers && cat .github/prompts/review-protocol.md; } | { grep -oE "${rules_name//./\\.}\`?('s)? [A-Z][A-Za-z]*" || true; })"
+[[ -z "$prose" ]] || fail "the review cites $rules_name in prose, not as $rules_name#<anchor>: ${prose//$'\n'/; }"
 # Staged alone, the protocol resolves only its own anchors and absolute URLs.
 dead_links="$(grep -noE '\]\([^)]*\)' "$own_dir/work/$protocol_dest" | grep -vE '\]\((#|https://)' || true)"
 [[ -z "$dead_links" ]] || fail "the staged protocol links what its location lacks: ${dead_links//$'\n'/ }"

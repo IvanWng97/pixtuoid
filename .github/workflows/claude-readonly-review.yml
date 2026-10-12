@@ -313,9 +313,9 @@ jobs:
           display_report: false
           show_full_output: false
           prompt: >-
-            Follow the Scope, Common and Orchestrator sections of the review
-            protocol, .claude-review/protocol.md, and REVIEW.md's Common
-            section. Your inputs are
+            Follow the review protocol's .claude-review/protocol.md#scope,
+            .claude-review/protocol.md#common and
+            .claude-review/protocol.md#orchestrator, and REVIEW.md#common. Your inputs are
             under .claude-review/: pr.diff
             (the PR against the trusted default-branch tree you run in),
             review-context.md, pr-description.json, prior-threads.json,

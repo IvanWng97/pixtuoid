@@ -1,8 +1,8 @@
 # Review protocol
 
-Staged by `claude-readonly-review.yml` from its own commit. `REVIEW.md` is the
-reviewed repository's own, at its root: it holds the rules, and its Common
-section joins this one's.
+Staged by `claude-readonly-review.yml` from its own commit. `REVIEW.md#<section>`
+is a section of the reviewed repository's rules, `REVIEW.md`, at its root, and
+`REVIEW.md#common` joins this [Common](#common).
 
 ## Scope
 
@@ -11,10 +11,11 @@ Each reader applies [Common](#common) and its own section, nothing else:
 - The automatic review's [orchestrator](#orchestrator) merges duplicate
   candidates and keeps what the [verifier](#verifier) keeps.
 - A unit reviewer applies [Unit](#unit) to the files of one unit.
-- The correctness reviewer applies `REVIEW.md`'s Correctness lens to the whole
-  diff, plus every matching Escalation row, and names the local rows.
-- The design reviewer applies `REVIEW.md`'s Design lens to the whole diff.
-- A local row lens applies its `REVIEW.md` Escalation row.
+- The correctness reviewer applies its lens, `REVIEW.md#correctness`, to the
+  whole diff, plus every matching `REVIEW.md#escalation` row, and names the
+  local rows.
+- The design reviewer applies its lens, `REVIEW.md#design`, to the whole diff.
+- A local row lens applies its `REVIEW.md#escalation` row.
 
 ## Common
 
@@ -32,8 +33,7 @@ upstream shape) not fetched this session says "unverified" (#112).
 
 [Conventional Comments](https://conventionalcomments.org/) labels, the
 `review-schema.json` `severity` enum;
-taste with no defect is never posted. Dispositions:
-[CONTRIBUTING](https://github.com/IvanWng97/pixtuoid/blob/main/docs/CONTRIBUTING.md#pull-requests).
+taste with no defect is never posted.
 
 - `issue (blocking)` — correctness, security, an invariant, or a breach of any
   AGENTS.md rule, its Conventions included. It blocks only once
@@ -47,7 +47,7 @@ taste with no defect is never posted. Dispositions:
 Each finding carries:
 
 - `severity`: the [label](#severity)'s decoration.
-- `lens`: the `REVIEW.md` lens whose section names the finding's kind; a unit's
+- `lens`: the lens whose `REVIEW.md#lenses` section names the finding's kind; a unit's
   comment, DRY and drift findings are design, its test findings correctness.
 - `path`: repository-relative (the `b/` side of `pr.diff`), never absolute.
 - `line`: the absolute head-side line, never invented.
@@ -72,9 +72,7 @@ resolved or not
 ([re-review convergence](https://code.claude.com/docs/en/code-review#what-you-can-tune));
 new findings follow [Severity](#severity), whatever the round. The published
 review shows its `Round:`, the count of heads it was published at, where a head
-that only merges main in does not advance it; the
-[convergence contract](https://github.com/IvanWng97/pixtuoid/blob/main/docs/CONTRIBUTING.md#convergence-contract) says what
-each round's fold takes.
+that only merges main in does not advance it.
 
 ## Unit
 
@@ -92,12 +90,12 @@ scope, `issue (pre-existing)` when the diff did not introduce it.
    Test fixtures stay inline.
 3. **Drift** — docs naming a moved file/fn/flag/count, searched including
    `.github/` and `.claude/`.
-4. **Test teeth** for every test the unit holds, as `REVIEW.md`'s Correctness
+4. **Test teeth** for every test the unit holds, as `REVIEW.md#correctness`
    defines it.
 
 ## Verifier
 
 Refute by default. Keep a candidate only when the code at its `file:line`,
 read this time, shows the evidence it states, the claim follows from it, and
-its failure scenario is reachable; drop it when `REVIEW.md`'s Do not flag
-covers it.
+its failure scenario is reachable; drop it when `REVIEW.md#do-not-flag` covers
+it.
