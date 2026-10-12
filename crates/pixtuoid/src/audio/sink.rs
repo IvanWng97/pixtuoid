@@ -66,6 +66,9 @@ pub(crate) fn mono(samples: &[f32]) -> rodio::buffer::SamplesBuffer {
 /// `source` held under [`CEILING_DBFS`]: the one output stage of the device's
 /// bus and the LISTEN render alike.
 pub(crate) fn limited<S: Source>(source: S) -> impl Source {
+    // The default's soft knee stays: a zero one divides by zero at the
+    // threshold (`LimitBase::new`'s `inv_knee_8`), so this curve bends where
+    // the web's hard-kneed one doesn't.
     let settings = LimitSettings::default()
         .with_threshold(CEILING_DBFS)
         .with_attack(LIMITER_ATTACK)
@@ -77,7 +80,7 @@ pub(crate) fn limited<S: Source>(source: S) -> impl Source {
 
 /// The bus every lane and one-shot sums into, at the device's format, and its
 /// [`limited`] output for the device's mixer.
-pub(crate) fn bus(
+fn bus(
     channels: rodio::ChannelCount,
     rate: rodio::SampleRate,
 ) -> (rodio::mixer::Mixer, impl Source + Send + 'static) {
