@@ -828,10 +828,9 @@ const HOOK_APPROVAL_REQUESTED: &str = "tool_approval_requested";
 const HOOK_APPROVAL_RESOLVED: &str = "tool_approval_resolved";
 
 /// The hook event types this decoder turns into events — this module's
-/// hook watch below, pinned to the dispatch arms by the
-/// drift-surface census (`every_exported_set_is_exactly_its_dispatch_arms`)
-/// and to the TS extension's registration list by the install-side
-/// two-language pin.
+/// hook watch below, pinned to the dispatch arms by
+/// `every_exported_set_is_exactly_its_dispatch_arms` and to the TS
+/// extension's registration list by the install-side two-language pin.
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
     HOOK_SESSION_START,
