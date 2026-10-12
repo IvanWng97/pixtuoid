@@ -287,19 +287,26 @@ anchors_of() {
     # github-slugger's slug, for an ASCII heading.
     awk '/^#+ / { h = tolower($0); sub(/^#+ /, "", h); gsub(/[^a-z0-9 _-]/, "", h); gsub(/ /, "-", h); print h }' "$1"
 }
-cites() { { grep -oE "${1//./\\.}#[A-Za-z0-9_-]+" || true; } | sed 's/.*#//' | sort -u; }
+# A citation is exactly <file>#<anchor>, with no path character before <file>.
+path_chars='A-Za-z0-9./_-'
+cites() { { grep -oE "(^|[^$path_chars])${1//./\\.}#[A-Za-z0-9_-]+" || true; } | sed 's/.*#//' | sort -u; }
 rules_name="$(basename "$REVIEW_RULES_FILE")"
-# One problem per line: an anchor no heading has, or a heading named anywhere
-# but in a citation or an in-file link (an allowlist: no prose form escapes).
+# One problem per line: an anchor no heading has, a <path>#<anchor> in any
+# other spelling, or a heading named anywhere but in a citation or an in-file
+# link (an allowlist: no prose form escapes).
 citation_problems() {
     local agents="$1" orchestrator="$2" protocol="$3" rules="$4" readers cited prose name
+    local spelled="(${protocol_dest//./\\.}|${rules_name//./\\.})#[A-Za-z0-9_-]+"
     readers="$(jq -r '.[].prompt' "$agents" && printf '%s\n' "$orchestrator")"
     for cited in "$protocol_dest:$protocol" "$rules_name:$rules"; do
         comm -23 <({ printf '%s\n' "$readers" && cat "$protocol"; } | cites "${cited%%:*}") \
             <(anchors_of "${cited#*:}" | sort -u) | sed "s|^|${cited%%:*}#|"
     done
+    { printf '%s\n' "$readers" && cat "$protocol"; } | sed -E 's#https?://[^ )>]+##g; s/\]\(#[^)]*\)//g' |
+        { grep -oE "(^|[^$path_chars])[$path_chars]+#[A-Za-z0-9_-]+" || true; } | sed -E "s/^[^$path_chars]//" |
+        { grep -vxE "$spelled" || true; } | sed 's/^/unresolved spelling /'
     prose="$({ printf '%s\n' "$readers" && grep -v '^#' "$protocol"; } |
-        sed -E 's/\[[^]]*\]\(#[^)]*\)//g; s/[A-Za-z./-]*#[A-Za-z0-9_-]+//g')"
+        sed -E "s/\\[[^]]*\\]\\(#[^)]*\\)//g; s,(^|[^$path_chars])$spelled,\\1,g")"
     while IFS= read -r name; do
         grep -qE "(^|[^A-Za-z-])$(sed 's/[][\.*^$+?(){}|/]/\\&/g' <<<"$name")([^A-Za-z-]|$)" <<<"$prose" &&
             echo "\"$name\" outside a citation"
@@ -313,17 +320,25 @@ done < <(jq -r '.[].prompt' .github/prompts/review-agents.json && printf '%s\n' 
 problems="$(citation_problems .github/prompts/review-agents.json "$prompt" .github/prompts/review-protocol.md "$REVIEW_RULES_FILE")"
 [[ -z "$problems" ]] ||
     fail "the review cites a section by a heading its file lacks, or not as <file>#<anchor>: ${problems//$'\n'/; }"
-# Each way a citation once escaped the check.
+# Each way a citation once escaped the check: a sed over the prompts, and one
+# over the protocol in the same edit.
 cite_dir="$test_dir/cites"
 mkdir -p "$cite_dir"
-for bypass in 's/REVIEW\.md#escalation/REVIEW.md#Escalation/g' \
-    's/every matching REVIEW\.md#escalation row/every matching Escalation row of REVIEW.md/' \
-    "s/each with the fields \\.claude-review\\/protocol\\.md#findings names/each with the fields the protocol's Findings names/"; do
-    sed -E "$bypass" .github/prompts/review-agents.json >"$cite_dir/agents.json"
-    ! cmp -s "$cite_dir/agents.json" .github/prompts/review-agents.json || fail "the citation bypass $bypass edits nothing"
-    [[ -n "$(citation_problems "$cite_dir/agents.json" "$prompt" .github/prompts/review-protocol.md "$REVIEW_RULES_FILE")" ]] ||
-        fail "the citation check misses a review prompt edited by $bypass"
-done
+assert_caught() {
+    sed -E "$2" .github/prompts/review-agents.json >"$cite_dir/agents.json"
+    sed -E "${3:-}" .github/prompts/review-protocol.md >"$cite_dir/protocol.md"
+    ! cmp -s "$cite_dir/agents.json" .github/prompts/review-agents.json || fail "the citation break \"$1\" edits no prompt"
+    [[ -n "$(citation_problems "$cite_dir/agents.json" "$prompt" "$cite_dir/protocol.md" "$REVIEW_RULES_FILE")" ]] ||
+        fail "the citation check misses $1"
+}
+assert_caught "a non-slug anchor" 's/REVIEW\.md#escalation/REVIEW.md#Escalation/g'
+assert_caught "a section named before its file" \
+    's/every matching REVIEW\.md#escalation row/every matching Escalation row of REVIEW.md/'
+assert_caught "a protocol section in prose" \
+    "s/each with the fields \\.claude-review\\/protocol\\.md#findings names/each with the fields the protocol's Findings names/"
+assert_caught "a misspelled file beside a renamed heading" \
+    's/\.claude-review\/protocol\.md#verifier/protocol.md#verifier/' 's/^## Verifier$/## Refuter/'
+assert_caught "a path ahead of the file" 's/REVIEW\.md#common/docs\/REVIEW.md#common/g'
 # Staged alone, the protocol resolves only its own anchors and absolute URLs.
 dead_links="$(grep -noE '\]\([^)]*\)' "$own_dir/work/$protocol_dest" | grep -vE '\]\((#|https://)' || true)"
 [[ -z "$dead_links" ]] || fail "the staged protocol links what its location lacks: ${dead_links//$'\n'/ }"
