@@ -115,7 +115,7 @@ portable = []
 audio = ["dep:rodio"]
 # The `drift_watch` example's checker, with every source's upstream
 # declarations, and its tests (`just test-upstream`); no shipped build enables
-# it, and no other build compiles its parsers.
+# it, and no other job runs its tests.
 upstream = [
     "pixtuoid-core/upstream",
     "dep:regex",

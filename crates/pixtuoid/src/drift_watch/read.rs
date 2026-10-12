@@ -42,7 +42,7 @@ fn missing(what: impl Into<String>) -> Unread {
 
 /// The ONE item found: a first-match read is silently wrong the day upstream
 /// grows a second declaration above the real one (a `#[cfg(test)]` twin, a
-/// macro body), so none or several is probe health.
+/// second invocation of the macro), so none or several is probe health.
 fn one<T>(mut found: impl Iterator<Item = T>, what: &str) -> Result<T, Unread> {
     match (found.next(), found.next()) {
         (Some(it), None) => Ok(it),

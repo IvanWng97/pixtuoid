@@ -10,9 +10,11 @@ updates:
     schedule:
       interval: weekly
     groups:
-      # Ahead of rust-deps, since a crate joins the first group it matches: oxc
-      # ships a breaking 0.x minor about weekly, and inside rust-deps one such
-      # break would hold every other bump until the drift readers are fixed.
+      # Ahead of rust-deps, since a crate joins the first group it matches. oxc
+      # is 0.y, where each y bump may break
+      # (https://doc.rust-lang.org/cargo/reference/semver.html), and inside
+      # rust-deps one break would hold every other bump until the drift readers
+      # are fixed.
       oxc:
         patterns: ["oxc*"]
       rust-deps:

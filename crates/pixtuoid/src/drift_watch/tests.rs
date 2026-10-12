@@ -114,7 +114,7 @@ fn a_vanished_name_is_breaking_and_a_present_one_is_silent() {
     assert_eq!(r.breaking.len(), 1, "{r:?}");
     assert!(
         !r.breaking[0].contains("there now"),
-        "only a sole read names upstream's value"
+        "only a `RustStr` read names upstream's value"
     );
     assert!(
         r.breaking[0].contains("`a.b`") && r.breaking[0].contains("no sprite"),
@@ -569,13 +569,10 @@ fn render(pattern: &str, name: &str) -> String {
                 .find(')')
                 .unwrap_or_else(|| panic!("unclosed group in {pattern}"));
             let first = alts[..end].split('|').next().unwrap_or_default();
-            // An optional group renders present: its first branch still matches.
-            let optional = usize::from(alts[end + 1..].starts_with('?'));
-            (render(first, name), 3 + end + 1 + optional)
+            (render(first, name), 3 + end + 1)
         } else {
             let fixed: &[(&str, &str)] = &[
                 ("{name}", name),
-                (r#"([^"]+)"#, name),
                 (r"(\w+)", name),
                 (r"\w+", "w"),
                 ("(?m)", ""),
@@ -617,11 +614,6 @@ fn rendering_a_pattern_yields_text_it_matches() {
         (r#""x-method"\s*:\s*"{name}""#, "session/update"),
         (r"Schema\.Literal\({name}\)", "a.b"),
         (r"(?m)^export const \b{name} = \{", "Event"),
-        (
-            r#"impl\s+X\s*\{\s*fn\s+(?:a|b)\(\)\s*\{\s*"([^"]+)""#,
-            "agent",
-        ),
-        (r#"const M\s*:\s*&(?:'static\s+)?str\s*=\s*"([^"]+)""#, "m"),
     ] {
         let text = render(pattern, name);
         let re = Regex::new(&pattern.replace("{name}", &regex::escape(name))).expect("compiles");
@@ -754,9 +746,9 @@ fn page(w: &Watch, names: &[&str]) -> String {
 }
 
 /// `decl`, then each of `w`'s anchors it does not already carry: rendering a
-/// declaration's own head again would declare it twice. In source a parser
-/// reads, the anchors sit in a block comment, which the anchor check still
-/// sees and the parser skips.
+/// declaration's own head again would declare it twice. In Rust and TypeScript
+/// source the anchors sit in a block comment, which the anchor check still sees
+/// and the parser skips; Markdown has none, so its anchors follow as plain lines.
 fn after_decl(w: &Watch, decl: String) -> String {
     let rest: Vec<String> = w
         .docs

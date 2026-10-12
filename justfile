@@ -1255,8 +1255,6 @@ drift-selftest:
 drift-watch:
     cargo run -q -p pixtuoid --no-default-features --features upstream --example drift_watch
 
-# Its parsers build only under `upstream`, and its readers read fetched text
-# alike on every OS, so CI runs this on Linux alone (ci-tests.yml).
 [doc('Test the upstream drift watch: engine, readers, censuses (`upstream` feature)')]
 [group('rust')]
 test-upstream:

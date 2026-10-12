@@ -69,7 +69,7 @@ CodSpeed skip drafts. The jobs:
 - **msrv** — the workspace compiles on its declared `rust-version`.
 - **drift watch** (`just test-upstream`, a step of linux-test) — the upstream
   drift watch's engine, parser-backed readers and censuses, which build only
-  under the binary's `upstream` feature, so no other job compiles their parsers.
+  under the binary's `upstream` feature, so no other job runs their tests.
 - **packaging-build** (full tier) — a clean `cargo install --locked` on both
   Homebrew bottle platforms.
 - **hawk** (full tier) — `just hawk` fails on a `pub` item no other workspace
