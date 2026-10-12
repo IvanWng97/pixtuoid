@@ -19,6 +19,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 
 use crate::install::target::MergeOutcome;
+#[cfg(feature = "upstream")]
+use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 /// Marks the extension as ours — absent from the removed-stub, so an uninstall
 /// of a foreign/removed file is a clean no-op.
@@ -27,6 +29,163 @@ const SENTINEL: &str = "@pixtuoid-omp-extension";
 const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
 pub(crate) const EXTENSION_TEMPLATE: &str = include_str!("omp_extension.ts");
+
+/// The upstream extension-API names the bridge reads: each event field
+/// (`ev?.…`), the session getters and the context's `cwd`.
+#[cfg(all(test, feature = "upstream"))]
+pub(crate) fn extension_reads() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = EXTENSION_TEMPLATE
+        .match_indices("ev?.")
+        .map(|(i, m)| {
+            let rest = &EXTENSION_TEMPLATE[i + m.len()..];
+            let end = rest
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(rest.len());
+            &rest[..end]
+        })
+        .collect();
+    for (probe, name) in [
+        (".getSessionFile", "getSessionFile"),
+        (".getSessionId", "getSessionId"),
+        ("ctx?.cwd", "cwd"),
+    ] {
+        if EXTENSION_TEMPLATE.contains(probe) {
+            names.push(name);
+        }
+    }
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+#[cfg(feature = "upstream")]
+const READ_GONE: &str = "the installed bridge forwards an undefined value, so that signal quietly \
+                         dies (approval waits, lifecycle, or identity)";
+
+/// One watch per declaring type: a field moving between the approval events
+/// would read as present off their union. `extension_reads` is held to the
+/// union of their bare names by `each_template_read_is_watched`.
+#[cfg(feature = "upstream")]
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "omp.approval_requested",
+        ours: || vec!["toolCallId", "toolName", "reason"],
+        docs: &[Doc {
+            at: At::Path {
+                repo: "can1357/oh-my-pi",
+                branch: "main",
+                path: "packages/coding-agent/src/extensibility/extensions/types.ts",
+            },
+            anchor: r"(?m)^export interface ToolApprovalRequestedEvent\b",
+            owns: "`ToolApprovalRequestedEvent`",
+        }],
+        read: Read::TsFields {
+            name: "ToolApprovalRequestedEvent",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(READ_GONE),
+        siblings: None,
+    },
+    Watch {
+        id: "omp.approval_resolved",
+        ours: || vec!["toolCallId", "toolName", "approved", "reason"],
+        docs: &[Doc {
+            at: At::Path {
+                repo: "can1357/oh-my-pi",
+                branch: "main",
+                path: "packages/coding-agent/src/extensibility/extensions/types.ts",
+            },
+            anchor: r"(?m)^export interface ToolApprovalResolvedEvent\b",
+            owns: "`ToolApprovalResolvedEvent`",
+        }],
+        read: Read::TsFields {
+            name: "ToolApprovalResolvedEvent",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(READ_GONE),
+        siblings: None,
+    },
+    Watch {
+        id: "omp.approved_required",
+        ours: || vec!["approved?"],
+        docs: &[Doc {
+            at: At::Path {
+                repo: "can1357/oh-my-pi",
+                branch: "main",
+                path: "packages/coding-agent/src/extensibility/extensions/types.ts",
+            },
+            anchor: r"(?m)^export interface ToolApprovalResolvedEvent\b",
+            owns: "`ToolApprovalResolvedEvent`",
+        }],
+        read: Read::TsFields {
+            name: "ToolApprovalResolvedEvent",
+        },
+        when: When::Appears,
+        finding: Finding::Breaking(
+            "the decoder reads an absent `approved` as a DENIAL, so every approval would drop \
+             the sprite to idle mid-run with no breadcrumb; decide an explicit missing-field \
+             policy first",
+        ),
+        siblings: None,
+    },
+    Watch {
+        id: "omp.extension_context",
+        ours: || vec!["cwd"],
+        docs: &[Doc {
+            at: At::Path {
+                repo: "can1357/oh-my-pi",
+                branch: "main",
+                path: "packages/coding-agent/src/extensibility/extensions/types.ts",
+            },
+            anchor: r"(?m)^export interface ExtensionContext\b",
+            owns: "`ExtensionContext`",
+        }],
+        read: Read::TsFields {
+            name: "ExtensionContext",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(READ_GONE),
+        siblings: None,
+    },
+    Watch {
+        id: "omp.session_switch",
+        ours: || vec!["previousSessionFile"],
+        docs: &[Doc {
+            at: At::Path {
+                repo: "can1357/oh-my-pi",
+                branch: "main",
+                path: "packages/coding-agent/src/extensibility/shared-events.ts",
+            },
+            anchor: r"(?m)^export interface SessionSwitchEvent\b",
+            owns: "`SessionSwitchEvent`",
+        }],
+        read: Read::TsFields {
+            name: "SessionSwitchEvent",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(READ_GONE),
+        siblings: None,
+    },
+    Watch {
+        id: "omp.session_getters",
+        ours: || vec!["getSessionFile", "getSessionId"],
+        docs: &[Doc {
+            at: At::Path {
+                repo: "can1357/oh-my-pi",
+                branch: "main",
+                path: "packages/coding-agent/src/session/session-manager.ts",
+            },
+            anchor: r"(?m)^export class SessionManager\b",
+            owns: "`SessionManager`",
+        }],
+        read: Read::TsMembers {
+            of: &["SessionManager"],
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(READ_GONE),
+        siblings: None,
+    },
+];
 
 /// A valid empty ES module WITHOUT the sentinel, so a re-uninstall is a no-op.
 const REMOVED_STUB: &str = "// pixtuoid omp extension removed by disconnecting omp in pixtuoid's Sources panel (press s).\nexport default function () {}\n";

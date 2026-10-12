@@ -346,6 +346,89 @@ fn a_rust_str_read_names_what_upstream_declares_now() {
     assert!(r.breaking[0].contains("declares `task` there now"), "{r:?}");
 }
 
+/// An early-return branch is the change: the whole list is upstream's answer.
+#[test]
+fn a_ts_return_read_names_what_upstream_returns_now() {
+    const W: Watch = Watch {
+        id: "t.return",
+        ours: || vec!["dirs.agentDir"],
+        docs: &[doc("t.ts")],
+        read: Read::TsReturn { function: "f" },
+        when: When::Vanishes,
+        finding: Finding::Review("re-verify"),
+        siblings: None,
+    };
+    let redirected = Served::default().with(
+        &raw("t.ts"),
+        "enum Events {}\nexport function f() {\n  if (x) return y;\n  return dirs.agentDir;\n}\n",
+    );
+    let r = check(&redirected, &W);
+    assert_eq!(r.review.len(), 1, "{r:?}");
+    assert!(
+        r.review[0].contains("returns `y; dirs.agentDir` there now"),
+        "{r:?}"
+    );
+}
+
+/// A name a read could not see the whole declaration for, through a base
+/// type or a computed key, may be declared out of its sight: blind, never a
+/// vanish.
+#[test]
+fn a_name_missing_from_a_partial_read_is_blind() {
+    const W: Watch = Watch {
+        id: "t.fields",
+        ours: || vec!["a", "b"],
+        docs: &[doc("t.ts")],
+        read: Read::TsFields { name: "X" },
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
+        siblings: None,
+    };
+    let page =
+        |decl: &str| Served::default().with(&raw("t.ts"), &format!("enum Events {{}}\n{decl}\n"));
+    let partial = check(
+        &page("export interface X extends Base { a: string; c: string }"),
+        &W,
+    );
+    assert!(partial.breaking.is_empty(), "{partial:?}");
+    assert!(
+        partial.blind.len() == 1
+            && partial.blind[0].contains("`b`")
+            && partial.blind[0].contains("extends another type"),
+        "{partial:?}"
+    );
+    let whole = check(&page("export interface X { a: string; c: string }"), &W);
+    assert!(
+        whole.breaking.len() == 1 && whole.breaking[0].contains("`b`"),
+        "{whole:?}"
+    );
+}
+
+/// The floor counts fields, never the facts beside them: a read that kept
+/// `a` and `a?` kept one field of the two ours names.
+#[test]
+fn a_ts_fields_floor_counts_fields_not_their_facts() {
+    const W: Watch = Watch {
+        id: "t.fields",
+        ours: || vec!["a", "b"],
+        docs: &[doc("t.ts")],
+        read: Read::TsFields { name: "X" },
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
+        siblings: None,
+    };
+    let truncated = Served::default().with(
+        &raw("t.ts"),
+        "enum Events {}\nexport interface X { a?: string }\n",
+    );
+    let r = check(&truncated, &W);
+    assert!(r.breaking.is_empty(), "{r:?}");
+    assert!(
+        r.blind.len() == 1 && r.blind[0].contains("floor 2"),
+        "{r:?}"
+    );
+}
+
 #[test]
 fn the_floor_skips_a_degraded_parse_but_not_a_family_reader() {
     const SCHEMA: &str = r#"{"$defs": {"Events": {"oneOf": [{"const": "c"}]}}}"#;
@@ -695,9 +778,28 @@ fn page(w: &Watch, names: &[&str]) -> String {
             let members: String = names.iter().map(|n| format!("  \"{n}\",\n")).collect();
             after_decl(w, format!("const {name} = [\n{members}] as const;"))
         }
+        // A field of its own besides: an empty interface is no declaration
+        // the reader reads, and an `Appears` page names none of ours.
         Read::TsFields { name } => {
-            let fields: String = names.iter().map(|n| format!("  {n}: string;\n")).collect();
-            after_decl(w, format!("export interface {name} {{\n{fields}}}"))
+            let fields: String = names.iter().map(|n| ts_field(n)).collect();
+            after_decl(
+                w,
+                format!("export interface {name} {{\n  pxd: string;\n{fields}}}"),
+            )
+        }
+        Read::TsMembers { of } => {
+            let members: String = names
+                .iter()
+                .map(|n| format!("  \"{n}\": string;\n"))
+                .collect();
+            after_decl(w, format!("export interface {} {{\n{members}}}", of[0]))
+        }
+        Read::TsReturn { function } => {
+            let value = names.first().copied().unwrap_or_default();
+            after_decl(
+                w,
+                format!("export function {function}() {{\n  return {value};\n}}"),
+            )
         }
         // A JSON document's anchor renders as a key, so each one opens a member.
         Read::JsonUnion { def, prop } => {
@@ -789,6 +891,17 @@ fn pascal(snake: &str) -> String {
         .collect()
 }
 
+/// The field that yields TsFields fact `n`: `f?` an optional field, `f:"lit"`
+/// a literal type, a decoy's suffix kept inside the quotes.
+fn ts_field(n: &str) -> String {
+    let (key, optional, literal) = match (n.split_once(":\""), n.strip_suffix('?')) {
+        (Some((f, lit)), _) => (f, "", format!("\"{}\"", lit.replace('"', ""))),
+        (None, Some(f)) => (f, "?", "string".to_owned()),
+        (None, None) => (n, "", "string".to_owned()),
+    };
+    format!("  \"{key}\"{optional}: {literal};\n")
+}
+
 /// `name` where `w`'s reader must not find it: another item of the reader's
 /// kind. A plain-text pattern's strictness cannot be read off the pattern under
 /// test, so `a_declaration_form_is_not_satisfied_by_prose` pins it where a
@@ -810,7 +923,11 @@ fn near_miss(w: &Watch, name: &str) -> String {
                 "pub struct PxdOther {{\n    #[serde(rename = \"{name}\")]\n    pub pxd: u8,\n}}"
             )
         }
-        Read::TsFields { .. } => format!("export interface PxdOther {{\n  {name}: string;\n}}"),
+        Read::TsFields { .. } => format!("export interface PxdOther {{\n{}}}", ts_field(name)),
+        Read::TsMembers { .. } => {
+            format!("export interface PxdOther {{\n  \"{name}\": string;\n}}")
+        }
+        Read::TsReturn { .. } => format!("function pxdOther() {{\n  return {name};\n}}"),
         Read::TsConstArray { .. } => {
             format!("const PXD_OTHER = [\n  \"{name}\",\n];\nif (n === \"{name}\") {{}}\n")
         }
@@ -963,6 +1080,72 @@ fn the_report_title_carries_the_strongest_disposition_and_the_exit_code() {
     );
 }
 
+/// What a shipped template reads is what its watches read: a read added
+/// without its watch, or a watch outliving its read, fails here.
+#[test]
+fn each_template_read_is_watched() {
+    use crate::install::{dsh, omp, openclaw};
+    let bare = |watches: &[Watch]| -> BTreeSet<&str> {
+        watches
+            .iter()
+            .flat_map(|w| (w.ours)())
+            .filter(|n| read::is_bare(n))
+            .collect()
+    };
+    for (template, watched) in [
+        (omp::extension_reads(), bare(omp::UPSTREAM)),
+        (dsh::plugin_events(), bare(dsh::UPSTREAM)),
+    ] {
+        assert!(!template.is_empty(), "a template scan reads nothing");
+        assert_eq!(template.into_iter().collect::<BTreeSet<_>>(), watched);
+    }
+    let fields = [openclaw::AGENT_END_FIELDS, openclaw::MODEL_CALL_BASE_FIELDS].concat();
+    for field in fields {
+        assert!(
+            openclaw::PLUGIN_TEMPLATE.contains(&format!("ev.{field}")),
+            "the plugin no longer reads `{field}`"
+        );
+    }
+    for fact in openclaw::MODEL_CALL_ENDED_FACTS {
+        let (field, literal) = fact.split_once(':').expect("a `field:\"lit\"` fact");
+        assert!(
+            ["===", "!=="].iter().any(|op| openclaw::PLUGIN_TEMPLATE
+                .contains(&format!("ev.{field} {op} {literal}"))),
+            "the plugin no longer compares `{field}` against {literal}"
+        );
+    }
+}
+
+/// Every CLI is watched where its dependence is declared: an `Installer`
+/// row's target carries watches, and a target with none leans on its source's
+/// own. An empty `Watched` list fails core's `no_source_is_watched_by_an_empty_list`.
+#[test]
+fn every_source_and_target_is_watched_or_closed() {
+    use pixtuoid_core::source::upstream::Upstream;
+    for d in REGISTRY {
+        if matches!(d.upstream, Upstream::Installer) {
+            assert!(
+                TARGETS
+                    .iter()
+                    .any(|t| t.core_source == d.name && !t.upstream.is_empty()),
+                "{} is `Installer`, but no install target of it declares a watch",
+                d.name
+            );
+        }
+    }
+    for t in TARGETS {
+        let source = REGISTRY
+            .iter()
+            .find(|d| d.name == t.core_source)
+            .expect("every target names a registered source");
+        assert!(
+            !t.upstream.is_empty() || matches!(source.upstream, Upstream::Watched(_)),
+            "{} declares no watch, and its source declares none of its own",
+            t.name
+        );
+    }
+}
+
 /// The installers' watches answer to the rules the registry's do, in one id
 /// space with them.
 #[test]
@@ -1079,6 +1262,8 @@ fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
             Read::RustEnum { .. }
             | Read::RustStruct { .. }
             | Read::TsFields { .. }
+            | Read::TsMembers { .. }
+            | Read::TsReturn { .. }
             | Read::TsConstArray { .. }
             | Read::MdTable { .. }
             | Read::MdHeadings { .. }

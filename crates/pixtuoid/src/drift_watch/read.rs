@@ -8,10 +8,14 @@
 use std::collections::BTreeSet;
 
 use oxc_allocator::Allocator;
+use oxc_ast::AstKind;
 use oxc_ast::ast::{
-    ArrayExpressionElement, BindingPattern, Declaration, Expression, ModuleDeclaration, Statement,
-    TSNamespaceDeclarationBody, TSSignature, VariableDeclarationKind,
+    ArrayExpressionElement, BindingPattern, ClassElement, Declaration, Expression,
+    MethodDefinitionKind, ModuleDeclaration, PropertyKey, ReturnStatement, Statement, TSLiteral,
+    TSNamespaceDeclarationBody, TSPropertySignature, TSSignature, TSType, VariableDeclarationKind,
 };
+use oxc_ast_visit::Visit as _;
+use oxc_span::GetSpan as _;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use serde_json::Value;
@@ -38,6 +42,37 @@ impl From<regex::Error> for Unread {
 
 fn missing(what: impl Into<String>) -> Unread {
     Unread::Missing(what.into())
+}
+
+/// A declaration's names, and why some may be out of the read's sight: one
+/// declared in a base type or behind a computed key is no evidence it vanished.
+pub(super) struct Declared {
+    pub(super) names: Names,
+    pub(super) partial: Option<String>,
+}
+
+impl From<Names> for Declared {
+    fn from(names: Names) -> Self {
+        Self {
+            names,
+            partial: None,
+        }
+    }
+}
+
+impl From<Declared> for Names {
+    fn from(d: Declared) -> Self {
+        d.names
+    }
+}
+
+/// Whether `name` is a field, not one of a `TsFields` read's facts beside it.
+pub(super) fn is_bare(name: &str) -> bool {
+    !name.ends_with('?') && !name.contains(":\"")
+}
+
+fn joined(why: BTreeSet<String>) -> Option<String> {
+    (!why.is_empty()).then(|| why.into_iter().collect::<Vec<_>>().join("; "))
 }
 
 /// The ONE item found: a first-match read is silently wrong the day upstream
@@ -504,34 +539,266 @@ fn with_ts<T>(
     f(&decls)
 }
 
-/// The top-level fields of the ONE `interface name`: a nested object's fields
-/// and its methods are not fields of the interface.
-pub(super) fn ts_fields(text: &str, name: &str) -> Result<Names, Unread> {
+/// The top-level fields of the ONE interface or type alias `name`: each
+/// field, `field?` when optional, and `field:"lit"` per string literal its type
+/// admits. A nested object's fields and its methods are not fields of it.
+pub(super) fn ts_fields(text: &str, name: &str) -> Result<Declared, Unread> {
     with_ts(text, |decls| {
-        let what = format!("`interface {name}`");
+        let decl = one(
+            decls.iter().filter(|d| match d {
+                Declaration::TSInterfaceDeclaration(i) => i.id.name == name,
+                Declaration::TSTypeAliasDeclaration(t) => t.id.name == name,
+                _ => false,
+            }),
+            &format!("interface or type `{name}`"),
+        )?;
+        let mut why = BTreeSet::new();
+        let mut members = Vec::new();
+        let what = match decl {
+            Declaration::TSInterfaceDeclaration(i) => {
+                let what = format!("`interface {name}`");
+                if !i.extends.is_empty() {
+                    why.insert(format!("{what} extends another type"));
+                }
+                members.extend(i.body.body.iter());
+                what
+            }
+            Declaration::TSTypeAliasDeclaration(t) => {
+                let what = format!("`type {name}`");
+                let mut named = false;
+                if !object_members(&t.type_annotation, &mut members, &mut named) {
+                    return Err(missing(format!("{what}, not an object type")));
+                }
+                if named {
+                    why.insert(format!("{what} intersects a named type"));
+                }
+                what
+            }
+            _ => return Err(missing(format!("no interface or type `{name}`"))),
+        };
+        let mut names = Names::new();
+        for member in members {
+            if let TSSignature::TSPropertySignature(p) = member {
+                if p.computed {
+                    why.insert(format!("{what} has a computed key"));
+                } else {
+                    field_facts(p, &mut names);
+                }
+            }
+        }
+        if names.is_empty() {
+            return Err(missing(format!("no field in {what}")));
+        }
+        Ok(Declared {
+            names,
+            partial: joined(why),
+        })
+    })
+}
+
+/// The members of `ty`'s object-literal operands, through intersections and
+/// parentheses, noting an operand that names a type instead; false when `ty`
+/// is no object type.
+fn object_members<'b, 'a>(
+    ty: &'b TSType<'a>,
+    members: &mut Vec<&'b TSSignature<'a>>,
+    named: &mut bool,
+) -> bool {
+    match ty {
+        TSType::TSTypeLiteral(l) => {
+            members.extend(l.members.iter());
+            true
+        }
+        TSType::TSParenthesizedType(p) => object_members(&p.type_annotation, members, named),
+        TSType::TSIntersectionType(i) => i.types.iter().all(|t| match t {
+            TSType::TSTypeReference(_) => {
+                *named = true;
+                true
+            }
+            t => object_members(t, members, named),
+        }),
+        _ => false,
+    }
+}
+
+/// A field, `field?` when optional, and `field:"lit"` per string literal its
+/// type admits.
+fn field_facts(p: &TSPropertySignature<'_>, out: &mut Names) {
+    let Some(key) = p.key.static_name() else {
+        return;
+    };
+    out.insert(key.to_string());
+    if p.optional {
+        out.insert(format!("{key}?"));
+    }
+    let admits = match p.type_annotation.as_ref().map(|a| &a.type_annotation) {
+        Some(TSType::TSUnionType(u)) => u.types.iter().collect(),
+        Some(t) => vec![t],
+        None => vec![],
+    };
+    for t in admits {
+        if let TSType::TSLiteralType(l) = t
+            && let TSLiteral::StringLiteral(lit) = &l.literal
+        {
+            out.insert(format!("{key}:\"{}\"", lit.value));
+        }
+    }
+}
+
+/// Every member key of the interfaces and classes named `of`, merged across
+/// their declarations in the document as TS merges augmentations. A private or
+/// protected member is still the runtime's; a `#private` one is no API.
+pub(super) fn ts_members(text: &str, of: &[&str]) -> Result<Declared, Unread> {
+    with_ts(text, |decls| {
+        let mut names = Names::new();
+        let mut why = BTreeSet::new();
+        let mut any = false;
+        let mut key_of = |what: &str, key: &PropertyKey<'_>, computed: bool| {
+            if computed {
+                why.insert(format!("{what} has a computed key"));
+            } else if let Some(k) = key.static_name() {
+                names.insert(k.into_owned());
+            }
+        };
+        let mut extends = BTreeSet::new();
+        for d in decls {
+            match d {
+                Declaration::TSInterfaceDeclaration(i) if of.contains(&i.id.name.as_str()) => {
+                    any = true;
+                    let what = format!("`interface {}`", i.id.name);
+                    if !i.extends.is_empty() {
+                        extends.insert(format!("{what} extends another type"));
+                    }
+                    for m in &i.body.body {
+                        match m {
+                            TSSignature::TSPropertySignature(p) => {
+                                key_of(&what, &p.key, p.computed)
+                            }
+                            TSSignature::TSMethodSignature(m) => key_of(&what, &m.key, m.computed),
+                            _ => {}
+                        }
+                    }
+                }
+                Declaration::ClassDeclaration(c)
+                    if c.id
+                        .as_ref()
+                        .is_some_and(|id| of.contains(&id.name.as_str())) =>
+                {
+                    any = true;
+                    let what = format!(
+                        "`class {}`",
+                        c.id.as_ref().map_or("", |id| id.name.as_str())
+                    );
+                    if c.heritage.is_some() {
+                        extends.insert(format!("{what} extends another type"));
+                    }
+                    for e in &c.body.body {
+                        match e {
+                            ClassElement::MethodDefinition(m)
+                                if m.kind != MethodDefinitionKind::Constructor =>
+                            {
+                                key_of(&what, &m.key, m.computed);
+                            }
+                            ClassElement::PropertyDefinition(p) => {
+                                key_of(&what, &p.key, p.computed)
+                            }
+                            ClassElement::AccessorProperty(a) => key_of(&what, &a.key, a.computed),
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let listed = || {
+            of.iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        if !any {
+            return Err(missing(format!("no interface or class {}", listed())));
+        }
+        if names.is_empty() {
+            return Err(missing(format!(
+                "no member in interface or class {}",
+                listed()
+            )));
+        }
+        why.extend(extends);
+        Ok(Declared {
+            names,
+            partial: joined(why),
+        })
+    })
+}
+
+/// Every `return` of the ONE `function name`, in order, as one name: its
+/// nested functions' and classes' returns are theirs.
+pub(super) fn ts_return(text: &str, name: &str) -> Result<Names, Unread> {
+    with_ts(text, |decls| {
+        let what = format!("`function {name}`");
         let body = one(
             decls.iter().filter_map(|d| match d {
-                Declaration::TSInterfaceDeclaration(i) if i.id.name.as_str() == name => {
-                    Some(&i.body.body)
+                Declaration::FunctionDeclaration(f)
+                    if f.id.as_ref().is_some_and(|id| id.name == name) =>
+                {
+                    f.body.as_deref()
                 }
                 _ => None,
             }),
             &what,
         )?;
-        let names: Names = body
+        let mut returns = Returns::default();
+        returns.visit_function_body(body);
+        if returns.spans.is_empty() {
+            return Err(missing(format!("no `return` in {what}")));
+        }
+        let list: Vec<&str> = returns
+            .spans
             .iter()
-            .filter_map(|member| match member {
-                TSSignature::TSPropertySignature(p) if !p.computed => {
-                    p.key.static_name().map(|k| k.into_owned())
-                }
-                _ => None,
+            .map(|s| {
+                text.get(s.start as usize..s.end as usize)
+                    .unwrap_or_default()
             })
             .collect();
-        if names.is_empty() {
-            return Err(missing(format!("no field in {what}")));
-        }
-        Ok(names)
+        Ok(Names::from([list.join("; ")]))
     })
+}
+
+/// The spans of the returned expressions at the visited body's own depth.
+#[derive(Default)]
+struct Returns {
+    depth: usize,
+    spans: Vec<oxc_span::Span>,
+}
+
+impl<'a> oxc_ast_visit::Visit<'a> for Returns {
+    fn enter_node(&mut self, kind: AstKind<'a>) {
+        if matches!(
+            kind,
+            AstKind::Function(_) | AstKind::ArrowFunctionExpression(_) | AstKind::Class(_)
+        ) {
+            self.depth += 1;
+        }
+    }
+
+    fn leave_node(&mut self, kind: AstKind<'a>) {
+        if matches!(
+            kind,
+            AstKind::Function(_) | AstKind::ArrowFunctionExpression(_) | AstKind::Class(_)
+        ) {
+            self.depth -= 1;
+        }
+    }
+
+    // Not walked: a returned expression holds no `return` of this function.
+    fn visit_return_statement(&mut self, it: &ReturnStatement<'a>) {
+        if self.depth == 0 {
+            self.spans
+                .push(it.argument.as_ref().map_or(it.span, |a| a.span()));
+        }
+    }
 }
 
 /// The string elements of the ONE `const name = [ … ]`: the type derived from
@@ -821,9 +1088,9 @@ mod tests {
 
     /// The names, or what the reader found instead; a pattern of ours that
     /// fails to compile fails the test.
-    fn found(read: Result<Names, Unread>) -> Result<Vec<String>, String> {
+    fn found(read: Result<impl Into<Names>, Unread>) -> Result<Vec<String>, String> {
         match read {
-            Ok(names) => Ok(names.into_iter().collect()),
+            Ok(names) => Ok(names.into().into_iter().collect()),
             Err(Unread::Missing(what)) => Err(what),
             Err(Unread::Ours(e)) => panic!("a test pattern does not compile: {e}"),
         }
@@ -831,6 +1098,11 @@ mod tests {
 
     fn names(xs: &[&str]) -> Result<Vec<String>, String> {
         Ok(xs.iter().map(|s| (*s).to_owned()).collect())
+    }
+
+    /// Why the read is partial, if it read its declaration at all.
+    fn partial(read: Result<Declared, Unread>) -> Option<String> {
+        read.ok().and_then(|d| d.partial)
     }
 
     #[test]
@@ -935,14 +1207,17 @@ mod tests {
 
     #[test]
     fn a_document_its_parser_rejects_is_never_read() {
-        let rejected = |r: Result<Names, Unread>, lang: &str| {
+        let rejected = |r: Result<Declared, Unread>, lang: &str| {
             let what = found(r);
             assert!(
                 what.as_ref().is_err_and(|w| w.starts_with(lang)),
                 "{what:?}"
             );
         };
-        rejected(rust_enum("enum E {", "E"), "Rust that syn cannot parse (");
+        rejected(
+            rust_enum("enum E {", "E").map(Into::into),
+            "Rust that syn cannot parse (",
+        );
         rejected(
             ts_fields("export interface E {", "E"),
             "TypeScript that oxc cannot parse (",
@@ -1097,16 +1372,144 @@ mod tests {
         // A nested object's fields, a comment and a method are no fields of it.
         assert_eq!(
             found(ts_fields(src, "Entry")),
-            names(&["nested", "quoted-key", "title", "type"])
+            names(&[
+                "nested",
+                "quoted-key",
+                "title",
+                "title?",
+                "type",
+                "type:\"x\""
+            ])
         );
         assert_eq!(
+            partial(ts_fields(src, "Entry")).as_deref(),
+            Some("`interface Entry` extends another type")
+        );
+        assert_eq!(partial(ts_fields(src, "Other")), None);
+        assert_eq!(
             found(ts_fields(src, "Gone")),
-            Err("no `interface Gone`".to_owned())
+            Err("no interface or type `Gone`".to_owned())
         );
         let twice = format!("{src}export interface Other {{\n  b: string;\n}}\n");
         assert_eq!(
             found(ts_fields(&twice, "Other")),
-            Err("more than one `interface Other`".to_owned())
+            Err("more than one interface or type `Other`".to_owned())
+        );
+    }
+
+    /// Optionality and each string literal a field admits are facts beside
+    /// the field: a watch can wait on `approved?` or `outcome:"error"`.
+    #[test]
+    fn ts_fields_yield_each_fields_optionality_and_string_literals() {
+        let src = "export interface E {\n  a: string;\n  b?: number;\n  kind: \"x\" | \"y\" | 3;\n  only?: \"z\";\n  [KEY]: number;\n  run(): void;\n}\n";
+        assert_eq!(
+            found(ts_fields(src, "E")),
+            names(&[
+                "a",
+                "b",
+                "b?",
+                "kind",
+                "kind:\"x\"",
+                "kind:\"y\"",
+                "only",
+                "only:\"z\"",
+                "only?"
+            ])
+        );
+        assert_eq!(
+            partial(ts_fields(src, "E")).as_deref(),
+            Some("`interface E` has a computed key")
+        );
+    }
+
+    /// A type alias is read through its object-literal operands, however
+    /// nested or parenthesised; a named operand's fields are out of sight.
+    #[test]
+    fn ts_fields_read_a_type_alias_through_its_intersections() {
+        let src = "type Plain = { runId?: string; success: boolean };\nexport type Ended = Base & ({ outcome: \"completed\" | \"error\" } & { failureKind?: \"aborted\" });\n";
+        assert_eq!(
+            found(ts_fields(src, "Plain")),
+            names(&["runId", "runId?", "success"])
+        );
+        assert_eq!(partial(ts_fields(src, "Plain")), None);
+        assert_eq!(
+            found(ts_fields(src, "Ended")),
+            names(&[
+                "failureKind",
+                "failureKind:\"aborted\"",
+                "failureKind?",
+                "outcome",
+                "outcome:\"completed\"",
+                "outcome:\"error\"",
+            ])
+        );
+        assert_eq!(
+            partial(ts_fields(src, "Ended")).as_deref(),
+            Some("`type Ended` intersects a named type")
+        );
+        for alias in ["A | B", "Base", "{ [K in Keys]: string }", "Base & (A | B)"] {
+            assert_eq!(
+                found(ts_fields(&format!("type X = {alias};"), "X")),
+                Err("`type X`, not an object type".to_owned()),
+                "{alias}"
+            );
+        }
+    }
+
+    /// Every member key of the interfaces and classes named, merged across
+    /// their declarations in the document, as TS merges augmentations.
+    #[test]
+    fn ts_members_read_every_key_of_the_interfaces_and_classes_named() {
+        let src = "declare module 'x' {\n  interface Events {\n    'agent/created'(this: S, p: {}): void\n    'agent/status': { a: number }\n  }\n  interface Context { sessions: S }\n}\ninterface SessionEventMap {\n  'turn/start': { turn: number }\n}\ninterface Events {\n  'session/event'(s: S): void\n  'session/event'(s: S, e: E): void\n}\nexport class SessionManager extends Base {\n  private secret = 1;\n  constructor() {}\n  getSessionFile(): string { return ''; }\n  get getter(): number { return 1; }\n  static make() {}\n  #hidden() {}\n  [COMPUTED]() {}\n}\n";
+        let events = ["Events", "SessionEventMap"];
+        assert_eq!(
+            found(ts_members(src, &events)),
+            names(&[
+                "agent/created",
+                "agent/status",
+                "session/event",
+                "turn/start"
+            ])
+        );
+        assert_eq!(partial(ts_members(src, &events)), None);
+        // A private or protected member is still the runtime's.
+        assert_eq!(
+            found(ts_members(src, &["SessionManager"])),
+            names(&["getSessionFile", "getter", "make", "secret"])
+        );
+        assert_eq!(
+            partial(ts_members(src, &["SessionManager"])).as_deref(),
+            Some(
+                "`class SessionManager` extends another type; `class SessionManager` has a computed key"
+            )
+        );
+        assert_eq!(
+            found(ts_members(src, &["Gone", "Lost"])),
+            Err("no interface or class `Gone`, `Lost`".to_owned())
+        );
+    }
+
+    /// Every `return` of the ONE function, in order, its nested functions'
+    /// aside: an early-return branch is the redirect a watch waits on.
+    #[test]
+    fn ts_return_is_every_return_of_the_one_function() {
+        let src = "export function getAgentDir(): string {\n  return dirs.agentDir;\n}\nfunction redirected(): string {\n  if (process.env.X) return process.env.X;\n  const f = () => { return 'nested'; };\n  class C { m() { return 'method'; } }\n  return dirs.agentDir;\n}\nfunction none() {}\n";
+        assert_eq!(
+            found(ts_return(src, "getAgentDir")),
+            names(&["dirs.agentDir"])
+        );
+        assert_eq!(
+            found(ts_return(src, "redirected")),
+            names(&["process.env.X; dirs.agentDir"])
+        );
+        assert_eq!(
+            found(ts_return(src, "none")),
+            Err("no `return` in `function none`".to_owned())
+        );
+        let arrow = "export const getAgentDir = (): string => dirs.agentDir;\n";
+        assert_eq!(
+            found(ts_return(arrow, "getAgentDir")),
+            Err("no `function getAgentDir`".to_owned())
         );
     }
 
@@ -1114,6 +1517,7 @@ mod tests {
     fn ts_fields_read_an_interface_inside_a_module_block() {
         let src = "declare module '@x/core' {\n  interface Context {\n    session: Session\n  }\n  interface Events {\n    'agent/created'(payload: {}): void\n    status: string\n  }\n}\n";
         assert_eq!(found(ts_fields(src, "Events")), names(&["status"]));
+        assert_eq!(partial(ts_fields(src, "Events")), None);
     }
 
     #[test]

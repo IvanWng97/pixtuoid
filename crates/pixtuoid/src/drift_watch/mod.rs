@@ -401,7 +401,11 @@ fn check_watch(source: &str, w: &Watch, fetched: &mut Fetched, report: &mut Repo
         .zip(&texts)
         .map(|((_, label, _), text)| (label.as_str(), text.as_str()))
         .collect();
-    let Some(upstream) = read_docs(w, source, &read_from, &ours, report) else {
+    let Some(read::Declared {
+        names: upstream,
+        partial,
+    }) = read_docs(w, source, &read_from, &ours, report)
+    else {
         return;
     };
     let (says, file): (&str, fn(&mut Report, String)) = match w.finding {
@@ -410,18 +414,36 @@ fn check_watch(source: &str, w: &Watch, fetched: &mut Fetched, report: &mut Repo
     };
     match w.when {
         When::Vanishes => {
-            let now = match w.read {
-                Read::RustStr { .. } => format!(
-                    " Upstream declares `{}` there now.",
+            let verb = match w.read {
+                Read::RustStr { .. } => Some("declares"),
+                Read::TsReturn { .. } => Some("returns"),
+                _ => None,
+            };
+            let now = verb.map_or_else(String::new, |verb| {
+                format!(
+                    " Upstream {verb} `{}` there now.",
                     upstream
                         .iter()
                         .map(|n| code_span(n))
                         .collect::<Vec<_>>()
                         .join("`, `")
-                ),
-                _ => String::new(),
-            };
+                )
+            });
             for name in ours.iter().filter(|n| !upstream.contains(**n)) {
+                // Out of the read's sight, so no evidence it vanished.
+                if let Some(why) = &partial {
+                    report.add_blind(
+                        &format!("`{name}` ({source}: `{}`)", w.id),
+                        &at,
+                        &format!(
+                            "The reader read a partial declaration ({why}), so it may be \
+                             declared out of sight and `{}` did not judge it.",
+                            w.id
+                        ),
+                        false,
+                    );
+                    continue;
+                }
                 file(
                     report,
                     format!(
@@ -459,37 +481,55 @@ fn floored(w: &Watch) -> bool {
         && !w.read.confined_to_family()
 }
 
-/// Upstream's names off every `(label, text)` document of `w`; `None`
-/// once it has filed why it could not. Every document must yield, as every
-/// one must fetch: a union read off the rest would hide what changed in the
-/// one that did not.
+/// What the floor counts of `names`: a `TsFields` read's `field?` and
+/// `field:"lit"` are facts beside a field, not fields.
+fn floor_count<'a>(read: &Read, names: impl Iterator<Item = &'a str>) -> usize {
+    match read {
+        Read::TsFields { .. } => names.filter(|n| read::is_bare(n)).count(),
+        _ => names.count(),
+    }
+}
+
+/// Upstream's names off every `(label, text)` document of `w`, and why the
+/// read is partial; `None` once it has filed why it could not. Every
+/// document must yield, as every one must fetch: a union read off the rest
+/// would hide what changed in the one that did not.
 fn read_docs(
     w: &Watch,
     source: &str,
     docs: &[(&str, &str)],
     ours: &BTreeSet<&str>,
     report: &mut Report,
-) -> Option<Names> {
+) -> Option<read::Declared> {
     let mut upstream = Names::new();
+    let mut partial = Vec::new();
     for (label, text) in docs {
         let read = match w.read {
-            Read::Each { pattern } => read::each(text, pattern, ours),
-            Read::RustStr { item } => read::rust_str(text, item),
-            Read::RustArms { name, arm } => read::rust_arms(text, name, arm),
-            Read::RustEnum { name } => read::rust_enum(text, name),
-            Read::RustStruct { name } => read::rust_struct(text, name),
+            Read::Each { pattern } => read::each(text, pattern, ours).map(Into::into),
+            Read::RustStr { item } => read::rust_str(text, item).map(Into::into),
+            Read::RustArms { name, arm } => read::rust_arms(text, name, arm).map(Into::into),
+            Read::RustEnum { name } => read::rust_enum(text, name).map(Into::into),
+            Read::RustStruct { name } => read::rust_struct(text, name).map(Into::into),
             Read::TsFields { name } => read::ts_fields(text, name),
-            Read::Matches { pattern } => read::matches(text, pattern),
-            Read::MdTable { header, under } => read::md_table(text, header, under),
-            Read::MdHeadings { under } => read::md_headings(text, under),
-            Read::PySet { decl } => read::py_set(text, decl),
-            Read::RustMacroRows { name } => read::rust_macro_rows(text, name),
-            Read::TsConstArray { name } => read::ts_const_array(text, name),
-            Read::JsonUnion { def, prop } => read::json_union(text, def, prop),
-            Read::JsonKeys => read::json_keys(text),
+            Read::TsMembers { of } => read::ts_members(text, of),
+            Read::TsReturn { function } => read::ts_return(text, function).map(Into::into),
+            Read::Matches { pattern } => read::matches(text, pattern).map(Into::into),
+            Read::MdTable { header, under } => read::md_table(text, header, under).map(Into::into),
+            Read::MdHeadings { under } => read::md_headings(text, under).map(Into::into),
+            Read::PySet { decl } => read::py_set(text, decl).map(Into::into),
+            Read::RustMacroRows { name } => read::rust_macro_rows(text, name).map(Into::into),
+            Read::TsConstArray { name } => read::ts_const_array(text, name).map(Into::into),
+            Read::JsonUnion { def, prop } => read::json_union(text, def, prop).map(Into::into),
+            Read::JsonKeys => read::json_keys(text).map(Into::into),
         };
         match read {
-            Ok(names) => upstream.extend(names),
+            Ok(read::Declared {
+                names,
+                partial: why,
+            }) => {
+                upstream.extend(names);
+                partial.extend(why.map(|why| format!("{label}: {why}")));
+            }
             Err(Unread::Ours(e)) => {
                 report.add_blind(
                     &format!("`{}`'s pattern or item spec ({e})", w.id),
@@ -510,22 +550,27 @@ fn read_docs(
             }
         }
     }
-    if floored(w) && upstream.len() < ours.len() {
+    let (got, want) = (
+        floor_count(&w.read, upstream.iter().map(String::as_str)),
+        floor_count(&w.read, ours.iter().copied()),
+    );
+    if floored(w) && got < want {
         let at: Vec<&str> = docs.iter().map(|(label, _)| *label).collect();
         report.add_blind(
             &format!("the names `{}` reads", w.id),
             &at.join(", "),
             &format!(
-                "The reader returned {} names (floor {}), so `{}` was SKIPPED.",
-                upstream.len(),
-                ours.len(),
+                "The reader returned {got} names (floor {want}), so `{}` was SKIPPED.",
                 w.id
             ),
             false,
         );
         return None;
     }
-    Some(upstream)
+    Some(read::Declared {
+        names: upstream,
+        partial: (!partial.is_empty()).then(|| partial.join("; ")),
+    })
 }
 
 /// Run only once every document of the watch was read: a missed one would

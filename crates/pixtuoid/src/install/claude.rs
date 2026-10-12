@@ -31,23 +31,93 @@ pub(crate) const EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
+/// The settings key a user-scope install is recorded under.
+const ENABLED_PLUGINS: &str = "enabledPlugins";
+/// The `claude plugin` subcommand that installs one.
+const INSTALL: &str = "install";
+
 #[cfg(feature = "upstream")]
-pub(crate) const UPSTREAM: &[Watch] = &[Watch {
-    id: "claude.hook_events",
-    ours: || EVENTS.to_vec(),
-    docs: &[Doc {
-        at: At::Url("https://code.claude.com/docs/en/hooks.md"),
-        anchor: r"(?m)^# Hooks reference",
-        owns: "the hooks-reference page",
-    }],
-    read: Read::MdTable {
-        header: "Event",
-        under: "Hook lifecycle",
+const fn page(page: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
+    Doc {
+        at: At::Url(page),
+        anchor,
+        owns,
+    }
+}
+
+#[cfg(feature = "upstream")]
+const INSTALL_PAGE: &[Doc] = &[page(
+    "https://code.claude.com/docs/en/plugins/install.md",
+    r"(?m)^# Install and manage plugins",
+    "the plugin-install page",
+)];
+
+#[cfg(feature = "upstream")]
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "claude.hook_events",
+        ours: || EVENTS.to_vec(),
+        docs: &[page(
+            "https://code.claude.com/docs/en/hooks.md",
+            r"(?m)^# Hooks reference",
+            "the hooks-reference page",
+        )],
+        read: Read::MdTable {
+            header: "Event",
+            under: "Hook lifecycle",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(UNDOCUMENTED_HOOK),
+        siblings: None,
     },
-    when: When::Vanishes,
-    finding: Finding::Breaking(UNDOCUMENTED_HOOK),
-    siblings: None,
-}];
+    host_plugin::premise(
+        "claude.plugin_hooks_shape",
+        || vec!["same shape as the `hooks` object in `settings.json`"],
+        &[page(
+            "https://code.claude.com/docs/en/plugins/components.md",
+            r"(?m)^# Add components to a plugin",
+            "the plugin-components page",
+        )],
+        r"{name}\.",
+        "the shape `register` writes `hooks/hooks.json` in may have changed",
+    ),
+    host_plugin::premise(
+        "claude.plugin_enabled_key",
+        || vec![ENABLED_PLUGINS],
+        INSTALL_PAGE,
+        r"The entry goes in `{name}` in `~/\.claude/settings\.json`",
+        "where `is_registered` reads a user-scope install may have changed",
+    ),
+    host_plugin::premise(
+        "claude.plugin_install_command",
+        || vec![INSTALL],
+        INSTALL_PAGE,
+        r"Run `claude plugin {name}` in your shell",
+        "the shell install command `register` runs may have changed",
+    ),
+    host_plugin::premise(
+        "claude.marketplace_removal",
+        || {
+            vec![
+                "When you remove a marketplace, Claude Code uninstalls every plugin you installed from it",
+            ]
+        },
+        INSTALL_PAGE,
+        r"{name}\s+",
+        "whether removing the marketplace still uninstalls the plugin `unregister` relies on may have changed",
+    ),
+    host_plugin::premise(
+        "claude.plugin_in_place_load",
+        || vec!["the plugin loads in place from its path inside the marketplace folder"],
+        &[page(
+            "https://code.claude.com/docs/en/plugins/loading.md",
+            r"(?m)^# Plugin loading reference",
+            "the plugin-loading page",
+        )],
+        r"{name}\.",
+        "whether a local-path marketplace loads in place, so a rewrite needs no reinstall, may have changed",
+    ),
+];
 
 /// Claude Code loads the hooks through its plugin system
 /// (code.claude.com/docs/en/plugins): a local marketplace whose one plugin loads
@@ -126,7 +196,7 @@ fn register(config: &Path) -> Result<()> {
     ])?;
     CLI.run(&[
         "plugin".as_ref(),
-        "install".as_ref(),
+        INSTALL.as_ref(),
         host_plugin::plugin_id().as_ref(),
     ])?;
     Ok(())
@@ -178,7 +248,7 @@ fn is_registered() -> Result<bool> {
 
 /// The plugin's `enabledPlugins` value: `Some(false)` is installed but disabled.
 fn plugin_entry() -> Result<Option<bool>> {
-    Ok(read_settings(&settings_path()?)?["enabledPlugins"][host_plugin::plugin_id()].as_bool())
+    Ok(read_settings(&settings_path()?)?[ENABLED_PLUGINS][host_plugin::plugin_id()].as_bool())
 }
 
 /// `Null` for a missing or empty file.

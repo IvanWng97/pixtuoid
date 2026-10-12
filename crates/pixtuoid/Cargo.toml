@@ -64,6 +64,7 @@ syn                = { workspace = true, optional = true, features = ["printing"
 proc-macro2        = { workspace = true, optional = true, features = ["span-locations"] }
 oxc_allocator      = { workspace = true, optional = true }
 oxc_ast            = { workspace = true, optional = true }
+oxc_ast_visit      = { workspace = true, optional = true }
 oxc_parser         = { workspace = true, optional = true }
 oxc_span           = { workspace = true, optional = true }
 pulldown-cmark     = { workspace = true, optional = true }
@@ -123,6 +124,7 @@ upstream = [
     "dep:proc-macro2",
     "dep:oxc_allocator",
     "dep:oxc_ast",
+    "dep:oxc_ast_visit",
     "dep:oxc_parser",
     "dep:oxc_span",
     "dep:pulldown-cmark",

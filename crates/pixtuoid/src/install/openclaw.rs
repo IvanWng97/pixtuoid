@@ -53,26 +53,91 @@ pub(crate) const OPENCLAW_EVENTS: &[&str] = &[
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const OPENCLAW_VERDICT_EVENTS: &[&str] = &["model_call_ended"];
 
+/// What the plugin stamps `errored` from, per upstream type: each field it
+/// reads and each literal it compares one against. Pinned to the template by
+/// `each_template_read_is_watched`.
 #[cfg(feature = "upstream")]
-pub(crate) const UPSTREAM: &[Watch] = &[Watch {
-    id: "openclaw.hook_events",
-    ours: || [OPENCLAW_EVENTS, OPENCLAW_VERDICT_EVENTS].concat(),
-    docs: &[Doc {
-        at: At::Path {
-            repo: "openclaw/openclaw",
-            branch: "main",
-            path: "src/plugins/hook-types.ts",
+pub(crate) const AGENT_END_FIELDS: &[&str] = &["runId", "success", "error"];
+#[cfg(feature = "upstream")]
+pub(crate) const MODEL_CALL_BASE_FIELDS: &[&str] = &["runId"];
+#[cfg(feature = "upstream")]
+pub(crate) const MODEL_CALL_ENDED_FACTS: &[&str] =
+    &["outcome:\"error\"", "failureKind:\"aborted\""];
+
+#[cfg(feature = "upstream")]
+const HOOK_TYPES: At = At::Path {
+    repo: "openclaw/openclaw",
+    branch: "main",
+    path: "src/plugins/hook-types.ts",
+};
+
+#[cfg(feature = "upstream")]
+const DEGRADED: &str =
+    "openclaw_plugin.js stamps `errored` from it, so the Degraded verdict misreads a run";
+
+#[cfg(feature = "upstream")]
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "openclaw.hook_events",
+        ours: || [OPENCLAW_EVENTS, OPENCLAW_VERDICT_EVENTS].concat(),
+        docs: &[Doc {
+            at: HOOK_TYPES,
+            anchor: r"const PLUGIN_HOOK_NAMES\s*=",
+            owns: "`PLUGIN_HOOK_NAMES`",
+        }],
+        read: Read::TsConstArray {
+            name: "PLUGIN_HOOK_NAMES",
         },
-        anchor: r"const PLUGIN_HOOK_NAMES\s*=",
-        owns: "`PLUGIN_HOOK_NAMES`",
-    }],
-    read: Read::TsConstArray {
-        name: "PLUGIN_HOOK_NAMES",
+        when: When::Vanishes,
+        finding: Finding::Breaking("the plugin registers a hook OpenClaw never fires"),
+        siblings: None,
     },
-    when: When::Vanishes,
-    finding: Finding::Breaking("the plugin registers a hook OpenClaw never fires"),
-    siblings: None,
-}];
+    Watch {
+        id: "openclaw.agent_end_fields",
+        ours: || AGENT_END_FIELDS.to_vec(),
+        docs: &[Doc {
+            at: HOOK_TYPES,
+            anchor: r"(?m)^(?:export type|type) PluginHookAgentEndEvent\b",
+            owns: "`PluginHookAgentEndEvent`",
+        }],
+        read: Read::TsFields {
+            name: "PluginHookAgentEndEvent",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(DEGRADED),
+        siblings: None,
+    },
+    Watch {
+        id: "openclaw.model_call_base_fields",
+        ours: || MODEL_CALL_BASE_FIELDS.to_vec(),
+        docs: &[Doc {
+            at: HOOK_TYPES,
+            anchor: r"(?m)^(?:export type|type) PluginHookModelCallBaseEvent\b",
+            owns: "`PluginHookModelCallBaseEvent`",
+        }],
+        read: Read::TsFields {
+            name: "PluginHookModelCallBaseEvent",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(DEGRADED),
+        siblings: None,
+    },
+    Watch {
+        id: "openclaw.model_call_ended_fields",
+        ours: || MODEL_CALL_ENDED_FACTS.to_vec(),
+        docs: &[Doc {
+            at: HOOK_TYPES,
+            anchor: r"(?m)^(?:export type|type) PluginHookModelCallEndedEvent\b",
+            owns: "`PluginHookModelCallEndedEvent`",
+        }],
+        read: Read::TsFields {
+            name: "PluginHookModelCallEndedEvent",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(DEGRADED),
+        siblings: None,
+    },
+];
 
 const MANIFEST: &str = r#"{
   "id": "pixtuoid",
