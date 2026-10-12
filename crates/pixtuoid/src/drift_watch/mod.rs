@@ -658,7 +658,7 @@ fn check_all(fetch: &dyn Fetch, report: &mut Report) {
     }
 }
 
-/// The watches not yet declared in Rust, still in `check_upstream_drift.py`:
+/// The watches still in `check_upstream_drift.py`:
 /// its buckets join this report, so each watch has one checker and the run one
 /// issue. Its traceback, if it has one, goes straight to our stderr.
 pub fn run_legacy(report: &mut Report) {

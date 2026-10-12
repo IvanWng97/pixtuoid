@@ -1,6 +1,5 @@
 //! This crate's half of the **drift surface** — the names its installers ship,
-//! emitted as data for `check_upstream_drift.py`, the watches not yet
-//! declared beside their source (`source/upstream.rs`).
+//! emitted as data for `check_upstream_drift.py`.
 //!
 //! That watcher is a separate program that cannot call us, and until #942 it
 //! REGEX-PARSED this crate's source instead. That fails SILENTLY: rename a

@@ -526,7 +526,7 @@ pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const DECODED_TITLE_FIELDS: &[&str] = &[TITLE_FIELD];
 
-/// The header entry (line 2; line 1 is a fixed-width 256-byte `title` slot that omp
+/// The header entry (line 2; line 1 is a fixed-width `title` slot that omp
 /// rewrites IN PLACE — pwrite at offset 0, and the tail cursor sits past it, so it
 /// is never re-read; legacy files lack the slot). Fork, branch, version migration
 /// and tool-output pruning REWRITE the file atomically (temp + rename → new inode)

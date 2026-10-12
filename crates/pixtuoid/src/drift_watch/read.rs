@@ -242,7 +242,7 @@ pub(super) fn rust_enum(text: &str, name: &str) -> Result<Names, Unread> {
     Ok(names)
 }
 
-/// Its fields, by the name serde reads each under: its `rename`, else its
+/// The ONE `struct name`'s fields, by the name serde reads each under: its `rename`, else its
 /// ident, which only a `snake_case` `rename_all` leaves as written; another
 /// spelling is never guessed at.
 pub(super) fn rust_struct(text: &str, name: &str) -> Result<Names, Unread> {
@@ -297,7 +297,8 @@ impl<'ast> Visit<'ast> for Arms<'ast> {
     }
 }
 
-/// The string literals a pattern matches: a literal, or an or-pattern of them.
+/// The string literals a pattern matches: a literal or an or-pattern of them,
+/// through any guard.
 fn pattern_strings(pat: &syn::Pat) -> Vec<String> {
     match pat {
         syn::Pat::Lit(syn::ExprLit {
@@ -995,8 +996,8 @@ pub(super) fn md_headings(text: &str, under: &str) -> Result<Names, Unread> {
 
 /// Comments go first: a comment quoting `{"action": "continue"}` once ended
 /// the set at its stray `}`. An empty set is an answer, not a miss. Hand-rolled
-/// on purpose: a Python grammar crate for the three set literals hermes' watches
-/// read (`install/hermes.rs`) outweighs this scanner.
+/// on purpose: a Python grammar crate for the set literals hermes' watches read
+/// (`install/hermes.rs`) outweighs this scanner.
 pub(super) fn py_set(text: &str, decl: &str) -> Result<Names, Unread> {
     let src = strip_py_comments(text);
     let opener = Regex::new(&format!(r"(?:{decl})\s*\{{"))?;

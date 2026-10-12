@@ -55,7 +55,7 @@ pub(crate) const OPENCLAW_VERDICT_EVENTS: &[&str] = &["model_call_ended"];
 
 /// What the plugin stamps `errored` from, per upstream type: each field it
 /// reads and each literal it compares one against. `each_template_read_is_watched`
-/// holds each to the template one way: a read added beside them is not seen.
+/// pins them to the template.
 #[cfg(feature = "upstream")]
 pub(crate) const AGENT_END_FIELDS: &[&str] = &["runId", "success", "error"];
 #[cfg(feature = "upstream")]

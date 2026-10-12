@@ -183,8 +183,8 @@ impl Yield {
         }
     }
 
-    /// Why a sibling sweep cannot run off this yield, `all` when its family
-    /// is [`Family::All`], which only a yield confined to the family can mean.
+    /// Why a sibling sweep cannot run off this yield. `all` says the sweep's
+    /// family is [`Family::All`], which only a yield confined to the family serves.
     pub const fn sibling_refusal(self, all: bool) -> Option<&'static str> {
         match self {
             Self::Ours | Self::One { .. } => Some("sweeps siblings off a reader that yields none"),
@@ -611,8 +611,8 @@ mod tests {
                 "the_exported_xai_tag_set_is_exactly_what_the_arms_match",
             ),
         ];
-        // Recursive: `src/source/` has nine module directories, and a const in
-        // one would otherwise be invisible to the census that exists to see it.
+        // Recursive: a const in a module directory would otherwise be
+        // invisible to the census that exists to see it.
         fn collect(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
             for entry in std::fs::read_dir(dir).expect("the source dir is readable") {
                 let path = entry.expect("a readable entry").path();

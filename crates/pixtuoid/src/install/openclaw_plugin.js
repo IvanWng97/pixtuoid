@@ -9,8 +9,8 @@
 // firing; it does NOT sanitize the payload — this allowlist is the sanitizer.
 //
 // NEVER BLOCK THE GATEWAY. `before_agent_run` is an AWAITED, FAIL-CLOSED decision
-// gate on the user's own turn — a throw or a >15s hang discards their prompt — so
-// three rules hold here:
+// gate on the user's own turn — a throw or a hang past its decision timeout
+// discards their prompt — so these rules hold here:
 //   1. the shim is spawned DETACHED + unref'd and NOTHING is awaited;
 //   2. every handler is try/catch'd and can never throw;
 //   3. the decision hook returns an EXPLICIT `{ outcome: "pass" }`.

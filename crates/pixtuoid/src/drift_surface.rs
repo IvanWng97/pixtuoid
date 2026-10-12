@@ -1,7 +1,5 @@
 //! This crate's half of the **drift surface** — the values our shipped
-//! artifacts bake in, emitted as data for `check_upstream_drift.py`. Everything
-//! else the installers depend on is watched beside them (`install/<cli>.rs`'s
-//! `UPSTREAM`).
+//! artifacts bake in, emitted as data for `check_upstream_drift.py`.
 
 use std::collections::BTreeMap;
 
