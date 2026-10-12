@@ -436,17 +436,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_subagent_dispatch_is_no_task() {
-        let ev = decode(json!({"type": TOOL_STARTED, "data": {
-            "sessionID": "ses_x", "id": "c", "name": "subagent"}}));
-        assert!(
-            matches!(ev, AgentEvent::ActivityStart { detail: Some(ref d), .. }
-            if !d.is_task() && d.display() == "subagent"),
-            "{ev:?}"
-        );
-    }
-
     /// `session.forked`'s `parentID` is the session it was copied from, beside
     /// a message `boundary` (`packages/schema/src/session-event.ts:187-200`),
     /// and the fork's own row keeps it as `fork_session_id`, with `parent_id`

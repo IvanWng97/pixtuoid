@@ -138,7 +138,6 @@ pub enum Primary {
         uninstall: fn(content: &str) -> Result<MergeOutcome>,
         /// As `Config`'s, over the owned primary.
         verify_schema: fn(content: &str) -> crate::install::verify::SchemaParse,
-        /// What an older pixtuoid's uninstall left that the CLI no longer loads.
         retired: Option<RetiredStub>,
         /// Whether the CLI reloads the primary when it changes, so a rewrite
         /// needs no restart notice.
@@ -146,9 +145,9 @@ pub enum Primary {
     },
 }
 
-/// A stub an older pixtuoid's uninstall wrote, and its successor. Launch
-/// rewrites the byte-exact `was`, connected or not: `uninstall`'s `changed` is
-/// the connected fact, so the stub can never read as ours there.
+/// A stub an older pixtuoid's uninstall wrote that the CLI no longer loads,
+/// and its successor. `uninstall`'s `changed` is the connected fact, so `was`
+/// must never read as ours there.
 #[derive(Debug)]
 pub struct RetiredStub {
     pub was: &'static str,
