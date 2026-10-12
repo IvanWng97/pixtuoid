@@ -97,7 +97,9 @@ Return only the structured result
 [`review-schema.json`](.github/prompts/review-schema.json) defines: a
 one-sentence `summary`, the kept findings, every blocking one first and
 pre-existing last, and as `overflow` the count of kept findings past the
-schema's `maxItems` ceiling, which fails the review's status at that head.
+schema's `maxItems` ceiling, which fails the review's status at that head; the
+summary then also names each of those by severity, lens and `path:line`, since
+they have no thread.
 
 ### Re-review
 
