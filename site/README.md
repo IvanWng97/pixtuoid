@@ -1,9 +1,9 @@
 # pixtuoid — website
 
-The marketing landing page for [pixtuoid](https://github.com/IvanWng97/pixtuoid),
+The marketing landing page for [pixtuoid](https://github.com/pixtuoid/pixtuoid),
 built with [Astro](https://astro.build). Deploys to GitHub Pages at
 **https://pixtuoid.dev/** (the old project page
-https://ivanwng97.github.io/pixtuoid/ redirects there).
+https://pixtuoid.github.io/pixtuoid/ redirects there).
 
 A Node project living in `site/`. The live office's `public/wasm/` is
 gitignored output of `just gen-wasm` (needs Rust); `dev` and `verify` work
@@ -111,6 +111,6 @@ counts, retint, and renders all pick it up automatically.
 The site lives on **pixtuoid.dev** (`base: '/'`, `site` in
 `astro.config.mjs`); the domain is configured in **Settings → Pages** (Actions
 deploys need no `CNAME` file), apex A/AAAA at GitHub Pages, `www` CNAME'd to
-`ivanwng97.github.io`. `robots.txt` + sitemap derive from the config. First
+`pixtuoid.github.io`. `robots.txt` + sitemap derive from the config. First
 deploy: set **Source: GitHub Actions**; after that every push to `main`
 touching `site/**` redeploys.

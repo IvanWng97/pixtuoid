@@ -14,9 +14,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/IvanWng97/pixtuoid/releases"><img src="https://img.shields.io/github/v/release/IvanWng97/pixtuoid?label=version&style=flat-square" alt="Version" /></a>
-  <a href="https://pixtuoid.dev/#tools"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FIvanWng97%2Fpixtuoid%2Fmain%2Fsite%2Fsrc%2Fsources.json&query=%24.length&label=agents%20supported&style=flat-square&color=8957e5" alt="Supported agents" /></a>
-  <a href="https://github.com/IvanWng97/pixtuoid/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/IvanWng97/pixtuoid/ci.yml?style=flat-square&label=CI" alt="CI" /></a>
+  <a href="https://github.com/pixtuoid/pixtuoid/releases"><img src="https://img.shields.io/github/v/release/pixtuoid/pixtuoid?label=version&style=flat-square" alt="Version" /></a>
+  <a href="https://pixtuoid.dev/#tools"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fpixtuoid%2Fpixtuoid%2Fmain%2Fsite%2Fsrc%2Fsources.json&query=%24.length&label=agents%20supported&style=flat-square&color=8957e5" alt="Supported agents" /></a>
+  <a href="https://github.com/pixtuoid/pixtuoid/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/pixtuoid/pixtuoid/ci.yml?style=flat-square&label=CI" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License" /></a>
 </p>
 
@@ -34,9 +34,9 @@
 <p align="center">
   <a href="https://buymeacoffee.com/IvanWng97">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/IvanWng97/pixtuoid/bmc-button/bmc-button-dark.svg" />
-      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/IvanWng97/pixtuoid/bmc-button/bmc-button-light.svg" />
-      <img alt="Buy me a coffee, with the live supporter count" src="https://raw.githubusercontent.com/IvanWng97/pixtuoid/bmc-button/bmc-button-light.svg" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/pixtuoid/pixtuoid/bmc-button/bmc-button-dark.svg" />
+      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/pixtuoid/pixtuoid/bmc-button/bmc-button-light.svg" />
+      <img alt="Buy me a coffee, with the live supporter count" src="https://raw.githubusercontent.com/pixtuoid/pixtuoid/bmc-button/bmc-button-light.svg" />
     </picture>
   </a>
 </p>
@@ -153,9 +153,9 @@ PRs welcome — especially new themes, sprite/decoration polish, and `Source` ad
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/IvanWng97/pixtuoid/star-history/star-history-dark.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/IvanWng97/pixtuoid/star-history/star-history-light.svg" />
-    <img alt="star history chart for IvanWng97/pixtuoid" src="https://raw.githubusercontent.com/IvanWng97/pixtuoid/star-history/star-history-light.svg" width="640" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/pixtuoid/pixtuoid/star-history/star-history-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/pixtuoid/pixtuoid/star-history/star-history-light.svg" />
+    <img alt="star history chart for pixtuoid/pixtuoid" src="https://raw.githubusercontent.com/pixtuoid/pixtuoid/star-history/star-history-light.svg" width="640" />
   </picture>
 </p>
 

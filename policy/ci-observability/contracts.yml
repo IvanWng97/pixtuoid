@@ -537,7 +537,7 @@
                           and (test("github\\.repository ==") | not))
   break:
     - (.jobs[] | select(has("if")) | .if) |= sub("repository_id == '[0-9]+'"; "repository_id == '1'")
-    - (.jobs[] | select(has("if")) | .if) |= sub("github.repository_id == '[0-9]+'"; "github.repository == 'IvanWng97/pixtuoid'")
+    - (.jobs[] | select(has("if")) | .if) |= sub("github.repository_id == '[0-9]+'"; "github.repository == 'pixtuoid/pixtuoid'")
     - (.jobs[] | select(has("if")) | .if) |= sub("( && )?github.repository_id == '[0-9]+'"; "")
     - '.jobs.ungated = {"runs-on": "ubuntu-latest", "steps": [{"run": "true"}]}'
 
