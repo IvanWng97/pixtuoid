@@ -174,4 +174,36 @@ mod tests {
         );
         assert_eq!(act(SceneHit::Furniture("Desk"), None), None);
     }
+
+    /// The README's button, the issue chooser and the site link the coffee
+    /// account too, and none of them can read this const.
+    #[test]
+    fn every_coffee_link_in_the_workspace_is_coffee_url() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        // crates.io-packaged test runs don't ship the repo's site/ tree.
+        if !root.join("site").is_dir() {
+            return;
+        }
+        let host = "https://buymeacoffee.com/";
+        for rel in [
+            "README.md",
+            ".github/ISSUE_TEMPLATE/config.yml",
+            "site/src/consts.ts",
+        ] {
+            let text = std::fs::read_to_string(root.join(rel))
+                .unwrap_or_else(|e| panic!("read {rel}: {e}"));
+            let links: Vec<&str> = text
+                .match_indices(host)
+                .filter_map(|(at, _)| {
+                    text[at..]
+                        .split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>'))
+                        .next()
+                })
+                .collect();
+            assert!(!links.is_empty(), "{rel} no longer links {host}");
+            for link in links {
+                assert_eq!(link, COFFEE_URL, "{rel}");
+            }
+        }
+    }
 }

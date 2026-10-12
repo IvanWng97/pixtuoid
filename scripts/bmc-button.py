@@ -7,9 +7,9 @@ the star chart's palette. It is drawn here and published to the `bmc-button`
 branch by `.github/workflows/bmc-button.yml`, the way the star chart is,
 because no hosted badge can draw it.
 
-Usage: `bmc-button.py OUT_DIR` writes `bmc-button-{light,dark}.svg` for the
-slug in `.github/FUNDING.yml`. `--selftest` exercises everything but the fetch;
-exit 0 = pass.
+Usage: `bmc-button.py FUNDING_YML OUT_DIR` writes `bmc-button-{light,dark}.svg`
+for the slug in FUNDING_YML, the org's `.github` copy the workflow fetches.
+`--selftest` exercises everything but the fetch; exit 0 = pass.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from urllib import request
 from readme_pixels import GLYPH_H, PACK_DIR, THEMES, Pack, _run, animation, compact, load_pack, mask_path, parse_sprite, sprite_size, text_path, text_width
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-FUNDING_PATH = REPO / ".github" / "FUNDING.yml"
+README_PATH = REPO / "README.md"
 # BMC's own app API, unauthenticated; `public_supporters_count` is the "N
 # supporters" the creator page shows.
 CREATOR_URL = "https://app.buymeacoffee.com/api/creators/slug/{slug}"
@@ -57,6 +57,16 @@ def slug_from_funding(text: str) -> str:
     if not m:
         raise RuntimeError("FUNDING.yml has no buy_me_a_coffee slug")
     return m.group(1)
+
+
+def button_slug(funding: str, readme: str) -> str:
+    # FUNDING.yml lives in another repo, so this run is what notices the README
+    # linking a different account than the one whose supporters it counts.
+    linked = set(re.findall(r"https://buymeacoffee\.com/([\w-]+)", readme))
+    slug = slug_from_funding(funding)
+    if linked != {slug}:
+        raise RuntimeError(f"FUNDING.yml names {slug!r}, but the README links {sorted(linked)}")
+    return slug
 
 
 def supporter_count(payload: object) -> int:
@@ -155,6 +165,13 @@ def test_slug_is_read_from_funding() -> None:
     check(_raises(slug_from_funding, "github: someone\n"), "a FUNDING.yml without the key must raise")
 
 
+def test_button_slug_is_the_one_the_readme_links() -> None:
+    funding = "buy_me_a_coffee: SomeOne42\n"
+    check(button_slug(funding, '<a href="https://buymeacoffee.com/SomeOne42">') == "SomeOne42", "an agreeing README passes")
+    for readme in ("no link", '<a href="https://buymeacoffee.com/Other">', "https://buymeacoffee.com/SomeOne42 https://buymeacoffee.com/Other"):
+        check(_raises(button_slug, funding, readme), f"README {readme!r} must raise, not count another account")
+
+
 def test_count_is_the_public_supporters_count() -> None:
     check(supporter_count({"data": {"public_supporters_count": 19, "supporter_count": 0}}) == 19, "reads data.public_supporters_count")
     for bad in (None, True, -1, "19"):
@@ -234,12 +251,13 @@ def selftest() -> int:
 def main(argv: list[str]) -> int:
     if "--selftest" in argv:
         return selftest()
-    if len(argv) != 1:
+    if len(argv) != 2:
         print(__doc__, file=sys.stderr)
         return 2
-    slug = slug_from_funding(FUNDING_PATH.read_text(encoding="utf-8"))
+    funding = pathlib.Path(argv[0]).read_text(encoding="utf-8")
+    slug = button_slug(funding, README_PATH.read_text(encoding="utf-8"))
     count = supporter_count(fetch_creator(slug))
-    for p in write_buttons(count, pathlib.Path(argv[0]), load_pack(PACK_DIR, (AGENT, CAT))):
+    for p in write_buttons(count, pathlib.Path(argv[1]), load_pack(PACK_DIR, (AGENT, CAT))):
         print(p)
     print(f"{slug}: {count} supporters", file=sys.stderr)
     return 0

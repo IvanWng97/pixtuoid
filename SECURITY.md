@@ -81,7 +81,7 @@ traversal, or any network egress), please report it.
 Report privately via
 [GitHub private vulnerability reporting](https://github.com/IvanWng97/pixtuoid/security/advisories/new).
 
-You will receive acknowledgement within 48 hours, and a fix or mitigation plan
-within 7 days for confirmed vulnerabilities.
+The [org's security policy](https://github.com/pixtuoid/.github/blob/main/SECURITY.md)
+sets the response times.
 
 **Do not** open a public issue for security vulnerabilities.
