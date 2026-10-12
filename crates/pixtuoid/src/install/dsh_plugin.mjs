@@ -15,9 +15,9 @@ import { spawn } from "node:child_process"
 export const name = "pixtuoid"
 export const inject = ["agents"]
 
-// Every listener is synchronous, returns nothing and never throws: the one
-// serial channel (`agent/created`) waits only for a spawn, and the rest are
-// emits, so this plugin cannot stall a tool call, a prompt, or shutdown.
+// Every listener is synchronous, returns nothing and never throws, and every
+// channel but `agent/created` (below) is an emit, so this plugin cannot stall a
+// tool call, a prompt, or shutdown.
 export function apply(ctx) {
   const send = (payload) => {
     try {
@@ -87,15 +87,13 @@ export function apply(ctx) {
             toolName: d.name,
           })
           break
-        case "tool/result": {
-          const block = d.message?.content?.[0]
+        case "tool/result":
           send({
             type: "tool_result",
             ...base(header),
-            ...(block?.toolCallId ? { callId: String(block.toolCallId) } : {}),
+            ...(d.message?.toolCallId ? { callId: String(d.message.toolCallId) } : {}),
           })
           break
-        }
         case "approval/asked":
           asked.set(String(d.id), { callId: d.callId, toolName: d.toolName })
           send({

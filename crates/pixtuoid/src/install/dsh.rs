@@ -46,61 +46,74 @@ pub(crate) fn plugin_events() -> Vec<&'static str> {
     names
 }
 
-/// dsh declares its events as keys of the cordis `Events` and the session's
-/// `SessionEventMap`, each augmented across packages, so one key may live in
-/// any of the four.
 #[cfg(feature = "upstream")]
-pub(crate) const UPSTREAM: &[Watch] = &[Watch {
-    id: "dsh.plugin_events",
-    ours: plugin_events,
-    docs: &[
-        Doc {
-            at: At::Path {
-                repo: "deepseek-ai/deepseek-harness",
-                branch: "master",
-                path: "packages/core/agent/src/runtime-types.ts",
+const fn dsh(path: &'static str) -> At {
+    At::Path {
+        repo: "deepseek-ai/deepseek-harness",
+        branch: "master",
+        path,
+    }
+}
+
+#[cfg(feature = "upstream")]
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "dsh.plugin_events",
+        ours: plugin_events,
+        // dsh declares its events as keys of the cordis `Events` and the
+        // session's `SessionEventMap`, each augmented across packages, so one
+        // key may live in any of these.
+        docs: &[
+            Doc {
+                at: dsh("packages/core/agent/src/runtime-types.ts"),
+                anchor: r"declare module '@deepseek-ai/cordis' \{\s*interface Events \{",
+                owns: "the cordis `Events` augmentation",
             },
-            anchor: r"declare module '@deepseek-ai/cordis' \{\s*interface Events \{",
-            owns: "the cordis `Events` augmentation",
-        },
-        Doc {
-            at: At::Path {
-                repo: "deepseek-ai/deepseek-harness",
-                branch: "master",
-                path: "packages/core/session/src/types.ts",
+            Doc {
+                at: dsh("packages/core/session/src/types.ts"),
+                anchor: r"export interface SessionEventMap\b",
+                owns: "`SessionEventMap`",
             },
-            anchor: r"export interface SessionEventMap\b",
-            owns: "`SessionEventMap`",
-        },
-        Doc {
-            at: At::Path {
-                repo: "deepseek-ai/deepseek-harness",
-                branch: "master",
-                path: "packages/interaction/user-approval/src/types.ts",
+            Doc {
+                at: dsh("packages/interaction/user-approval/src/types.ts"),
+                anchor: r"declare module '@deepseek-ai/dsh-session/types' \{\s*interface SessionEventMap \{",
+                owns: "the `SessionEventMap` augmentation",
             },
-            anchor: r"declare module '@deepseek-ai/dsh-session/types' \{\s*interface SessionEventMap \{",
-            owns: "the `SessionEventMap` augmentation",
-        },
-        Doc {
-            at: At::Path {
-                repo: "deepseek-ai/deepseek-harness",
-                branch: "master",
-                path: "packages/core/session/src/index.ts",
+            Doc {
+                at: dsh("packages/core/session/src/index.ts"),
+                anchor: r"declare module '@deepseek-ai/cordis' \{",
+                owns: "the cordis augmentation",
             },
-            anchor: r"declare module '@deepseek-ai/cordis' \{",
-            owns: "the cordis augmentation",
+        ],
+        read: Read::TsMembers {
+            of: &["Events", "SessionEventMap"],
         },
-    ],
-    read: Read::TsMembers {
-        of: &["Events", "SessionEventMap"],
-    },
-    when: When::Vanishes,
-    finding: Finding::Breaking(
-        "the plugin listens to an event dsh never fires, so that slice of the office silently \
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the plugin listens to an event dsh never fires, so that slice of the office silently \
          stops updating",
-    ),
-    siblings: None,
-}];
+        ),
+        siblings: None,
+    },
+    Watch {
+        id: "dsh.tool_result_call_id",
+        ours: || vec!["toolCallId"],
+        docs: &[Doc {
+            at: dsh("packages/llm/llm/src/message.ts"),
+            anchor: r"(?m)^export interface ToolResultMessage\b",
+            owns: "`ToolResultMessage`",
+        }],
+        read: Read::TsFields {
+            name: "ToolResultMessage",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "every tool result reaches the decoder without its call id: doctor reports it as \
+             drift, and its end cannot be paired with its call",
+        ),
+        siblings: None,
+    },
+];
 
 /// `$DSH_HOME` else `~/.dsh` — upstream `resolveDshHome`
 /// (`packages/util/home-paths/src/index.ts`, fetched 2026-09-01) resolves
@@ -517,6 +530,22 @@ mod tests {
                 .count(),
             2,
             "tool/call and approval/asked both guard callId"
+        );
+    }
+
+    /// The call id is read off the message, whose `ToolResultMessage` field
+    /// `dsh.tool_result_call_id` watches, never off a content block.
+    #[test]
+    fn the_plugin_reads_a_tool_results_call_id_off_its_message() {
+        assert!(
+            PLUGIN_TEMPLATE.contains(
+                r#"...(d.message?.toolCallId ? { callId: String(d.message.toolCallId) } : {})"#
+            ),
+            "tool/result lost its guarded read of the message's call id"
+        );
+        assert!(
+            !PLUGIN_TEMPLATE.contains("content?.[0]"),
+            "tool/result reads a content block, which declares no call id"
         );
     }
 
