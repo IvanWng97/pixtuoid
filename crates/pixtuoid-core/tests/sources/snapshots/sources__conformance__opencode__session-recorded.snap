@@ -3,74 +3,75 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - SessionStart:
-    agent_id: 18208626524761177055
+    agent_id: 8256116563401147404
     source: opencode
-    session_id: ses_ecea43bcafferMIn3p8ddoq0IB
+    session_id: ses_ece799e49ffeXR8xaUT3U2cfud
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
 - ModelInfo:
-    agent_id: 18208626524761177055
+    agent_id: 8256116563401147404
     model: deepseek-flash
     effort: ~
-- Identity:
-    agent_id: 18208626524761177055
+- SessionStart:
+    agent_id: 8256116563401147404
     source: opencode
-    session_id: ses_ecea43bcafferMIn3p8ddoq0IB
-    cwd: ~
+    session_id: ses_ece799e49ffeXR8xaUT3U2cfud
+    cwd: ""
+    parent_id: ~
 - Identity:
-    agent_id: 18208626524761177055
+    agent_id: 8256116563401147404
     source: opencode
-    session_id: ses_ecea43bcafferMIn3p8ddoq0IB
-    cwd: ~
+    session_id: ses_ece799e49ffeXR8xaUT3U2cfud
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 18208626524761177055
-    tool_use_id: call_00_7Z4jaOwGYEKdOFluXUK53124
+    agent_id: 8256116563401147404
+    tool_use_id: call_00_hp6DBJv0Ss8cv8sXYOLL2851
     detail:
       Generic:
         display: read
-- ActivityEnd:
-    agent_id: 18208626524761177055
-    tool_use_id: call_00_7Z4jaOwGYEKdOFluXUK53124
 - Identity:
-    agent_id: 18208626524761177055
+    agent_id: 8256116563401147404
     source: opencode
-    session_id: ses_ecea43bcafferMIn3p8ddoq0IB
-    cwd: ~
+    session_id: ses_ece799e49ffeXR8xaUT3U2cfud
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 18208626524761177055
-    tool_use_id: call_00_ud3D4M6uvTTjttpTYhnz2425
+    agent_id: 8256116563401147404
+    tool_use_id: call_01_5gXt0CvJh9T4CnZaXLIu9315
     detail:
       Generic:
         display: shell
-- Identity:
-    agent_id: 18208626524761177055
-    source: opencode
-    session_id: ses_ecea43bcafferMIn3p8ddoq0IB
-    cwd: ~
-- Waiting:
-    agent_id: 18208626524761177055
-    reason: shell
-    tool_use_id: call_00_ud3D4M6uvTTjttpTYhnz2425
 - ActivityEnd:
-    agent_id: 18208626524761177055
-    tool_use_id: call_00_ud3D4M6uvTTjttpTYhnz2425
+    agent_id: 8256116563401147404
+    tool_use_id: call_00_hp6DBJv0Ss8cv8sXYOLL2851
 - Identity:
-    agent_id: 18208626524761177055
+    agent_id: 8256116563401147404
     source: opencode
-    session_id: ses_ecea43bcafferMIn3p8ddoq0IB
-    cwd: ~
+    session_id: ses_ece799e49ffeXR8xaUT3U2cfud
+    cwd: /private/tmp/pixtuoid-capture/proj
+- Waiting:
+    agent_id: 8256116563401147404
+    reason: shell
+    tool_use_id: call_01_5gXt0CvJh9T4CnZaXLIu9315
+- ActivityEnd:
+    agent_id: 8256116563401147404
+    tool_use_id: call_01_5gXt0CvJh9T4CnZaXLIu9315
+- Identity:
+    agent_id: 8256116563401147404
+    source: opencode
+    session_id: ses_ece799e49ffeXR8xaUT3U2cfud
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 18208626524761177055
-    tool_use_id: call_00_ET_kEClgNSyPrd7c46jVdsQ7512
+    agent_id: 8256116563401147404
+    tool_use_id: call_00_PgC2cnfTXEdTW6Jtn5ly5467
     detail:
       Generic:
         display: read
 - ActivityEnd:
-    agent_id: 18208626524761177055
-    tool_use_id: call_00_ET_kEClgNSyPrd7c46jVdsQ7512
+    agent_id: 8256116563401147404
+    tool_use_id: call_00_PgC2cnfTXEdTW6Jtn5ly5467
 - ActivityEnd:
-    agent_id: 18208626524761177055
+    agent_id: 8256116563401147404
     tool_use_id: ~
 - SessionEnd:
-    agent_id: 18208626524761177055
+    agent_id: 8256116563401147404
     as_child: false

@@ -673,8 +673,8 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
         caps: SourceCaps {
             // A TUI quit ends nothing: the session lives on in the server.
             has_exit_signal: false,
-            // The next prompt's `session.execution.started` decodes to `Identity`,
-            // which re-registers a swept session.
+            // The next prompt's `session.execution.started` decodes to
+            // `SessionStart`.
             resurrects_on_prompt: true,
             // A `subagent` child is parented by its `session.created`'s `parentID`,
             // so its events keep the parent fresh (`scope::refresh_lineage`).

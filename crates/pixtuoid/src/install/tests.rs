@@ -295,6 +295,38 @@ fn has_hooks_unreadable_config_is_true() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A pre-v2 disconnect left a stub opencode 2 lists as a failed plugin; launch
+/// rewrites it, and only it, while `has_hooks` keeps reading it disconnected.
+#[test]
+fn a_retired_stub_is_rewritten_and_stays_disconnected() {
+    let t = &crate::install::target::OPENCODE;
+    let Primary::Owned {
+        retired: Some(stub),
+        ..
+    } = &t.primary
+    else {
+        panic!("opencode declares its retired stub");
+    };
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cfg = tmp.path().join("plugins").join("pixtuoid.ts");
+    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+
+    assert!(!heal_retired_stub(t, Some(cfg.clone())).unwrap());
+    assert!(!cfg.exists(), "no file is created where none was");
+
+    std::fs::write(&cfg, stub.was).unwrap();
+    assert!(!has_hooks(t, Some(cfg.clone())));
+    assert!(heal_retired_stub(t, Some(cfg.clone())).unwrap());
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), stub.now);
+    assert!(!has_hooks(t, Some(cfg.clone())));
+    assert!(!heal_retired_stub(t, Some(cfg.clone())).unwrap());
+
+    let foreign = "export default { id: \"mine\", setup() {} }\n";
+    std::fs::write(&cfg, foreign).unwrap();
+    assert!(!heal_retired_stub(t, Some(cfg.clone())).unwrap());
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), foreign);
+}
+
 #[test]
 fn has_hooks_changed_vs_unchanged_arms() {
     let path = fake2_config_path();

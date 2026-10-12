@@ -72,6 +72,7 @@ export default {
           await send(
             JSON.stringify({
               type: event.type,
+              location: event.location && { directory: event.location.directory },
               data: allowlisted(event.data),
               // The opencode server's pid; the daemon's HookPidWatch ends every
               // sprite bound to it when it dies.

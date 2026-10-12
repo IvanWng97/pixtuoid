@@ -194,7 +194,8 @@ fn codex_idle_agent_reaps_faster_than_claude_idle() {
 }
 
 /// A quit opencode TUI leaves no end signal, so the next prompt's
-/// `session.execution.started` (decoded to `Identity`) is what heals the sweep.
+/// `session.execution.started` (decoded to `SessionStart`) is what heals the
+/// sweep, during the walkout and after it.
 #[test]
 fn a_quit_opencode_idle_slot_is_swept_short_and_walks_back_in_on_its_next_turn() {
     use pixtuoid_core::state::reducer::{EXIT_GRACE_WINDOW, STALE_SHORT_IDLE_TIMEOUT};
@@ -202,45 +203,41 @@ fn a_quit_opencode_idle_slot_is_swept_short_and_walks_back_in_on_its_next_turn()
     let mut reducer = Reducer::new();
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let oc = AgentId::from_parts("opencode", "ses_q");
-    reducer.apply(
-        &mut scene,
-        AgentEvent::SessionStart {
-            agent_id: oc,
-            source: "opencode".into(),
-            session_id: "ses_q".into(),
-            cwd: PathBuf::from("/repo"),
-            parent_id: None,
-        },
-        t0,
-        Transport::Hook,
-    );
+    let start = || AgentEvent::SessionStart {
+        agent_id: oc,
+        source: "opencode".into(),
+        session_id: "ses_q".into(),
+        cwd: PathBuf::from("/repo"),
+        parent_id: None,
+    };
+    let exiting = |scene: &SceneState| scene.agents.get(&oc).map(|s| s.exiting_at.is_some());
+    reducer.apply(&mut scene, start(), t0, Transport::Hook);
+
     let swept = t0 + STALE_SHORT_IDLE_TIMEOUT + Duration::from_secs(1);
     reducer.tick(&mut scene, swept);
-    assert!(
-        scene.agents.get(&oc).unwrap().exiting_at.is_some(),
-        "an idle opencode slot takes the short reaper"
+    assert_eq!(
+        exiting(&scene),
+        Some(true),
+        "an idle slot takes the short reaper"
     );
+    let walking_out = swept + Duration::from_secs(1);
+    reducer.apply(&mut scene, start(), walking_out, Transport::Hook);
+    assert_eq!(
+        exiting(&scene),
+        Some(false),
+        "a turn mid-walkout resurrects it"
+    );
+
+    let swept = walking_out + STALE_SHORT_IDLE_TIMEOUT + Duration::from_secs(1);
+    reducer.tick(&mut scene, swept);
     let gone = swept + EXIT_GRACE_WINDOW + Duration::from_millis(1);
     reducer.tick(&mut scene, gone);
-    assert!(!scene.agents.contains_key(&oc));
-    reducer.apply(
-        &mut scene,
-        AgentEvent::Identity {
-            agent_id: oc,
-            source: "opencode".into(),
-            session_id: "ses_q".into(),
-            cwd: None,
-            pid: None,
-        },
-        gone,
-        Transport::Hook,
-    );
-    assert!(
-        scene
-            .agents
-            .get(&oc)
-            .is_some_and(|s| s.exiting_at.is_none()),
-        "the next turn's Identity walks the session back in"
+    assert_eq!(exiting(&scene), None);
+    reducer.apply(&mut scene, start(), gone, Transport::Hook);
+    assert_eq!(
+        exiting(&scene),
+        Some(false),
+        "a turn after the walkout re-registers it"
     );
 }
 

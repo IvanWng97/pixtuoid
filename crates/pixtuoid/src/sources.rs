@@ -220,6 +220,15 @@ fn is_on(app: &config::AppConfig, sid: &str, hooked: impl Fn(&str) -> Option<boo
 /// leaves the install for the boot warning and doctor to report, and the next
 /// launch retries it.
 pub(crate) fn converge_owned(connected: &HashSet<String>) -> Vec<&'static Target> {
+    for t in install::TARGETS {
+        match install::heal_retired_stub(t, None) {
+            Ok(true) => tracing::info!(cli = t.name, "rewrote a stub an older pixtuoid left"),
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(cli = t.name, error = ?e, "could not rewrite a stub an older pixtuoid left");
+            }
+        }
+    }
     converge_owned_with(install::TARGETS, connected, |t| install::converge(t, None))
 }
 

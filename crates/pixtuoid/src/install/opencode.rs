@@ -34,11 +34,20 @@ pub(crate) fn plugin_events() -> Vec<&'static str> {
         .collect()
 }
 
-/// A no-op plugin WITHOUT the sentinel, so a re-uninstall is a no-op. opencode
-/// reports a module without an `{ id, setup }` default export
-/// (`packages/core/src/plugin/module.ts:78-91`) as a failed plugin
-/// (`supervisor.ts:63`, `:79-84`).
-const REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Sources panel (press s).\nexport default { id: \"pixtuoid-removed\", setup() {} }\n";
+/// A no-op plugin WITHOUT the sentinel, so a re-uninstall is a no-op.
+pub(crate) const REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Sources panel (press s).\nexport default { id: \"pixtuoid-removed\", setup() {} }\n";
+
+/// What a pre-v2 pixtuoid's disconnect wrote, which opencode 2 cannot load.
+pub(crate) const V1_REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Sources panel (press s).\nexport {}\n";
+
+/// Whether `content` default-exports the `{ id, setup }` object opencode loads;
+/// it reports any other module as a failed plugin
+/// (`packages/core/src/plugin/module.ts:78-91`, `supervisor.ts:63`, `:79-84`).
+fn exports_a_plugin(content: &str) -> bool {
+    content
+        .split_once("export default {")
+        .is_some_and(|(_, rest)| rest.contains("id:") && rest.contains("setup("))
+}
 
 fn opencode_config_dir() -> Result<PathBuf> {
     config_dir_from(
@@ -117,6 +126,11 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     let Some(p) = crate::install::verify::baked_hook_path(content) else {
         return SchemaParse::broken("could not read HOOK_PATH from the opencode plugin");
     };
+    if !exports_a_plugin(content) {
+        return SchemaParse::broken(
+            "the opencode plugin predates opencode 2, which cannot load it — reconnect opencode",
+        );
+    }
     SchemaParse {
         shim: ShimRef::Absolute(p),
         ..Default::default()
@@ -185,13 +199,27 @@ mod tests {
             "an unsubstituted placeholder must be reported"
         );
 
-        let no_binding = format!("// {SENTINEL}\nexport default function () {{}}\n");
+        let no_binding = format!("// {SENTINEL}\nexport default {{ id: \"x\", setup() {{}} }}\n");
         assert!(
             verify_schema(&no_binding)
                 .issues
                 .iter()
                 .any(|i| i.contains("HOOK_PATH")),
             "an unreadable HOOK_PATH must be reported, not silently accepted"
+        );
+
+        // What a pre-v2 pixtuoid rendered: a function default export.
+        let v1 = format!(
+            "// {SENTINEL}\nconst HOOK_PATH: string = \"/opt/bin/pixtuoid-hook\"\n\
+             export const PixtuoidOpencode = async () => ({{}})\nexport default PixtuoidOpencode\n"
+        );
+        assert!(
+            verify_schema(&v1)
+                .issues
+                .iter()
+                .any(|i| i.contains("opencode 2") && i.contains("reconnect opencode")),
+            "a plugin opencode 2 cannot load must be a HARD issue — got {:?}",
+            verify_schema(&v1).issues
         );
     }
 
@@ -252,17 +280,14 @@ mod tests {
         assert_eq!(removed.content, REMOVED_STUB);
     }
 
-    /// The stub is still loaded as a plugin, so it must be a valid one: an
-    /// object default export with an `id` and a `setup` function.
+    /// The stub is still loaded as a plugin, so it must be a valid one.
     #[test]
-    fn the_removed_stub_is_a_loadable_no_op_plugin() {
-        let export = REMOVED_STUB
-            .lines()
-            .find_map(|l| l.strip_prefix("export default "))
-            .expect("an object default export");
-        assert!(export.starts_with('{') && export.ends_with('}'), "{export}");
-        assert!(export.contains("id: \"pixtuoid-removed\""), "{export}");
-        assert!(export.contains("setup() {}"), "{export}");
+    fn the_removed_stub_and_the_render_are_loadable_plugins() {
+        assert!(exports_a_plugin(REMOVED_STUB), "{REMOVED_STUB}");
+        assert!(exports_a_plugin(
+            &render_plugin("/opt/bin/pixtuoid-hook").unwrap()
+        ));
+        assert!(!exports_a_plugin(V1_REMOVED_STUB));
     }
 
     #[test]
@@ -273,8 +298,7 @@ mod tests {
         assert!(!uninstall("").unwrap().changed);
         // `changed` is the connected fact (`install::has_hooks`), so the stub an
         // older pixtuoid's disconnect wrote must stay disconnected.
-        let v1_stub = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Sources panel (press s).\nexport {}\n";
-        assert!(!uninstall(v1_stub).unwrap().changed);
+        assert!(!uninstall(V1_REMOVED_STUB).unwrap().changed);
     }
 
     #[test]

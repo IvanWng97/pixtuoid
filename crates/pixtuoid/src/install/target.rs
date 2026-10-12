@@ -138,7 +138,18 @@ pub enum Primary {
         uninstall: fn(content: &str) -> Result<MergeOutcome>,
         /// As `Config`'s, over the owned primary.
         verify_schema: fn(content: &str) -> crate::install::verify::SchemaParse,
+        /// What an older pixtuoid's uninstall left that the CLI no longer loads.
+        retired: Option<RetiredStub>,
     },
+}
+
+/// A stub an older pixtuoid's uninstall wrote, and its successor. Launch
+/// rewrites the byte-exact `was`, connected or not: `uninstall`'s `changed` is
+/// the connected fact, so the stub can never read as ours there.
+#[derive(Debug)]
+pub struct RetiredStub {
+    pub was: &'static str,
+    pub now: &'static str,
 }
 
 impl Primary {
@@ -245,6 +256,7 @@ pub(crate) const CLAUDE: Target = Target {
         installed_shim: crate::install::claude::installed_shim,
         uninstall: crate::install::host_plugin::uninstall_hooks,
         verify_schema: crate::install::claude::verify_schema,
+        retired: None,
     },
     // Windows: the exec form embeds the absolute path, and a hook spawned without
     // a shell can't PATH-search, so an unresolvable binary is fatal there.
@@ -273,6 +285,7 @@ pub(crate) const CODEX: Target = Target {
         installed_shim: crate::install::codex::installed_shim,
         uninstall: crate::install::host_plugin::uninstall_hooks,
         verify_schema: crate::install::codex::verify_schema,
+        retired: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: crate::install::codex::detect_installed,
@@ -299,6 +312,7 @@ pub(crate) const REASONIX: Target = Target {
         installed_shim: crate::install::reasonix::installed_shim,
         uninstall: crate::install::reasonix::uninstall,
         verify_schema: crate::install::reasonix::verify_schema,
+        retired: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: crate::install::reasonix::detect_installed,
@@ -348,6 +362,10 @@ pub(crate) const OPENCODE: Target = Target {
         installed_shim: crate::install::verify::baked_shim,
         uninstall: crate::install::opencode::uninstall,
         verify_schema: crate::install::opencode::verify_schema,
+        retired: Some(RetiredStub {
+            was: crate::install::opencode::V1_REMOVED_STUB,
+            now: crate::install::opencode::REMOVED_STUB,
+        }),
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // A post-uninstall stub still exists, so detect on opencode's own dirs
@@ -524,6 +542,7 @@ pub(crate) const OMP: Target = Target {
         installed_shim: crate::install::verify::baked_shim,
         uninstall: crate::install::omp::uninstall,
         verify_schema: crate::install::omp::verify_schema,
+        retired: None,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // A post-uninstall stub still exists, so detect on omp's own agent dir
