@@ -404,13 +404,13 @@ fn a_name_missing_from_a_partial_read_is_blind() {
     );
 }
 
-/// A literal lost on a field the read still sees is a certain loss: no base
-/// type can add it back, so a partial read judges it.
+/// A partial read judges a fact of a field it sees: no base type adds a
+/// literal back. A fact whose field it cannot see stays blind.
 #[test]
-fn a_fact_of_a_visible_field_is_judged_in_a_partial_read() {
+fn a_partial_read_judges_a_fact_by_whether_its_field_is_seen() {
     const W: Watch = Watch {
         id: "t.facts",
-        ours: || vec!["a:\"x\""],
+        ours: || vec!["a:\"x\"", "b:\"y\""],
         docs: &[doc("t.ts")],
         read: Read::TsFields { name: "X" },
         when: When::Vanishes,
@@ -423,7 +423,42 @@ fn a_fact_of_a_visible_field_is_judged_in_a_partial_read() {
     );
     let r = check(&narrowed, &W);
     assert!(
-        r.blind.is_empty() && r.breaking.len() == 1 && r.breaking[0].contains(r#"`a:"x"`"#),
+        r.blind.len() == 1 && r.blind[0].contains(r#"`b:"y"`"#),
+        "{r:?}"
+    );
+    assert!(
+        r.breaking.len() == 1 && r.breaking[0].contains(r#"`a:"x"`"#),
+        "{r:?}"
+    );
+}
+
+/// A later complete document leaves an earlier partial one's reason standing.
+#[test]
+fn a_partial_document_keeps_a_union_read_partial() {
+    const W: Watch = Watch {
+        id: "t.members",
+        ours: || vec!["a", "b"],
+        docs: &[doc("a.ts"), doc("b.ts")],
+        read: Read::TsMembers { of: &["X"] },
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
+        siblings: None,
+    };
+    let served = Served::default()
+        .with(
+            &raw("a.ts"),
+            "enum Events {}\ninterface X extends Base { a: string }\n",
+        )
+        .with(
+            &raw("b.ts"),
+            "enum Events {}\ninterface X { a: string; c: string }\n",
+        );
+    let r = check(&served, &W);
+    assert!(r.breaking.is_empty(), "{r:?}");
+    assert!(
+        r.blind.len() == 1
+            && r.blind[0].contains("`b`")
+            && r.blind[0].contains("a.ts: `interface X` extends another type"),
         "{r:?}"
     );
 }
@@ -1106,8 +1141,8 @@ fn the_report_title_carries_the_strongest_disposition_and_the_exit_code() {
 
 /// What a shipped template reads is what its watches read. omp, both ways: a
 /// read added without its watch, or a watch outliving its read, fails here.
-/// OpenClaw, one way: each field and literal its Degraded consts name is still
-/// read or compared; a new read is not detected. dsh's watch reads its scan
+/// OpenClaw, one way: each field, literal and id its consts name is still read,
+/// compared or forwarded; a new read is not detected. dsh's watch reads its scan
 /// itself, so it needs no leg.
 #[test]
 fn each_template_read_is_watched() {
@@ -1119,18 +1154,35 @@ fn each_template_read_is_watched() {
             .filter(|n| read::is_bare(n))
             .collect()
     };
-    let reads: BTreeSet<&str> = omp::extension_reads().into_iter().collect();
-    assert!(!reads.is_empty(), "the template scan reads nothing");
-    assert_eq!(reads, bare(omp::UPSTREAM));
+    let omp_reads: BTreeSet<&str> = omp::extension_reads().into_iter().collect();
+    assert!(!omp_reads.is_empty(), "the template scan reads nothing");
+    assert_eq!(omp_reads, bare(omp::UPSTREAM));
+    let plugin_reads = |read: &str| {
+        openclaw::PLUGIN_TEMPLATE.match_indices(read).any(|(i, _)| {
+            !openclaw::PLUGIN_TEMPLATE[i + read.len()..]
+                .starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+        })
+    };
     let fields = [openclaw::AGENT_END_FIELDS, openclaw::MODEL_CALL_BASE_FIELDS].concat();
     for field in fields {
-        let read = format!("ev.{field}");
         assert!(
-            openclaw::PLUGIN_TEMPLATE
-                .match_indices(&read)
-                .any(|(i, _)| !openclaw::PLUGIN_TEMPLATE[i + read.len()..]
-                    .starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '$')),
+            plugin_reads(&format!("ev.{field}")),
             "the plugin no longer reads `{field}`"
+        );
+    }
+    for field in openclaw::PORT_FIELDS {
+        for read in [format!("ev.{field}"), format!("ctx.{field}")] {
+            assert!(plugin_reads(&read), "the plugin no longer reads `{read}`");
+        }
+    }
+    let allow = openclaw::PLUGIN_TEMPLATE
+        .split_once("const ALLOW = [")
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map_or("", |(list, _)| list);
+    for id in openclaw::RUN_KEY_FIELDS {
+        assert!(
+            allow.contains(&format!("\"{id}\"")),
+            "the plugin no longer forwards `{id}`"
         );
     }
     for fact in openclaw::MODEL_CALL_ENDED_FACTS {

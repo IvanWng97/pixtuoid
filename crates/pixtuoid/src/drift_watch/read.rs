@@ -1102,9 +1102,13 @@ mod tests {
         Ok(xs.iter().map(|s| (*s).to_owned()).collect())
     }
 
-    /// Why the read is partial, if it read its declaration at all.
+    /// Why the read is partial; a read that failed fails the test.
     fn partial(read: Result<Declared, Unread>) -> Option<String> {
-        read.ok().and_then(|d| d.partial)
+        match read {
+            Ok(read) => read.partial,
+            Err(Unread::Missing(what)) => panic!("the read found {what}"),
+            Err(Unread::Ours(e)) => panic!("a test pattern does not compile: {e}"),
+        }
     }
 
     #[test]
@@ -1494,13 +1498,21 @@ mod tests {
             partial(ts_members(extended, &events)).as_deref(),
             Some("`interface Events` extends another type")
         );
+        let computed = "interface Events {\n  [K]: 1;\n  'a': 1\n}\ninterface SessionEventMap {\n  [K](): void;\n  'b': 1\n}\nclass C {\n  accessor x = 1;\n}\n";
+        for of in ["Events", "SessionEventMap"] {
+            assert_eq!(
+                partial(ts_members(computed, &[of])),
+                Some(format!("`interface {of}` has a computed key"))
+            );
+        }
+        assert_eq!(found(ts_members(computed, &["C"])), names(&["x"]));
     }
 
     /// Every `return` of the ONE function, in order, its nested functions'
     /// aside: an early-return branch is the redirect a watch waits on.
     #[test]
     fn ts_return_is_every_return_of_the_one_function() {
-        let src = "export function getAgentDir(): string {\n  return dirs.agentDir;\n}\nfunction redirected(): string {\n  if (process.env.X) return process.env.X;\n  const f = () => { return 'nested'; };\n  class C { m() { return 'method'; } }\n  return dirs.agentDir;\n}\nfunction none() {}\n";
+        let src = "export function getAgentDir(): string {\n  return dirs.agentDir;\n}\nfunction redirected(): string {\n  if (process.env.X) return process.env.X;\n  const f = () => { return 'nested'; };\n  function g() { return 'decl'; }\n  const h = function () { return 'expr'; };\n  class C { m() { return 'method'; } }\n  return dirs.agentDir;\n}\nfunction none() {}\n";
         assert_eq!(
             found(ts_return(src, "getAgentDir")),
             names(&["dirs.agentDir"])

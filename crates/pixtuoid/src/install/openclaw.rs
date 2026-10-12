@@ -64,16 +64,53 @@ pub(crate) const MODEL_CALL_BASE_FIELDS: &[&str] = &["runId"];
 pub(crate) const MODEL_CALL_ENDED_FACTS: &[&str] =
     &["outcome:\"error\"", "failureKind:\"aborted\""];
 
+/// What `notePort` reads off an event and its context.
 #[cfg(feature = "upstream")]
-const HOOK_TYPES: At = At::Path {
-    repo: "openclaw/openclaw",
-    branch: "main",
-    path: "src/plugins/hook-types.ts",
-};
+pub(crate) const PORT_FIELDS: &[&str] = &["port"];
+/// What `forward` copies from a hook's context (`ALLOW`).
+#[cfg(feature = "upstream")]
+pub(crate) const RUN_KEY_FIELDS: &[&str] = &["runId", "sessionId"];
+
+#[cfg(feature = "upstream")]
+const fn openclaw(path: &'static str) -> At {
+    At::Path {
+        repo: "openclaw/openclaw",
+        branch: "main",
+        path,
+    }
+}
+
+#[cfg(feature = "upstream")]
+const HOOK_TYPES: At = openclaw("src/plugins/hook-types.ts");
+#[cfg(feature = "upstream")]
+const GATEWAY_TYPES: At = openclaw("src/plugins/hook-gateway.types.ts");
 
 #[cfg(feature = "upstream")]
 const DEGRADED: &str =
     "openclaw_plugin.js stamps `errored` from it, so the Degraded verdict misreads a run";
+#[cfg(feature = "upstream")]
+const IDENTITY: &str = "the plugin keys each gateway's mascot on the port it reads, so a `--port` \
+                        gateway falls back to the default and two live gateways collapse onto one";
+
+/// The fields of the ONE type `name` that the plugin reads.
+#[cfg(feature = "upstream")]
+const fn reads(
+    id: &'static str,
+    ours: fn() -> Vec<&'static str>,
+    docs: &'static [Doc],
+    name: &'static str,
+    says: &'static str,
+) -> Watch {
+    Watch {
+        id,
+        ours,
+        docs,
+        read: Read::TsFields { name },
+        when: When::Vanishes,
+        finding: Finding::Breaking(says),
+        siblings: None,
+    }
+}
 
 #[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
@@ -92,51 +129,73 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         finding: Finding::Breaking("the plugin registers a hook OpenClaw never fires"),
         siblings: None,
     },
-    Watch {
-        id: "openclaw.agent_end_fields",
-        ours: || AGENT_END_FIELDS.to_vec(),
-        docs: &[Doc {
+    reads(
+        "openclaw.agent_end_fields",
+        || AGENT_END_FIELDS.to_vec(),
+        &[Doc {
             at: HOOK_TYPES,
             anchor: r"(?m)^(?:export type|type) PluginHookAgentEndEvent\b",
             owns: "`PluginHookAgentEndEvent`",
         }],
-        read: Read::TsFields {
-            name: "PluginHookAgentEndEvent",
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(DEGRADED),
-        siblings: None,
-    },
-    Watch {
-        id: "openclaw.model_call_base_fields",
-        ours: || MODEL_CALL_BASE_FIELDS.to_vec(),
-        docs: &[Doc {
+        "PluginHookAgentEndEvent",
+        DEGRADED,
+    ),
+    reads(
+        "openclaw.model_call_base_fields",
+        || MODEL_CALL_BASE_FIELDS.to_vec(),
+        &[Doc {
             at: HOOK_TYPES,
             anchor: r"(?m)^(?:export type|type) PluginHookModelCallBaseEvent\b",
             owns: "`PluginHookModelCallBaseEvent`",
         }],
-        read: Read::TsFields {
-            name: "PluginHookModelCallBaseEvent",
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(DEGRADED),
-        siblings: None,
-    },
-    Watch {
-        id: "openclaw.model_call_ended_fields",
-        ours: || MODEL_CALL_ENDED_FACTS.to_vec(),
-        docs: &[Doc {
+        "PluginHookModelCallBaseEvent",
+        DEGRADED,
+    ),
+    reads(
+        "openclaw.model_call_ended_fields",
+        || MODEL_CALL_ENDED_FACTS.to_vec(),
+        &[Doc {
             at: HOOK_TYPES,
             anchor: r"(?m)^(?:export type|type) PluginHookModelCallEndedEvent\b",
             owns: "`PluginHookModelCallEndedEvent`",
         }],
-        read: Read::TsFields {
-            name: "PluginHookModelCallEndedEvent",
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(DEGRADED),
-        siblings: None,
-    },
+        "PluginHookModelCallEndedEvent",
+        DEGRADED,
+    ),
+    reads(
+        "openclaw.gateway_start_port",
+        || PORT_FIELDS.to_vec(),
+        &[Doc {
+            at: GATEWAY_TYPES,
+            anchor: r"(?m)^export type PluginHookGatewayStartEvent\b",
+            owns: "`PluginHookGatewayStartEvent`",
+        }],
+        "PluginHookGatewayStartEvent",
+        IDENTITY,
+    ),
+    reads(
+        "openclaw.gateway_context_port",
+        || PORT_FIELDS.to_vec(),
+        &[Doc {
+            at: GATEWAY_TYPES,
+            anchor: r"(?m)^export type PluginHookGatewayContext\b",
+            owns: "`PluginHookGatewayContext`",
+        }],
+        "PluginHookGatewayContext",
+        IDENTITY,
+    ),
+    reads(
+        "openclaw.agent_context_ids",
+        || RUN_KEY_FIELDS.to_vec(),
+        &[Doc {
+            at: openclaw("src/plugins/hook-agent-context.types.ts"),
+            anchor: r"(?m)^export type PluginHookAgentContext\b",
+            owns: "`PluginHookAgentContext`",
+        }],
+        "PluginHookAgentContext",
+        "the decoder pairs a run's start and end by these ids, so concurrent runs share one key \
+         and the first to end shows the gateway idle while the rest still run",
+    ),
 ];
 
 const MANIFEST: &str = r#"{
