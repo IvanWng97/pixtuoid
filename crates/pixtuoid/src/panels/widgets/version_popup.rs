@@ -81,7 +81,11 @@ fn notice_rows(bounds: Rect, notices: &[String]) -> Vec<String> {
         return Vec::new();
     };
     let width = usize::from(inner.width).saturating_sub(INDENT.len());
+    // Named, not defaulted: textwrap's defaults follow its features, which a
+    // build with the `upstream` feature unifies wider (oxc's diagnostics).
     let wrap = textwrap::Options::new(width)
+        .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit)
+        .word_separator(textwrap::WordSeparator::AsciiSpace)
         .initial_indent(BULLET)
         .subsequent_indent(HANG);
     let mut rows: Vec<String> = notices
@@ -428,6 +432,27 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(words(&rows.join(" ")), words(&notices().join(" ")));
+    }
+
+    /// The release build's wrap, first-fit at ASCII spaces, in every build:
+    /// optimal fit would move `bb` down, and Unicode breaking would split the
+    /// ideographs to fill the row after `x`.
+    #[test]
+    fn a_notice_wraps_first_fit_at_spaces_in_any_build() {
+        let room = inner_width(wide()) - INDENT.len() - textwrap::core::display_width(BULLET);
+        let long = "a".repeat(room - 3);
+        let ideographs = "字".repeat(room / 2);
+        let notices = [format!("{long} bb cc {long}zz"), format!("x {ideographs}")];
+        assert_eq!(
+            notice_rows(wide(), &notices),
+            [
+                format!("{BULLET}{long} bb"),
+                format!("{HANG}cc"),
+                format!("{HANG}{long}zz"),
+                format!("{BULLET}x"),
+                format!("{HANG}{ideographs}"),
+            ]
+        );
     }
 
     /// The notices sit above the release, and the link's click rect is the

@@ -903,6 +903,13 @@ mod tests {
             Err("no `<AgentTool as ToolSpec>::description`".to_owned())
         );
         assert!(matches!(rust_str(src, "<<>"), Err(Unread::Ours(_))));
+        let twice = format!("{src}\n{src}");
+        for item in ["METHOD", "<AgentTool as ToolSpec>::name"] {
+            assert_eq!(
+                found(rust_str(&twice, item)),
+                Err(format!("more than one `{item}`"))
+            );
+        }
     }
 
     #[test]
@@ -1072,6 +1079,8 @@ mod tests {
             found(ts_const_array("let NAMES = [\"x\"];", "NAMES")),
             Err("no `const NAMES` array".to_owned())
         );
+        let shapes = "const NAMES = ([\"own\", flag ? \"c\" : \"d\", [\"inner\"], ...[\"spread\"]]) as const;";
+        assert_eq!(found(ts_const_array(shapes, "NAMES")), names(&["own"]));
     }
 
     #[test]
@@ -1137,6 +1146,11 @@ mod tests {
             found(md_table(page, "Hook", "Lifecycle")),
             Err("no `Hook` table".to_owned())
         );
+        let coded = "## Lifecycle\n| `Event` | x |\n|---|---|\n| `Stop` | done |\n";
+        assert_eq!(
+            found(md_table(coded, "Event", "Lifecycle")),
+            names(&["Stop"])
+        );
         assert_eq!(
             found(md_table(page, "Event", "Gone")),
             Err("no `Gone` heading".to_owned())
@@ -1149,10 +1163,10 @@ mod tests {
 
     #[test]
     fn md_headings_are_the_one_word_ones_in_their_section() {
-        let page = "# Hooks\n## Quickstart\n```sh\n# Read input\n```\n## Reference\n### Hook events\n```sh\n# stdin\n```\n#### preToolUse\n#### before / after\n##### deeper\nprose stop\n### Other\n#### elsewhere\n## Troubleshooting\n";
+        let page = "# Hooks\n## Quickstart\n```sh\n# Read input\n```\n## Reference\n### Hook events\n```sh\n# stdin\n```\n#### preToolUse\n#### `postToolUse`\n#### before / after\n##### deeper\nprose stop\n### Other\n#### elsewhere\n## Troubleshooting\n";
         assert_eq!(
             found(md_headings(page, "Hook events")),
-            names(&["preToolUse"])
+            names(&["postToolUse", "preToolUse"])
         );
         assert_eq!(
             found(md_headings(page, "Gone")),
