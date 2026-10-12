@@ -1040,11 +1040,25 @@ fn sources_category(rows: &[DoctorSourceRow], ink: &Ink) -> Category {
     }
 }
 
-/// A CLI running AHEAD of the version this build's decoder was verified
-/// against is the one skew worth an alarm (its wire format may have moved);
-/// older/matching installs stay silent — that comparison is derivable, not
-/// actionable.
+/// Whether the installed MAJOR is below the verified one: only the latest
+/// release is supported, and a new major is where a wire breaks. A CalVer
+/// year is no major.
+fn below_verified_major(installed: Option<&str>, verified: &str) -> bool {
+    match (installed.and_then(parse_version), parse_version(verified)) {
+        (Some((i, ..)), Some((v, ..))) => i < v && v < IMPLAUSIBLE_MAJOR,
+        _ => false,
+    }
+}
+
+/// Two skews are worth an alarm: an older major, which is unsupported, and a
+/// CLI running AHEAD of the version this build's decoder was verified against
+/// (its wire format may have moved). An older minor or patch stays silent —
+/// that comparison is derivable, not actionable.
 fn versions_category(rows: &[DoctorSourceRow]) -> Category {
+    let older: Vec<&DoctorSourceRow> = rows
+        .iter()
+        .filter(|r| below_verified_major(r.installed_version.as_deref(), r.verified_version))
+        .collect();
     let newer: Vec<&DoctorSourceRow> = rows
         .iter()
         .filter(|r| {
@@ -1052,7 +1066,7 @@ fn versions_category(rows: &[DoctorSourceRow]) -> Category {
                 == Some(std::cmp::Ordering::Greater)
         })
         .collect();
-    if newer.is_empty() {
+    if older.is_empty() && newer.is_empty() {
         return Category {
             status: CategoryStatus::Ok,
             name: "versions",
@@ -1060,28 +1074,37 @@ fn versions_category(rows: &[DoctorSourceRow]) -> Category {
             details: Vec::new(),
         };
     }
-    let details = newer
+    let row = |r: &DoctorSourceRow, tail: String| {
+        // Both buckets compared a parsed installed side.
+        let inst = r
+            .installed_version
+            .as_deref()
+            .and_then(parsed_version_display)
+            .unwrap_or_else(|| "unknown".to_string());
+        format!(
+            "{DETAIL_INDENT}{:<15} {inst} installed \u{b7} {} verified{tail}",
+            format!("{}\u{b7}{}", r.prefix, r.source_id),
+            r.verified_version
+        )
+    };
+    let details = older
         .iter()
-        .map(|r| {
-            // `version_cmp` returned Greater, so the installed side parsed.
-            let inst = r
-                .installed_version
-                .as_deref()
-                .and_then(parsed_version_display)
-                .unwrap_or_else(|| "unknown".to_string());
-            format!(
-                "{DETAIL_INDENT}{:<15} {inst} installed \u{b7} {} verified",
-                format!("{}\u{b7}{}", r.prefix, r.source_id),
-                r.verified_version
-            )
-        })
+        .map(|r| row(r, format!(" — unsupported, upgrade {}", r.source_id)))
+        .chain(newer.iter().map(|r| row(r, String::new())))
         .collect();
-    let n = newer.len();
-    let noun = if n == 1 { "CLI" } else { "CLIs" };
+    let clis = |n: usize| format!("{n} {}", if n == 1 { "CLI" } else { "CLIs" });
+    let summary: Vec<String> = [
+        (!older.is_empty()).then(|| format!("{} unsupported (upgrade needed)", clis(older.len()))),
+        (!newer.is_empty())
+            .then(|| format!("{} newer than verified (drift possible)", clis(newer.len()))),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     Category {
         status: CategoryStatus::Warn,
         name: "versions",
-        summary: format!("{n} {noun} newer than verified (drift possible)"),
+        summary: summary.join(" \u{b7} "),
         details,
     }
 }
@@ -1282,7 +1305,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
         match d.focus_channel() {
             FocusChannel::ShimStamp => shim_stamp.push(tag),
             FocusChannel::PluginStamp => plugin_stamp.push(tag),
-            FocusChannel::Unsupported => no_channel.push(tag),
+            FocusChannel::Unsupported | FocusChannel::ServerStamp => no_channel.push(tag),
             FocusChannel::TranscriptProbe => unreachable!("skipped above"),
         }
     }
@@ -1479,7 +1502,7 @@ mod tests {
         assert!(s.contains("claude-code — registry probe ✓"), "{s}");
         assert!(s.contains("codex — rollout probe ✓"), "{s}");
         assert!(
-            s.contains("opencode") && s.contains("plugin-stamped"),
+            s.contains("dsh") && s.contains("plugin-stamped"),
             "plugin stampers listed separately: {s}"
         );
         assert!(
@@ -1495,6 +1518,10 @@ mod tests {
             .iter()
             .find(|l| l.contains("no focus channel"))
             .expect("a no-channel line");
+        assert!(
+            no_channel_line.contains("opencode"),
+            "a server-stamped `_pid` owns no window: {no_channel_line}"
+        );
         assert!(
             no_channel_line.contains("antigravity") && no_channel_line.contains("copilot"),
             "transcript-only sources listed: {no_channel_line}"
@@ -1905,6 +1932,35 @@ mod tests {
         // The raw banner stays on the source row, without skew prose.
         assert!(out.contains("GitHub Copilot CLI 1.0.79."), "{out}");
         assert!(!out.contains("NEWER than verified"), "{out}");
+    }
+
+    #[test]
+    fn report_versions_category_flags_an_older_major_as_unsupported() {
+        let mut v1 = summary_row("oc", "opencode");
+        v1.installed_version = Some("1.18.30".into());
+        v1.verified_version = "2.0.27";
+        let mut older_minor = summary_row("cp", "copilot");
+        older_minor.installed_version = Some("1.0.50".into());
+        older_minor.verified_version = "1.0.62";
+        let mut calver = summary_row("ok", "openclaw");
+        calver.installed_version = Some("OpenClaw 2025.12.1".into());
+        calver.verified_version = "2026.10.1";
+        let out = render(&summary_report(vec![v1, older_minor, calver]));
+        assert!(
+            out.contains("[!] versions — 1 CLI unsupported (upgrade needed)\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains(
+                "      oc\u{b7}opencode     1.18.30 installed \u{b7} 2.0.27 verified — \
+                 unsupported, upgrade opencode"
+            ),
+            "{out}"
+        );
+        assert!(
+            !out.contains("1.0.62 verified") && !out.contains("2026.10.1 verified"),
+            "an older minor, or a CalVer year, is no older major: {out}"
+        );
     }
 
     #[test]

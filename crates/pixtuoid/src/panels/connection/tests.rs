@@ -368,33 +368,6 @@ fn format_connect_result_renders_connected_plus_path_note() {
 }
 
 #[test]
-fn only_restart_bound_targets_declare_a_post_install_step_naming_it() {
-    // A hint exists only where the write does not take effect on the CLI's next
-    // run; each target's own row says why.
-    let mut with_hint = Vec::new();
-    for t in crate::install::TARGETS {
-        if let Some(h) = t.post_install_hint {
-            assert!(
-                h.contains("restart"),
-                "{}: a post-install hint must name the action: {h}",
-                t.name
-            );
-            with_hint.push(t.core_source);
-        }
-    }
-    assert_eq!(
-        with_hint,
-        vec![
-            pixtuoid_core::source::codex::SOURCE_NAME,
-            pixtuoid_core::source::openclaw::SOURCE_NAME,
-            pixtuoid_core::source::omp::SOURCE_NAME,
-            pixtuoid_core::source::dsh::SOURCE_NAME,
-        ],
-        "only codex, openclaw, omp and dsh need a post-install step today"
-    );
-}
-
-#[test]
 fn format_disconnect_result_renders_disconnected_plus_registration_note() {
     use crate::install::{UninstallOutcome, UninstallReport};
     let removed = UninstallReport {

@@ -353,7 +353,9 @@ pub(crate) const OPENCODE: Target = Target {
     // A post-uninstall stub still exists, so detect on opencode's own dirs
     // rather than our plugin file.
     presence_probe: crate::install::opencode::detect_installed,
-    post_install_hint: None,
+    // A v1 opencode fails to load a v2 plugin, and v2 reloads `plugins/` on
+    // change (`packages/core/src/plugin/supervisor.ts:219`).
+    post_install_hint: Some("needs opencode 2 or later; it loads the plugin without a restart"),
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],

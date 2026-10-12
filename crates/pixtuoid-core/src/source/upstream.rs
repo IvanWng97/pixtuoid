@@ -555,7 +555,6 @@ mod tests {
             ),
             ("copilot.rs", "let out = match kind {", "DECODED_KINDS"),
             ("opencode.rs", "match event {", "DECODED_EVENTS"),
-            ("opencode.rs", "match status {", "DECODED_PART_STATUSES"),
             ("omp.rs", "match ty {", "DECODED_HOOK_EVENTS"),
             (
                 "claude_code.rs",

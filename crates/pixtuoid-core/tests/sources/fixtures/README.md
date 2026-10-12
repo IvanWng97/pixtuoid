@@ -71,13 +71,9 @@ is refused before the turn is spent rather than after.
 
 **A gate needs its own sandbox and its own prompt.** `CAPTURE_SEED=<dir>` is
 copied into the sandbox workspace before the run — the place a per-CLI ask rule
-belongs, since opencode auto-approves a trusted workspace and CC only FIRES
+belongs, since CC only FIRES
 `PermissionRequest` when a project rule makes the tool ask. `CAPTURE_PROMPT` replaces the shared prompt for
 a scenario it cannot reach. Neither touches the user's own config.
-
-A composed fixture kept for a reason says so in its note: `opencode/session-run`
-is retained because an auto-approving run emits no permission event for `Waiting`
-to ride.
 
 **A module's own scenarios re-record in place.** The recorder writes to
 `<source>/fixtures/<scenario>/` when a committed `provenance.json` is already

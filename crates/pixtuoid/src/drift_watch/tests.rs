@@ -1064,8 +1064,8 @@ fn a_declaration_form_is_not_satisfied_by_prose() {
     for (id, prose) in [
         ("omp.hook_events", r#"/** Emitted as "{name}". */"#),
         (
-            "opencode.part_statuses",
-            r#"type Done = Omit<ToolPart, "{name}">"#,
+            "opencode.hook_events",
+            r#"expect(event.type).toBe("{name}")"#,
         ),
         ("omp.entry_types", "// a {name} entry, written once"),
         ("codex.escalation", "/// set `{name}` to escalate"),
@@ -1567,7 +1567,7 @@ fn an_enum_off_snake_case_is_probe_health() {
 /// literal behind a non-exported const escapes the scan; and the scan is
 /// `==`/`!=`-shaped only — a MATCH ARM pattern, a `.starts_with` prefix
 /// gate, or a `matches!` is outside its population. Export such
-/// vocabularies instead (opencode's part statuses are the precedent).
+/// vocabularies instead.
 /// Stale exemptions fail the OTHER direction.
 #[test]
 fn every_equality_compared_wire_literal_is_accounted_for() {
@@ -1665,12 +1665,6 @@ fn every_equality_compared_wire_literal_is_accounted_for() {
             "task",
             "children register via PATH NESTING regardless (module doc); the \
              name only styles the parent's pose",
-        ),
-        (
-            "opencode.rs",
-            "tool",
-            "part-type inside the watched `message.part.updated`; a rename is \
-             #943-class value drift, accepted residual",
         ),
         (
             "codex/native.rs",

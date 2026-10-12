@@ -251,9 +251,17 @@ fn agent_cases() -> Vec<WireCase> {
         WireCase {
             name: "opencode",
             source: "opencode",
-            fixture: "fixtures/opencode/session-run/hook-payloads.jsonl",
+            fixture: "fixtures/opencode/session-recorded/hook-payloads.jsonl",
             wire: Wire::Hooks,
-            must_reach: &[Reach::Active, Reach::Waiting, Reach::Delegating],
+            must_reach: &[Reach::Active, Reach::Waiting],
+        },
+        WireCase {
+            // Two sessions, so it lives outside `fixtures/`, like dsh's.
+            name: "opencode-delegation",
+            source: "opencode",
+            fixture: "delegation/fixtures/opencode/hook-payloads.jsonl",
+            wire: Wire::Hooks,
+            must_reach: &[Reach::Active, Reach::Delegating],
         },
         WireCase {
             name: "cursor",

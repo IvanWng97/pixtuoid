@@ -1,0 +1,11 @@
+{"_pid":56362,"_pixtuoid_source":"opencode","_shim_ts_ms":1791829460084,"data":{"location":{"directory":"/private/tmp/pixtuoid-capture/proj"},"model":{"id":"deepseek-flash"},"sessionID":"ses_ecea43bcafferMIn3p8ddoq0IB"},"type":"session.created"}
+{"_pid":56362,"_pixtuoid_source":"opencode","_shim_ts_ms":1791829460114,"data":{"sessionID":"ses_ecea43bcafferMIn3p8ddoq0IB"},"type":"session.execution.started"}
+{"_pid":56362,"_pixtuoid_source":"opencode","_shim_ts_ms":1791829461644,"data":{"id":"call_00_7Z4jaOwGYEKdOFluXUK53124","name":"read","sessionID":"ses_ecea43bcafferMIn3p8ddoq0IB"},"type":"session.tool.input.started"}
+{"_pid":56362,"_pixtuoid_source":"opencode","_shim_ts_ms":1791829461656,"data":{"id":"call_00_7Z4jaOwGYEKdOFluXUK53124","sessionID":"ses_ecea43bcafferMIn3p8ddoq0IB"},"type":"session.tool.success"}
+{"_pid":56362,"_pixtuoid_source":"opencode","_shim_ts_ms":1791829462567,"data":{"id":"call_00_ud3D4M6uvTTjttpTYhnz2425","name":"shell","sessionID":"ses_ecea43bcafferMIn3p8ddoq0IB"},"type":"session.tool.input.started"}
+{"_pid":56362,"_pixtuoid_source":"opencode","_shim_ts_ms":1791829462621,"data":{"action":"shell","id":"","sessionID":"ses_ecea43bcafferMIn3p8ddoq0IB","source":{"id":"call_00_ud3D4M6uvTTjttpTYhnz2425"}},"type":"permission.asked"}
+{"_pid":56362,"_pixtuoid_source":"opencode","_shim_ts_ms":1791829462636,"data":{"id":"call_00_ud3D4M6uvTTjttpTYhnz2425","sessionID":"ses_ecea43bcafferMIn3p8ddoq0IB"},"type":"session.tool.success"}
+{"_pid":56362,"_pixtuoid_source":"opencode","_shim_ts_ms":1791829463493,"data":{"id":"call_00_ET_kEClgNSyPrd7c46jVdsQ7512","name":"read","sessionID":"ses_ecea43bcafferMIn3p8ddoq0IB"},"type":"session.tool.input.started"}
+{"_pid":56362,"_pixtuoid_source":"opencode","_shim_ts_ms":1791829463628,"data":{"id":"call_00_ET_kEClgNSyPrd7c46jVdsQ7512","sessionID":"ses_ecea43bcafferMIn3p8ddoq0IB"},"type":"session.tool.success"}
+{"_pid":56362,"_pixtuoid_source":"opencode","_shim_ts_ms":1791829465189,"data":{"sessionID":"ses_ecea43bcafferMIn3p8ddoq0IB"},"type":"session.execution.succeeded"}
+{"_pid":56362,"_pixtuoid_source":"opencode","_shim_ts_ms":1791829465325,"data":{"sessionID":"ses_ecea43bcafferMIn3p8ddoq0IB"},"type":"session.deleted"}

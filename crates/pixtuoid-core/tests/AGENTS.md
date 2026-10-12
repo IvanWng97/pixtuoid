@@ -27,7 +27,7 @@ tests/
 │   │                    platform-dependently, so expectations derive through the
 │   │                    fold, not the platform-invariant conformance goldens
 │   ├── delegation/      the NAME-KEYED family (a tool literally called `task`
-│   │                    — `subagent` for dsh): opencode, copilot, omp, dsh —
+│   │                    — `subagent` for dsh, opencode): opencode, copilot, omp, dsh —
 │   │                    one rule, one table
 │   ├── snapshots/       insta snaps (sources__conformance__<source>__<scenario>)
 │   └── fixtures/<source>/<scenario>/  conformance scenarios ONLY — dir name MUST be a

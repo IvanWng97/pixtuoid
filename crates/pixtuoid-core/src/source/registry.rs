@@ -213,6 +213,10 @@ pub enum FocusChannel {
     /// The source's own runtime stamps `_pid` — cross-platform, and survives
     /// even where the shim sends nothing.
     PluginStamp,
+    /// The source's runtime stamps a background server's `_pid`, which every
+    /// session shares and no window owns: the exit watch binds it, a focus
+    /// click no-ops.
+    ServerStamp,
     /// Pid resolves through a recycle-guarded liveness probe at CLICK time; hook
     /// stamps are never trusted (the shim resolves the nearest non-shell
     /// ancestor, not necessarily the CLI). The probe fn itself lives in the binary.
@@ -654,7 +658,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
 const OPENCODE: SourceDescriptor = SourceDescriptor {
     name: opencode::SOURCE_NAME,
     label_prefix: "oc",
-    verified_version: "1.18.30",
+    verified_version: "2.0.27",
     version_probe: Some(&["opencode", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
@@ -667,17 +671,18 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
             custom: Some(HookCustom::ClaimsAll(opencode::decode_oc_hook_payload)),
         }),
         caps: SourceCaps {
-            // `session.deleted` → SessionEnd on a clean close; an abrupt exit kills
-            // the process, and `hook::HookPidWatch` ends every `_pid`-bound sprite.
-            has_exit_signal: true,
-            // Sessions are persistent SQLite rows: a follow-up prompt continues the
-            // SAME one and emits no new `session.created`, so a sweep is permanent.
-            resurrects_on_prompt: false,
-            // The `task` tool emits `running` then `completed`/`error`, and liveness
-            // also flows UP from the child session.
+            // A TUI quit ends nothing: the session lives on in the server.
+            has_exit_signal: false,
+            // The next prompt's `session.execution.started` decodes to `Identity`,
+            // which re-registers a swept session.
+            resurrects_on_prompt: true,
+            // A `subagent` child is parented by its `session.created`'s `parentID`,
+            // so its events keep the parent fresh (`scope::refresh_lineage`).
             delegations_are_hook_silent: false,
         },
-        focus: FocusChannel::PluginStamp,
+        // The plugin runs in the background server every TUI attaches to
+        // (`packages/client/src/service-contender.ts:19-20`), not in a TUI.
+        focus: FocusChannel::ServerStamp,
     },
 };
 
@@ -1200,11 +1205,11 @@ mod tests {
     }
 
     #[test]
-    fn short_idle_reap_fires_for_codex_and_grok_only() {
+    fn short_idle_reap_fires_for_codex_grok_and_opencode_only() {
         for d in REGISTRY {
             assert_eq!(
                 d.caps().short_idle_reap(),
-                d.name == codex::SOURCE_NAME || d.name == grok::SOURCE_NAME,
+                [codex::SOURCE_NAME, grok::SOURCE_NAME, opencode::SOURCE_NAME].contains(&d.name),
                 "short_idle_reap mismatch for {:?}",
                 d.name
             );

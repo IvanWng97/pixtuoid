@@ -1652,9 +1652,8 @@ mod tests {
                 opencode::SOURCE_NAME,
                 Box::new(|| {
                     opencode::decode_oc_hook_payload(&json!({
-                        "type":"message.part.updated","properties":{"sessionID":"ses-1","part":{
-                            "type":"tool","callID":"c1","tool":name,
-                            "state":{"status":"running","input":{"command":tgt}}}}}))
+                        "type":"session.tool.input.started",
+                        "data":{"sessionID":"ses-1","id":"c1","name":name}}))
                     .expect("opencode decodes")
                 }),
             ),
@@ -1851,7 +1850,7 @@ mod tests {
                 Box::new(|| {
                     opencode::decode_oc_hook_payload(&json!({
                         "type":"permission.asked",
-                        "properties":{"sessionID":"ses-1","action":raw}}))
+                        "data":{"sessionID":"ses-1","action":raw}}))
                     .expect("opencode decodes")
                 }),
             ),

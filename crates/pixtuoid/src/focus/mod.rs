@@ -343,13 +343,13 @@ mod tests {
     #[test]
     fn resolve_pid_prefers_the_slot_cache() {
         // Markerless cache (no marker was readable): the identity check is skipped.
-        let s = slot("opencode", "ses_a", Some(pid_id(4242, None)));
+        let s = slot("dsh", "ses_a", Some(pid_id(4242, None)));
         assert_eq!(resolve_pid(&s, &NO_PATHS, &empty_table()), Some(4242));
     }
 
     #[test]
     fn resolve_pid_verifies_the_start_marker_when_stamped() {
-        let s = slot("opencode", "ses_a", Some(pid_id(4242, Some(1_000))));
+        let s = slot("dsh", "ses_a", Some(pid_id(4242, Some(1_000))));
         let mut t = empty_table();
         t.started.insert(4242, 1_000);
         assert_eq!(resolve_pid(&s, &NO_PATHS, &t), Some(4242));
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn resolve_pid_refuses_a_recycled_or_dead_pid() {
-        let s = slot("opencode", "ses_a", Some(pid_id(4242, Some(1_000))));
+        let s = slot("dsh", "ses_a", Some(pid_id(4242, Some(1_000))));
         let mut t = empty_table();
         t.started.insert(4242, 2_000);
         assert_eq!(resolve_pid(&s, &NO_PATHS, &t), None, "recycled → refuse");
@@ -370,7 +370,7 @@ mod tests {
 
     #[test]
     fn resolve_pid_refuses_an_exiting_slot() {
-        let mut s = slot("opencode", "ses_a", Some(pid_id(4242, None)));
+        let mut s = slot("dsh", "ses_a", Some(pid_id(4242, None)));
         s.exiting_at = Some(std::time::SystemTime::UNIX_EPOCH);
         assert_eq!(resolve_pid(&s, &NO_PATHS, &empty_table()), None);
     }
@@ -421,7 +421,7 @@ mod tests {
         };
         let mut activated = None;
         focus_agent(
-            &slot("opencode", "s", Some(pid_id(4242, None))),
+            &slot("dsh", "s", Some(pid_id(4242, None))),
             &NO_PATHS,
             &t,
             |p| {
@@ -448,7 +448,7 @@ mod tests {
         };
         let mut activated: Option<i32> = None;
         focus_agent(
-            &slot("opencode", "s", Some(pid_id(4242, None))),
+            &slot("dsh", "s", Some(pid_id(4242, None))),
             &NO_PATHS,
             &t,
             |p| {

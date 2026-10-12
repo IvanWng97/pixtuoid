@@ -1064,12 +1064,12 @@ fn two_step_backfill_source_first_then_cwd_still_upgrades_the_label() {
 fn hook_identity_pid_fills_refreshes_and_never_downgrades_slot_pid() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
-    let id = AgentId::from_parts("opencode", "ses_pid");
+    let id = AgentId::from_parts("dsh", "ses_pid");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let pid_id = |pid: i32| pixtuoid_core::source::PidIdentity::new(pid, Some(1_000));
     let identity = |pid: Option<pixtuoid_core::source::PidIdentity>| AgentEvent::Identity {
         agent_id: id,
-        source: "opencode".into(),
+        source: "dsh".into(),
         session_id: "ses_pid".into(),
         cwd: Some(PathBuf::from("/w")),
         pid,

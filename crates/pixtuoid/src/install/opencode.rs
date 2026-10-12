@@ -3,15 +3,13 @@
 //! opencode has no config-level shell hook (and SQLite-only sessions, no
 //! tailable transcript), so pixtuoid drops a plugin file at
 //! `<opencode-config>/plugins/pixtuoid.ts`, which opencode auto-discovers. The
-//! plugin pipes the EventV2 lifecycle/tool/permission stream into the
+//! plugin pipes the session/tool/permission event stream into the
 //! `pixtuoid-hook` shim on stdin; the shim's absolute path is baked in
 //! (JSON-escaped) at install time from the `opencode_plugin.ts` template.
 //!
 //! The plugin FILE is the target's owned primary, so install renders the whole
-//! file and a disconnect replaces it with a sentinel-free no-op stub.
-//! ACCEPTED residual: uninstall leaves that stub rather than deleting the file —
-//! the orchestrator's `write_atomic` can't delete, and the stub is a harmless
-//! empty module.
+//! file and a disconnect replaces it with a sentinel-free no-op plugin: the
+//! orchestrator's `write_atomic` can't delete.
 
 use std::path::{Path, PathBuf};
 
@@ -28,26 +26,19 @@ const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
 const PLUGIN_TEMPLATE: &str = include_str!("opencode_plugin.ts");
 
-/// The events the plugin forwards: its `FORWARD` set, plus each event it
-/// handles outside it (`t === "…"`), today the part update it dedupes on status
-/// change.
+/// The events the plugin forwards: its `FORWARD` set.
 #[cfg(test)]
 pub(crate) fn plugin_events() -> Vec<&'static str> {
-    let beside = PLUGIN_TEMPLATE
-        .match_indices("t === \"")
-        .filter_map(|(i, m)| PLUGIN_TEMPLATE[i + m.len()..].split_once('"'))
-        .map(|(name, _)| name);
-    let mut names: Vec<&'static str> = crate::install::forward_set(PLUGIN_TEMPLATE)
+    crate::install::forward_set(PLUGIN_TEMPLATE)
         .into_iter()
-        .chain(beside)
-        .collect();
-    names.sort_unstable();
-    names.dedup();
-    names
+        .collect()
 }
 
-/// A valid empty ES module WITHOUT the sentinel, so a re-uninstall is a no-op.
-const REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Sources panel (press s).\nexport {}\n";
+/// A no-op plugin WITHOUT the sentinel, so a re-uninstall is a no-op. opencode
+/// reports a module without an `{ id, setup }` default export
+/// (`packages/core/src/plugin/module.ts:78-91`) as a failed plugin
+/// (`supervisor.ts:63`, `:79-84`).
+const REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Sources panel (press s).\nexport default { id: \"pixtuoid-removed\", setup() {} }\n";
 
 fn opencode_config_dir() -> Result<PathBuf> {
     config_dir_from(
@@ -57,9 +48,10 @@ fn opencode_config_dir() -> Result<PathBuf> {
     )
 }
 
-/// Mirrors opencode's own `global.ts` precedence, so we write into the dir it
-/// actually scans for plugins: `OPENCODE_CONFIG_DIR`, then
-/// `$XDG_CONFIG_HOME/opencode`, then `<home>/.config/opencode`.
+/// Mirrors opencode's own precedence (`packages/util/src/global.ts:79`,
+/// `global-roots.ts:7`), so we write into the dir it actually scans for
+/// plugins: `OPENCODE_CONFIG_DIR`, then `$XDG_CONFIG_HOME/opencode`, then
+/// `<home>/.config/opencode`.
 fn config_dir_from(oc: Option<&Path>, xdg: Option<&Path>, home: Option<&Path>) -> Result<PathBuf> {
     // Blank overrides were already filtered at the read (`platform::path_env`).
     if let Some(dir) = oc {
@@ -72,9 +64,8 @@ fn config_dir_from(oc: Option<&Path>, xdg: Option<&Path>, home: Option<&Path>) -
         .ok_or_else(|| io::home_unset("the home directory", "HOME/USERPROFILE"))
 }
 
-/// The dir is `plugins` (PLURAL): canonical opencode auto-discovers only
-/// `<config>/plugins/*.{ts,js}` (the anomalyco fork globs `{plugin,plugins}`, so
-/// plural works there too).
+/// opencode auto-discovers `<config>/{plugin,plugins}/*.{ts,js}`
+/// (`packages/core/src/plugin/source-directory.ts:7`).
 pub(crate) fn default_config_path() -> Result<PathBuf> {
     Ok(opencode_config_dir()?.join("plugins").join("pixtuoid.ts"))
 }
@@ -87,9 +78,9 @@ pub(crate) fn detect_installed() -> bool {
         || io::home_relative(".local/share/opencode").exists()
 }
 
-/// opencode runs the plugin under Bun and spawns the shim by embedded path (no
-/// PATH reliance), so `_explicit` — Claude's bare-vs-absolute switch — is
-/// irrelevant here: opencode always needs the absolute path.
+/// The plugin spawns the shim by embedded path (no PATH reliance), so
+/// `_explicit` — Claude's bare-vs-absolute switch — is irrelevant here:
+/// opencode always needs the absolute path.
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     crate::install::merge::hook_path_str(resolved).map(str::to_string)
 }
@@ -258,10 +249,20 @@ mod tests {
             !removed.content.contains(SENTINEL),
             "stub must drop the sentinel so detection flips"
         );
-        assert!(
-            removed.content.contains("export {}"),
-            "stub is a valid empty module"
-        );
+        assert_eq!(removed.content, REMOVED_STUB);
+    }
+
+    /// The stub is still loaded as a plugin, so it must be a valid one: an
+    /// object default export with an `id` and a `setup` function.
+    #[test]
+    fn the_removed_stub_is_a_loadable_no_op_plugin() {
+        let export = REMOVED_STUB
+            .lines()
+            .find_map(|l| l.strip_prefix("export default "))
+            .expect("an object default export");
+        assert!(export.starts_with('{') && export.ends_with('}'), "{export}");
+        assert!(export.contains("id: \"pixtuoid-removed\""), "{export}");
+        assert!(export.contains("setup() {}"), "{export}");
     }
 
     #[test]
@@ -270,6 +271,10 @@ mod tests {
         assert!(!uninstall(foreign).unwrap().changed);
         assert!(!uninstall(REMOVED_STUB).unwrap().changed);
         assert!(!uninstall("").unwrap().changed);
+        // `changed` is the connected fact (`install::has_hooks`), so the stub an
+        // older pixtuoid's disconnect wrote must stay disconnected.
+        let v1_stub = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Sources panel (press s).\nexport {}\n";
+        assert!(!uninstall(v1_stub).unwrap().changed);
     }
 
     #[test]
@@ -340,11 +345,16 @@ mod tests {
         assert_eq!(
             plugin_events(),
             [
-                "message.part.updated",
                 "permission.asked",
-                "permission.v2.asked",
                 "session.created",
                 "session.deleted",
+                "session.execution.failed",
+                "session.execution.interrupted",
+                "session.execution.started",
+                "session.execution.succeeded",
+                "session.tool.failed",
+                "session.tool.input.started",
+                "session.tool.success",
             ],
             "opencode_plugin.ts's forwarded events changed — update the decoder and this pin together"
         );
@@ -356,35 +366,16 @@ mod tests {
     #[test]
     fn every_forwarded_opencode_event_decodes() {
         use pixtuoid_core::source::decoder::decode_hook_payload;
-        let payloads = [
-            serde_json::json!({"type": "session.created",
-                "properties": {"info": {"id": "ses_1", "directory": "/r"}}, "_pixtuoid_source": "opencode"}),
-            serde_json::json!({"type": "session.deleted",
-                "properties": {"info": {"id": "ses_1", "directory": "/r"}}, "_pixtuoid_source": "opencode"}),
-            serde_json::json!({"type": "permission.asked",
-                "properties": {"sessionID": "ses_1"}, "_pixtuoid_source": "opencode"}),
-            serde_json::json!({"type": "permission.v2.asked",
-                "properties": {"sessionID": "ses_1"}, "_pixtuoid_source": "opencode"}),
-            serde_json::json!({"type": "message.part.updated",
-                "properties": {"sessionID": "ses_1", "part": {"type": "tool", "callID": "c",
-                    "tool": "bash", "state": {"status": "running"}}}, "_pixtuoid_source": "opencode"}),
-        ];
-        let covered: std::collections::BTreeSet<&str> = payloads
-            .iter()
-            .map(|p| p["type"].as_str().unwrap())
-            .collect();
-        for ev in plugin_events() {
-            assert!(
-                covered.contains(ev),
-                "plugin forwards `{ev}` but this test has no payload for it — the \
-                 hand-listed fixtures drifted from opencode_plugin.ts"
-            );
-        }
+        let payloads = plugin_events().into_iter().map(|ty| {
+            serde_json::json!({"type": ty, "_pixtuoid_source": "opencode",
+                "data": {"sessionID": "ses_1", "location": {"directory": "/r"},
+                    "id": "c", "name": "bash", "action": "bash"}})
+        });
         for p in payloads {
             let ty = p["type"].clone();
             assert!(
-                decode_hook_payload(p).is_ok(),
-                "forwarded opencode event {ty} failed to decode — add an arm in source/opencode.rs"
+                decode_hook_payload(p).is_ok_and(|evs| !evs.is_empty()),
+                "forwarded opencode event {ty} decoded to nothing — add an arm in source/opencode.rs"
             );
         }
     }

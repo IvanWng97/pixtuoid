@@ -1,0 +1,76 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 18208626524761177055
+    source: opencode
+    session_id: ses_ecea43bcafferMIn3p8ddoq0IB
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- ModelInfo:
+    agent_id: 18208626524761177055
+    model: deepseek-flash
+    effort: ~
+- Identity:
+    agent_id: 18208626524761177055
+    source: opencode
+    session_id: ses_ecea43bcafferMIn3p8ddoq0IB
+    cwd: ~
+- Identity:
+    agent_id: 18208626524761177055
+    source: opencode
+    session_id: ses_ecea43bcafferMIn3p8ddoq0IB
+    cwd: ~
+- ActivityStart:
+    agent_id: 18208626524761177055
+    tool_use_id: call_00_7Z4jaOwGYEKdOFluXUK53124
+    detail:
+      Generic:
+        display: read
+- ActivityEnd:
+    agent_id: 18208626524761177055
+    tool_use_id: call_00_7Z4jaOwGYEKdOFluXUK53124
+- Identity:
+    agent_id: 18208626524761177055
+    source: opencode
+    session_id: ses_ecea43bcafferMIn3p8ddoq0IB
+    cwd: ~
+- ActivityStart:
+    agent_id: 18208626524761177055
+    tool_use_id: call_00_ud3D4M6uvTTjttpTYhnz2425
+    detail:
+      Generic:
+        display: shell
+- Identity:
+    agent_id: 18208626524761177055
+    source: opencode
+    session_id: ses_ecea43bcafferMIn3p8ddoq0IB
+    cwd: ~
+- Waiting:
+    agent_id: 18208626524761177055
+    reason: shell
+    tool_use_id: call_00_ud3D4M6uvTTjttpTYhnz2425
+- ActivityEnd:
+    agent_id: 18208626524761177055
+    tool_use_id: call_00_ud3D4M6uvTTjttpTYhnz2425
+- Identity:
+    agent_id: 18208626524761177055
+    source: opencode
+    session_id: ses_ecea43bcafferMIn3p8ddoq0IB
+    cwd: ~
+- ActivityStart:
+    agent_id: 18208626524761177055
+    tool_use_id: call_00_ET_kEClgNSyPrd7c46jVdsQ7512
+    detail:
+      Generic:
+        display: read
+- ActivityEnd:
+    agent_id: 18208626524761177055
+    tool_use_id: call_00_ET_kEClgNSyPrd7c46jVdsQ7512
+- ActivityEnd:
+    agent_id: 18208626524761177055
+    tool_use_id: ~
+- SessionEnd:
+    agent_id: 18208626524761177055
+    as_child: false

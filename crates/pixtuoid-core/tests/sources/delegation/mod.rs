@@ -143,7 +143,7 @@ fn the_task_detail_lands_on_the_call_actually_named_task() {
             "opencode",
             opencode_events(),
             lines("opencode", "hook-payloads.jsonl"),
-            "task",
+            "subagent",
         ),
         (
             "copilot",
