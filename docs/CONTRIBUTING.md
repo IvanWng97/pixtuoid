@@ -288,7 +288,7 @@ invariants"), which every contributor and agent reads first.
 
 Green `ci-gate`; the required `claude-review / claude-review` check green at
 the final head; every finding's review thread resolved by its
-disposition; zero open confirmed `issue (blocking)`; each matching
+disposition; zero open confirmed blocking finding; each matching
 [local row](../REVIEW.md#escalation)'s run recorded as a PR comment starting
 `<!-- local-row:<row>:<head sha> -->`, where `<row>` is the row's first column
 up to any colon or parenthesis, lowercased, each run of non-alphanumerics one

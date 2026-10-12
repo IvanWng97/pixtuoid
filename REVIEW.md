@@ -37,7 +37,6 @@ headings. A local row lens applies its [row](#escalation).
 
 ### Always check
 
-- A breach of AGENTS.md (invariants, conventions, "Things NOT to do").
 - New behavior without a test; scope beyond what the PR body states.
 
 ### Do not flag
@@ -48,42 +47,17 @@ headings. A local row lens applies its [row](#escalation).
   the comments on the lines it governs first.
 - Speculative defense in depth where a primary defense holds. Every layer a
   trap names is primary, and a concrete, reachable extra-layer gap at a trust
-  boundary is `issue (non-blocking)`.
+  boundary is non-blocking.
 - Risks needing unlikely or unreachable preconditions; performance unless
   measurable (the TUI repaints at `anim::PAINT_FPS`).
 - A missing comment ([comment audit](#every-changed-file) owns the rest).
 
-### Evidence
-
-Every finding states its evidence before its claim, cites a `file:line` from a
-file actually read, and survives a sharp-edge check: the same seam is not the
-same claim. A claim about an external artifact (action tag, crate release,
-upstream shape) not fetched this session says "unverified" (#112).
-
-### Severity
-
-[Conventional Comments](https://conventionalcomments.org/) labels; taste with
-no defect is never posted. Dispositions:
-[CONTRIBUTING](docs/CONTRIBUTING.md#pull-requests).
-
-- `issue (blocking)` — correctness, security, an invariant, or a breach of any
-  AGENTS.md rule, its Conventions included. It blocks only once
-  the agent that ran the review or a maintainer confirms it against the code;
-  the finder's label alone never blocks.
-- `issue (non-blocking)` — any other real defect this PR introduced.
-- `issue (pre-existing)` — real, not introduced here.
-
-### Findings
-
-Each finding carries its [label](#severity), its head-side `path:line`, never
-invented, and a concrete failure scenario; a maintenance defect's is the edit
-that would leave a copy or a comment wrong.
-
 ## Every changed file
 
 Read each changed file whole at the head (a removed file has only its hunks),
-against the base tree. A defect anywhere in it is in scope,
-`issue (pre-existing)` when the diff did not introduce it.
+against the base tree. A defect anywhere in it is in scope, pre-existing when
+the diff did not introduce it; a maintenance defect's failure scenario is the
+edit that would leave a copy or a comment wrong.
 
 1. **Comment audit**: for every file, a one-line change included, read its
    entire comment population against the code and AGENTS.md's comment rules
@@ -155,8 +129,8 @@ invariant-breaking sequence against:
    not shared topic; verify join keys against real production constants,
    never test fixtures.
 3. Layering: mechanism calls route through the designated orchestrator.
-4. **Proportion**, each with the cheaper alternative, `issue (non-blocking)`
-   unless it breaches AGENTS.md ([Severity](#severity)): **over-engineering** (YAGNI), a branch,
+4. **Proportion**, each with the cheaper alternative, non-blocking
+   unless it breaches AGENTS.md: **over-engineering** (YAGNI), a branch,
    helper, parameter, type, fallback arm or test machinery serving no
    reachable case; **low ROI**, code, API change or coupling out of proportion
    to its payoff (an API made `Option` across three painters for a width
@@ -174,7 +148,7 @@ invariant-breaking sequence against:
    ladders) stays.
 5. **Naming**: every new or renamed name, `pub(crate)` and modules included,
    is faithful, clear and concise. Each finding cites what the name breaks;
-   severity per [Severity](#severity), non-blocking by default.
+   non-blocking unless it breaches AGENTS.md.
    - **Faithful**: it says what the item is or does at head; a behavior change
      renames it.
    - **Clear**: a reader without this PR's context reads it right. One concept,
