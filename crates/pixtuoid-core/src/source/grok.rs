@@ -73,7 +73,7 @@ pub(crate) const DECODED_XAI_TAGS: &[&str] = &[
     XAI_HOOK_EXECUTION,
 ];
 
-/// It publishes no release and no tag.
+/// grok-build publishes no release and no tag.
 #[cfg(any(test, feature = "upstream"))]
 pub const REPO: Repo = Repo {
     name: "xai-org/grok-build",

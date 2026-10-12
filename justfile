@@ -1229,17 +1229,10 @@ compare-selftest:
     "$py" scripts/compare-screenshots.py --selftest
 
 # Default features off: the watch plays no audio, so the runner needs no ALSA.
-[doc('Build the upstream drift watch')]
-[group('meta')]
-drift-watch-build:
-    cargo build -q -p pixtuoid --no-default-features --features upstream --example drift_watch
-
-# Built apart, so upstream-drift.yml hands its token to the run alone
-# (`just --no-deps drift-watch`), never to a dependency's build script.
 [doc('Check every name the sources read and the installers register against upstream (network)')]
 [group('meta')]
-drift-watch: drift-watch-build
-    "${CARGO_TARGET_DIR:-target}/debug/examples/drift_watch"
+drift-watch:
+    cargo run -q -p pixtuoid --no-default-features --features upstream --example drift_watch
 
 # The pty driver's pure halves — the ANSI stripper, the composer comparison, the
 # gate/menu wording. Each fails silently, at the price of a BILLED turn: a broken

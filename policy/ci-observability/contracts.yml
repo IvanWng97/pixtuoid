@@ -74,28 +74,30 @@
     - '.jobs.publish.steps[0].with["persist-credentials"] = true'
     - '.jobs.publish.steps += [{"run": "bash scripts/x.sh"}]'
 
-- id: drift-watch-hands-its-token-only-to-the-run
+- id: drift-watch-files-issues-from-a-job-that-runs-no-tree-code
   file: .github/workflows/upstream-drift.yml
   why: >-
-    The watch reads GITHUB_TOKEN for GitHub's rate limit, and the job's token
-    can write issues; a step that also built would hand it to every
-    dependency's build script.
+    The watch builds and runs the tree, every dependency's build script
+    included, and hands its token to curl; that job's token only reads. The
+    token that writes issues lives in a job that checks nothing out and runs
+    no build, so no code of the tree ever holds it.
   assert: |
-    def holds: tostring | test("github\\.token|secrets\\.");
-    "just --no-deps drift-watch | tee drift-report.md" as $watch
-    | [.jobs.drift.steps[] | select(holds)] as $held
-    | ([$held[] | .run // "" | split("\n")[] | select(test("drift-watch"))] == [$watch])
-      and ($held | all(.run // "" | split("\n") | map(select(. != $watch)) | join("\n")
-                       | test("\\b(cargo|just|npm|node|pip|python3?|make|bash|sh)\\b|\\./") | not))
-      and (.env // {} | holds | not)
-      and (.jobs.drift.env // {} | holds | not)
+    ([.jobs.file.steps[] | .run // ""] | join("\n")) as $file
+    | .permissions == {}
+      and .jobs.drift.permissions == {"contents": "read"}
+      and .jobs.file.permissions == {"issues": "write"}
+      and ([.jobs | to_entries[] | select(.key != "file") | .value.permissions // {} | .[]]
+           | all(. != "write"))
+      and ([.jobs.file.steps[] | .uses // empty | sub("@.*"; "")] - ["actions/download-artifact"]) == []
+      and ($file | test("\\b(cargo|just|npm|node|pip|python3?|make|bash|sh)\\b|\\./") | not)
   break:
-    - '(.jobs.drift.steps[] | select(.env.GITHUB_TOKEN) | .run) |= sub("just --no-deps drift-watch"; "true")'
-    - '(.jobs.drift.steps[] | select(.env.GITHUB_TOKEN) | .run) += "\njust build"'
-    - '(.jobs.drift.steps[] | select(.name == "Build the drift watch") | .run) |= "GITHUB_TOKEN=${{ github.token }} " + .'
-    - '(.jobs.drift.steps[] | select(.name == "Build the drift watch")) += {"env": {"GH_TOKEN": "${{ github.token }}"}}'
-    - '.jobs.drift.env = {"GITHUB_TOKEN": "${{ github.token }}"}'
-    - '.env = {"GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}'
+    - '.permissions = {"issues": "write"}'
+    - '.jobs.drift.permissions.issues = "write"'
+    - '.jobs.drift.permissions.actions = "read"'
+    - '.jobs.file.permissions.contents = "read"'
+    - '.jobs.other = {"permissions": {"pull-requests": "write"}}'
+    - '.jobs.file.steps = [{"uses": "actions/checkout@v7"}] + .jobs.file.steps'
+    - '.jobs.file.steps += [{"run": "just drift-watch"}]'
 
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml
