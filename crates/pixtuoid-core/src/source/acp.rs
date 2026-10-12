@@ -43,13 +43,12 @@ pub(crate) const SESSION_UPDATE_METHOD: &str = "session/update";
 #[cfg(any(test, feature = "upstream"))]
 const SCHEMA_TAG: &str = "v0.11.4";
 
+/// Read at the `agent-client-protocol-schema` grok-build's `Cargo.lock` pins,
+/// which grok runs.
 #[cfg(any(test, feature = "upstream"))]
 const REPO: Repo = Repo {
     name: "agentclientprotocol/agent-client-protocol",
-    release: Release::Pinned {
-        tag: SCHEMA_TAG,
-        why: "grok-build runs the `agent-client-protocol-schema` its `Cargo.lock` pins",
-    },
+    release: Release::Pinned { tag: SCHEMA_TAG },
 };
 
 /// Both schemas, each proven by the declaration a watch reads: grok pins

@@ -52,7 +52,7 @@ use crate::source::{AgentEvent, ToolDetail};
 pub const SOURCE_NAME: &str = "codewhale";
 
 /// CodeWhale's one sub-agent tool; its `action` picks the verb
-/// (Hmbown/CodeWhale `crates/tui/src/tools/subagent/mod.rs`
+/// (codewhale-hq/Codewhale `crates/tui/src/tools/subagent/mod.rs`
 /// `parse_agent_tool_action`). The CHILD gets its own sprite from the
 /// `subagent_spawn`/`subagent_complete` observer hooks.
 pub(crate) const SUBAGENT_TOOL: &str = "agent";

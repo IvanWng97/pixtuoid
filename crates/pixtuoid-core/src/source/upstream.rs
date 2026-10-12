@@ -69,12 +69,9 @@ pub enum Release {
         tag_prefix: &'static str,
     },
     /// One tag, for an upstream users run at the version another CLI locks.
-    Pinned {
-        tag: &'static str,
-        why: &'static str,
-    },
+    Pinned { tag: &'static str },
     /// Its default branch, for a repository that publishes no release.
-    Branch { why: &'static str },
+    Branch,
 }
 
 /// A document upstream declares names in.
@@ -405,7 +402,7 @@ mod tests {
         };
         const UNRELEASED: Repo = Repo {
             name: "o/r",
-            release: Release::Branch { why: "x" },
+            release: Release::Branch,
         };
         let arms = Read::RustArms {
             name: "f",

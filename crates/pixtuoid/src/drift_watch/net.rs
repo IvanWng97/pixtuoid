@@ -84,7 +84,7 @@ fn authorized(url: &str) -> bool {
 /// list, which every local process can read; and a redirect to another origin
 /// drops it, since `--location` is not `--location-trusted`
 /// (curl.se/docs/manpage.html#-H).
-fn curl_args(url: &str, timeout: Duration, authorized: bool) -> Vec<String> {
+fn curl_args(url: &str, timeout: Duration, token_on_stdin: bool) -> Vec<String> {
     let mut args: Vec<String> = ["--silent", "--show-error", "--location", "--max-time"]
         .map(str::to_owned)
         .into();
@@ -98,7 +98,7 @@ fn curl_args(url: &str, timeout: Duration, authorized: bool) -> Vec<String> {
         ]
         .map(str::to_owned),
     );
-    if authorized {
+    if token_on_stdin {
         args.extend(["--header", "@-"].map(str::to_owned));
     }
     args.push(url.to_owned());

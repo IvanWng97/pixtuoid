@@ -82,15 +82,17 @@
     dependency's build script.
   assert: |
     def holds: tostring | test("github\\.token|secrets\\.");
-    [.jobs.drift.steps[] | select(.env // {} | holds)] as $held
-    | ($held | all(.run // "" | test("\\bcargo\\b|drift-watch-build") | not))
-      and ([$held[] | .run // "" | split("\n")[] | select(test("drift-watch"))]
-           == ["just --no-deps drift-watch | tee drift-report.md"])
+    "just --no-deps drift-watch | tee drift-report.md" as $watch
+    | [.jobs.drift.steps[] | select(holds)] as $held
+    | ([$held[] | .run // "" | split("\n")[] | select(test("drift-watch"))] == [$watch])
+      and ($held | all(.run // "" | split("\n") | map(select(. != $watch)) | join("\n")
+                       | test("\\b(cargo|just|npm|node|pip|python3?|make|bash|sh)\\b|\\./") | not))
       and (.env // {} | holds | not)
       and (.jobs.drift.env // {} | holds | not)
   break:
-    - '(.jobs.drift.steps[] | select(.env.GITHUB_TOKEN) | .run) |= sub("--no-deps "; "")'
-    - '(.jobs.drift.steps[] | select(.env.GITHUB_TOKEN) | .run) |= "just drift-watch-build\n" + .'
+    - '(.jobs.drift.steps[] | select(.env.GITHUB_TOKEN) | .run) |= sub("just --no-deps drift-watch"; "true")'
+    - '(.jobs.drift.steps[] | select(.env.GITHUB_TOKEN) | .run) += "\njust build"'
+    - '(.jobs.drift.steps[] | select(.name == "Build the drift watch") | .run) |= "GITHUB_TOKEN=${{ github.token }} " + .'
     - '(.jobs.drift.steps[] | select(.name == "Build the drift watch")) += {"env": {"GH_TOKEN": "${{ github.token }}"}}'
     - '.jobs.drift.env = {"GITHUB_TOKEN": "${{ github.token }}"}'
     - '.env = {"GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}'

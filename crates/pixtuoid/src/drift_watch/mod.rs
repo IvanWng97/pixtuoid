@@ -311,7 +311,7 @@ impl<'f> Fetched<'f> {
                 None
             }
         };
-        if let (Some(_), Release::Branch { .. }) = (&resolved, &repo.release) {
+        if let (Some(_), Release::Branch) = (&resolved, &repo.release) {
             match self.json_str(
                 &format!("{API_URL}/{}/releases/latest", repo.name),
                 "tag_name",
@@ -371,11 +371,11 @@ impl<'f> Fetched<'f> {
                 );
                 tag(want, missing)
             }
-            Release::Pinned { tag: pinned, .. } => tag(
+            Release::Pinned { tag: pinned } => tag(
                 pinned.to_owned(),
                 format!("Its pinned tag `{pinned}` is gone"),
             ),
-            Release::Branch { .. } => field(&meta, &api, "default_branch").map(Ref::Branch),
+            Release::Branch => field(&meta, &api, "default_branch").map(Ref::Branch),
         }
     }
 

@@ -50,8 +50,8 @@ impl Served {
                     r#"{"version": "1.0.0"}"#,
                 )
                 .with(&format!("{api}/git/ref/tags/{tag_prefix}1.0.0"), "{}"),
-            Release::Pinned { tag, .. } => found.with(&format!("{api}/git/ref/tags/{tag}"), "{}"),
-            Release::Branch { .. } => found.gone(&format!("{api}/releases/latest"), 404),
+            Release::Pinned { tag } => found.with(&format!("{api}/git/ref/tags/{tag}"), "{}"),
+            Release::Branch => found.gone(&format!("{api}/releases/latest"), 404),
         }
     }
 
@@ -107,7 +107,7 @@ impl Fetch for Served {
 /// The repository most tests read, at its default branch.
 const OR: Repo = Repo {
     name: "o/r",
-    release: Release::Branch { why: "a test" },
+    release: Release::Branch,
 };
 
 /// The network answering every question [`OR`] raises.
@@ -809,10 +809,7 @@ fn each_release_resolves_to_the_ref_users_run() {
     };
     const PINNED: Repo = Repo {
         name: "o/pinned",
-        release: Release::Pinned {
-            tag: "v0.1.0",
-            why: "a test",
-        },
+        release: Release::Pinned { tag: "v0.1.0" },
     };
     let found = |repo: &Repo| {
         Served::default().with(
@@ -914,10 +911,7 @@ fn a_release_that_resolves_no_tag_is_probe_health() {
     };
     const PINNED: Repo = Repo {
         name: "o/r",
-        release: Release::Pinned {
-            tag: "v0.1.0",
-            why: "a test",
-        },
+        release: Release::Pinned { tag: "v0.1.0" },
     };
     for (repo, served, says) in [
         (
@@ -1614,26 +1608,6 @@ fn every_registered_hook_is_watched() {
 /// pattern captures the name it reads. A pattern of ours that does not compile
 /// is a blind line, which `every_watch_fires_on_its_change_and_stays_silent_otherwise`
 /// fails on.
-/// One repository, whichever crate reads it, is read at one ref.
-#[test]
-fn one_repository_has_one_release_policy() {
-    let mut seen: HashMap<String, &Repo> = HashMap::new();
-    for (_, w) in declared() {
-        for doc in w.docs {
-            let (At::Path { repo, .. } | At::ReleaseAsset { repo, .. }) = doc.at else {
-                continue;
-            };
-            let first = *seen.entry(repo.name.to_ascii_lowercase()).or_insert(repo);
-            assert_eq!(
-                first, repo,
-                "`{}` is declared twice, differently",
-                repo.name
-            );
-        }
-    }
-    assert!(!seen.is_empty(), "the roster reads repositories");
-}
-
 #[test]
 fn no_anchor_is_a_guarded_name_and_every_matches_pattern_captures() {
     let mut watches = 0;
@@ -1660,6 +1634,26 @@ fn no_anchor_is_a_guarded_name_and_every_matches_pattern_captures() {
         }
     }
     assert!(watches > 0, "the registry declares watches");
+}
+
+/// One repository, whichever crate reads it, is read at one ref.
+#[test]
+fn one_repository_has_one_release_policy() {
+    let mut seen: HashMap<String, &Repo> = HashMap::new();
+    for (_, w) in declared() {
+        for doc in w.docs {
+            let (At::Path { repo, .. } | At::ReleaseAsset { repo, .. }) = doc.at else {
+                continue;
+            };
+            let first = *seen.entry(repo.name.to_ascii_lowercase()).or_insert(repo);
+            assert_eq!(
+                first, repo,
+                "`{}` is declared twice, differently",
+                repo.name
+            );
+        }
+    }
+    assert!(!seen.is_empty(), "the roster reads repositories");
 }
 
 #[test]

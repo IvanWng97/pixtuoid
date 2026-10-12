@@ -73,13 +73,11 @@ pub(crate) const DECODED_XAI_TAGS: &[&str] = &[
     XAI_HOOK_EXECUTION,
 ];
 
-/// The repository its drift watches read.
+/// It publishes no release and no tag.
 #[cfg(any(test, feature = "upstream"))]
 pub const REPO: Repo = Repo {
     name: "xai-org/grok-build",
-    release: Release::Branch {
-        why: "grok-build publishes no release and no tag",
-    },
+    release: Release::Branch,
 };
 
 #[cfg(any(test, feature = "upstream"))]
