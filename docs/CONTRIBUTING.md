@@ -434,11 +434,9 @@ step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
     (`each_template_read_is_watched` holds the two together, both ways where
     the template is scanned). A source whose dependence lives wholly in its installer is
     `Upstream::Installer`. The types are in `source/upstream.rs`, and
-    `just drift-watch` runs them. A value our shipped artifacts bake in, such
-    as a template's fallback port, is still a `check_upstream_drift.py` row:
-    the `insert` in that crate's `src/drift_surface.rs`, `just
-    gen-drift-surface` (commit both fragments), and the `SURFACE_ROWS` row
-    plus its selftest case.
+    `just drift-watch` runs them. A value our shipped artifacts bake in is a
+    `Watch` too, its `ours` read off the artifact rather than copied
+    (OpenClaw's `default_gateway_port`).
 12. **Three roster literals in three test binaries** (a scoped run misses
     them): the row-by-row byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN`
     in `tests/sources/captures.rs`; a case row + `#[test]` in

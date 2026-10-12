@@ -12,7 +12,9 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use pixtuoid_core::source::registry::REGISTRY;
-use pixtuoid_core::source::upstream::{At, Doc, Family, Finding, Read, Siblings, Watch, When};
+use pixtuoid_core::source::upstream::{
+    At, Doc, Family, Finding, Read, Siblings, Watch, When, Yield,
+};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
@@ -61,7 +63,7 @@ trait Fetch {
 /// `breaking` fix the decoder or the registration, `review` adopt, ignore or re-verify,
 /// `blind` repin by hand,
 /// `errors` transient. Collapsing `blind` into `breaking` is what made #793
-/// report five phantom renames.
+/// report phantom renames.
 #[derive(Debug, Default)]
 pub struct Report {
     breaking: Vec<String>,
@@ -152,7 +154,7 @@ impl Report {
                  facade at the old path all land here, and every check riding the \
                  affected surface was SKIPPED rather than reported as drift. **Verify \
                  upstream by hand and repin — do NOT change a decoder on these lines \
-                 alone** (#793 did, against three working env vars).",
+                 alone** (#793 did, against working env vars).",
             ),
             &self.blind,
         );
@@ -414,10 +416,9 @@ fn check_watch(source: &str, w: &Watch, fetched: &mut Fetched, report: &mut Repo
     };
     match w.when {
         When::Vanishes => {
-            let verb = match w.read {
-                Read::RustStr { .. } => Some("declares"),
-                Read::TsReturn { .. } => Some("returns"),
-                _ => None,
+            let verb = match w.read.yields() {
+                Yield::One { verb } => Some(verb),
+                Yield::Declaration | Yield::Family | Yield::Ours | Yield::Fields => None,
             };
             let now = verb.map_or_else(String::new, |verb| {
                 format!(
@@ -474,23 +475,18 @@ fn check_watch(source: &str, w: &Watch, fetched: &mut Fetched, report: &mut Repo
     }
 }
 
-/// Whether fewer names than ours means the reader degraded rather than that
-/// most of ours were renamed at once, #929's false ⛔: only for a vanish
-/// watch whose reader yields upstream's whole declaration. `Each` yields just
-/// the ones of ours it finds and a family reader just the family, so their
-/// shrink is the finding, and a shrunk parse cannot invent an appearance.
+/// Whether fewer names than ours means the reader degraded: only on a vanish
+/// watch, since a shrunk parse cannot invent an appearance.
 fn floored(w: &Watch) -> bool {
-    matches!(w.when, When::Vanishes)
-        && !matches!(w.read, Read::Each { .. })
-        && !w.read.confined_to_family()
+    matches!(w.when, When::Vanishes) && w.read.yields().floored()
 }
 
 /// What the floor counts of `names`: a `TsFields` read's `field?` and
 /// `field:"lit"` are facts beside a field, not fields.
 fn floor_count<'a>(read: &Read, names: impl Iterator<Item = &'a str>) -> usize {
-    match read {
-        Read::TsFields { .. } => names.filter(|n| read::is_bare(n)).count(),
-        _ => names.count(),
+    match read.yields() {
+        Yield::Fields => names.filter(|n| read::is_bare(n)).count(),
+        Yield::Declaration | Yield::Family | Yield::Ours | Yield::One { .. } => names.count(),
     }
 }
 
@@ -523,6 +519,7 @@ fn read_docs(
             Read::PySet { decl } => read::py_set(text, decl).map(Into::into),
             Read::RustMacroRows { name } => read::rust_macro_rows(text, name).map(Into::into),
             Read::TsConstArray { name } => read::ts_const_array(text, name).map(Into::into),
+            Read::TsConst { name } => read::ts_const(text, name).map(Into::into),
             Read::JsonUnion { def, prop } => read::json_union(text, def, prop).map(Into::into),
             Read::JsonKeys => read::json_keys(text).map(Into::into),
         };
@@ -661,9 +658,9 @@ fn check_all(fetch: &dyn Fetch, report: &mut Report) {
     }
 }
 
-/// The watches not yet declared in Rust, still in `check_upstream_drift.py`:
-/// its buckets join this report, so each watch has one checker and the run one
-/// issue. Its traceback, if it has one, goes straight to our stderr.
+/// The watches still in `check_upstream_drift.py`, each also a Rust `Watch`
+/// until the script is deleted: its buckets join this report, so the run files
+/// one issue. Its traceback, if it has one, goes straight to our stderr.
 pub fn run_legacy(report: &mut Report) {
     let script = concat!(
         env!("CARGO_MANIFEST_DIR"),
