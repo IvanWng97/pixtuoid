@@ -658,54 +658,5 @@ fn check_all(fetch: &dyn Fetch, report: &mut Report) {
     }
 }
 
-/// The watches still in `check_upstream_drift.py`:
-/// its buckets join this report, so each watch has one checker and the run one
-/// issue. Its traceback, if it has one, goes straight to our stderr.
-pub fn run_legacy(report: &mut Report) {
-    let script = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../scripts/check_upstream_drift.py"
-    );
-    let stdout = std::process::Command::new("python3")
-        .arg(script)
-        .stderr(std::process::Stdio::inherit())
-        .output()
-        .map(|out| out.stdout)
-        .map_err(|e| e.to_string());
-    fold_legacy(report, script, stdout);
-}
-
-/// Every bucket is required and no other key is allowed: a renamed one on
-/// either side would otherwise drop its findings and exit 0.
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Buckets {
-    breaking: Vec<String>,
-    review: Vec<String>,
-    blind: Vec<String>,
-    errors: Vec<String>,
-}
-
-/// A legacy run whose buckets cannot be read is every legacy watch gone dark,
-/// so it files probe health against ours rather than reading as no drift.
-fn fold_legacy(report: &mut Report, script: &str, stdout: Result<Vec<u8>, String>) {
-    let read =
-        stdout.and_then(|o| serde_json::from_slice::<Buckets>(&o).map_err(|e| e.to_string()));
-    match read {
-        Ok(b) => {
-            report.breaking.extend(b.breaking);
-            report.review.extend(b.review);
-            report.blind.extend(b.blind);
-            report.errors.extend(b.errors);
-        }
-        Err(e) => report.add_blind(
-            &format!("the legacy watches ({e})"),
-            script,
-            "They were SKIPPED.",
-            true,
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests;

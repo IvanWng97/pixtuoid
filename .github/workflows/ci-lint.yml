@@ -143,7 +143,6 @@ jobs:
       - run: just ci-observability
       - run: just json-schemas
       - run: just links
-      - run: just drift-selftest
       - run: just tuidrive-selftest
       - run: just e2e-scrub-selftest
       - run: just star-history-selftest

@@ -1369,27 +1369,6 @@ fn no_anchor_is_a_guarded_name_and_every_matches_pattern_captures() {
 }
 
 #[test]
-fn the_legacy_buckets_merge_and_an_unreadable_run_goes_dark_on_our_side() {
-    let mut r = Report::default();
-    let json = r#"{"breaking": ["B"], "review": [], "blind": ["D"], "errors": ["E"]}"#;
-    fold_legacy(&mut r, "x.py", Ok(json.as_bytes().to_vec()));
-    assert_eq!((r.breaking.len(), r.blind.len(), r.errors.len()), (1, 1, 1));
-    // A key renamed on either side would otherwise drop its findings and exit 0.
-    for bad in [
-        Ok(br#"{"breaking": [], "review": [], "blind": []}"#.to_vec()),
-        Ok(br#"{"broken": [], "breaking": [], "review": [], "blind": [], "errors": []}"#.to_vec()),
-        Ok(b"Traceback (most recent call last):".to_vec()),
-        Err("No such file or directory".to_owned()),
-    ] {
-        let mut r = Report::default();
-        fold_legacy(&mut r, "x.py", bad);
-        assert_eq!(r.blind.len(), 1, "{r:?}");
-        assert!(r.blind[0].contains("the legacy watches") && r.blind[0].contains("Our own"));
-        assert_eq!(r.exit_code(), 1);
-    }
-}
-
-#[test]
 fn a_fetched_name_cannot_leave_its_code_span() {
     assert_eq!(
         code_span("tool_call`](https://x)\nmore\u{202e}"),
@@ -1584,8 +1563,7 @@ fn an_enum_off_snake_case_is_probe_health() {
 
 /// Every wire literal a decoder equality-compares is carried by a declared
 /// vanish watch — a source's or an installer's, so it lives here, where both
-/// rosters are — or a drift-surface fragment, or exempted below with its
-/// adjudicated reason (#943's gate).
+/// rosters are — or exempted below with its adjudicated reason (#943's gate).
 ///
 /// Accepted loosenesses, adjudicated on #943: membership is
 /// global across sets, so a cross-source spelling collision passes; a
@@ -1697,24 +1675,6 @@ fn every_equality_compared_wire_literal_is_accounted_for() {
 
     let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut carried: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    fn walk(v: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
-        match v {
-            serde_json::Value::String(s) => {
-                out.insert(s.clone());
-            }
-            serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
-            serde_json::Value::Object(o) => o.values().for_each(|x| walk(x, out)),
-            _ => {}
-        }
-    }
-    for krate in ["pixtuoid-core", "pixtuoid"] {
-        let path = crates.join(krate).join("drift-surface.json");
-        let frag = std::fs::read_to_string(&path).expect("committed fragment is readable");
-        walk(
-            &serde_json::from_str(&frag).expect("fragment parses"),
-            &mut carried,
-        );
-    }
     // An appearance watch fires only when a name lands, so it cannot see one
     // renamed: only the vanish watches' names are carried.
     for (_, w) in declared().filter(|(_, w)| matches!(w.when, When::Vanishes)) {

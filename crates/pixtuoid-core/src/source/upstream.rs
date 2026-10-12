@@ -468,10 +468,6 @@ mod tests {
     /// follows a RENAME. It cannot see an ADDITION: an arm
     /// written as a bare literal decodes a name no watch carries, and every
     /// other gate stays green — so a bare literal is rejected outright.
-    ///
-    /// Reading our own source here is not what this crate stopped doing: that
-    /// was a FOREIGN program regex-parsing us, where a miss narrowed the watch
-    /// in silence. A miss here fails this crate's own test.
     fn assert_arms_match_export(file: &str, dispatch: &str, export: &str) {
         let src = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

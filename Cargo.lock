@@ -3194,7 +3194,6 @@ dependencies = [
  "rustix 1.1.5",
  "serde",
  "serde_json",
- "snapbox",
  "strum",
  "temp-env",
  "tempfile",
