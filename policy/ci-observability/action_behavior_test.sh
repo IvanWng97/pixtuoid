@@ -18,7 +18,6 @@ workflow_step_script() {
 
 test_dir="$(mktemp -d)"
 trap 'rm -rf "$test_dir"' EXIT
-export RUNNER_TEMP="$test_dir"
 
 fake_bin="$test_dir/bin"
 mkdir -p "$fake_bin"

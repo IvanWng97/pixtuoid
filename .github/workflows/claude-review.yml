@@ -1,11 +1,8 @@
 name: claude-review
-
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-
 permissions: {}
-
 jobs:
   claude-review:
     uses: pixtuoid/.github/.github/workflows/claude-review.yml@main

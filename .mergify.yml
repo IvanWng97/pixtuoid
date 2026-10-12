@@ -4,7 +4,7 @@
 # Two-step CI (docs.mergify.com/merge-queue/two-step): a PR's pushes run the
 # light tier, and the queue's draft PR (`mergify/merge-queue/…`) runs the full
 # tier, batching several PRs into one run. Branch protection is not injected:
-# the bots review the PR, never the queue's draft, so an injected `claude-review`
+# the bots review the PR, never the queue's draft, so an injected review
 # condition, which the queue also checks on that draft
 # (docs.mergify.com/merge-queue/rules: "the merge conditions for checks are
 # evaluated against the temporary pull request"), would never pass there.

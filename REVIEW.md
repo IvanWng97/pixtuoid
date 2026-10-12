@@ -188,8 +188,9 @@ invariant-breaking sequence against:
 
 ## Escalation
 
-The automatic review is the floor; each matching row adds one focused lens. The
-first column decides; Paths are where it usually fires. A **local** row needs
+The automatic review is the floor, and its summary names each row the diff
+matches; each matching row adds one focused lens. The first column decides;
+Paths are where it usually fires. A **local** row needs
 the head tree read, built or run, or an upstream fetched, so its local run is
 mandatory ([recorded](docs/CONTRIBUTING.md#the-merge-gate)), and that run is
 its focused lens alone: the floor is never re-run locally.

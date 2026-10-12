@@ -98,7 +98,8 @@ CodSpeed skip drafts. The jobs:
   workflows' own shell) and
   `just fixture-pii` (gitleaks over the committed capture tree); the
   capture-tree rules ride `just test` instead.
-- **zizmor** — workflow/action security: SHA pins (`actions/*` may float on a major),
+- **zizmor** — workflow/action security: SHA pins (`actions/*` may float on a
+  major, `pixtuoid/.github/*` runs at `main`),
   credential-dropping checkouts, exact inline suppressions.
 - **The automatic Claude review** is the org's shared
   [`claude-review.yml`](https://github.com/pixtuoid/.github/blob/main/.github/workflows/claude-review.yml),
@@ -315,9 +316,11 @@ bot PR (`bot/media-regen`, `docs/images/` only) queues itself and needs no
 generated-art record: it renders main's merged code, which each look PR's lens
 already read as evidence.
 
-The review skips a fork's or a bot's PR, and its skipped check passes, so a
-maintainer reviews such a PR by hand. A fork's author can resolve their own
-threads, so before merging read each thread's `resolvedBy` and its reply.
+The review skips a fork's or a bot's PR, and its skipped check passes. A
+maintainer reviews a fork's or Dependabot's PR by hand before queueing it; a
+fork's author can resolve their own threads, so read each thread's
+`resolvedBy` and its reply. The media-regen PR above is unreviewed by design,
+held to `docs/images/` by its queue rule's file filter.
 
 ### Dispositions
 
