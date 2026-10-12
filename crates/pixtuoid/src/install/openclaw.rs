@@ -66,10 +66,10 @@ pub(crate) const MODEL_CALL_ENDED_FACTS: &[&str] =
 
 /// What `notePort` reads off an event and its context.
 #[cfg(feature = "upstream")]
-pub(crate) const GATEWAY_PORT: &[&str] = &["port"];
+pub(crate) const PORT_FIELDS: &[&str] = &["port"];
 /// What `forward` copies from a hook's context (`ALLOW`).
 #[cfg(feature = "upstream")]
-pub(crate) const AGENT_IDS: &[&str] = &["runId", "sessionId"];
+pub(crate) const RUN_KEY_FIELDS: &[&str] = &["runId", "sessionId"];
 
 #[cfg(feature = "upstream")]
 const fn openclaw(path: &'static str) -> At {
@@ -164,7 +164,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     ),
     reads(
         "openclaw.gateway_start_port",
-        || GATEWAY_PORT.to_vec(),
+        || PORT_FIELDS.to_vec(),
         &[Doc {
             at: GATEWAY_TYPES,
             anchor: r"(?m)^export type PluginHookGatewayStartEvent\b",
@@ -175,7 +175,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     ),
     reads(
         "openclaw.gateway_context_port",
-        || GATEWAY_PORT.to_vec(),
+        || PORT_FIELDS.to_vec(),
         &[Doc {
             at: GATEWAY_TYPES,
             anchor: r"(?m)^export type PluginHookGatewayContext\b",
@@ -186,7 +186,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     ),
     reads(
         "openclaw.agent_context_ids",
-        || AGENT_IDS.to_vec(),
+        || RUN_KEY_FIELDS.to_vec(),
         &[Doc {
             at: openclaw("src/plugins/hook-agent-context.types.ts"),
             anchor: r"(?m)^export type PluginHookAgentContext\b",

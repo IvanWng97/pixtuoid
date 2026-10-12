@@ -1154,10 +1154,10 @@ fn each_template_read_is_watched() {
             .filter(|n| read::is_bare(n))
             .collect()
     };
-    let reads: BTreeSet<&str> = omp::extension_reads().into_iter().collect();
-    assert!(!reads.is_empty(), "the template scan reads nothing");
-    assert_eq!(reads, bare(omp::UPSTREAM));
-    let reads = |read: &str| {
+    let omp_reads: BTreeSet<&str> = omp::extension_reads().into_iter().collect();
+    assert!(!omp_reads.is_empty(), "the template scan reads nothing");
+    assert_eq!(omp_reads, bare(omp::UPSTREAM));
+    let plugin_reads = |read: &str| {
         openclaw::PLUGIN_TEMPLATE.match_indices(read).any(|(i, _)| {
             !openclaw::PLUGIN_TEMPLATE[i + read.len()..]
                 .starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '$')
@@ -1166,20 +1166,20 @@ fn each_template_read_is_watched() {
     let fields = [openclaw::AGENT_END_FIELDS, openclaw::MODEL_CALL_BASE_FIELDS].concat();
     for field in fields {
         assert!(
-            reads(&format!("ev.{field}")),
+            plugin_reads(&format!("ev.{field}")),
             "the plugin no longer reads `{field}`"
         );
     }
-    for field in openclaw::GATEWAY_PORT {
+    for field in openclaw::PORT_FIELDS {
         for read in [format!("ev.{field}"), format!("ctx.{field}")] {
-            assert!(reads(&read), "the plugin no longer reads `{read}`");
+            assert!(plugin_reads(&read), "the plugin no longer reads `{read}`");
         }
     }
     let allow = openclaw::PLUGIN_TEMPLATE
         .split_once("const ALLOW = [")
         .and_then(|(_, rest)| rest.split_once(']'))
         .map_or("", |(list, _)| list);
-    for id in openclaw::AGENT_IDS {
+    for id in openclaw::RUN_KEY_FIELDS {
         assert!(
             allow.contains(&format!("\"{id}\"")),
             "the plugin no longer forwards `{id}`"
