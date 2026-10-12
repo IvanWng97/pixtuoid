@@ -1,9 +1,9 @@
 {
-  "captured": "2026-09-01",
-  "cli": "dsh",
-  "command": "scripts/lib/capture-dsh-authed.sh — authed `dsh --profile headless` on the shared prompt (read/bash/read tool rounds; the headless profile ran them without approval events)",
   "origin": "recorded",
-  "version": "0.1.1-rc.2",
+  "cli": "dsh",
+  "version": "0.2.0-rc.2",
+  "captured": "2026-10-12",
+  "command": "scripts/lib/capture-dsh-authed.sh — authed `dsh --profile headless` on the shared prompt (read/bash/read tool rounds; the headless profile ran them without approval events)",
   "deidentified": {
     "method": "decoder-allowlist",
     "blanked": 0
