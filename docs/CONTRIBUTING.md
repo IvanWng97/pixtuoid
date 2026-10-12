@@ -98,8 +98,8 @@ CodSpeed skip drafts. The jobs:
   workflows' own shell) and
   `just fixture-pii` (gitleaks over the committed capture tree); the
   capture-tree rules ride `just test` instead.
-- **zizmor** — workflow/action security: SHA pins (`actions/*` may float on a
-  major, `pixtuoid/.github/*` runs at `main`),
+- **zizmor** — workflow/action security: SHA pins outside the namespaces
+  [`.github/zizmor.yml`](../.github/zizmor.yml) relaxes,
   credential-dropping checkouts, exact inline suppressions.
 - **The automatic Claude review** is the org's shared
   [`claude-review.yml`](https://github.com/pixtuoid/.github/blob/main/.github/workflows/claude-review.yml),
@@ -303,6 +303,8 @@ ancestor of the new one (a rebase), the re-run judges the whole PR. The
 [`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
 rows. A refuted blocking finding clears without a push: once its thread is
 resolved with the disposition, re-run the review (`gh run rerun <id> --failed`).
+A bot's push onto a human's PR fails the review until a human pushes: a re-run
+keeps the bot as its `github.actor`, which the action refuses.
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
 entry is a command because no queue condition can confirm a finding or match a

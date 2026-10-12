@@ -167,9 +167,8 @@ actionlint-composites:
     exit 0
 
 # Security audit for workflows/actions/Dependabot. zizmor owns the parser and
-# audit catalog; .github/zizmor.yml records the deliberate pin exceptions
-# (`actions/*` floats on a major, the org's shared review runs at `main`,
-# every other action is a SHA) and every
+# audit catalog; .github/zizmor.yml records the deliberate pin exceptions and
+# every
 # accepted finding is suppressed at its exact source location with a WHY.
 # The operating MODE is env-derived, not chosen here, and the asymmetry is
 # deliberate: tokenless it runs OFFLINE (it says so on stderr) and skips every
