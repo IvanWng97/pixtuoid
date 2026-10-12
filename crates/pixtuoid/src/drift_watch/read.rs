@@ -1494,6 +1494,14 @@ mod tests {
             partial(ts_members(extended, &events)).as_deref(),
             Some("`interface Events` extends another type")
         );
+        let computed = "interface Events {\n  [K]: 1;\n  'a': 1\n}\ninterface SessionEventMap {\n  [K](): void;\n  'b': 1\n}\nclass C {\n  accessor x = 1;\n}\n";
+        for of in ["Events", "SessionEventMap"] {
+            assert_eq!(
+                partial(ts_members(computed, &[of])),
+                Some(format!("`interface {of}` has a computed key"))
+            );
+        }
+        assert_eq!(found(ts_members(computed, &["C"])), names(&["x"]));
     }
 
     /// Every `return` of the ONE function, in order, its nested functions'

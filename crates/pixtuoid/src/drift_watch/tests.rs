@@ -428,6 +428,34 @@ fn a_fact_of_a_visible_field_is_judged_in_a_partial_read() {
     );
 }
 
+/// A fact whose field the partial read cannot see stays blind, beside one
+/// whose field it sees, which is judged.
+#[test]
+fn a_fact_of_a_missing_field_is_blind_in_a_partial_read() {
+    const W: Watch = Watch {
+        id: "t.facts",
+        ours: || vec!["a:\"x\"", "b:\"y\""],
+        docs: &[doc("t.ts")],
+        read: Read::TsFields { name: "X" },
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
+        siblings: None,
+    };
+    let narrowed = Served::default().with(
+        &raw("t.ts"),
+        "enum Events {}\nexport type X = Base & { a: \"y\" };\n",
+    );
+    let r = check(&narrowed, &W);
+    assert!(
+        r.blind.len() == 1 && r.blind[0].contains(r#"`b:"y"`"#),
+        "{r:?}"
+    );
+    assert!(
+        r.breaking.len() == 1 && r.breaking[0].contains(r#"`a:"x"`"#),
+        "{r:?}"
+    );
+}
+
 /// The floor counts fields, never the facts beside them: a read that kept
 /// `a` and `a?` kept one field of the two ours names.
 #[test]

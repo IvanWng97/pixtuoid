@@ -81,7 +81,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     },
     Watch {
         id: "omp.approval_resolved",
-        ours: || vec!["toolCallId", "toolName", "approved", "reason"],
+        // No `reason`: the decoder reads it off the requested event alone.
+        ours: || vec!["toolCallId", "toolName", "approved"],
         docs: &[Doc {
             at: At::Path {
                 repo: "can1357/oh-my-pi",
@@ -154,6 +155,25 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         }],
         read: Read::TsFields {
             name: "SessionSwitchEvent",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(READ_GONE),
+        siblings: None,
+    },
+    Watch {
+        id: "omp.session_branch",
+        ours: || vec!["previousSessionFile"],
+        docs: &[Doc {
+            at: At::Path {
+                repo: "can1357/oh-my-pi",
+                branch: "main",
+                path: "packages/coding-agent/src/extensibility/shared-events.ts",
+            },
+            anchor: r"(?m)^export interface SessionBranchEvent\b",
+            owns: "`SessionBranchEvent`",
+        }],
+        read: Read::TsFields {
+            name: "SessionBranchEvent",
         },
         when: When::Vanishes,
         finding: Finding::Breaking(READ_GONE),

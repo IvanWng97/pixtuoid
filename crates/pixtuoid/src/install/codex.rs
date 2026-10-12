@@ -29,10 +29,13 @@ pub(crate) const CODEX_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-/// The `codex plugin` and `codex plugin marketplace` subcommands that add and
-/// remove one.
-const ADD: &str = "add";
-const REMOVE: &str = "remove";
+/// The `codex plugin` subcommands that add and remove one.
+const PLUGIN_ADD: &str = "add";
+const PLUGIN_REMOVE: &str = "remove";
+/// The `codex plugin marketplace` subcommands that add and remove one: a
+/// separate upstream enum, so each moves with its own watch.
+const MARKETPLACE_ADD: &str = "add";
+const MARKETPLACE_REMOVE: &str = "remove";
 /// The `config.toml` tables and keys a marketplace and a plugin are recorded in.
 const MARKETPLACES: &str = "marketplaces";
 const SOURCE: &str = "source";
@@ -98,28 +101,28 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     },
     host_plugin::premise(
         "codex.plugin_add",
-        || vec![ADD],
+        || vec![PLUGIN_ADD],
         PLUGIN_CMD,
         r#"bin_name = "codex plugin {name}""#,
         "the install command `register` runs to add and reload the plugin may have changed",
     ),
     host_plugin::premise(
         "codex.plugin_remove",
-        || vec![REMOVE],
+        || vec![PLUGIN_REMOVE],
         PLUGIN_CMD,
         r#"bin_name = "codex plugin {name}""#,
         "the uninstall command `unregister` runs may have changed",
     ),
     host_plugin::premise(
         "codex.marketplace_add",
-        || vec![ADD],
+        || vec![MARKETPLACE_ADD],
         MARKETPLACE_CMD,
         r#"bin_name = "codex plugin marketplace {name}""#,
         "the marketplace add command `register` runs may have changed",
     ),
     host_plugin::premise(
         "codex.marketplace_remove",
-        || vec![REMOVE],
+        || vec![MARKETPLACE_REMOVE],
         MARKETPLACE_CMD,
         r#"bin_name = "codex plugin marketplace {name}""#,
         "the marketplace remove command `unregister` runs may have changed",
@@ -289,7 +292,7 @@ fn register(config: &Path) -> Result<()> {
     CLI.run(&[
         "plugin".as_ref(),
         "marketplace".as_ref(),
-        ADD.as_ref(),
+        MARKETPLACE_ADD.as_ref(),
         root.as_os_str(),
     ])?;
     add_plugin()
@@ -318,7 +321,7 @@ fn remove_marketplace() -> Result<()> {
     CLI.run(&[
         "plugin".as_ref(),
         "marketplace".as_ref(),
-        REMOVE.as_ref(),
+        MARKETPLACE_REMOVE.as_ref(),
         NAME.as_ref(),
     ])?;
     Ok(())
@@ -329,7 +332,7 @@ fn remove_marketplace() -> Result<()> {
 fn add_plugin() -> Result<()> {
     CLI.run(&[
         "plugin".as_ref(),
-        ADD.as_ref(),
+        PLUGIN_ADD.as_ref(),
         host_plugin::plugin_id().as_ref(),
     ])?;
     Ok(())
@@ -370,7 +373,7 @@ fn unregister(config: &Path) -> Result<Unregistered> {
     if installed {
         CLI.run(&[
             "plugin".as_ref(),
-            REMOVE.as_ref(),
+            PLUGIN_REMOVE.as_ref(),
             host_plugin::plugin_id().as_ref(),
         ])?;
     }
