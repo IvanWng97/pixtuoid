@@ -557,12 +557,10 @@ _doc-targets:
         grep -qx "$target" <<<"$installed" || rustup target add "$target"
     done
 
-# CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
-# profile. Writes lcov.info + target/nextest/ci/junit.xml.
 [doc('Coverage + JUnit XML — ci-tests.yml runs it on every tier with its matrix `features` as args, the full one uploading it (needs llvm-cov + nextest)')]
 [group('rust')]
 coverage *args:
-    TZ={{ TEST_TZ }} cargo llvm-cov nextest --workspace --lcov --output-path lcov.info --profile ci "$@"
+    TZ={{ TEST_TZ }} cargo llvm-cov nextest --workspace --codecov --output-path codecov.json --profile ci "$@"
 
 # Runs the suite under nextest and FAILS on a
 # pending (un-accepted `.snap.new`) OR unreferenced (orphan `.snap` — e.g. a
