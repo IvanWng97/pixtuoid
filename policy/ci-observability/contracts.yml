@@ -55,7 +55,7 @@
     .github/prompts/review-schema.json "$own/review-schema.json"
   assert: |
     [.jobs.analyze.steps[] | select(.name == "Load the review's own files")]
-    | length == 1 and (.[0] | has("uses") | not)
+    | length == 1
       and .[0].env == {"GH_TOKEN": "${{ github.token }}", "WORKFLOW_REPOSITORY": "${{ job.workflow_repository }}",
                        "WORKFLOW_SHA": "${{ job.workflow_sha }}"}
       and (.[0].run as $run
@@ -296,19 +296,19 @@
 - id: reviewer-fork-head-needs-a-maintainer
   file: .github/workflows/claude-review.yml
   why: >-
-    allow_fork hands a fork's diff to a billed model, and the only approval is
-    the `if:` admitting an issue_comment from a maintainer alone; an `if:` has no
-    shell for action_behavior_test.sh to run.
+    A comment-started review bills a model and may read a fork's diff, and its
+    only approval is the `if:` admitting an issue_comment from a maintainer
+    alone; an `if:` has no shell for action_behavior_test.sh to run. The callee
+    bounds allow_fork itself (reviewer-fork-head-needs-a-maintainer-in-the-callee),
+    so this covers only the caller's approval `if:`.
   assert: |
     [.jobs[] | select(.uses == "./.github/workflows/claude-readonly-review.yml")] as $jobs
     | ($jobs | length == 1)
-      and $jobs[0].with.allow_fork == "${{ github.event_name == 'issue_comment' }}"
       and ([($jobs[0].if // "") | gsub("\r?\n[ \t]*"; " ") | split(" || ")[]
             | select(contains("github.event_name == 'issue_comment'"))] as $arms
            | ($arms | length > 0)
              and all($arms[]; contains("contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), github.event.comment.author_association)")))
   break:
-    - .jobs.review.with.allow_fork = true
     - .jobs.review.if |= sub("github.event.comment.author_association"; "github.event.comment.user.login")
     - .jobs.review.if += " || (github.event_name == 'issue_comment' && github.event.issue.pull_request)"
     - .jobs.second = .jobs.review

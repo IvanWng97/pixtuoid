@@ -289,7 +289,9 @@ invariants"), which every contributor and agent reads first.
 
 ## Pull requests
 
-- Review rules: [`REVIEW.md`](../REVIEW.md).
+- Review rules: [`REVIEW.md`](../REVIEW.md) (what to check);
+  [`review-protocol.md`](../.github/prompts/review-protocol.md) (scope,
+  severity, findings, verifier).
 
 ### The merge gate
 

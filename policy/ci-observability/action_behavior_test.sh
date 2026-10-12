@@ -283,7 +283,7 @@ cmp -s "$own_dir/work/$protocol_dest" .github/prompts/review-protocol.md ||
     fail "the review's own files step staged something other than review-protocol.md at $protocol_dest"
 # A reader cites a section as <file>#<anchor>, of the staged protocol or of the
 # caller's REVIEW.md. Each must be a heading there, so a renamed heading reds
-# here, not as a protocol and five prompts silently out of step.
+# here, not as the protocol and the reader prompts silently out of step.
 anchors_of() {
     # github-slugger's slug, for an ASCII heading.
     awk '/^#+ / { h = tolower($0); sub(/^#+ /, "", h); gsub(/[^a-z0-9 _-]/, "", h); gsub(/ /, "-", h); print h }' "$1"
