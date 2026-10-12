@@ -367,8 +367,8 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
 def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> None:
     """The gate #941 asks for: EVERY surface row's check, both directions, offline.
 
-    Each document is BUILT from the set we depend on, so an added event cannot make
-    this stale."""
+    Each document is BUILT from the row's own value, so an added row's value cannot
+    make this stale."""
     real = d.fetch
     try:
         rep0 = d.Report()

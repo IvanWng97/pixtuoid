@@ -541,9 +541,9 @@ fn with_ts<T>(
     f(&decls)
 }
 
-/// The top-level fields of the ONE interface or type alias `name`: each
-/// field, `field?` when optional, and `field:"lit"` per string literal its type
-/// admits. A nested object's fields and its methods are not fields of it.
+/// The top-level fields of the ONE interface or type alias `name`, as
+/// [`field_facts`] yields them; a nested object's fields and its methods are
+/// not fields of it.
 pub(super) fn ts_fields(text: &str, name: &str) -> Result<Declared, Unread> {
     with_ts(text, |decls| {
         let decl = one(
@@ -1399,8 +1399,8 @@ mod tests {
         );
     }
 
-    /// Optionality and each string literal a field admits are facts beside
-    /// the field: a watch can wait on `approved?` or `outcome:"error"`.
+    /// The facts beside a field are names a watch can wait on: `approved?`,
+    /// `outcome:"error"`.
     #[test]
     fn ts_fields_yield_each_fields_optionality_and_string_literals() {
         let src = "export interface E {\n  a: string;\n  b?: number;\n  kind: \"x\" | \"y\" | 3;\n  only?: \"z\";\n  [KEY]: number;\n  run(): void;\n}\n";
