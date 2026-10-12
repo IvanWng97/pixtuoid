@@ -6,20 +6,21 @@
 /// Whether a source is watched upstream, and through what.
 #[derive(Debug)]
 pub enum Upstream {
-    /// One slice of watches per upstream project the source reads. Empty
-    /// means not yet moved off `check_upstream_drift.py`: the
-    /// census that every row is watched or closed lands with the last move.
+    /// One slice of watches per upstream project the source reads.
     Watched(&'static [&'static [Watch]]),
+    /// Its install target's watches carry what it depends on: it decodes the
+    /// hook set its installer registers.
+    Installer,
     /// Nothing upstream publishes declares what the source reads.
     Closed { why: &'static str },
 }
 
 impl Upstream {
-    /// Every watch the source declares; none when it is closed.
+    /// Every watch the source itself declares.
     pub fn watches(&self) -> impl Iterator<Item = &'static Watch> + use<> {
         let projects: &'static [&'static [Watch]] = match *self {
             Self::Watched(projects) => projects,
-            Self::Closed { .. } => &[],
+            Self::Installer | Self::Closed { .. } => &[],
         };
         projects.iter().flat_map(|watches| watches.iter())
     }
@@ -79,8 +80,15 @@ pub enum Read {
     RustEnum { name: &'static str },
     /// The serde wire names of the ONE `struct name`'s fields.
     RustStruct { name: &'static str },
-    /// The top-level fields of the ONE `interface name`.
+    /// The top-level fields of the ONE interface or type alias `name`: each
+    /// field, `field?` when optional, and `field:"lit"` per string literal its
+    /// type admits.
     TsFields { name: &'static str },
+    /// Every member key of the interfaces and classes named `of`, merged
+    /// across a document's declarations as TS merges augmentations.
+    TsMembers { of: &'static [&'static str] },
+    /// Every `return` of the ONE `function name`, in order, as one name.
+    TsReturn { function: &'static str },
     /// Every first group of `pattern`: `Each` turned round, so the floor can
     /// tell a degraded parse from a rename.
     Matches { pattern: &'static str },
@@ -138,9 +146,9 @@ pub struct Watch {
 impl Watch {
     /// Why a checker cannot run this watch, if it cannot: a blank name, or an
     /// `Each` pattern without `{name}`, matches whatever upstream says; a
-    /// `RustStr` read yields one name; and a sibling sweep needs a vanish watch whose
-    /// reader yields upstream's names, all of them unless the family is `All`,
-    /// which only a reader confined to the family can mean.
+    /// `RustStr` or `TsReturn` read yields one name; and a sibling sweep needs
+    /// a vanish watch whose reader yields upstream's names, all of them unless
+    /// the family is `All`, which only a reader confined to the family can mean.
     pub fn unrunnable(&self) -> Option<String> {
         let ours = (self.ours)();
         let why = if ours.is_empty() || ours.iter().any(|n| n.is_empty()) {
@@ -149,13 +157,21 @@ impl Watch {
             "reads no document".to_owned()
         } else if matches!(self.read, Read::Each { pattern } if !pattern.contains("{name}")) {
             "has an `Each` pattern that names no name".to_owned()
-        } else if matches!(self.read, Read::RustStr { .. }) && ours.len() != 1 {
+        } else if matches!(self.read, Read::RustStr { .. } | Read::TsReturn { .. })
+            && ours.len() != 1
+        {
             format!("reads one name off upstream but watches {}", ours.len())
         } else if let Some(sib) = &self.siblings {
             if !matches!(self.when, When::Vanishes) {
                 "sweeps siblings on a watch that does not fire on a vanish".to_owned()
-            } else if matches!(self.read, Read::Each { .. } | Read::RustStr { .. }) {
+            } else if matches!(
+                self.read,
+                Read::Each { .. } | Read::RustStr { .. } | Read::TsReturn { .. }
+            ) {
                 "sweeps siblings off a reader that yields none".to_owned()
+            } else if matches!(self.read, Read::TsFields { .. }) {
+                "sweeps siblings off a reader whose `field?` and `field:\"lit\"` are no names"
+                    .to_owned()
             } else if matches!(sib.family, Family::All) && !self.read.confined_to_family() {
                 "sweeps `Family::All` off a reader that yields more than the family".to_owned()
             } else {
@@ -231,6 +247,21 @@ mod tests {
         }
     }
 
+    /// An emptied list fails here, in core, rather than passing a census its
+    /// installer's watches satisfy.
+    #[test]
+    fn no_source_is_watched_by_an_empty_list() {
+        for d in REGISTRY {
+            if let Upstream::Watched(projects) = d.upstream {
+                assert!(
+                    !projects.is_empty() && projects.iter().all(|p| !p.is_empty()),
+                    "{} is `Watched` by an empty list",
+                    d.name
+                );
+            }
+        }
+    }
+
     /// Each rule refuses the watch it exists for; the roster is held to them by
     /// the binary's `every_declared_watch_is_runnable_and_its_id_unique`.
     #[test]
@@ -296,6 +327,30 @@ mod tests {
                     ..OK
                 },
                 "sweeps siblings off a reader that yields none",
+            ),
+            (
+                Watch {
+                    read: Read::TsReturn { function: "f" },
+                    ..OK
+                },
+                "reads one name off upstream but watches 2",
+            ),
+            (
+                Watch {
+                    ours: || vec!["a"],
+                    read: Read::TsReturn { function: "f" },
+                    siblings: Some(ALL),
+                    ..OK
+                },
+                "sweeps siblings off a reader that yields none",
+            ),
+            (
+                Watch {
+                    read: Read::TsFields { name: "T" },
+                    siblings: Some(ALL),
+                    ..OK
+                },
+                "sweeps siblings off a reader whose `field?` and `field:\"lit\"` are no names",
             ),
             (
                 Watch {

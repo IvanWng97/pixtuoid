@@ -449,11 +449,11 @@ step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
     its registry row — a `Watch` beside each decoded set, unless REVIEW.md's
     **Wire format** check settles it with a breadcrumb or an adjudicated
     `EXEMPT` row — and the installer's, named in its `Target` row, a `Watch`
-    over each hook set it registers. The types are in `source/upstream.rs`,
-    and `just drift-watch` runs them. A value a shipped template bakes in is
-    still a `check_upstream_drift.py` row: the `insert` in that crate's
-    `src/drift_surface.rs`, `just gen-drift-surface` (commit both fragments),
-    and the `SURFACE_ROWS` row plus its selftest case.
+    over each hook set it registers and each name a shipped template reads
+    (`each_template_read_is_watched` holds the two together, both ways where
+    the template is scanned). A source whose dependence lives wholly in its installer is
+    `Upstream::Installer`. The types are in `source/upstream.rs`, and
+    `just drift-watch` runs them.
 12. **Three roster literals in three test binaries** (a scoped run misses
     them): the row-by-row byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN`
     in `tests/sources/captures.rs`; a case row + `#[test]` in

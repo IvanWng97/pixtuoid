@@ -542,7 +542,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["reasonix", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: Upstream::Watched(&[]),
+    upstream: Upstream::Installer,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -583,7 +583,7 @@ const DSH: SourceDescriptor = SourceDescriptor {
     // under it); hook-only, so core resolves no root to relocate.
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: Upstream::Watched(&[]),
+    upstream: Upstream::Installer,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -691,7 +691,7 @@ const OPENCLAW: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["openclaw", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: Upstream::Watched(&[]),
+    upstream: Upstream::Installer,
     kind: SourceKind::Daemon {
         presence_decoder: openclaw::decode_openclaw_hook_payload,
     },
@@ -745,7 +745,7 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["cursor-agent", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: Upstream::Watched(&[]),
+    upstream: Upstream::Installer,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -782,7 +782,7 @@ const HERMES: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["hermes", "--version"]),
     home_env: Some("HERMES_HOME"),
     #[cfg(any(test, feature = "upstream"))]
-    upstream: Upstream::Watched(&[]),
+    upstream: Upstream::Installer,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -931,7 +931,7 @@ const KIMI: SourceDescriptor = SourceDescriptor {
     version_probe: Some(&["kimi", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
-    upstream: Upstream::Watched(&[]),
+    upstream: Upstream::Installer,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
