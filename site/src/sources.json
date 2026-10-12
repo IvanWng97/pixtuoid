@@ -60,7 +60,7 @@
     "badge": "cw·",
     "badge_color": "#14b8b0",
     "name": "CodeWhale",
-    "url": "https://github.com/Hmbown/CodeWhale",
+    "url": "https://github.com/codewhale-hq/Codewhale",
     "status": "supported",
     "transport": "hooks only (~/.codewhale/config.toml [hooks], cwd-keyed)",
     "platforms": {
