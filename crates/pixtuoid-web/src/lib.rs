@@ -396,7 +396,7 @@ impl Office {
     /// The engine's sample rate (Hz) — JS builds its `AudioBuffer`s at this rate
     /// (the browser resamples to the AudioContext rate).
     pub fn audio_sample_rate(&self) -> u32 {
-        pixtuoid_scene::audio::dsp::SAMPLE_RATE
+        pixtuoid_scene::audio::SAMPLE_RATE
     }
 
     /// Zero-copy pointer/length into the looping bed samples for stem `idx`, in

@@ -15,6 +15,7 @@ pub mod compose;
 pub mod dsp;
 #[doc(hidden)]
 pub mod engine;
+pub(crate) mod foley;
 #[doc(hidden)]
 pub mod mixer;
 // Private, not `pub`: the frozen takes are `#[cfg(test)]` fingerprint ANCHORS
@@ -31,16 +32,15 @@ pub use engine::{AudioEngine, MAX_DT_S, PlayCmd, TickCommands};
 
 use crate::tally::StateCounts;
 
-/// The build-time noise seed, in ONE place because both painters MUST seed
-/// identically — a per-crate copy silently desyncs the two soundtracks on the
-/// next edit.
-#[doc(hidden)]
-pub const BUILD_SEED: u64 = 0xC0FF_EE01;
 // `AudioEngine::new`'s seeds for the per-tick keystroke / rain-drop schedulers
 // and their picker.
 pub(crate) const TYPING_SEED: u64 = 0xBEEF;
 pub(crate) const DROP_SEED: u64 = 0xFACE;
 pub(crate) const PICK_SEED: u64 = 0xDEAD;
+
+/// The rate every synthesized buffer is tagged with; each sink resamples to its
+/// device's or AudioContext's own rate.
+pub const SAMPLE_RATE: u32 = dsp::SAMPLE_RATE;
 
 /// Active-agent count at which the office reads BUSY (full band + dense
 /// typing). 1..BUSY_ACTIVE_MIN is the moderate anchor tier; 0 is empty.
@@ -176,9 +176,9 @@ pub(crate) fn select_track(is_day: bool, precipitation: f32, track_epoch: u64) -
 }
 
 /// Decode a [`TrackId`] to its composed score — the ONE
-/// `TrackId → (Mood, seed) → compose` bridge both build shells call, so the mood
-/// decode lives once instead of a hand-synced match per shell.
-pub fn compose_track(track: TrackId) -> compose::GeneratedScore {
+/// `TrackId → (Mood, seed) → compose` bridge; `bank::Synthesis` and
+/// `bank::TrackBuild` call it, so the mood decode lives once.
+pub(crate) fn compose_track(track: TrackId) -> compose::Score {
     let (mood, seed) = match track {
         TrackId::GenDay(seed) => (compose::Mood::Day, seed),
         TrackId::GenNight(seed) => (compose::Mood::Night, seed),

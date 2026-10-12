@@ -187,7 +187,7 @@ imports `phase2_audition.py` — both are bundled. Adapt the voices to your own 
 ## The GENERATOR loop (pixtuoid's Rust composer — iterate in minutes, not arcs)
 
 Once a project graduates from frozen takes to a theory-constrained generator
-(`pixtuoid-scene/src/audio/compose.rs` + `synth::gen_beds`), the iteration loop changes
+(`pixtuoid-scene/src/audio/compose.rs` + `synth::render_lane`), the iteration loop changes
 shape: the LISTEN gate becomes **statistical** (blind-audition a batch of seeds; all
 acceptable = the GENERATOR is ratified — a dud = tighten a constraint and re-batch), and
 every taste axis is a data table or named const with ONE home:

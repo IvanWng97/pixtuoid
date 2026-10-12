@@ -3,14 +3,14 @@
 //! painter alike: the same synthesis, not the same bits, as [`f32::sin`]'s and
 //! [`f32::exp`]'s precision varies by platform. Pure: no device deps.
 //!
-//! The `rng` DRAW ORDER is the sound — `AssetBank::build` then
-//! `TrackBeds::build` continue ONE stream in the ratified order, so every
-//! buffer matches the LISTEN-ratified renders. Don't reorder the synth calls.
+//! The `rng` DRAW ORDER is the sound — [`Synthesis`] draws the one-shot pools,
+//! then rain, then each track's lanes from ONE stream in the ratified order, so
+//! every buffer matches the LISTEN-ratified renders. Don't reorder its calls.
 
 use std::sync::Arc;
 
 use super::mixer::LoopStem;
-use super::{OneShot, TrackId, dsp, synth};
+use super::{OneShot, TrackId, dsp, foley, synth};
 
 /// Per-key / per-drop variant pool sizes: playback picks randomly so
 /// typing/rain never sound repeated, while runtime stays synthesis-free.
@@ -24,16 +24,30 @@ pub(crate) const ONE_SHOT_GAIN: f32 = 0.5;
 /// peaks under 1.0, so drops ride at the rain level itself.
 pub(crate) const DROP_GAIN: f32 = 0.9;
 
-/// The six TRACK-OWNED loop stems, in registration order. Rain is not here —
-/// it is weather, shared by every mood track.
-pub const TRACK_STEMS: [LoopStem; 6] = [
-    LoopStem::Pad,
-    LoopStem::Sparkle,
-    LoopStem::Keys,
-    LoopStem::Drums,
-    LoopStem::Texture,
-    LoopStem::Bass,
-];
+/// The six TRACK-OWNED loop stems, in lane render order. Rain is not here — it
+/// is weather, shared by every mood track.
+pub const TRACK_STEMS: [LoopStem; synth::Lane::ALL.len()] = {
+    let mut out = [LoopStem::Pad; synth::Lane::ALL.len()];
+    let mut i = 0;
+    while i < out.len() {
+        out[i] = stem_of(synth::Lane::ALL[i]);
+        i += 1;
+    }
+    out
+};
+
+/// The stem each music lane plays on — exhaustive, so a new lane fails to
+/// compile until it has one.
+const fn stem_of(lane: synth::Lane) -> LoopStem {
+    match lane {
+        synth::Lane::Pad => LoopStem::Pad,
+        synth::Lane::Sparkle => LoopStem::Sparkle,
+        synth::Lane::Keys => LoopStem::Keys,
+        synth::Lane::Drums => LoopStem::Drums,
+        synth::Lane::Texture => LoopStem::Texture,
+        synth::Lane::Bass => LoopStem::Bass,
+    }
+}
 
 /// Which one-shot pool a play draws from — the ONE vocabulary both backends
 /// share: the native gateway resolves it to a buffer via [`AssetBank::sample`],
@@ -96,17 +110,17 @@ pub struct AssetBank {
 }
 
 impl AssetBank {
-    pub fn build(rng: &mut dsp::NoiseStream) -> Self {
+    pub(crate) fn build(rng: &mut dsp::NoiseStream) -> Self {
         Self {
             keystrokes: (0..KEYSTROKE_POOL)
-                .map(|_| Arc::new(synth::keystroke(rng)))
+                .map(|_| Arc::new(foley::keystroke(rng)))
                 .collect(),
             drops: (0..DROP_POOL)
-                .map(|_| Arc::new(synth::rain_drop(rng)))
+                .map(|_| Arc::new(foley::rain_drop(rng)))
                 .collect(),
-            door_chime: Arc::new(synth::door_chime()),
-            printer_whir: Arc::new(synth::printer_whir(rng)),
-            vending_drop: Arc::new(synth::vending_drop(rng)),
+            door_chime: Arc::new(foley::door_chime()),
+            printer_whir: Arc::new(foley::printer_whir(rng)),
+            vending_drop: Arc::new(foley::vending_drop(rng)),
         }
     }
 
@@ -156,27 +170,18 @@ impl AssetBank {
     }
 }
 
-/// One mood track's loop beds — built per [`TrackId`], registered (or swapped
-/// in) with the sink, then DROPPED. The five musical beds and the NIGHT texture
-/// share ONE sample count (phase-locked); the DAY texture keeps its
-/// free-running power-of-two length.
+/// One mood track's loop beds — built by [`Synthesis`] per [`TrackId`],
+/// registered (or swapped in) with the sink, then DROPPED. The five musical beds
+/// and the NIGHT texture share ONE sample count (phase-locked); the DAY texture
+/// keeps its free-running power-of-two length.
 #[derive(Debug)]
 pub struct TrackBeds {
     beds: [Arc<Vec<f32>>; TRACK_STEMS.len()],
 }
 
 impl TrackBeds {
-    /// Compose the id's take (the seed is the track-epoch block) and render it
-    /// through the SAME cores the owner-ratified takes were built on.
-    pub fn build(rng: &mut dsp::NoiseStream, track: TrackId) -> Self {
-        let score = super::compose_track(track);
-        Self {
-            beds: synth::gen_beds(&score, rng).map(Arc::new),
-        }
-    }
-
-    /// Assemble from beds already built lane-by-lane (the wasm driver's chunked
-    /// rebuild) — `TRACK_STEMS` order.
+    /// Assemble from beds built elsewhere (the wasm worker's handoff) —
+    /// `TRACK_STEMS` order.
     pub fn from_arcs(beds: [Arc<Vec<f32>>; TRACK_STEMS.len()]) -> Self {
         Self { beds }
     }
@@ -199,6 +204,82 @@ impl TrackBeds {
     }
 }
 
+/// Seeds [`Synthesis`]'s one stream: the ratified renders were drawn from it,
+/// so a new value is a new sound.
+const BUILD_SEED: u64 = 0xC0FF_EE01;
+
+/// The office's synthesis in its one ratified order: the one-shot pools, then
+/// rain, then each track's lanes as tracks are needed — one rng stream, so the
+/// order is the sound. Every painter builds through here.
+#[derive(Debug)]
+pub struct Synthesis {
+    rng: dsp::NoiseStream,
+}
+
+impl Default for Synthesis {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Synthesis {
+    pub fn new() -> Self {
+        Self {
+            rng: dsp::NoiseStream::new(BUILD_SEED),
+        }
+    }
+
+    pub fn assets(&mut self) -> AssetBank {
+        AssetBank::build(&mut self.rng)
+    }
+
+    pub fn rain(&mut self) -> Arc<Vec<f32>> {
+        Arc::new(foley::rain_bed(&mut self.rng))
+    }
+
+    /// Every lane of `track` at once — the native thread, which may block.
+    pub fn track(&mut self, track: TrackId) -> TrackBeds {
+        let score = super::compose_track(track);
+        TrackBeds {
+            beds: synth::Lane::ALL
+                .map(|lane| Arc::new(synth::render_lane(&score, lane, &mut self.rng))),
+        }
+    }
+}
+
+/// A track built one lane per [`TrackBuild::step`] — the wasm driver spreads a
+/// build across ticks, because every lane in one rAF tick hitches the page.
+#[derive(Debug)]
+pub struct TrackBuild {
+    score: super::compose::Score,
+    beds: Vec<Arc<Vec<f32>>>,
+}
+
+impl TrackBuild {
+    pub fn new(track: TrackId) -> Self {
+        Self {
+            score: super::compose_track(track),
+            beds: Vec::with_capacity(TRACK_STEMS.len()),
+        }
+    }
+
+    /// Render the next lane; the finished beds once the last one is in.
+    pub fn step(&mut self, synthesis: &mut Synthesis) -> Option<TrackBeds> {
+        let lane = synth::Lane::ALL[self.beds.len()];
+        self.beds.push(Arc::new(synth::render_lane(
+            &self.score,
+            lane,
+            &mut synthesis.rng,
+        )));
+        if self.beds.len() < TRACK_STEMS.len() {
+            return None;
+        }
+        <[Arc<Vec<f32>>; TRACK_STEMS.len()]>::try_from(std::mem::take(&mut self.beds))
+            .ok()
+            .map(|beds| TrackBeds { beds })
+    }
+}
+
 /// Whether every TRACK-owned stem's live gain has reached exactly 0.0 — the
 /// silence gate a player checks before swapping a mood track's beds. Rain/typing
 /// gains are ignored (track-independent).
@@ -211,34 +292,23 @@ pub(crate) fn track_stems_silent(gains: &[(LoopStem, f32)]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::super::compose::{Mood, compose};
     use super::*;
 
+    /// Both sinks register track stems in this order and the web wire indexes
+    /// `LoopStem::ALL` by it, so the derivation must not reorder them.
     #[test]
-    fn track_beds_wire_each_lane_to_the_right_synth() {
-        let mut rng = dsp::NoiseStream::new(crate::audio::BUILD_SEED);
-        let day = TrackBeds::build(&mut rng, TrackId::GenDay(0));
-        let rain = synth::rain_bed(&mut rng);
+    fn track_stems_keep_their_registration_order() {
         assert_eq!(
-            day.bed_slice(LoopStem::Texture).len(),
-            1 << 19,
-            "day texture = the free-running noise-bed loop"
-        );
-        assert_eq!(rain.len(), 1 << 19, "rain = the noise-bed loop");
-        let n = day.bed_slice(LoopStem::Pad).len();
-        for stem in [
-            LoopStem::Sparkle,
-            LoopStem::Keys,
-            LoopStem::Drums,
-            LoopStem::Bass,
-        ] {
-            assert_eq!(day.bed_slice(stem).len(), n, "musical beds phase-lock");
-        }
-        let c = |s| dsp::centroid_hz(day.bed_slice(s));
-        assert!(
-            c(LoopStem::Sparkle) > c(LoopStem::Pad) * 1.5,
-            "the lead must sit clearly above the pad: {:.0} vs {:.0}",
-            c(LoopStem::Sparkle),
-            c(LoopStem::Pad)
+            TRACK_STEMS,
+            [
+                LoopStem::Pad,
+                LoopStem::Sparkle,
+                LoopStem::Keys,
+                LoopStem::Drums,
+                LoopStem::Texture,
+                LoopStem::Bass,
+            ]
         );
     }
 
@@ -247,15 +317,85 @@ mod tests {
         assert!(!TRACK_STEMS.contains(&LoopStem::Rain));
     }
 
+    /// The one ratified order, rebuilt by hand from the same functions in this
+    /// process: pools, then rain, then each track's lanes, one stream.
     #[test]
-    fn the_night_arm_builds_a_bed_distinct_from_day() {
-        let mut rng = dsp::NoiseStream::new(crate::audio::BUILD_SEED);
-        let day = TrackBeds::build(&mut rng, TrackId::GenDay(0));
-        let night = TrackBeds::build(&mut rng, TrackId::GenNight(0));
-        assert_ne!(
-            day.bed_slice(LoopStem::Pad).len(),
-            night.bed_slice(LoopStem::Pad).len(),
-            "the night pad is a distinct bed (different BPM/loop length), not a Day clone"
+    fn synthesis_draws_in_the_ratified_order() {
+        let mut s = Synthesis::new();
+        let assets = s.assets();
+        let rain = s.rain();
+        let day = s.track(TrackId::GenDay(0));
+        let night = s.track(TrackId::GenNight(0));
+
+        let mut rng = dsp::NoiseStream::new(BUILD_SEED);
+        let want_assets = AssetBank::build(&mut rng);
+        let want_rain = foley::rain_bed(&mut rng);
+        let mut lanes = |track| {
+            let score = super::super::compose_track(track);
+            synth::Lane::ALL.map(|lane| synth::render_lane(&score, lane, &mut rng))
+        };
+        let want_day = lanes(TrackId::GenDay(0));
+        let want_night = lanes(TrackId::GenNight(0));
+
+        for pool in OneShotPool::ALL {
+            for i in 0..KEYSTROKE_POOL.max(DROP_POOL) {
+                assert_eq!(
+                    assets.get(pool, i),
+                    want_assets.get(pool, i),
+                    "{pool:?}[{i}]"
+                );
+            }
+        }
+        assert_eq!(*rain, want_rain);
+        for (i, stem) in TRACK_STEMS.into_iter().enumerate() {
+            assert_eq!(day.bed_slice(stem), want_day[i].as_slice(), "day {stem:?}");
+            assert_eq!(
+                night.bed_slice(stem),
+                want_night[i].as_slice(),
+                "night {stem:?}"
+            );
+        }
+    }
+
+    /// The web's chunked build against the native whole build — two paths, one
+    /// lane order: one lane per step, the same beds, and a fresh build once it
+    /// finishes.
+    #[test]
+    fn a_stepped_build_matches_a_whole_one_and_restarts_clean() {
+        let whole = Synthesis::new().track(TrackId::GenNight(3));
+        let mut s = Synthesis::new();
+        let mut build = TrackBuild::new(TrackId::GenNight(3));
+        let mut stepped = None;
+        for step in 1..=TRACK_STEMS.len() {
+            stepped = build.step(&mut s);
+            assert_eq!(
+                stepped.is_some(),
+                step == TRACK_STEMS.len(),
+                "one lane per step"
+            );
+        }
+        let stepped = stepped.expect("the last step finishes the build");
+        for stem in TRACK_STEMS {
+            assert_eq!(whole.bed_slice(stem), stepped.bed_slice(stem), "{stem:?}");
+        }
+        assert!(
+            build.step(&mut s).is_none(),
+            "a finished build starts over at lane 0"
         );
+    }
+
+    /// Each track id composes its own mood from its own seed — wiring, not content.
+    #[test]
+    fn a_track_id_composes_its_mood_and_seed() {
+        for seed in [0, 7] {
+            assert_eq!(
+                super::super::compose_track(TrackId::GenDay(seed)),
+                compose(Mood::Day, seed)
+            );
+            assert_eq!(
+                super::super::compose_track(TrackId::GenNight(seed)),
+                compose(Mood::Night, seed)
+            );
+        }
     }
 }

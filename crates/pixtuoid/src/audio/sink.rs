@@ -7,7 +7,7 @@ use std::sync::Arc;
 use pixtuoid_scene::audio::mixer::LoopStem;
 
 pub(crate) trait AudioSink: Send {
-    /// Start `stem` looping `samples` (mono f32 @ 44_100) at gain 0.
+    /// Start `stem` looping `samples` (mono f32 at [`pixtuoid_scene::audio::SAMPLE_RATE`]) at gain 0.
     fn start_loop(&mut self, stem: LoopStem, samples: Arc<Vec<f32>>);
     /// Replace a looping stem's buffer — the caller guarantees the stem is at gain
     /// 0, so the cut is inaudible.
@@ -94,8 +94,8 @@ pub(crate) mod rodio_sink {
 
         fn source_of(samples: &Arc<Vec<f32>>) -> rodio::buffer::SamplesBuffer {
             let mono = std::num::NonZero::new(1u16).expect("1 != 0");
-            let rate = std::num::NonZero::new(pixtuoid_scene::audio::dsp::SAMPLE_RATE)
-                .expect("44100 != 0");
+            let rate = std::num::NonZero::new(pixtuoid_scene::audio::SAMPLE_RATE)
+                .expect("SAMPLE_RATE != 0");
             rodio::buffer::SamplesBuffer::new(mono, rate, samples.as_slice())
         }
     }

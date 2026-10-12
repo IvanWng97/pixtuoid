@@ -702,12 +702,10 @@ fn hitch(path: &Path) -> Result<()> {
         let lofi = run.lofi.then(|| {
             let stop = Arc::clone(&lofi_stop);
             std::thread::spawn(move || {
-                use pixtuoid_scene::audio::{
-                    BUILD_SEED, TrackId, bank::TrackBeds, dsp::NoiseStream,
-                };
+                use pixtuoid_scene::audio::{TrackId, bank::Synthesis};
                 // As the audio thread does.
                 pixtuoid::dev::demote_to_utility();
-                let mut rng = NoiseStream::new(BUILD_SEED);
+                let mut synthesis = Synthesis::new();
                 let mut builds = Vec::new();
                 let mut n = 0u64;
                 while !stop.load(std::sync::atomic::Ordering::Relaxed) {
@@ -717,7 +715,7 @@ fn hitch(path: &Path) -> Result<()> {
                         TrackId::GenNight(n)
                     };
                     let at = Instant::now();
-                    std::hint::black_box(TrackBeds::build(&mut rng, track));
+                    std::hint::black_box(synthesis.track(track));
                     builds.push(at.elapsed());
                     n += 1;
                 }
