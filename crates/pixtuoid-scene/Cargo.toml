@@ -34,6 +34,7 @@ cutaway-assets = []
 
 [dependencies]
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", default-features = false }
+pixtuoid-lofi = { workspace = true }
 tracing       = { workspace = true }
 lru           = { workspace = true }
 unicode-width = { workspace = true }

@@ -54,8 +54,18 @@ updates:
       - dependency-name: "winit"
         update-types:
           ["version-update:semver-minor", "version-update:semver-major"]
+      # A lofi minor (0.y) is a new Mood/Lane or a dsp output change: a sound
+      # change that needs pixtuoid code and the owner's LISTEN, so a person
+      # bumps it. Patches flow: nothing here pins lofi's output, so one is a
+      # lock-only bump.
+      - dependency-name: "pixtuoid-lofi"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-major"]
     cooldown:
       default-days: 7
+      # Our own crate: a lofi patch is reviewed in its repo before release, so
+      # the cooldown's quarantine buys nothing.
+      exclude: ["pixtuoid-lofi"]
 
   - package-ecosystem: github-actions
     # `directory: /` searches ONLY `.github/workflows` plus a root `action.yml`,

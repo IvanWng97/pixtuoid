@@ -3,27 +3,18 @@
 //! NO audio dependencies live in this crate — the crate boundary is the
 //! compiler tooth, exactly like the terminal/window ban.
 
-// The PURE synthesis stack: dsp kernels, frozen lofi compositions, per-voice
-// synth recipes, runtime mixer/schedulers. Shared so the native device gateway
-// and the wasm WebAudio painter build the SAME sample buffers, with no
-// audio-device deps (pure math; the rodio/cpal ban still holds).
+// The office's half of the synthesis — pooled foley, the bank that orders every
+// build, runtime mixer/schedulers — over `pixtuoid-lofi`'s music. Shared so the
+// native device gateway and the wasm WebAudio painter build the SAME sample
+// buffers, with no audio-device deps (pure math; the rodio/cpal ban still
+// holds).
 #[doc(hidden)]
 pub mod bank;
-#[doc(hidden)]
-pub mod compose;
-#[doc(hidden)]
-pub mod dsp;
 #[doc(hidden)]
 pub mod engine;
 pub(crate) mod foley;
 #[doc(hidden)]
 pub mod mixer;
-// Private, not `pub`: the frozen takes are `#[cfg(test)]` fingerprint ANCHORS
-// read only by the sibling `synth`/`compose`, so a `pub mod` would offer a
-// publicly reachable empty path.
-mod score;
-#[doc(hidden)]
-pub mod synth;
 
 // The shared per-tick engine surface — both audio painters build on these, so
 // they can't drift.
@@ -40,7 +31,7 @@ pub(crate) const PICK_SEED: u64 = 0xDEAD;
 
 /// The rate every synthesized buffer is tagged with; each sink resamples to its
 /// device's or AudioContext's own rate.
-pub const SAMPLE_RATE: u32 = dsp::SAMPLE_RATE;
+pub const SAMPLE_RATE: u32 = pixtuoid_lofi::dsp::SAMPLE_RATE;
 
 /// The peak each sink's limiter holds its summed bus under, after EBU R 128
 /// (<https://tech.ebu.ch/docs/r/r128.pdf>): "the True Peak Level of a programme
@@ -58,8 +49,8 @@ pub fn ceiling_amplitude() -> f32 {
 /// reaches the clamp behind it, which hard-clips it.
 pub const LIMITER_ATTACK: std::time::Duration = std::time::Duration::from_millis(5);
 
-/// How fast each sink's limiter lets its gain back up: well inside one beat
-/// (`compose::DAY_BPM`'s fastest), so one loud hit never ducks the next.
+/// How fast each sink's limiter lets its gain back up: well inside one beat, so
+/// one loud hit never ducks the next.
 pub const LIMITER_RELEASE: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Active-agent count at which the office reads BUSY (full band + dense
@@ -198,12 +189,12 @@ pub(crate) fn select_track(is_day: bool, precipitation: f32, track_epoch: u64) -
 /// Decode a [`TrackId`] to its composed score — the ONE
 /// `TrackId → (Mood, seed) → compose` bridge; `bank::Synthesis` and
 /// `bank::TrackBuild` call it, so the mood decode lives once.
-pub(crate) fn compose_track(track: TrackId) -> compose::Score {
+pub(crate) fn compose_track(track: TrackId) -> pixtuoid_lofi::Score {
     let (mood, seed) = match track {
-        TrackId::GenDay(seed) => (compose::Mood::Day, seed),
-        TrackId::GenNight(seed) => (compose::Mood::Night, seed),
+        TrackId::GenDay(seed) => (pixtuoid_lofi::Mood::Day, seed),
+        TrackId::GenNight(seed) => (pixtuoid_lofi::Mood::Night, seed),
     };
-    compose::compose(mood, seed)
+    pixtuoid_lofi::compose(mood, seed)
 }
 
 impl StemLevels {

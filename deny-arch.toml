@@ -25,6 +25,7 @@ allow = [
     "lru",
     "notify",
     "palette",
+    "pixtuoid-lofi",
     "rustix",
     "serde",
     "serde_json",

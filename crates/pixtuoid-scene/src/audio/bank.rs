@@ -9,8 +9,11 @@
 
 use std::sync::Arc;
 
+use pixtuoid_lofi::dsp::NoiseStream;
+use pixtuoid_lofi::{Lane, Score, render_lane};
+
 use super::mixer::LoopStem;
-use super::{OneShot, TrackId, dsp, foley, synth};
+use super::{OneShot, TrackId, foley};
 
 /// Per-key / per-drop variant pool sizes: playback picks randomly so
 /// typing/rain never sound repeated, while runtime stays synthesis-free.
@@ -26,11 +29,11 @@ pub(crate) const DROP_GAIN: f32 = 0.9;
 
 /// The six TRACK-OWNED loop stems, in lane render order. Rain is not here — it
 /// is weather, shared by every mood track.
-pub const TRACK_STEMS: [LoopStem; synth::Lane::ALL.len()] = {
-    let mut out = [LoopStem::Pad; synth::Lane::ALL.len()];
+pub const TRACK_STEMS: [LoopStem; Lane::ALL.len()] = {
+    let mut out = [LoopStem::Pad; Lane::ALL.len()];
     let mut i = 0;
     while i < out.len() {
-        out[i] = stem_of(synth::Lane::ALL[i]);
+        out[i] = stem_of(Lane::ALL[i]);
         i += 1;
     }
     out
@@ -38,14 +41,14 @@ pub const TRACK_STEMS: [LoopStem; synth::Lane::ALL.len()] = {
 
 /// The stem each music lane plays on — exhaustive, so a new lane fails to
 /// compile until it has one.
-const fn stem_of(lane: synth::Lane) -> LoopStem {
+const fn stem_of(lane: Lane) -> LoopStem {
     match lane {
-        synth::Lane::Pad => LoopStem::Pad,
-        synth::Lane::Sparkle => LoopStem::Sparkle,
-        synth::Lane::Keys => LoopStem::Keys,
-        synth::Lane::Drums => LoopStem::Drums,
-        synth::Lane::Texture => LoopStem::Texture,
-        synth::Lane::Bass => LoopStem::Bass,
+        Lane::Pad => LoopStem::Pad,
+        Lane::Sparkle => LoopStem::Sparkle,
+        Lane::Keys => LoopStem::Keys,
+        Lane::Drums => LoopStem::Drums,
+        Lane::Texture => LoopStem::Texture,
+        Lane::Bass => LoopStem::Bass,
     }
 }
 
@@ -110,7 +113,7 @@ pub struct AssetBank {
 }
 
 impl AssetBank {
-    pub(crate) fn build(rng: &mut dsp::NoiseStream) -> Self {
+    pub(crate) fn build(rng: &mut NoiseStream) -> Self {
         Self {
             keystrokes: (0..KEYSTROKE_POOL)
                 .map(|_| Arc::new(foley::keystroke(rng)))
@@ -213,7 +216,7 @@ const BUILD_SEED: u64 = 0xC0FF_EE01;
 /// order is the sound. Every painter builds through here.
 #[derive(Debug)]
 pub struct Synthesis {
-    rng: dsp::NoiseStream,
+    rng: NoiseStream,
 }
 
 impl Default for Synthesis {
@@ -225,7 +228,7 @@ impl Default for Synthesis {
 impl Synthesis {
     pub fn new() -> Self {
         Self {
-            rng: dsp::NoiseStream::new(BUILD_SEED),
+            rng: NoiseStream::new(BUILD_SEED),
         }
     }
 
@@ -241,8 +244,7 @@ impl Synthesis {
     pub fn track(&mut self, track: TrackId) -> TrackBeds {
         let score = super::compose_track(track);
         TrackBeds {
-            beds: synth::Lane::ALL
-                .map(|lane| Arc::new(synth::render_lane(&score, lane, &mut self.rng))),
+            beds: Lane::ALL.map(|lane| Arc::new(render_lane(&score, lane, &mut self.rng))),
         }
     }
 }
@@ -251,7 +253,7 @@ impl Synthesis {
 /// build across ticks, because every lane in one rAF tick hitches the page.
 #[derive(Debug)]
 pub struct TrackBuild {
-    score: super::compose::Score,
+    score: Score,
     beds: Vec<Arc<Vec<f32>>>,
 }
 
@@ -265,12 +267,9 @@ impl TrackBuild {
 
     /// Render the next lane; the finished beds once the last one is in.
     pub fn step(&mut self, synthesis: &mut Synthesis) -> Option<TrackBeds> {
-        let lane = synth::Lane::ALL[self.beds.len()];
-        self.beds.push(Arc::new(synth::render_lane(
-            &self.score,
-            lane,
-            &mut synthesis.rng,
-        )));
+        let lane = Lane::ALL[self.beds.len()];
+        self.beds
+            .push(Arc::new(render_lane(&self.score, lane, &mut synthesis.rng)));
         if self.beds.len() < TRACK_STEMS.len() {
             return None;
         }
@@ -292,8 +291,8 @@ pub(crate) fn track_stems_silent(gains: &[(LoopStem, f32)]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::super::compose::{Mood, compose};
     use super::*;
+    use pixtuoid_lofi::{Mood, compose};
 
     /// Both sinks register track stems in this order and the web wire indexes
     /// `LoopStem::ALL` by it, so the derivation must not reorder them.
@@ -327,12 +326,12 @@ mod tests {
         let day = s.track(TrackId::GenDay(0));
         let night = s.track(TrackId::GenNight(0));
 
-        let mut rng = dsp::NoiseStream::new(BUILD_SEED);
+        let mut rng = NoiseStream::new(BUILD_SEED);
         let want_assets = AssetBank::build(&mut rng);
         let want_rain = foley::rain_bed(&mut rng);
         let mut lanes = |track| {
             let score = super::super::compose_track(track);
-            synth::Lane::ALL.map(|lane| synth::render_lane(&score, lane, &mut rng))
+            Lane::ALL.map(|lane| render_lane(&score, lane, &mut rng))
         };
         let want_day = lanes(TrackId::GenDay(0));
         let want_night = lanes(TrackId::GenNight(0));
