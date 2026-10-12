@@ -268,19 +268,8 @@ pub(crate) fn render_extension(hook_path: &str) -> Result<String> {
 mod tests {
     use super::*;
 
-    /// The events the extension actually registers, read OUT of the template
-    /// rather than hand-copied beside it.
     fn extension_forward_set() -> std::collections::BTreeSet<&'static str> {
-        let block = EXTENSION_TEMPLATE
-            .split_once("const FORWARD = new Set<string>([")
-            .and_then(|(_, rest)| rest.split_once("])"))
-            .map(|(inner, _)| inner)
-            .expect("extension defines a FORWARD set");
-        block
-            .split(',')
-            .map(|s| s.trim().trim_matches('"'))
-            .filter(|s| !s.is_empty())
-            .collect()
+        crate::install::forward_set(EXTENSION_TEMPLATE)
     }
 
     /// The extension registers EXACTLY what the decoder reads. Two lists in

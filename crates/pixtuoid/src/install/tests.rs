@@ -37,6 +37,8 @@ static FAKE: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
+    #[cfg(feature = "upstream")]
+    registers: Vec::new,
 };
 
 // A fn-pointer `default_config_path` can't capture a TempDir, so FAKE2/FAKE_DIR
@@ -79,6 +81,8 @@ static FAKE2: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
+    #[cfg(feature = "upstream")]
+    registers: Vec::new,
 };
 
 // FAKE_DIR's config path is created as a DIRECTORY, so read_config errors.
@@ -110,6 +114,8 @@ static FAKE_DIR: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
+    #[cfg(feature = "upstream")]
+    registers: Vec::new,
 };
 
 // FAKE_NO_HOME's default_config_path Errs — the no-home-dir arm.
@@ -141,6 +147,8 @@ static FAKE_NO_HOME: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
+    #[cfg(feature = "upstream")]
+    registers: Vec::new,
 };
 
 /// The files a target owns beside its config, `None` for every other target.
@@ -172,8 +180,7 @@ fn resolve_hook_binary_env_override_wins() {
 #[cfg(unix)]
 #[test]
 fn resolve_hook_binary_claude_falls_back_to_bare_name_when_unresolvable() {
-    // Regression: a fresh-machine connect hard-failed when pixtuoid-hook wasn't
-    // yet on PATH. Routed through the injected seam (env_hook: None) so an ambient
+    // Routed through the injected seam (env_hook: None) so an ambient
     // PIXTUOID_HOOK on the dev machine can't short-circuit the staged failure.
     let got = resolve_hook_binary_from(&CLAUDE_FILE, None, || {
         Err(anyhow::anyhow!("could not locate"))

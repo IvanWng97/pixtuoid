@@ -1290,49 +1290,39 @@ fn rs_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     out
 }
 
-/// Every `*EVENTS` registration set in `install/` is carried by a vanish watch
-/// in its module's `UPSTREAM` that `declared()` runs. A set no watch carries has
-/// no upstream check at all — an appearance watch cannot see a rename, and an
-/// `UPSTREAM` no target names is never run — and every
-/// gate stays green because nothing else omits it. Derived from the consts, so
-/// no exemption list drifts: opencode, omp and dsh subscribe in their plugin
-/// code and declare no `*EVENTS` const.
+/// Every hook a target's artifact subscribes to is carried by a vanish watch,
+/// the target's or its source's: a hook upstream renamed would leave the
+/// registration inert with nothing to say so. A field watch never carries a
+/// hook name, so a field named like one cannot stand in for it.
 #[test]
-fn every_install_events_const_is_watched() {
-    let decl = Regex::new(r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?const\s+([A-Z_]*EVENTS)\s*:")
-        .expect("compiles");
-    let upstream = Regex::new(r"(?ms)\bconst UPSTREAM\b.*?^\}?\];").expect("compiles");
-    let id = Regex::new(r#"\bid:\s*"([^"]+)""#).expect("compiles");
-    let mut found = 0;
-    for path in rs_files(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/install")) {
-        let src = std::fs::read_to_string(&path).expect("the module is readable");
-        let vanish_watches: Vec<&str> = upstream
-            .find(&src)
-            .map_or("", |m| m.as_str())
-            .split("Watch {")
-            .filter(|w| w.contains("When::Vanishes"))
+fn every_registered_hook_is_watched() {
+    for t in TARGETS {
+        let hooks = (t.registers)();
+        assert!(!hooks.is_empty(), "{} registers no hook", t.name);
+        let source = REGISTRY
+            .iter()
+            .find(|d| d.name == t.core_source)
+            .unwrap_or_else(|| panic!("{} installs for no registered source", t.name));
+        let carried: BTreeSet<&str> = t
+            .upstream
+            .iter()
+            .chain(source.upstream.watches())
+            .filter(|w| matches!(w.when, When::Vanishes))
+            .filter(|w| match w.read.yields() {
+                Yield::Fields => false,
+                Yield::Declaration | Yield::Family | Yield::Ours | Yield::One { .. } => true,
+            })
+            .flat_map(|w| (w.ours)())
             .collect();
-        for name in decl.captures_iter(&src).filter_map(|c| c.get(1)) {
-            found += 1;
-            let named = Regex::new(&format!(r"\b{}\b", name.as_str())).expect("compiles");
-            let ids: Vec<&str> = vanish_watches
-                .iter()
-                .filter(|w| named.is_match(w))
-                .filter_map(|w| id.captures(w).and_then(|c| c.get(1)).map(|m| m.as_str()))
-                .collect();
+        for hook in hooks {
             assert!(
-                ids.iter().any(|&i| declared().any(|(_, w)| w.id == i)),
-                "{path:?} registers hooks as {}, but no vanish watch the checker runs \
-                 carries them (watches naming it: {ids:?}): a rename upstream would leave \
-                 the registration inert with nothing to say so",
-                name.as_str(),
+                carried.contains(hook),
+                "{} registers `{hook}`, but no vanish watch it or {} declares carries it",
+                t.name,
+                t.core_source,
             );
         }
     }
-    assert!(
-        found > 0,
-        "the *EVENTS declaration shape moved — this census reads nothing"
-    );
 }
 
 /// No anchor matches a name it guards: such an anchor vanishes WITH the names
@@ -1561,7 +1551,7 @@ fn an_enum_off_snake_case_is_probe_health() {
     );
 }
 
-/// Every wire literal a decoder equality-compares is carried by a declared
+/// Every wire literal a decoder or a native exit gate equality-compares is carried by a declared
 /// vanish watch — a source's or an installer's, so it lives here, where both
 /// rosters are — or exempted below with its adjudicated reason (#943's gate).
 ///
@@ -1574,103 +1564,125 @@ fn an_enum_off_snake_case_is_probe_health() {
 /// Stale exemptions fail the OTHER direction.
 #[test]
 fn every_equality_compared_wire_literal_is_accounted_for() {
-    // (file stem, literal, why no upstream watch is owed)
+    // (path under `src/source`, literal, why no upstream watch is owed)
     const EXEMPT: &[(&str, &str, &str)] = &[
         (
-            "antigravity",
+            "antigravity.rs",
             "PLANNER_RESPONSE",
             "capture-verified step type; a rename lands in the \
              non-PLANNER_RESPONSE + tool_calls breadcrumb (antigravity.rs)",
         ),
         (
-            "antigravity",
+            "antigravity.rs",
             "ask_permission",
             "unverified reverse-engineered tool name (antigravity.rs comment); \
              no watchable upstream, silent on rename — accepted",
         ),
-        ("antigravity", "ask_question", "same as ask_permission"),
+        ("antigravity.rs", "ask_question", "same as ask_permission"),
         (
-            "admit",
+            "admit.rs",
             "jsonl",
             "file-extension guard; resolver/path axis (#880)",
         ),
         (
-            "cc_probe",
+            "cc_probe.rs",
             "json",
             "file-extension guard; resolver/path axis (#880)",
         ),
         (
-            "cc_probe",
+            "cc_probe.rs",
             "projects",
             "dirname guard; resolver/path axis (#880)",
         ),
         (
-            "claude_code",
+            "claude_code.rs",
             "<synthetic>",
             "CC's placeholder model value; a rename degrades to a cosmetic \
              flame label until the next real model string arrives",
         ),
         (
-            "claude_code",
+            "claude_code.rs",
             "tool_use",
             "Messages-API block type; no CC doc declares it apart from \
              `tool_use_id`, and the hook transport carries the same activity \
              — headless-only degradation, corpus-census detectable",
         ),
-        ("claude_code", "tool_result", "same as tool_use"),
+        ("claude_code.rs", "tool_result", "same as tool_use"),
         (
-            "antigravity",
+            "antigravity.rs",
             "USER_INPUT",
             "no watchable upstream doc; the decoder breadcrumbs unknown \
              vocabulary (the runtime detector)",
         ),
-        ("antigravity", "CONVERSATION_HISTORY", "same as USER_INPUT"),
         (
-            "claude_code",
+            "antigravity.rs",
+            "CONVERSATION_HISTORY",
+            "same as USER_INPUT",
+        ),
+        (
+            "claude_code.rs",
             "attachment",
             "undocumented transcript surface; its marker KINDS are \
              appearance-watched by `claude_code.effort_attachments`",
         ),
         (
-            "copilot",
+            "copilot.rs",
             "task",
             "name-only BY DESIGN (subagent_type is spoofable, see \
              copilot_tool_detail) — and unwatchable: the schema types \
              toolName as a free string and never declares tool-name values",
         ),
         (
-            "cursor",
+            "cursor.rs",
             "Task",
             "detection is semantic (subagent_type, capture-verified), so a \
              rename degrades to a Generic tool, never a missed delegation",
         ),
         (
-            "grok",
+            "grok.rs",
             "spawn_subagent",
             "semantic subagent_type fallback exists on the same arm",
         ),
         (
-            "omp",
+            "omp.rs",
             "default",
             "resolver/path axis, deliberately unwatched (#880)",
         ),
         (
-            "omp",
+            "omp.rs",
             "sessions",
             "resolver/path axis, deliberately unwatched (#880)",
         ),
         (
-            "omp",
+            "omp.rs",
             "task",
             "children register via PATH NESTING regardless (module doc); the \
              name only styles the parent's pose",
         ),
         (
-            "opencode",
+            "opencode.rs",
             "tool",
             "part-type inside the watched `message.part.updated`; a rename is \
              #943-class value drift, accepted residual",
         ),
+        (
+            "codex/native.rs",
+            "jsonl",
+            "resolver/path axis, deliberately unwatched (#880): a session-file path \
+             component, not a wire name",
+        ),
+        (
+            "codex/native.rs",
+            "sessions",
+            "same as codex/native.rs jsonl",
+        ),
+        (
+            "grok/native.rs",
+            "sessions",
+            "same as codex/native.rs jsonl",
+        ),
+        ("omp/native.rs", "jsonl", "same as codex/native.rs jsonl"),
+        ("omp/native.rs", "sessions", "same as codex/native.rs jsonl"),
     ];
 
     let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -1683,19 +1695,25 @@ fn every_equality_compared_wire_literal_is_accounted_for() {
     let sources: std::collections::BTreeSet<&str> =
         pixtuoid_core::source::registry::registered_source_names().collect();
 
-    let paths = rs_files(&crates.join("pixtuoid-core/src/source"));
+    let root = crates.join("pixtuoid-core/src/source");
+    let paths = rs_files(&root);
 
     let mut found: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
     let mut unaccounted: Vec<String> = Vec::new();
     for path in paths {
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .expect("a utf-8 stem")
-            .to_owned();
-        // mod/native/tests are the runtime+resolver axis, deliberately
-        // unwatched (#880); drift/registry are the breadcrumb infra itself.
-        if ["mod", "native", "tests", "drift", "registry"].contains(&stem.as_str()) {
+        let file = path
+            .strip_prefix(&root)
+            .expect("under the census root")
+            .to_str()
+            .expect("a utf-8 path")
+            .replace('\\', "/");
+        // mod/tests are the runtime axis, deliberately unwatched (#880);
+        // drift/registry are the breadcrumb infra itself. A native resolver is
+        // read: its exit gate compares the decoder's wire names.
+        if ["mod.rs", "tests.rs", "drift.rs", "registry.rs"]
+            .iter()
+            .any(|f| path.file_name().is_some_and(|n| n == *f))
+        {
             continue;
         }
         let src = std::fs::read_to_string(&path).expect("the module is readable");
@@ -1711,14 +1729,14 @@ fn every_equality_compared_wire_literal_is_accounted_for() {
                     let rest = &code[i + pat.len()..];
                     let Some(end) = rest.find('\"') else { continue };
                     let lit = &rest[..end];
-                    found.insert((stem.clone(), lit.to_owned()));
+                    found.insert((file.clone(), lit.to_owned()));
                     let ok = carried.contains(lit)
                         || sources.contains(lit)
                         || lit.starts_with('.')
                         || lit.ends_with(".jsonl")
-                        || EXEMPT.iter().any(|(f, l, _)| *f == stem && *l == lit);
+                        || EXEMPT.iter().any(|(f, l, _)| *f == file && *l == lit);
                     if !ok {
-                        unaccounted.push(format!("{stem}.rs: == \"{lit}\""));
+                        unaccounted.push(format!("{file}: == \"{lit}\""));
                     }
                 }
             }
@@ -1735,7 +1753,7 @@ fn every_equality_compared_wire_literal_is_accounted_for() {
     for (file, lit, _) in EXEMPT {
         assert!(
             found.contains(&((*file).to_owned(), (*lit).to_owned())),
-            "the exemption for {file}.rs == \"{lit}\" outlived the \
+            "the exemption for {file} == \"{lit}\" outlived the \
              comparison it excused — delete the row",
         );
     }
