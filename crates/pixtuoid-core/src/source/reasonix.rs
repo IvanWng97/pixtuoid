@@ -33,9 +33,10 @@ use crate::source::{AgentEvent, ToolDetail};
 /// The Reasonix CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "reasonix";
 
-/// Each version also publishes a Studio app release (`studio-v…`,
-/// `README.md:26` at v2.37.0), which `releases/latest` may name; the CLI is
-/// npm's `reasonix` (`:27`).
+/// Each version publishes a "Reasonix CLI" and a "Reasonix Studio" release
+/// (`studio-v…`, github.com/esengine/DeepSeek-Reasonix/releases), so
+/// `releases/latest` may name the app; the CLI is npm's `reasonix` at its
+/// `latest` dist-tag (registry.npmjs.org/reasonix), tagged `v{version}`.
 #[cfg(any(test, feature = "upstream"))]
 pub const REPO: crate::source::upstream::Repo = crate::source::upstream::Repo {
     name: "esengine/DeepSeek-Reasonix",

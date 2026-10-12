@@ -82,7 +82,8 @@
     token that writes issues lives in a job that checks nothing out and runs
     no build, so no code of the tree ever holds it.
   assert: |
-    ([.jobs.file.steps[] | .run // ""] | join("\n")) as $file
+    ([.jobs.file.steps[] | .run // "" | split("\n")[] | select(test("^\\s*#") | not)]
+     | join("\n")) as $file
     | .permissions == {}
       and .jobs.drift.permissions == {"contents": "read"}
       and .jobs.file.permissions == {"issues": "write"}
