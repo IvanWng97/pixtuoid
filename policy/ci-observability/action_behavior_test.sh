@@ -250,6 +250,7 @@ mkdir -p "$own_dir/bin"
 printf '%s\n' \
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
+    '[[ "$*" == *"Accept: application/vnd.github.raw"* ]] || exit 1' \
     'path="${*: -1}"' \
     'file="${path#repos/"$OWN_REPO"/contents/}"' \
     '[[ "$file" != "$path" && "$file" == *"?ref=$OWN_SHA" ]] || exit 1' \
@@ -295,7 +296,7 @@ rules_name="$(basename "$REVIEW_RULES_FILE")"
 # other spelling, or a heading named anywhere but in a citation or an in-file
 # link (an allowlist: no prose form escapes).
 citation_problems() {
-    local agents="$1" orchestrator="$2" protocol="$3" rules="$4" readers cited prose name
+    local agents="$1" orchestrator="$2" protocol="$3" rules="$4" readers cited prose name listed elsewhere
     local spelled="(${protocol_dest//./\\.}|${rules_name//./\\.})#[A-Za-z0-9_-]+"
     readers="$(jq -r '.[].prompt' "$agents" && printf '%s\n' "$orchestrator")"
     for cited in "$protocol_dest:$protocol" "$rules_name:$rules"; do
@@ -305,6 +306,11 @@ citation_problems() {
     { printf '%s\n' "$readers" && cat "$protocol"; } | sed -E 's#https?://[^ )>]+##g; s/\]\(#[^)]*\)//g' |
         { grep -oE "(^|[^$path_chars])[$path_chars]+#[A-Za-z0-9_-]+" || true; } | sed -E "s/^[^$path_chars]//" |
         { grep -vxE "$spelled" || true; } | sed 's/^/unresolved spelling /'
+    # The header lists, for a caller, exactly the sections of its rules the
+    # rest of the review cites.
+    listed="$(awk '/^## / { exit } { print }' "$protocol" | cites "$rules_name" | paste -sd ' ' -)"
+    elsewhere="$({ printf '%s\n' "$readers" && awk 'body; /^## / { body = 1 }' "$protocol"; } | cites "$rules_name" | paste -sd ' ' -)"
+    [[ "$listed" == "$elsewhere" ]] || echo "the protocol's header lists $rules_name#[$listed], the review cites [$elsewhere]"
     prose="$({ printf '%s\n' "$readers" && grep -v '^#' "$protocol"; } |
         sed -E "s/\\[[^]]*\\]\\(#[^)]*\\)//g; s,(^|[^$path_chars])$spelled,\\1,g")"
     while IFS= read -r name; do
@@ -327,7 +333,8 @@ mkdir -p "$cite_dir"
 assert_caught() {
     sed -E "$2" .github/prompts/review-agents.json >"$cite_dir/agents.json"
     sed -E "${3:-}" .github/prompts/review-protocol.md >"$cite_dir/protocol.md"
-    ! cmp -s "$cite_dir/agents.json" .github/prompts/review-agents.json || fail "the citation break \"$1\" edits no prompt"
+    ! { cmp -s "$cite_dir/agents.json" .github/prompts/review-agents.json &&
+        cmp -s "$cite_dir/protocol.md" .github/prompts/review-protocol.md; } || fail "the citation break \"$1\" edits nothing"
     [[ -n "$(citation_problems "$cite_dir/agents.json" "$prompt" "$cite_dir/protocol.md" "$REVIEW_RULES_FILE")" ]] ||
         fail "the citation check misses $1"
 }
@@ -339,6 +346,9 @@ assert_caught "a protocol section in prose" \
 assert_caught "a misspelled file beside a renamed heading" \
     's/\.claude-review\/protocol\.md#verifier/protocol.md#verifier/' 's/^## Verifier$/## Refuter/'
 assert_caught "a path ahead of the file" 's/REVIEW\.md#common/docs\/REVIEW.md#common/g'
+# shellcheck disable=SC2016 # Markdown backticks, matched literally.
+assert_caught "a listed section nothing cites" '' 's/^`REVIEW\.md#escalation`\.$/`REVIEW.md#escalation`, `REVIEW.md#always-check`./'
+assert_caught "a cited section the list lacks" 's/with REVIEW\.md#do-not-flag,/with REVIEW.md#do-not-flag and REVIEW.md#always-check,/'
 # Staged alone, the protocol resolves only its own anchors and absolute URLs.
 dead_links="$(grep -noE '\]\([^)]*\)' "$own_dir/work/$protocol_dest" | grep -vE '\]\((#|https://)' || true)"
 [[ -z "$dead_links" ]] || fail "the staged protocol links what its location lacks: ${dead_links//$'\n'/ }"

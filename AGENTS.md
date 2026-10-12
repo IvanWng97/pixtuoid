@@ -26,8 +26,8 @@ strings as goldens). The asserted rows are marked "homebrew-core contract" at
 `sources_cli.rs`, `codewhale.rs`; release-side consequences
 in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
-`pixtuoid/lofi` calls the review's reusable workflows at a pinned commit, so a
-change to their interface (the `*-callee-interface-holds` contracts) breaks THEIR CI.
+`pixtuoid/lofi` pins the review's reusable workflows; their interface is the
+`*-callee-interface-holds` contracts (`policy/ci-observability/contracts.yml`).
 
 ## What this is
 

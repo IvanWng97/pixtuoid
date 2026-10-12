@@ -62,6 +62,7 @@
            | ([$run | scan("(?m)^ *own=(.*)$")] == [["\"$RUNNER_TEMP/review-own\""]])
              and ([$run | scan("gh api")] | length == 1)
              and ($run | contains("\"repos/${WORKFLOW_REPOSITORY}/contents/$1?ref=${WORKFLOW_SHA}\""))
+             and ($run | contains("gh api -H \"Accept: application/vnd.github.raw\""))
              and ([$run | scan("(?m)^ *fetch +(\\S+) +(\\S+) *$") | join(" ")] | sort | join("\n")) == $expected)
   break:
     - (.jobs.analyze.steps[] | select(.name == "Load the review's own files") | .env.WORKFLOW_SHA) = "${{ github.sha }}"
@@ -71,6 +72,9 @@
     - (.jobs.analyze.steps[] | select(.name == "Load the review's own files") | .run) |= sub("own=\"\\$RUNNER_TEMP/review-own\""; "own=.claude-review/head")
     - (.jobs.analyze.steps[] | select(.name == "Load the review's own files") | .run) += "\ngh api repos/x/y/contents/z > .claude-review/z"
     - (.jobs.analyze.steps[] | select(.name == "Load the review's own files") | .run) |= sub("\\?ref=\\$\\{WORKFLOW_SHA\\}"; "")
+    - |
+      (.jobs.analyze.steps[] | select(.name == "Load the review's own files") | .run)
+      |= sub(" -H \"Accept: application/vnd.github.raw\""; "")
     - .jobs.analyze.steps |= map(select(.name != "Load the review's own files"))
 
 - id: reviewer-model-only-reads

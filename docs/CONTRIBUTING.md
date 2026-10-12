@@ -103,13 +103,15 @@ CodSpeed skip drafts. The jobs:
   trusted default branch, a read-only model reads the PR diff, its head files,
   title, body and prior threads as inert data, and spawns the
   [`review-protocol.md`](../.github/prompts/review-protocol.md#scope) readers:
-  repeated passes per planned unit,
-  one per lens over the whole diff, a verifier per candidate. A unit it skips
-  fails the run; a separate least-privilege publisher opens a review thread
-  per finding and sets the one required `claude-review` status, with each
-  lens's finding count in its description. The protocol, `review-schema.json`
-  and `review-agents.json` are the workflow's own, read at its commit; a
-  caller's tree supplies `REVIEW.md` and the code under review.
+  repeated passes per planned unit, one per lens over the whole diff, a
+  verifier per candidate. A unit it skips fails the run; a separate
+  least-privilege publisher opens a review thread per finding and sets the one
+  required `claude-review` status, with each lens's finding count in its
+  description. The protocol, `review-schema.json` and `review-agents.json` are
+  the workflow's own, read at its commit; a caller's tree supplies the code
+  under review and a `REVIEW.md` with the sections
+  [the protocol's header](../.github/prompts/review-protocol.md#review-protocol)
+  lists.
 - **CodeQL**, advisory (not a required check), stays the advanced workflow (`codeql.yml`): explicit languages,
   a SARIF health gate on Rust's `none`-mode extraction, and an inline query
   filter dropping `rust/cleartext-logging` (WHY on the init step).
@@ -330,8 +332,10 @@ run, then comments `/claude-review`, again after every push. Its author can
 resolve their own threads, so before merging read each thread's `resolvedBy`
 and its reply. Its bot verdict is advisory, since the
 author can steer it through the diff, so the maintainer reads the diff too.
-A Dependabot PR is not reviewed: [`claude-review.yml`](../.github/workflows/claude-review.yml)'s
-`exempt` job posts the `claude-review` status when every commit is
+A Dependabot PR is not reviewed:
+[`claude-review-exempt.yml`](../.github/workflows/claude-review-exempt.yml),
+which `claude-review.yml`'s `exempt` job calls with the manifest allowlist,
+posts the `claude-review` status when every commit is
 Dependabot's and the PR only moves versions in its manifests or an action's
 `uses:` pin, with no
 package, install script or source new to it. Anything else gets `pending`, and

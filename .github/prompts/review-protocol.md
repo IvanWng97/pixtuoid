@@ -4,6 +4,11 @@ Staged by `claude-readonly-review.yml` from its own commit. `REVIEW.md#<section>
 is a section of the reviewed repository's rules, `REVIEW.md`, at its root, and
 `REVIEW.md#common` joins this [Common](#common).
 
+A caller's `REVIEW.md` has every section the review cites: `REVIEW.md#common`,
+holding `REVIEW.md#do-not-flag`; `REVIEW.md#lenses`, holding one section per
+`review-schema.json` lens (`REVIEW.md#correctness`, `REVIEW.md#design`); and
+`REVIEW.md#escalation`.
+
 ## Scope
 
 Each reader applies [Common](#common) and its own section, nothing else:
