@@ -519,6 +519,7 @@ fn read_docs(
             Read::PySet { decl } => read::py_set(text, decl).map(Into::into),
             Read::RustMacroRows { name } => read::rust_macro_rows(text, name).map(Into::into),
             Read::TsConstArray { name } => read::ts_const_array(text, name).map(Into::into),
+            Read::TsConst { name } => read::ts_const(text, name).map(Into::into),
             Read::JsonUnion { def, prop } => read::json_union(text, def, prop).map(Into::into),
             Read::JsonKeys => read::json_keys(text).map(Into::into),
         };

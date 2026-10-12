@@ -808,22 +808,10 @@ impl<'a> oxc_ast_visit::Visit<'a> for Returns {
 pub(super) fn ts_const_array(text: &str, name: &str) -> Result<Names, Unread> {
     with_ts(text, |decls| {
         let array = one(
-            decls
-                .iter()
-                .filter_map(|d| match d {
-                    Declaration::VariableDeclaration(v) if v.kind == VariableDeclarationKind::Const => {
-                        Some(v.declarations.iter())
-                    }
-                    _ => None,
-                })
-                .flatten()
-                .filter(|v| {
-                    matches!(&v.id, BindingPattern::BindingIdentifier(b) if b.name.as_str() == name)
-                })
-                .filter_map(|v| match v.init.as_ref()?.get_inner_expression() {
-                    Expression::ArrayExpression(a) => Some(a),
-                    _ => None,
-                }),
+            const_inits(decls, name).filter_map(|init| match init {
+                Expression::ArrayExpression(a) => Some(a),
+                _ => None,
+            }),
             &format!("`const {name}` array"),
         )?;
         Ok(array
@@ -835,6 +823,43 @@ pub(super) fn ts_const_array(text: &str, name: &str) -> Result<Names, Unread> {
             })
             .collect())
     })
+}
+
+/// The literal the ONE `const name` initializes to: a string's value, or a
+/// number's, which a reformat of its source text leaves as it was.
+pub(super) fn ts_const(text: &str, name: &str) -> Result<Names, Unread> {
+    with_ts(text, |decls| {
+        let value = one(
+            const_inits(decls, name).filter_map(|init| match init {
+                Expression::StringLiteral(s) => Some(s.value.as_str().to_owned()),
+                Expression::NumericLiteral(n) => Some(n.value.to_string()),
+                _ => None,
+            }),
+            &format!("`const {name}` literal"),
+        )?;
+        Ok(Names::from([value]))
+    })
+}
+
+/// What each `const name` declarator initializes to, `as` and parentheses
+/// stripped.
+fn const_inits<'b, 'a>(
+    decls: &'b [&'b Declaration<'a>],
+    name: &'b str,
+) -> impl Iterator<Item = &'b Expression<'a>> {
+    decls
+        .iter()
+        .filter_map(|d| match d {
+            Declaration::VariableDeclaration(v) if v.kind == VariableDeclarationKind::Const => {
+                Some(v.declarations.iter())
+            }
+            _ => None,
+        })
+        .flatten()
+        .filter(move |v| {
+            matches!(&v.id, BindingPattern::BindingIdentifier(b) if b.name.as_str() == name)
+        })
+        .filter_map(|v| Some(v.init.as_ref()?.get_inner_expression()))
 }
 
 /// A heading's events: where it starts and ends, its level, and its text.
@@ -1370,6 +1395,28 @@ mod tests {
         );
         let shapes = "const NAMES = ([\"own\", flag ? \"c\" : \"d\", [\"inner\"], ...[\"spread\"]]) as const;";
         assert_eq!(found(ts_const_array(shapes, "NAMES")), names(&["own"]));
+    }
+
+    /// A number reads as its value, so a reformat of the literal is no change.
+    #[test]
+    fn a_ts_const_is_its_one_literal() {
+        let src = "// export const PORT = 1;\nexport const PORT = 18_789;\nconst HEX: number = 0x4965;\nconst NAME = 'agent' as const;\nconst CALL = port();\n";
+        assert_eq!(found(ts_const(src, "PORT")), names(&["18789"]));
+        assert_eq!(found(ts_const(src, "HEX")), names(&["18789"]));
+        assert_eq!(found(ts_const(src, "NAME")), names(&["agent"]));
+        assert_eq!(
+            found(ts_const(src, "CALL")),
+            Err("no `const CALL` literal".to_owned())
+        );
+        assert_eq!(
+            found(ts_const(src, "GONE")),
+            Err("no `const GONE` literal".to_owned())
+        );
+        assert_eq!(
+            found(ts_const("let PORT = 1;", "PORT")),
+            Err("no `const PORT` literal".to_owned())
+        );
+        assert!(found(ts_const(&format!("{src}{src}"), "PORT")).is_err());
     }
 
     #[test]

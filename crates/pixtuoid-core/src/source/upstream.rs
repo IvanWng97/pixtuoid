@@ -109,6 +109,9 @@ pub enum Read {
     RustMacroRows { name: &'static str },
     /// The string elements of the ONE `const name = [ … ]`.
     TsConstArray { name: &'static str },
+    /// The literal the ONE `const name` initializes to: a string's value, or a
+    /// number's.
+    TsConst { name: &'static str },
     /// JSON Schema: each member of `def`'s `oneOf`/`anyOf` union, as the
     /// const of its `prop` property, or its own const when `prop` is `None`.
     JsonUnion {
@@ -126,7 +129,7 @@ impl Read {
     pub const fn yields(&self) -> Yield {
         match self {
             Self::Each { .. } => Yield::Ours,
-            Self::RustStr { .. } => Yield::One { verb: "declares" },
+            Self::RustStr { .. } | Self::TsConst { .. } => Yield::One { verb: "declares" },
             Self::TsReturn { .. } => Yield::One { verb: "returns" },
             Self::RustArms { .. } => Yield::Family,
             Self::TsFields { .. } => Yield::Fields,

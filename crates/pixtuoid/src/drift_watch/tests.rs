@@ -346,6 +346,33 @@ fn a_rust_str_read_names_what_upstream_declares_now() {
     assert!(r.breaking[0].contains("declares `task` there now"), "{r:?}");
 }
 
+#[test]
+fn a_ts_const_read_names_what_upstream_declares_now() {
+    const W: Watch = Watch {
+        id: "t.const",
+        ours: || vec!["18789"],
+        docs: &[doc("t.ts")],
+        read: Read::TsConst { name: "PORT" },
+        when: When::Vanishes,
+        finding: Finding::Breaking("stale port"),
+        siblings: None,
+    };
+    let reformatted = Served::default().with(
+        &raw("t.ts"),
+        "enum Events {}\nexport const PORT: number =\n  18_789;\n",
+    );
+    let r = check(&reformatted, &W);
+    assert!(r.breaking.is_empty() && r.blind.is_empty(), "{r:?}");
+    let bumped =
+        Served::default().with(&raw("t.ts"), "enum Events {}\nexport const PORT = 18790;\n");
+    let r = check(&bumped, &W);
+    assert_eq!(r.breaking.len(), 1, "{r:?}");
+    assert!(
+        r.breaking[0].contains("declares `18790` there now"),
+        "{r:?}"
+    );
+}
+
 /// An early-return branch is the change: the whole list is upstream's answer.
 #[test]
 fn a_ts_return_read_names_what_upstream_returns_now() {
@@ -837,6 +864,17 @@ fn page(w: &Watch, names: &[&str]) -> String {
             let members: String = names.iter().map(|n| format!("  \"{n}\",\n")).collect();
             after_decl(w, format!("const {name} = [\n{members}] as const;"))
         }
+        // A number reads as one, and anything else, a vanished value's empty
+        // one included, as a string.
+        Read::TsConst { name } => {
+            let value = names.first().copied().unwrap_or_default();
+            let literal = if value.parse::<f64>().is_ok() {
+                value.to_owned()
+            } else {
+                format!("\"{value}\"")
+            };
+            after_decl(w, format!("export const {name} = {literal};"))
+        }
         // A field of its own besides: an empty interface is no declaration
         // the reader reads, and an `Appears` page names none of ours.
         Read::TsFields { name } => {
@@ -969,6 +1007,7 @@ fn ts_field(n: &str) -> String {
 fn near_miss(w: &Watch, name: &str) -> String {
     match w.read {
         Read::RustStr { .. } => format!("const PXD_OTHER: &str = \"{name}\";"),
+        Read::TsConst { .. } => format!("export const PXD_OTHER = \"{name}\";"),
         Read::RustArms { arm, .. } => format!(
             "fn pxd_other() {{ match a {{ \"{name}\" => {}, _ => Err(()) }} }}",
             render(arm, "")
@@ -1344,6 +1383,7 @@ fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
             | Read::TsMembers { .. }
             | Read::TsReturn { .. }
             | Read::TsConstArray { .. }
+            | Read::TsConst { .. }
             | Read::MdTable { .. }
             | Read::MdHeadings { .. }
             | Read::RustMacroRows { .. }
