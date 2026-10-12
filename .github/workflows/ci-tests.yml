@@ -29,6 +29,9 @@ jobs:
             runner: ubuntu-latest
             flag: unit
             timeout: 25
+            # The drift watch's parsers build only under `upstream`, and its
+            # readers read fetched text alike on every OS: one platform pays.
+            features: --features pixtuoid/upstream
           # Track windows-latest deliberately: this gate catches hosted-image
           # changes. It runs the Windows pipes and atomic-write retries the Linux
           # entry compiles out, and the full tier uploads their coverage.
@@ -73,12 +76,7 @@ jobs:
       # tier saved, so a plain PR build recompiled the whole graph.
       - name: Unit tests under coverage + JUnit XML
         id: tests
-        run: just coverage
-      # Its parsers build only under `upstream`, and its readers read fetched
-      # text alike on every OS: one platform pays for them.
-      - name: Drift watch tests (`upstream` feature)
-        if: ${{ matrix.platform == 'linux' }}
-        run: just test-upstream
+        run: just coverage ${{ matrix.features }}
       - name: Upload coverage to Codecov
         if: ${{ inputs.full }}
         uses: ./.github/actions/upload-codecov
