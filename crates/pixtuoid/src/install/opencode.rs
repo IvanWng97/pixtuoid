@@ -28,8 +28,9 @@ const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
 const PLUGIN_TEMPLATE: &str = include_str!("opencode_plugin.ts");
 
-/// The events the plugin forwards: its `FORWARD` set, and each event it
-/// handles beside it (`t === "…"`), as the part update it dedupes on status.
+/// The events the plugin forwards: its `FORWARD` set, plus each event it
+/// handles outside it (`t === "…"`), today the part update it dedupes on status
+/// change.
 #[cfg(test)]
 pub(crate) fn registers() -> Vec<&'static str> {
     let beside = PLUGIN_TEMPLATE

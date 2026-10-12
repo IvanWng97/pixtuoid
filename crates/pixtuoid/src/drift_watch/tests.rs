@@ -1551,7 +1551,7 @@ fn an_enum_off_snake_case_is_probe_health() {
     );
 }
 
-/// Every wire literal a decoder equality-compares is carried by a declared
+/// Every wire literal a decoder or a native exit gate equality-compares is carried by a declared
 /// vanish watch — a source's or an installer's, so it lives here, where both
 /// rosters are — or exempted below with its adjudicated reason (#943's gate).
 ///
@@ -1668,28 +1668,21 @@ fn every_equality_compared_wire_literal_is_accounted_for() {
         (
             "codex/native.rs",
             "jsonl",
-            "a session-file path component the native resolver matches, not a wire name",
+            "resolver/path axis, deliberately unwatched (#880): a session-file path \
+             component, not a wire name",
         ),
         (
             "codex/native.rs",
             "sessions",
-            "a session-file path component the native resolver matches, not a wire name",
+            "same as codex/native.rs jsonl",
         ),
         (
             "grok/native.rs",
             "sessions",
-            "a session-file path component the native resolver matches, not a wire name",
+            "same as codex/native.rs jsonl",
         ),
-        (
-            "omp/native.rs",
-            "jsonl",
-            "a session-file path component the native resolver matches, not a wire name",
-        ),
-        (
-            "omp/native.rs",
-            "sessions",
-            "a session-file path component the native resolver matches, not a wire name",
-        ),
+        ("omp/native.rs", "jsonl", "same as codex/native.rs jsonl"),
+        ("omp/native.rs", "sessions", "same as codex/native.rs jsonl"),
     ];
 
     let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");

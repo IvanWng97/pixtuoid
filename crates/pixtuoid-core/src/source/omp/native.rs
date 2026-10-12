@@ -17,12 +17,13 @@ use crate::source::{Source, TaggedSender};
 /// injectable so tests can grow the set without touching process env.
 pub(crate) type OmpProfileEnumerate = Arc<dyn Fn() -> Vec<PathBuf> + Send + Sync>;
 
-/// omp appends a `custom` entry `customType:"session_exit"` on every clean
-/// teardown, so a transcript that already ended carries that marker — the
-/// first-sight gate uses it to avoid resurrecting a finished session.
-/// Structural parse only: tool arguments/results are persisted verbatim in the
-/// same file, so a substring scan would let CONTENT (a grep for
-/// `session_exit`) end a live session — the CC sharp edge.
+/// omp appends a [`super::CUSTOM`] entry whose `customType` is
+/// [`super::SESSION_EXIT`] on every clean teardown, so a transcript that already
+/// ended carries that marker — the first-sight gate uses it to avoid
+/// resurrecting a finished session. Structural parse only: tool
+/// arguments/results are persisted verbatim in the same file, so a substring
+/// scan would let CONTENT (a grep for the marker) end a live session — the CC
+/// sharp edge.
 fn omp_session_ended(tail: &[u8]) -> bool {
     parsed_tail_lines(tail).any(|v| {
         v.get("type").and_then(|t| t.as_str()) == Some(super::CUSTOM)

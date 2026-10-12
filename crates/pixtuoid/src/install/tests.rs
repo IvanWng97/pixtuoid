@@ -180,8 +180,7 @@ fn resolve_hook_binary_env_override_wins() {
 #[cfg(unix)]
 #[test]
 fn resolve_hook_binary_claude_falls_back_to_bare_name_when_unresolvable() {
-    // Regression: a fresh-machine connect hard-failed when pixtuoid-hook wasn't
-    // yet on PATH. Routed through the injected seam (env_hook: None) so an ambient
+    // Routed through the injected seam (env_hook: None) so an ambient
     // PIXTUOID_HOOK on the dev machine can't short-circuit the staged failure.
     let got = resolve_hook_binary_from(&CLAUDE_FILE, None, || {
         Err(anyhow::anyhow!("could not locate"))
