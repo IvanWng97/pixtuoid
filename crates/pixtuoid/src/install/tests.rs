@@ -295,8 +295,9 @@ fn has_hooks_unreadable_config_is_true() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A pre-v2 disconnect left a stub opencode 2 lists as a failed plugin; launch
-/// rewrites it, and only it, while `has_hooks` keeps reading it disconnected.
+/// A disconnect from before opencode 2 support left a stub opencode 2 lists as
+/// a failed plugin; launch rewrites it, and only it, while `has_hooks` keeps
+/// reading it disconnected.
 #[test]
 fn a_retired_stub_is_rewritten_and_stays_disconnected() {
     let t = &crate::install::target::OPENCODE;

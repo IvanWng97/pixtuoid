@@ -26,32 +26,19 @@ const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
 const PLUGIN_TEMPLATE: &str = include_str!("opencode_plugin.ts");
 
-/// Every event name the plugin spells: its `FORWARD` set whole, plus each
-/// quoted `word.word…` literal wherever it compares an event, so no copy of a
-/// name escapes the pins.
+/// The events the plugin forwards: its `FORWARD` set.
 #[cfg(test)]
 pub(crate) fn plugin_events() -> Vec<&'static str> {
-    let spelled = PLUGIN_TEMPLATE.split('"').skip(1).step_by(2).filter(|lit| {
-        lit.contains('.')
-            && lit.split('.').all(|w| {
-                !w.is_empty()
-                    && w.bytes()
-                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-            })
-    });
-    let mut names: Vec<&'static str> = crate::install::forward_set(PLUGIN_TEMPLATE)
+    crate::install::forward_set(PLUGIN_TEMPLATE)
         .into_iter()
-        .chain(spelled)
-        .collect();
-    names.sort_unstable();
-    names.dedup();
-    names
+        .collect()
 }
 
 /// A no-op plugin WITHOUT the sentinel, so a re-uninstall is a no-op.
 pub(crate) const REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Sources panel (press s).\nexport default { id: \"pixtuoid-removed\", setup() {} }\n";
 
-/// What a pre-v2 pixtuoid's disconnect wrote, which opencode 2 cannot load.
+/// What pixtuoid's disconnect wrote before it supported opencode 2, which
+/// opencode 2 cannot load.
 pub(crate) const V1_REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Sources panel (press s).\nexport {}\n";
 
 fn opencode_config_dir() -> Result<PathBuf> {
@@ -144,6 +131,27 @@ pub(crate) fn render_plugin(hook_path: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every event name the plugin spells outside `FORWARD`, wherever it
+    /// compares an event, must be one it forwards: the loop drops every other.
+    #[test]
+    fn every_event_the_plugin_names_is_one_it_forwards() {
+        let forwarded = crate::install::forward_set(PLUGIN_TEMPLATE);
+        for lit in PLUGIN_TEMPLATE.split('"').skip(1).step_by(2) {
+            let event_shaped = lit.contains('.')
+                && lit.split('.').all(|w| {
+                    !w.is_empty()
+                        && w.bytes()
+                            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+                });
+            if event_shaped {
+                assert!(
+                    forwarded.contains(lit),
+                    "the plugin names `{lit}` but never forwards it"
+                );
+            }
+        }
+    }
 
     /// The plugin forwards EXACTLY what the decoder reads. These are two lists in
     /// two languages — a TS `FORWARD` set here, `match event` arms in
@@ -316,9 +324,9 @@ mod tests {
         assert_eq!(removed.content, REMOVED_STUB);
     }
 
-    /// Whether `content` default-exports the `{ id, setup }` object opencode loads;
-    /// it reports any other module as a failed plugin
-    /// (`packages/core/src/plugin/module.ts:78-91`, `supervisor.ts:63`, `:79-84`).
+    /// Whether `content` default-exports an `{ id, setup }` object, one of the
+    /// two shapes opencode loads (`{ id, effect }` is the other,
+    /// `packages/core/src/plugin/module.ts:78-91`).
     fn exports_a_plugin(content: &str) -> bool {
         content
             .split_once("export default {")

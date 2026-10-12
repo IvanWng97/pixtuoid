@@ -438,23 +438,14 @@ mod tests {
 
     /// `session.forked`'s `parentID` is the session it was copied from, beside
     /// a message `boundary` (`packages/schema/src/session-event.ts:187-200`),
-    /// and the fork's own row keeps it as `fork_session_id`, with `parent_id`
-    /// null (`packages/core/src/session/projector.ts:160-161`), so a fork
-    /// registers as its own root on its first turn.
+    /// not a parent.
     #[test]
-    fn a_fork_is_its_own_root_not_a_child() {
+    fn a_fork_is_no_child() {
         assert!(
             decode_all(json!({"type": "session.forked", "data": {
                 "sessionID": "ses_f", "parentID": "ses_p", "boundary": {}}}))
             .is_empty()
         );
-        assert!(matches!(
-            decode(json!({"type": EXECUTION_STARTED, "data": {"sessionID": "ses_f"}})),
-            AgentEvent::SessionStart {
-                parent_id: None,
-                ..
-            }
-        ));
     }
 
     #[test]

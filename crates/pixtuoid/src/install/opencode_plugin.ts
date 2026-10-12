@@ -59,15 +59,17 @@ const send = (payload: string) =>
     }
   })
 
-// The fields of a session's record the decoder reads, or none when it cannot be
-// read: `ctx.session.get`'s endpoint answers `{ data: PublicSessionInfo }`
+// A session's record, or nothing when it cannot be read: `ctx.session.get`'s
+// endpoint answers `{ data: PublicSessionInfo }`
 // (`packages/protocol/src/groups/session.ts:127-130`, `:287-290`), whose lone
 // `data` the promise adapter unwraps (`packages/plugin/src/promise/adapter.ts:186-196`),
-// so it returns the `Session.Info` (`packages/schema/src/session.ts:31-53`).
+// so it returns the `Session.Info` (`packages/schema/src/session.ts:31-53`). A
+// fork's row keeps its source in `fork_session_id` with `parent_id` null
+// (`packages/core/src/session/projector.ts:160-161`), read back as `fork`, not
+// `parentID` (`packages/core/src/session/info.ts:21-28`), so a fork stays a root.
 const record = async (ctx: any, sessionID: unknown) => {
   try {
-    const s = await ctx.session.get({ sessionID })
-    return { location: s?.location, parentID: s?.parentID, model: s?.model }
+    return (await ctx.session.get({ sessionID })) ?? {}
   } catch {
     return {}
   }
