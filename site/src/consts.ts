@@ -2,10 +2,11 @@ import themesData from './themes.json';
 import weatherData from './weather.json';
 import showcaseData from './showcase.json';
 import featuresData from './features.json';
+import { REPO_SLUG } from '../config/gh-stars.mjs';
 
 // Base is '/' today, but every internal URL still goes through asset()/BASE_URL
 // so a base change can never silently break links.
-export const REPO = 'https://github.com/IvanWng97/pixtuoid';
+export const REPO = `https://github.com/${REPO_SLUG}`;
 export const CRATES = 'https://crates.io/crates/pixtuoid';
 export const SPONSOR = 'https://buymeacoffee.com/IvanWng97';
 // The build authority is `site` in astro.config.mjs; this is only the shared

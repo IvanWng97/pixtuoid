@@ -2,7 +2,7 @@
 Thanks for contributing to pixtuoid! Before you open this PR:
 - Read AGENTS.md (root) — architecture invariants & conventions are load-bearing.
 - Push: the pre-push hook runs `just preflight` (lint + clippy); CI runs the tests. `just preflight full` runs CI's Rust recipes locally.
-- From a fork: a maintainer starts the review ([how](https://github.com/IvanWng97/pixtuoid/blob/main/docs/CONTRIBUTING.md#the-merge-gate)).
+- From a fork: a maintainer starts the review ([how](https://github.com/pixtuoid/pixtuoid/blob/main/docs/CONTRIBUTING.md#the-merge-gate)).
 Delete sections that don't apply. Keep it short — the diff speaks for itself.
 -->
 
@@ -49,7 +49,7 @@ pixel painter, attach a cropped snapshot and self-critique:
 - [ ] Errors propagate via `anyhow`/`thiserror`.
 - [ ] No new `println!`/`eprintln!` on a production path (use `tracing`).
 - [ ] Docs updated in the same commit if I changed module structure, architecture, or public API (`AGENTS.md` / `README.md`).
-- [ ] Checked against [`REVIEW.md`](https://github.com/IvanWng97/pixtuoid/blob/main/REVIEW.md#common), the rules the review bots apply.
+- [ ] Checked against [`REVIEW.md`](https://github.com/pixtuoid/pixtuoid/blob/main/REVIEW.md#common), the rules the review bots apply.
 - [ ] CI is green.
 
 ## AI assistance

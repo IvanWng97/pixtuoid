@@ -1,6 +1,6 @@
 # Pixtuoid for Raycast
 
-Manage [Pixtuoid](https://github.com/IvanWng97/pixtuoid) — the terminal-native,
+Manage [Pixtuoid](https://github.com/pixtuoid/pixtuoid) — the terminal-native,
 pixel-art office that visualizes your running AI coding-agent sessions — without
 leaving Raycast.
 

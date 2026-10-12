@@ -79,7 +79,7 @@ traversal, or any network egress), please report it.
 ## Reporting a Vulnerability
 
 Report privately via
-[GitHub private vulnerability reporting](https://github.com/IvanWng97/pixtuoid/security/advisories/new).
+[GitHub private vulnerability reporting](https://github.com/pixtuoid/pixtuoid/security/advisories/new).
 
 The [org's security policy](https://github.com/pixtuoid/.github/blob/main/SECURITY.md)
 sets the response times.

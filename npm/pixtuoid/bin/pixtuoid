@@ -16,7 +16,7 @@ if (!bin) {
       process.arch +
       ".\n" +
       "Install with `cargo install pixtuoid pixtuoid-hook`, or download a build:\n" +
-      "https://github.com/IvanWng97/pixtuoid/releases/latest\n"
+      "https://github.com/pixtuoid/pixtuoid/releases/latest\n"
   );
   process.exit(1);
 }

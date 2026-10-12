@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import process from 'node:process';
-import { E2E_STAR_COUNT, fetchStarCount } from './gh-stars.mjs';
+import { readFileSync } from 'node:fs';
+import { E2E_STAR_COUNT, REPO_SLUG, fetchStarCount } from './gh-stars.mjs';
 
 const ok = (count) =>
   /** @type {any} */ ({ ok: true, json: async () => ({ stargazers_count: count }) });
@@ -73,4 +74,11 @@ test('a set-but-empty GH_STARS_E2E behaves as unset (degenerate-env rule)', asyn
     if (prev === undefined) delete process.env.GH_STARS_E2E;
     else process.env.GH_STARS_E2E = prev;
   }
+});
+
+test("install.json's GitHub links name REPO_SLUG, the copy JSON can't import", () => {
+  const json = readFileSync(new URL('../src/install.json', import.meta.url), 'utf8');
+  const slugs = [...json.matchAll(/github\.com\/([\w.-]+\/[\w.-]+)/g)].map((m) => m[1]);
+  assert.ok(slugs.length > 0, 'install.json names no GitHub repository');
+  for (const slug of slugs) assert.equal(slug, REPO_SLUG);
 });

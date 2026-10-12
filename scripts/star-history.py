@@ -593,16 +593,16 @@ def test_header_halves_never_collide() -> None:
 def test_render_is_well_formed_and_carries_the_facts() -> None:
     series = [(_d("2026-05-24"), 2), (_d("2026-06-14"), 300), (_d("2026-08-02"), 452)]
     for theme in THEMES:
-        svg = render_svg("IvanWng97/pixtuoid", series, theme, _d("2026-08-23"))
+        svg = render_svg("pixtuoid/pixtuoid", series, theme, _d("2026-08-23"))
         root = _render_ok(svg, theme)
         if root is None:
             continue
         title = root.findtext(f"{SVG_NS}title") or ""
-        check("IvanWng97/pixtuoid" in title and "452" in title and "2026-08-23" in title, f"{theme}: <title> must carry repo, count and date; got {title!r}")
+        check("pixtuoid/pixtuoid" in title and "452" in title and "2026-08-23" in title, f"{theme}: <title> must carry repo, count and date; got {title!r}")
         check(THEMES[theme].star in svg and THEMES[theme].wall in svg, f"{theme}: the office palette must be painted")
         check(root.get("shape-rendering") == "crispEdges", f"{theme}: pixels must not be anti-aliased")
-    light = render_svg("IvanWng97/pixtuoid", series, "light", _d("2026-08-23"))
-    check(light == render_svg("IvanWng97/pixtuoid", series, "light", _d("2026-08-23")), "render must be deterministic")
+    light = render_svg("pixtuoid/pixtuoid", series, "light", _d("2026-08-23"))
+    check(light == render_svg("pixtuoid/pixtuoid", series, "light", _d("2026-08-23")), "render must be deterministic")
 
 
 def test_render_paints_only_inside_the_canvas() -> None:
@@ -614,7 +614,7 @@ def test_render_paints_only_inside_the_canvas() -> None:
         [],
     )
     for series in cases:
-        svg = render_svg("IvanWng97/pixtuoid_with-a.long-name", series, "light", _d("2026-08-23"))
+        svg = render_svg("pixtuoid/pixtuoid_with-a.long-name", series, "light", _d("2026-08-23"))
         runs = [tuple(map(int, r)) for r in RUN_RE.findall(svg)]
         check(bool(runs), "the chart must be painted as rectangle runs")
         outside = [r for r in runs if r[0] < 0 or r[1] < 0 or r[0] + r[2] > WIDTH or r[1] + r[3] > HEIGHT]
@@ -645,10 +645,10 @@ def test_fetch_follows_cursors_until_the_last_page() -> None:
         seen.append(variables)
         return pages[len(seen) - 1]
 
-    got = fetch_star_dates("IvanWng97/pixtuoid", "t", post=post)
+    got = fetch_star_dates("o/r", "t", post=post)
     check(got == [_d("2026-05-24"), _d("2026-05-24"), _d("2026-05-25")], f"fetch must flatten pages to dates, got {got}")
     check([v.get("after") for v in seen] == [None, "c1"], f"fetch must thread the cursor, sent {seen}")
-    check(seen[0]["owner"] == "IvanWng97" and seen[0]["name"] == "pixtuoid", "fetch must split owner/name")
+    check(seen[0]["owner"] == "o" and seen[0]["name"] == "r", "fetch must split owner/name")
 
 
 def test_fetch_refuses_a_withheld_list() -> None:

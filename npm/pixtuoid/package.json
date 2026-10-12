@@ -11,13 +11,13 @@
     "ai-agents",
     "visualizer"
   ],
-  "homepage": "https://github.com/IvanWng97/pixtuoid",
+  "homepage": "https://github.com/pixtuoid/pixtuoid",
   "bugs": {
-    "url": "https://github.com/IvanWng97/pixtuoid/issues"
+    "url": "https://github.com/pixtuoid/pixtuoid/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/IvanWng97/pixtuoid.git"
+    "url": "git+https://github.com/pixtuoid/pixtuoid.git"
   },
   "license": "(MIT AND OFL-1.1)",
   "bin": {
