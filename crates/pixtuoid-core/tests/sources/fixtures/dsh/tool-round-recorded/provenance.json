@@ -3,7 +3,7 @@
   "cli": "dsh",
   "version": "0.2.0-rc.2",
   "captured": "2026-10-12",
-  "command": "scripts/lib/capture-dsh-authed.sh — authed `dsh --profile headless` on the shared prompt (read/list/read tool rounds; the headless profile ran them without approval events)",
+  "command": "scripts/lib/capture-dsh-authed.sh — authed `dsh --profile headless` on the shared prompt (read/bash/read tool rounds; the headless profile ran them without approval events)",
   "deidentified": {
     "method": "decoder-allowlist",
     "blanked": 0
