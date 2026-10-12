@@ -240,27 +240,49 @@ assert_status() {
         fail "review status: $2: $(cat "$posted_statuses" 2>/dev/null)"
 }
 
-schema_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Load the review schema and agents")"
-# The step reads what the callee checkout stages, so a caller's own copies,
-# here decoys, never reach the model or the publisher.
-stage() { STEP_NAME="Stage the review's own files" yq -e -r ".jobs.analyze.steps[] | select(.name == strenv(STEP_NAME)) | .with.$1" "$CLAUDE_REVIEW_WORKFLOW_FILE"; }
-stage_path="$(stage path)" || fail "$CLAUDE_REVIEW_WORKFLOW_FILE stages its own files nowhere"
-schema_work="$test_dir/schema-work"
-while IFS= read -r staged; do
-    [[ -n "$staged" ]] || continue
-    mkdir -p "$schema_work/$stage_path/$(dirname "$staged")" "$schema_work/$(dirname "$staged")"
-    cp "$staged" "$schema_work/$stage_path/$staged"
-    echo '{"decoy": true}' >"$schema_work/$staged"
-done < <(stage '"sparse-checkout"')
-: >"$test_dir/schema-output"
-(cd "$schema_work" && GITHUB_OUTPUT="$test_dir/schema-output" bash -c "$schema_script") ||
-    fail "the review schema step exited non-zero on the staged files"
-# Every reader is pointed at the protocol where the checkout stages it.
-protocol=.github/prompts/review-protocol.md
-[[ -s "$schema_work/$stage_path/$protocol" ]] || fail "$CLAUDE_REVIEW_WORKFLOW_FILE does not stage $protocol"
+schema_script="$(workflow_step_script "$CLAUDE_REVIEW_WORKFLOW_FILE" "Load the review's own files")"
+# Each file comes from the workflow's own repository at its own commit, never
+# the caller's tree (here decoys), and an unset or malformed one fails the run.
+own_dir="$test_dir/own"
+own_root="$PWD"
+mkdir -p "$own_dir/bin"
+# shellcheck disable=SC2016 # The stub reads its fixtures when it runs.
+printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'path="${*: -1}"' \
+    'file="${path#repos/"$OWN_REPO"/contents/}"' \
+    '[[ "$file" != "$path" && "$file" == *"?ref=$OWN_SHA" ]] || exit 1' \
+    '[[ -z "${OWN_EMPTY:-}" ]] || exit 0' \
+    'cat "$OWN_ROOT/${file%%\?*}"' \
+    >"$own_dir/bin/gh"
+chmod +x "$own_dir/bin/gh"
+own_sha=0123456789abcdef0123456789abcdef01234567
+run_own() {
+    rm -rf "$own_dir/work" && mkdir -p "$own_dir/work/.claude-review" "$own_dir/work/.github/prompts"
+    for decoy in review-schema.json review-agents.json review-protocol.md; do
+        echo '{"decoy": true}' >"$own_dir/work/.github/prompts/$decoy"
+    done
+    : >"$test_dir/schema-output"
+    (cd "$own_dir/work" && env PATH="$own_dir/bin:$PATH" OWN_ROOT="$own_root" OWN_REPO=owner/repo OWN_SHA="$own_sha" \
+        GH_TOKEN=t WORKFLOW_REPOSITORY=owner/repo WORKFLOW_SHA="$own_sha" GITHUB_OUTPUT="$test_dir/schema-output" \
+        "$@" bash -c "$schema_script") >/dev/null 2>&1
+}
+for bad in "WORKFLOW_SHA= OWN_SHA=" "WORKFLOW_SHA=main OWN_SHA=main" "WORKFLOW_REPOSITORY= OWN_REPO=" \
+    "WORKFLOW_REPOSITORY=o/r/x OWN_REPO=o/r/x" OWN_EMPTY=1; do
+    # shellcheck disable=SC2086 # Each case is a list of assignments.
+    run_own $bad && fail "the review's own files step passed with $bad"
+done
+run_own || fail "the review's own files step exited non-zero"
+staged="$(cd "$own_dir/work/.claude-review" && find . -type f)"
+[[ "$staged" == ./* && "$staged" != *$'\n'* ]] ||
+    fail "the review's own files step wrote [${staged//$'\n'/ }] in the workspace, not one protocol file"
+protocol_dest=".claude-review/${staged#./}"
+cmp -s "$own_dir/work/$protocol_dest" .github/prompts/review-protocol.md ||
+    fail "the review's own files step staged something other than review-protocol.md at $protocol_dest"
 while IFS= read -r reader; do
-    [[ "$reader" == *"$stage_path/$protocol"* ]] ||
-        fail "a review prompt does not name the staged $stage_path/$protocol: $reader"
+    [[ "$reader" == *"$protocol_dest"* ]] ||
+        fail "a review prompt does not name the protocol at $protocol_dest: $reader"
 done < <(jq -r '.[].prompt' .github/prompts/review-agents.json && printf '%s\n' "$prompt")
 bounds="$(sed -n 's/^bounds=//p' "$test_dir/schema-output")"
 severities="$(jq -c '.severities' <<<"$bounds")"

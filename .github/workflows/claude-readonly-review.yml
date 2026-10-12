@@ -106,23 +106,6 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      # The files this workflow's code is written against, at the commit that
-      # defines this job: a caller's tree, here or in another repository,
-      # never supplies them.
-      - name: Stage the review's own files
-        if: steps.pr.outputs.reviewable == 'true'
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .claude-review/workflow
-          sparse-checkout: |
-            .github/prompts/review-schema.json
-            .github/prompts/review-agents.json
-            .github/prompts/review-protocol.md
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-
       - name: Prepare inert review input
         if: steps.pr.outputs.reviewable == 'true'
         env:
@@ -271,13 +254,33 @@ jobs:
       # inline literal is invisible to actionlint and zizmor. The CLI has no
       # --json-schema-file and rejects a path, so it must round-trip through a
       # step output; shlex.quote survives a payload containing an apostrophe.
-      - name: Load the review schema and agents
+      # Each file is the one this workflow's code is written against, at the
+      # commit that defines this job: a caller's tree, here or in another
+      # repository, never supplies it.
+      - name: Load the review's own files
         if: steps.pr.outputs.reviewable == 'true'
         id: schema
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: |
           set -euo pipefail
+          [[ "$WORKFLOW_REPOSITORY" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ && "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error title=No workflow commit::repository '$WORKFLOW_REPOSITORY', sha '$WORKFLOW_SHA'"
+            exit 1
+          }
+          own="$RUNNER_TEMP/review-own"
+          mkdir -p "$own"
+          fetch() {
+            gh api -H "Accept: application/vnd.github.raw" \
+              "repos/${WORKFLOW_REPOSITORY}/contents/$1?ref=${WORKFLOW_SHA}" > "$2"
+            test -s "$2"
+          }
+          fetch .github/prompts/review-schema.json "$own/review-schema.json"
+          fetch .github/prompts/review-agents.json "$own/review-agents.json"
+          fetch .github/prompts/review-protocol.md .claude-review/protocol.md
           quoted() { jq -c . "$1" | python3 -c 'import shlex,sys; sys.stdout.write(shlex.quote(sys.stdin.read().strip()))'; }
-          own=.claude-review/workflow/.github/prompts
           printf 'json=%s\nagents=%s\n' "$(quoted "$own/review-schema.json")" \
             "$(quoted "$own/review-agents.json")" >>"$GITHUB_OUTPUT"
           jq -r '.properties as $p | $p.findings.items.properties as $f
@@ -315,8 +318,8 @@ jobs:
           show_full_output: false
           prompt: >-
             Follow the Scope, Common and Orchestrator sections of the review
-            protocol, .claude-review/workflow/.github/prompts/review-protocol.md,
-            and ${{ inputs.prompt_path }}'s Common section. Your inputs are
+            protocol, .claude-review/protocol.md, and ${{ inputs.prompt_path }}'s
+            Common section. Your inputs are
             under .claude-review/: pr.diff
             (the PR against the trusted default-branch tree you run in),
             review-context.md, pr-description.json, prior-threads.json,

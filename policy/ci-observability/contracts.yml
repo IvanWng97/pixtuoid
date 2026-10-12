@@ -28,47 +28,50 @@
   file: .github/workflows/claude-readonly-review.yml
   why: >-
     Checking out the PR head here runs untrusted files beside the base branch's
-    credentials, so the caller's one checkout is its default branch and any
-    other is reviewer-stages-its-own-files'. (A persisted checkout token is
-    zizmor's `artipacked`.)
+    credentials. (A persisted checkout token is zizmor's `artipacked`.)
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@"))]
-    | (map(select(.with.repository == null)) | length == 1
-         and .[0].with.ref == "${{ github.event.repository.default_branch }}")
-      and all(.[]; .with.repository == null or .with.repository == "${{ job.workflow_repository }}")
+    | length == 1
+      and .[0].with.ref == "${{ github.event.repository.default_branch }}"
   break:
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with.ref)
       = "${{ github.event.pull_request.head.sha }}"
     - '.jobs.analyze.steps += [{"uses": "actions/checkout@v7"}]'
-    - '.jobs.analyze.steps += [{"uses": "actions/checkout@v7", "with": {"repository": "${{ github.event.pull_request.head.repo.full_name }}"}}]'
 
 - id: reviewer-stages-its-own-files
   file: .github/workflows/claude-readonly-review.yml
   why: >-
     The review schema, agents and protocol are this workflow's code, so they
     come from the commit that defines the job, never a caller's tree, which an
-    outside caller pins apart from this workflow. Cone mode adds every top-level file
-    (git-scm.com/docs/git-sparse-checkout, "Cone mode handling"), which would
-    set this repository's AGENTS.md and REVIEW.md before a caller's review;
-    the path is inside reviewer-model-only-reads' claudeMdExcludes and apart
-    from .claude-review/head/, where a PR's own copies of these files land.
+    outside caller pins apart from this workflow. They arrive as API data, so
+    no other file of this repository enters the workspace the model reads; the
+    schema and agents land outside it, the protocol inside
+    reviewer-model-only-reads' claudeMdExcludes and apart from
+    .claude-review/head/, where a PR's own copies of these files land.
   expected: |-
-    .github/prompts/review-agents.json
-    .github/prompts/review-protocol.md
-    .github/prompts/review-schema.json
+    .github/prompts/review-agents.json "$own/review-agents.json"
+    .github/prompts/review-protocol.md .claude-review/protocol.md
+    .github/prompts/review-schema.json "$own/review-schema.json"
   assert: |
-    [.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@")) | select(.with.repository != null)]
-    | length == 1
-      and (.[0].with | .repository == "${{ job.workflow_repository }}" and .ref == "${{ job.workflow_sha }}"
-           and .["sparse-checkout-cone-mode"] == false and .path == ".claude-review/workflow"
-           and ((.["sparse-checkout"] // "") | split("\n") | map(select(. != "")) | sort | join("\n")) == $expected)
+    [.jobs.analyze.steps[] | select(.name == "Load the review's own files")]
+    | length == 1 and (.[0] | has("uses") | not)
+      and .[0].env == {"GH_TOKEN": "${{ github.token }}", "WORKFLOW_REPOSITORY": "${{ job.workflow_repository }}",
+                       "WORKFLOW_SHA": "${{ job.workflow_sha }}"}
+      and (.[0].run as $run
+           | ([$run | scan("(?m)^ *own=(.*)$")] == [["\"$RUNNER_TEMP/review-own\""]])
+             and ([$run | scan("gh api")] | length == 1)
+             and ($run | contains("\"repos/${WORKFLOW_REPOSITORY}/contents/$1?ref=${WORKFLOW_SHA}\""))
+             and ([$run | scan("(?m)^ *fetch +(\\S+) +(\\S+) *$") | join(" ")] | sort | join("\n")) == $expected)
   break:
-    - (.jobs.analyze.steps[] | select(.name == "Stage the review's own files") | .with.ref) = "main"
-    - (.jobs.analyze.steps[] | select(.name == "Stage the review's own files") | .with) |= del(.["sparse-checkout-cone-mode"])
-    - (.jobs.analyze.steps[] | select(.name == "Stage the review's own files") | .with["sparse-checkout"]) += ".github/\n"
-    - (.jobs.analyze.steps[] | select(.name == "Stage the review's own files") | .with.path) = ".claude-review/head"
-    - .jobs.analyze.steps |= map(select(.name != "Stage the review's own files"))
+    - (.jobs.analyze.steps[] | select(.name == "Load the review's own files") | .env.WORKFLOW_SHA) = "${{ github.sha }}"
+    - (.jobs.analyze.steps[] | select(.name == "Load the review's own files") | .env.WORKFLOW_REPOSITORY) = "${{ github.repository }}"
+    - (.jobs.analyze.steps[] | select(.name == "Load the review's own files") | .run) += "\nfetch AGENTS.md .claude-review/AGENTS.md"
+    - (.jobs.analyze.steps[] | select(.name == "Load the review's own files") | .run) |= sub(" \\.claude-review/protocol\\.md"; " .claude-review/head/protocol.md")
+    - (.jobs.analyze.steps[] | select(.name == "Load the review's own files") | .run) |= sub("own=\"\\$RUNNER_TEMP/review-own\""; "own=.claude-review/head")
+    - (.jobs.analyze.steps[] | select(.name == "Load the review's own files") | .run) += "\ngh api repos/x/y/contents/z > .claude-review/z"
+    - (.jobs.analyze.steps[] | select(.name == "Load the review's own files") | .run) |= sub("\\?ref=\\$\\{WORKFLOW_SHA\\}"; "")
+    - .jobs.analyze.steps |= map(select(.name != "Load the review's own files"))
 
 - id: reviewer-model-only-reads
   file: .github/workflows/claude-readonly-review.yml
