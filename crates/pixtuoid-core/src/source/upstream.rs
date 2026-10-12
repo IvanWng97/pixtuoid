@@ -176,7 +176,7 @@ impl Yield {
     }
 
     /// Whether it is one value, which only one name of ours can watch.
-    pub const fn is_one(self) -> bool {
+    pub(crate) const fn is_one(self) -> bool {
         match self {
             Self::One { .. } => true,
             Self::Declaration | Self::Family | Self::Ours | Self::Fields => false,
@@ -185,7 +185,7 @@ impl Yield {
 
     /// Why a sibling sweep cannot run off this yield. `all` says the sweep's
     /// family is [`Family::All`], which only a yield confined to the family serves.
-    pub const fn sibling_refusal(self, all: bool) -> Option<&'static str> {
+    pub(crate) const fn sibling_refusal(self, all: bool) -> Option<&'static str> {
         match self {
             Self::Ours | Self::One { .. } => Some("sweeps siblings off a reader that yields none"),
             Self::Fields => {
