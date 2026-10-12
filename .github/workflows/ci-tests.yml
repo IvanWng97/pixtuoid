@@ -81,7 +81,7 @@ jobs:
         if: ${{ inputs.full }}
         uses: ./.github/actions/upload-codecov
         with:
-          file: lcov.info
+          file: codecov.json
           flag: ${{ matrix.flag }}
       - name: Upload test results to Mergify CI Insights
         if: ${{ !cancelled() && env.HAS_MERGIFY_TOKEN == 'true' }}
