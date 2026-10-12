@@ -59,7 +59,7 @@ pub fn ceiling_amplitude() -> f32 {
 pub const LIMITER_ATTACK: std::time::Duration = std::time::Duration::from_millis(5);
 
 /// How fast each sink's limiter lets its gain back up: well inside one beat
-/// ([`compose::DAY_BPM`]'s fastest), so one loud hit never ducks the next.
+/// (`compose::DAY_BPM`'s fastest), so one loud hit never ducks the next.
 pub const LIMITER_RELEASE: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Active-agent count at which the office reads BUSY (full band + dense
