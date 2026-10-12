@@ -411,7 +411,7 @@ fn check_watch(source: &str, w: &Watch, fetched: &mut Fetched, report: &mut Repo
     match w.when {
         When::Vanishes => {
             let now = match w.read {
-                Read::Sole { .. } => format!(
+                Read::RustStr { .. } => format!(
                     " Upstream declares `{}` there now.",
                     upstream
                         .iter()
@@ -459,7 +459,7 @@ fn floored(w: &Watch) -> bool {
         && !w.read.confined_to_family()
 }
 
-/// Upstream's names off every `(label, path, text)` document of `w`; `None`
+/// Upstream's names off every `(label, text)` document of `w`; `None`
 /// once it has filed why it could not. Every document must yield, as every
 /// one must fetch: a union read off the rest would hide what changed in the
 /// one that did not.
@@ -474,7 +474,6 @@ fn read_docs(
     for (label, text) in docs {
         let read = match w.read {
             Read::Each { pattern } => read::each(text, pattern, ours),
-            Read::Sole { pattern } => read::sole(text, pattern),
             Read::RustStr { item } => read::rust_str(text, item),
             Read::RustArms { name, arm } => read::rust_arms(text, name, arm),
             Read::RustEnum { name } => read::rust_enum(text, name),

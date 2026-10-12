@@ -254,15 +254,6 @@ fn one_unreadable_document_skips_the_whole_union() {
 #[test]
 fn a_broken_pattern_of_ours_blames_ours() {
     const EACH: Watch = each(&[doc("e.ts")], r"({name}");
-    const SOLE: Watch = Watch {
-        id: "t.sole",
-        ours: || vec!["agent"],
-        docs: &[doc("e.ts")],
-        read: Read::Sole { pattern: "(" },
-        when: When::Vanishes,
-        finding: Finding::Breaking("x"),
-        siblings: None,
-    };
     const ARMS: Watch = Watch {
         id: "t.arms",
         ours: || vec!["start"],
@@ -275,7 +266,7 @@ fn a_broken_pattern_of_ours_blames_ours() {
         finding: Finding::Breaking("x"),
         siblings: None,
     };
-    for w in [&EACH, &SOLE, &ARMS] {
+    for w in [&EACH, &ARMS] {
         let r = check(&Served::default().with(&raw("e.ts"), "enum Events {\n"), w);
         assert!(r.breaking.is_empty() && r.blind.len() == 1, "{r:?}");
         assert!(r.blind[0].contains("Our own declaration"), "{r:?}");
@@ -325,22 +316,18 @@ fn a_document_is_fetched_once_per_run_and_a_failure_filed_once() {
 }
 
 #[test]
-fn a_sole_read_names_what_upstream_declares_now() {
+fn a_rust_str_read_names_what_upstream_declares_now() {
     const W: Watch = Watch {
-        id: "t.sole",
+        id: "t.str",
         ours: || vec!["agent"],
         docs: &[doc("t.rs")],
-        read: Read::Sole {
-            pattern: r#"fn name\(\) -> &str \{ "([^"]+)""#,
-        },
+        read: Read::RustStr { item: "NAME" },
         when: When::Vanishes,
         finding: Finding::Breaking("no delegation"),
         siblings: None,
     };
-    let renamed = Served::default().with(
-        &raw("t.rs"),
-        "enum Events {}\nfn name() -> &str { \"task\" }",
-    );
+    let renamed =
+        Served::default().with(&raw("t.rs"), "enum Events {}\nconst NAME: &str = \"task\";");
     let r = check(&renamed, &W);
     assert_eq!(r.breaking.len(), 1, "{r:?}");
     assert!(r.breaking[0].contains("declares `task` there now"), "{r:?}");
@@ -646,7 +633,7 @@ fn rendering_a_pattern_yields_text_it_matches() {
 fn page(w: &Watch, names: &[&str]) -> String {
     let anchors: Vec<String> = w.docs.iter().map(|doc| render(doc.anchor, "")).collect();
     match w.read {
-        Read::Each { pattern } | Read::Sole { pattern } => {
+        Read::Each { pattern } => {
             let decls: Vec<String> = names.iter().map(|n| render(pattern, n)).collect();
             format!("{}\n{}\n", anchors.join("\n"), decls.join("\n"))
         }
@@ -828,11 +815,9 @@ fn near_miss(w: &Watch, name: &str) -> String {
         Read::MdHeadings { .. } => format!("## PxdOther\n### {name}\n"),
         Read::PySet { .. } => format!("PXD_OTHER = {{\"{name}\"}}\n"),
         Read::RustMacroRows { .. } => format!("pxd_other! {{\n    {name} {{ }},\n}}\n"),
-        Read::Each { .. }
-        | Read::Sole { .. }
-        | Read::Matches { .. }
-        | Read::JsonUnion { .. }
-        | Read::JsonKeys => String::new(),
+        Read::Each { .. } | Read::Matches { .. } | Read::JsonUnion { .. } | Read::JsonKeys => {
+            String::new()
+        }
     }
 }
 
@@ -1076,9 +1061,7 @@ fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
             Read::Each { pattern } => Regex::new(&pattern.replace("{name}", "n"))
                 .map(drop)
                 .map_err(|e| e.to_string()),
-            Read::Sole { pattern } | Read::Matches { pattern } => {
-                captures(pattern).map_err(|e| e.to_string())
-            }
+            Read::Matches { pattern } => captures(pattern).map_err(|e| e.to_string()),
             Read::RustArms { name, arm } => match read::rust_arms("", name, arm) {
                 Err(Unread::Ours(e)) => Err(e),
                 _ => Ok(()),

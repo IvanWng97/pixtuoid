@@ -62,15 +62,6 @@ pub(super) fn each(text: &str, pattern: &str, ours: &BTreeSet<&str>) -> Result<N
     Ok(found)
 }
 
-pub(super) fn sole(text: &str, pattern: &str) -> Result<Names, Unread> {
-    let re = Regex::new(pattern)?;
-    let at = one(re.find_iter(text), "match of its pattern")?.start();
-    re.captures_at(text, at)
-        .and_then(|c| c.get(1))
-        .map(|m| [m.as_str().to_owned()].into())
-        .ok_or_else(|| missing("a match of its pattern with no name in it"))
-}
-
 pub(super) fn matches(text: &str, pattern: &str) -> Result<Names, Unread> {
     let found: Names = Regex::new(pattern)?
         .captures_iter(text)
@@ -869,25 +860,6 @@ mod tests {
     }
 
     #[test]
-    fn a_sole_read_refuses_a_second_declaration() {
-        let p = r#"const M: &str = "([^"]+)""#;
-        let read = |text: &str| found(sole(text, p));
-        assert_eq!(read(r#"const M: &str = "a";"#), names(&["a"]));
-        // A `#[cfg(test)]` twin above the real one would make a first match wrong.
-        assert_eq!(
-            read("const M: &str = \"a\";\nconst M: &str = \"b\";"),
-            Err("more than one match of its pattern".to_owned())
-        );
-        assert_eq!(
-            read("const N: &str = \"a\";"),
-            Err("no match of its pattern".to_owned())
-        );
-        // Plain text: a commented-out copy is a second match, which a source
-        // declaration is read by `RustStr` to avoid.
-        assert!(read("// const M: &str = \"old\";\nconst M: &str = \"a\";").is_err());
-    }
-
-    #[test]
     fn a_rust_str_is_the_literal_its_one_item_evaluates_to() {
         let src = r#"
             pub(crate) const METHOD: &str = "_x.ai/session/update";
@@ -950,6 +922,8 @@ mod tests {
                     "wait" => Ok( Action::Wait ),
                     "noted" => Ok(/* the original */ Action::Start),
                     "guarded" if ready => Ok(Action::Start),
+                    "outer" => match tail { "nested" => Ok(Action::Start), _ => Err(()) },
+                    "wrapped" => wrap(Ok(Action::Start)),
                     "list" => Ok(Action::List),
                     _ => { Err(()) }
                 }
@@ -959,10 +933,11 @@ mod tests {
             }"#;
         let read = |t: &str| found(rust_arms(t, "parse", arm));
         // A comment inside an arm is no part of its code; a guarded arm still
-        // decodes its literal.
+        // decodes its literal; a nested match's arm is read; an arm only
+        // wrapping the target, or opening a match, yields it at no start.
         assert_eq!(
             read(src),
-            names(&["guarded", "noted", "spawn", "start", "wait"])
+            names(&["guarded", "nested", "noted", "spawn", "start", "wait"])
         );
         let default = "trait T {\n    fn parse(i: &str) -> Result<Action> {\n        match i { \"t\" => Ok(Action::Start), _ => Err(()) }\n    }\n}";
         assert_eq!(read(default), names(&["t"]));
@@ -1094,6 +1069,13 @@ mod tests {
     fn ts_fields_read_an_interface_inside_a_module_block() {
         let src = "declare module '@x/core' {\n  interface Context {\n    session: Session\n  }\n  interface Events {\n    'agent/created'(payload: {}): void\n    status: string\n  }\n}\n";
         assert_eq!(found(ts_fields(src, "Events")), names(&["status"]));
+    }
+
+    #[test]
+    fn ts_fields_read_an_interface_inside_a_namespace_or_global_block() {
+        let src = "export {};\nnamespace A.B {\n  export interface X { f: string }\n}\ndeclare global {\n  interface Y { g: string }\n}\n";
+        assert_eq!(found(ts_fields(src, "X")), names(&["f"]));
+        assert_eq!(found(ts_fields(src, "Y")), names(&["g"]));
     }
 
     #[test]
