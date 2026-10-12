@@ -37,17 +37,21 @@ jobs:
         with:
           persist-credentials: false
 
-      # GitHub shows the org `.github` repo's FUNDING.yml on every repo without
-      # its own, so that copy is the one the button counts for.
-      - name: Fetch the org's FUNDING.yml
+      # The Sponsor button as GitHub resolves it: this repo's FUNDING.yml, else
+      # the org `.github` repo's.
+      - name: Read the funding links
         env:
           GH_TOKEN: ${{ github.token }}
+          FUNDING_QUERY: >-
+            query($owner: String!, $name: String!) {
+            repository(owner: $owner, name: $name) { fundingLinks { platform url } } }
         run: >-
-          gh api "repos/$GITHUB_REPOSITORY_OWNER/.github/contents/FUNDING.yml"
-          -H "Accept: application/vnd.github.raw+json" >"$RUNNER_TEMP/FUNDING.yml"
+          gh api graphql -f query="$FUNDING_QUERY"
+          -f owner="$GITHUB_REPOSITORY_OWNER" -f name="${GITHUB_REPOSITORY#*/}"
+          >"$RUNNER_TEMP/funding.json"
 
       - name: Render the button
-        run: python3 scripts/bmc-button.py "$RUNNER_TEMP/FUNDING.yml" "$RUNNER_TEMP/button"
+        run: python3 scripts/bmc-button.py "$RUNNER_TEMP/funding.json" "$RUNNER_TEMP/button"
 
       - id: day
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
