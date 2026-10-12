@@ -278,6 +278,8 @@ assert_status '.state == "success" and .sha == "abc123"' "a published review pas
     fail "Claude publisher posted no review body"
 [[ "$(<"$published_comment")" == *"**Findings: 0**"* ]] ||
     fail "Claude publisher omitted the zero-finding count"
+[[ "$(<"$published_comment")" != *"Past the ceiling"* ]] ||
+    fail "Claude publisher reports findings past the ceiling for a review with none"
 [[ ! -e "$posted_threads" ]] ||
     fail "Claude publisher posted a review thread for zero findings"
 
@@ -1221,12 +1223,12 @@ plan_run() {
     spawn v2 verifier "candidate 2"
 }
 assert_gate() {
-    local want="$1" label="$2" log="$3" units="${4:-$two_units}" kept="${5:-1}"
+    local want="$1" label="$2" log="$3" units="${4:-$two_units}" kept="${5:-1}" overflow="${6:-0}"
     printf '%s' "$units" >"$gate_dir/.claude-review/units.json"
     jq -s . <<<"$log" >"$gate_dir/execution.json"
     : >"$gate_dir/output"
     if (cd "$gate_dir" && UNIT_PASSES="$unit_passes" EXECUTION_FILE="$gate_dir/execution.json" GITHUB_OUTPUT="$gate_dir/output" \
-        REVIEW_JSON="$(jq -cn --argjson n "$kept" '{summary: "s", findings: [range($n) | {}]}')" \
+        REVIEW_JSON="$(jq -cn --argjson n "$kept" --argjson o "$overflow" '{summary: "s", overflow: $o, findings: [range($n) | {}]}')" \
         bash -c "$gate_script") >/dev/null 2>&1; then
         [[ "$want" == fail ]] && fail "the plan gate passed $label"
         grep -qx "refuted=$want" "$gate_dir/output" || fail "the plan gate passed $label without refuted=$want: $(<"$gate_dir/output")"
@@ -1245,6 +1247,9 @@ assert_gate fail "a unit pass a subagent made" "$(plan_run | jq -c '(select(.mes
 assert_gate fail "no design reviewer" "$(plan_run | jq -c 'select(.message.content[0] | (.id // .tool_use_id) != "d")')"
 assert_gate fail "no correctness reviewer" "$(plan_run | jq -c 'select(.message.content[0] | (.id // .tool_use_id) != "c")')"
 assert_gate fail "a kept finding no verifier saw" "$(plan_run)" "$two_units" 3
+# A finding past the ceiling was kept too: it needed its verifier, and it isn't a refuted one.
+assert_gate 0 "a verifier per kept finding, past the ceiling included" "$(plan_run)" "$two_units" 1 1
+assert_gate fail "a finding past the ceiling no verifier saw" "$(plan_run)" "$two_units" 1 2
 assert_gate fail "a run that spawned nothing" "$(spawn c correctness-reviewer x | jq -c 'select(.type == "user")')"
 assert_gate 0 "a plan with no units" "$(
     spawn c correctness-reviewer x

@@ -364,7 +364,8 @@ jobs:
             --argjson review "$REVIEW_JSON" '
             . as $spawns
             | def ran($type): [$spawns[] | select(.subagent_type == $type)];
-            ($review.findings | length) as $kept
+            # A finding past the ceiling was kept and verified, just not posted.
+            (($review.findings | length) + $review.overflow) as $kept
             | select(all($units[0][]; .id as $id
                        | [ran("unit-reviewer")[] | select([.prompt | scan("(?i)\\bunit (u[0-9]+)\\b")[0]] | unique == [$id])]
                          | length >= $passes)
