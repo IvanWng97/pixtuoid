@@ -37,7 +37,11 @@ queue_rules:
       - -head ~= ^release-plz-
       - check-success = ci-gate
       - check-success = GitGuardian Security Checks
-      - check-success = claude-review
+      # The review skips a fork's or a bot's PR (pixtuoid/.github's
+      # claude-review.yml), which a human reviews.
+      - or:
+          - check-success = claude-review / claude-review
+          - check-skipped = claude-review / claude-review
       - "#review-threads-unresolved = 0"
     # The queue's draft PR, where ci-gate is the full tier.
     merge_conditions:

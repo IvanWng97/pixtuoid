@@ -200,16 +200,16 @@ ci-observability:
     bash policy/ci-observability/action_behavior_test.sh
 
 # Every committed JSON Schema, held to the metaschema. These are contracts a
-# consumer reads at runtime — the review schema reaches the Claude CLI, the
-# raycast ones pin the `--json` shape — and nothing else parses them: a broken
-# one is invisible until the consumer refuses to start.
+# consumer reads at runtime — the raycast ones pin the `--json` shape — and
+# nothing else parses them: a broken one is invisible until the consumer
+# refuses to start.
 [doc('Validate every committed JSON Schema against the metaschema (check-jsonschema)')]
 [group('rust')]
 json-schemas:
     #!/usr/bin/env bash
     set -euo pipefail
     shopt -s nullglob
-    schemas=(.github/prompts/review-schema.json integrations/raycast/contract/*.schema.json)
+    schemas=(integrations/raycast/contract/*.schema.json)
     ((${#schemas[@]})) || { echo "error: no committed JSON Schemas found" >&2; exit 1; }
     check-jsonschema --check-metaschema "${schemas[@]}"
     echo "${#schemas[@]} JSON Schemas validated"
