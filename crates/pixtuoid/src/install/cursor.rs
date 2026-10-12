@@ -18,7 +18,7 @@ use crate::install::io;
 use crate::install::merge;
 use crate::install::target::MergeOutcome;
 #[cfg(any(test, feature = "upstream"))]
-use crate::install::target::UNFIRED_HOOK;
+use crate::install::target::UNDOCUMENTED_HOOK;
 #[cfg(any(test, feature = "upstream"))]
 use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
@@ -45,9 +45,11 @@ pub(crate) const UPSTREAM: &[Watch] = &[Watch {
         anchor: r"(?m)^#{2,4} Hook events",
         owns: "the hook-events section",
     }],
-    read: Read::MdHeadings,
+    read: Read::MdHeadings {
+        under: "Hook events",
+    },
     when: When::Vanishes,
-    finding: Finding::Breaking(UNFIRED_HOOK),
+    finding: Finding::Breaking(UNDOCUMENTED_HOOK),
     siblings: None,
 }];
 

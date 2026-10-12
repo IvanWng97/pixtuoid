@@ -58,7 +58,8 @@ trait Fetch {
 }
 
 /// One bucket per DISPOSITION, because each calls for a different action:
-/// `breaking` fix the decoder, `review` adopt, ignore or re-verify, `blind` repin by hand,
+/// `breaking` fix the decoder or the registration, `review` adopt, ignore or re-verify,
+/// `blind` repin by hand,
 /// `errors` transient. Collapsing `blind` into `breaking` is what made #793
 /// report five phantom renames.
 #[derive(Debug, Default)]
@@ -134,10 +135,11 @@ impl Report {
             out.push(String::new());
         };
         section(
-            "## ⛔ Verified upstream change — decoder will silently drop events",
+            "## ⛔ Verified upstream change — events will silently drop",
             Some(
                 "Each line was read off the upstream surface that OWNS the name: the \
-                 declaration is present and the name is gone. Fix the decoder.",
+                 declaration is present and the name is gone. Fix what the line names: \
+                 the decoder, or the hook we register.",
             ),
             &self.breaking,
         );
@@ -482,12 +484,14 @@ fn read_docs(
             Read::Sole { pattern } => read::sole(text, path, pattern),
             Read::RustArms { name, arm } => read::rust_arms(text, name, arm),
             Read::RustEnum { name } => read::rust_enum(text, name),
+            Read::RustStruct { name } => read::rust_struct(text, name),
             Read::TsFields { name } => read::ts_fields(text, name),
             Read::Matches { pattern } => read::matches(text, pattern),
             Read::MdTable { header } => read::md_table(text, header),
-            Read::MdHeadings => read::md_headings(text),
+            Read::MdHeadings { under } => read::md_headings(text, under),
             Read::PySet { decl } => read::py_set(text, decl),
             Read::RustMacroRows { name } => read::rust_macro_rows(text, name),
+            Read::TsConstArray { name } => read::ts_const_array(text, name),
             Read::JsonUnion { def, prop } => read::json_union(text, def, prop),
             Read::JsonKeys => read::json_keys(text),
         };
@@ -589,7 +593,8 @@ fn code_span(name: &str) -> String {
         .collect()
 }
 
-/// Every watch every registered source declares, over the network.
+/// Every watch the registered sources and the install targets declare, over the
+/// network.
 pub fn run(report: &mut Report) {
     check_all(&Platform, report);
 }

@@ -667,10 +667,26 @@ fn page(w: &Watch, names: &[&str]) -> String {
                 .iter()
                 .map(|n| format!("    {},\n", pascal(n)))
                 .collect();
-            format!(
-                "#[serde(tag = \"type\", rename_all = \"snake_case\")]\npub enum {name} {{\n{variants}}}\n{}\n",
-                anchors.join("\n")
+            after_decl(
+                w,
+                format!(
+                    "#[serde(tag = \"type\", rename_all = \"snake_case\")]\npub enum {name} {{\n{variants}}}"
+                ),
             )
+        }
+        Read::RustStruct { name } => {
+            let fields: String = names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| {
+                    format!("    #[serde(rename = \"{n}\", default)]\n    pub pxd_{i}: Vec<u8>,\n")
+                })
+                .collect();
+            after_decl(w, format!("pub struct {name} {{\n{fields}}}"))
+        }
+        Read::TsConstArray { name } => {
+            let members: String = names.iter().map(|n| format!("  \"{n}\",\n")).collect();
+            after_decl(w, format!("const {name} = [\n{members}] as const;"))
         }
         Read::TsFields { name } => {
             let fields: String = names.iter().map(|n| format!("  {n}: string;\n")).collect();
@@ -714,9 +730,9 @@ fn page(w: &Watch, names: &[&str]) -> String {
                 anchors.join("\n")
             )
         }
-        Read::MdHeadings => {
-            let heads: String = names.iter().map(|n| format!("#### {n}\n")).collect();
-            format!("{}\n{heads}", anchors.join("\n"))
+        Read::MdHeadings { under } => {
+            let heads: String = names.iter().map(|n| format!("### {n}\n")).collect();
+            after_decl(w, format!("## {under}\n{heads}"))
         }
         Read::PySet { decl } => {
             let members: String = names.iter().map(|n| format!("    \"{n}\",\n")).collect();
@@ -733,9 +749,21 @@ fn page(w: &Watch, names: &[&str]) -> String {
                 .iter()
                 .map(|n| format!("    {n} {{ alias: \"x\" }},\n"))
                 .collect();
-            format!("{name}! {{\n{rows}}}\n{}\n", anchors.join("\n"))
+            after_decl(w, format!("{name}! {{\n{rows}}}"))
         }
     }
+}
+
+/// `decl`, then each of `w`'s anchors it does not already carry: rendering a
+/// declaration's own head again would declare it twice.
+fn after_decl(w: &Watch, decl: String) -> String {
+    let rest: Vec<String> = w
+        .docs
+        .iter()
+        .filter(|doc| !Regex::new(doc.anchor).expect("compiles").is_match(&decl))
+        .map(|doc| render(doc.anchor, ""))
+        .collect();
+    format!("{decl}\n{}\n", rest.join("\n"))
 }
 
 /// The variant a snake_case wire name derives from.
@@ -773,9 +801,17 @@ fn near_miss(w: &Watch, name: &str) -> String {
             "#[serde(rename_all = \"snake_case\")]\nenum PxdOther {{\n    {},\n}}",
             pascal(name)
         ),
+        Read::RustStruct { .. } => {
+            format!(
+                "pub struct PxdOther {{\n    #[serde(rename = \"{name}\")]\n    pub pxd: u8,\n}}"
+            )
+        }
         Read::TsFields { .. } => format!("export interface PxdOther {{\n  {name}: string;\n}}"),
+        Read::TsConstArray { .. } => {
+            format!("const PXD_OTHER = [\n  \"{name}\",\n];\nif (n === \"{name}\") {{}}\n")
+        }
         Read::MdTable { .. } => format!("| Other | When |\n|---|---|\n| `{name}` | x |\n"),
-        Read::MdHeadings => format!("{name} is named here in prose\n"),
+        Read::MdHeadings { .. } => format!("## PxdOther\n### {name}\n"),
         Read::PySet { .. } => format!("PXD_OTHER = {{\"{name}\"}}\n"),
         Read::RustMacroRows { .. } => format!("pxd_other! {{\n    {name} {{ }},\n}}\n"),
         Read::Each { .. }
@@ -949,8 +985,9 @@ fn rs_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     out
 }
 
-/// Every `*EVENTS` registration set in `install/` is named by its module's
-/// `UPSTREAM`. A set no watch carries has no upstream check at all, and every
+/// Every `*EVENTS` registration set in `install/` is carried by a vanish watch
+/// in its module's `UPSTREAM`. A set no watch carries has no upstream check at
+/// all — an appearance watch cannot see a rename — and every
 /// gate stays green because nothing else omits it. Derived from the consts, so
 /// no exemption list drifts: opencode, omp and dsh subscribe in their plugin
 /// code and declare no `*EVENTS` const.
@@ -962,14 +999,20 @@ fn every_install_events_const_is_watched() {
     let mut found = 0;
     for path in rs_files(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/install")) {
         let src = std::fs::read_to_string(&path).expect("the module is readable");
-        let watched = upstream.find(&src).map_or("", |m| m.as_str());
+        let vanish_watches: Vec<&str> = upstream
+            .find(&src)
+            .map_or("", |m| m.as_str())
+            .split("Watch {")
+            .filter(|w| w.contains("When::Vanishes"))
+            .collect();
         for name in decl.captures_iter(&src).filter_map(|c| c.get(1)) {
             found += 1;
             let named = Regex::new(&format!(r"\b{}\b", name.as_str())).expect("compiles");
             assert!(
-                named.is_match(watched),
-                "{path:?} registers hooks as {}, but its `UPSTREAM` never watches them: \
-                 a rename upstream would leave the registration inert with nothing to say so",
+                vanish_watches.iter().any(|w| named.is_match(w)),
+                "{path:?} registers hooks as {}, but no vanish watch in its `UPSTREAM` \
+                 carries them: a rename upstream would leave the registration inert with \
+                 nothing to say so",
                 name.as_str(),
             );
         }
@@ -1021,9 +1064,11 @@ fn every_declared_pattern_compiles_and_no_anchor_is_a_guarded_name() {
             }),
             Read::PySet { decl } => Regex::new(decl).map(drop),
             Read::RustEnum { .. }
+            | Read::RustStruct { .. }
             | Read::TsFields { .. }
+            | Read::TsConstArray { .. }
             | Read::MdTable { .. }
-            | Read::MdHeadings
+            | Read::MdHeadings { .. }
             | Read::RustMacroRows { .. }
             | Read::JsonUnion { .. }
             | Read::JsonKeys => Ok(()),

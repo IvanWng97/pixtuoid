@@ -32,7 +32,7 @@ const PRE_APPROVAL_REQUEST: &str = "pre_approval_request";
 /// Every event here decodes — `every_registered_hermes_event_decodes` enforces
 /// that direction, and only that one: an event the DECODER handles and this list
 /// omits is the shape that shipped `pre_approval_request` unregistered (#930),
-/// and it is the drift watch's job, not this test's. Wire values from a
+/// and nothing checks that direction. Wire values from a
 /// real capture — session events carry the `on_` prefix, tool events don't.
 pub(crate) const HERMES_EVENTS: &[&str] = &[
     "on_session_start",
@@ -96,7 +96,13 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     },
     Watch {
         id: "hermes.blocking",
-        ours: || vec![PRE_APPROVAL_REQUEST],
+        ours: || {
+            HERMES_EVENTS
+                .iter()
+                .copied()
+                .filter(|&e| e == PRE_APPROVAL_REQUEST)
+                .collect()
+        },
         docs: &[Doc {
             at: At::Path {
                 repo: "NousResearch/hermes-agent",

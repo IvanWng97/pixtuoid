@@ -42,8 +42,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[Watch {
         anchor: r"struct HookEventsToml\b",
         owns: "`HookEventsToml`",
     }],
-    read: Read::Each {
-        pattern: r#"rename\s*=\s*"{name}""#,
+    read: Read::RustStruct {
+        name: "HookEventsToml",
     },
     when: When::Vanishes,
     finding: Finding::Breaking(UNFIRED_HOOK),

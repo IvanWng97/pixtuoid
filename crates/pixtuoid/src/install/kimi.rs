@@ -26,7 +26,7 @@ use toml::value::Table;
 use crate::install::io;
 use crate::install::target::MergeOutcome;
 #[cfg(any(test, feature = "upstream"))]
-use crate::install::target::UNFIRED_HOOK;
+use crate::install::target::UNDOCUMENTED_HOOK;
 use pixtuoid_core::source::kimi::SOURCE_NAME;
 #[cfg(any(test, feature = "upstream"))]
 use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
@@ -56,14 +56,12 @@ pub(crate) const UPSTREAM: &[Watch] = &[Watch {
             branch: "main",
             path: "docs/en/customization/hooks.md",
         },
-        anchor: "hook_event_name",
-        owns: "the hook-event payload docs",
+        anchor: r"(?m)^## Event Reference",
+        owns: "the Event Reference table",
     }],
-    read: Read::Each {
-        pattern: r"\b{name}\b",
-    },
+    read: Read::MdTable { header: "Event" },
     when: When::Vanishes,
-    finding: Finding::Breaking(UNFIRED_HOOK),
+    finding: Finding::Breaking(UNDOCUMENTED_HOOK),
     siblings: None,
 }];
 

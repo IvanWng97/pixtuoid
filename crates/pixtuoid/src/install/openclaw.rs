@@ -63,11 +63,11 @@ pub(crate) const UPSTREAM: &[Watch] = &[Watch {
             branch: "main",
             path: "src/plugins/hook-types.ts",
         },
-        anchor: r"export type PluginHookName\s*=",
-        owns: "`PluginHookName`",
+        anchor: r"const PLUGIN_HOOK_NAMES\s*=",
+        owns: "`PLUGIN_HOOK_NAMES`",
     }],
-    read: Read::Each {
-        pattern: r#""{name}""#,
+    read: Read::TsConstArray {
+        name: "PLUGIN_HOOK_NAMES",
     },
     when: When::Vanishes,
     finding: Finding::Breaking("the plugin registers a hook OpenClaw never fires"),

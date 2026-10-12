@@ -77,6 +77,8 @@ pub enum Read {
     /// its ident in snake_case. Read only under `rename_all = "snake_case"`,
     /// the one spelling it derives.
     RustEnum { name: &'static str },
+    /// The serde wire names of the ONE `struct name`'s fields.
+    RustStruct { name: &'static str },
     /// The fields of the ONE `export interface name`.
     TsFields { name: &'static str },
     /// Every first group of `pattern`: `Each` turned round, so the floor can
@@ -85,13 +87,16 @@ pub enum Read {
     /// The backticked first-column names of the Markdown table whose header
     /// row begins with `header`; other tables repeat names in other columns.
     MdTable { header: &'static str },
-    /// Every one-word `##`–`####` Markdown heading.
-    MdHeadings,
+    /// The one-word titles of the direct subsections of the ONE heading
+    /// `under`; a page's other sections carry one-word headings of their own.
+    MdHeadings { under: &'static str },
     /// The string members of the `{…}` opened after the ONE match of `decl`,
     /// comments first.
     PySet { decl: &'static str },
     /// The row headers of the `name! { … }` table, comments first.
     RustMacroRows { name: &'static str },
+    /// The string members of the ONE `const name = [ … ]`, comments first.
+    TsConstArray { name: &'static str },
     /// JSON Schema: each member of `def`'s `oneOf`/`anyOf` union, as the
     /// const of its `prop` property, or its own const when `prop` is `None`.
     JsonUnion {
@@ -222,12 +227,91 @@ mod tests {
         }
     }
 
+    /// Each rule refuses the watch it exists for; the roster is held to them by
+    /// the binary's `every_declared_watch_is_runnable_and_its_id_unique`.
     #[test]
-    fn every_watch_is_one_a_checker_can_run() {
-        let mut ids = std::collections::BTreeSet::new();
-        for w in REGISTRY.iter().flat_map(|d| d.upstream.watches()) {
-            assert!(ids.insert(w.id), "watch id {} is declared twice", w.id);
-            assert_eq!(w.unrunnable(), None, "{}", w.id);
+    fn unrunnable_names_each_watch_a_checker_cannot_run() {
+        const OK: Watch = Watch {
+            id: "t.ok",
+            ours: || vec!["a", "b"],
+            docs: &[Doc {
+                at: At::Url("https://example.com/x.md"),
+                anchor: "x",
+                owns: "x",
+            }],
+            read: Read::Each {
+                pattern: r"\b{name}\b",
+            },
+            when: When::Vanishes,
+            finding: Finding::Breaking("x"),
+            siblings: None,
+        };
+        const ALL: Siblings = Siblings {
+            family: Family::All,
+            ignored: &[],
+        };
+        let arms = Read::RustArms {
+            name: "f",
+            arm: "x",
+        };
+        let cases = [
+            (
+                Watch {
+                    ours: || vec![],
+                    ..OK
+                },
+                "watches an empty set or a blank name",
+            ),
+            (
+                Watch {
+                    ours: || vec![""],
+                    ..OK
+                },
+                "watches an empty set or a blank name",
+            ),
+            (Watch { docs: &[], ..OK }, "reads no document"),
+            (
+                Watch {
+                    read: Read::Each { pattern: "x" },
+                    ..OK
+                },
+                "has an `Each` pattern that names no name",
+            ),
+            (
+                Watch {
+                    read: Read::Sole { pattern: "(x)" },
+                    ..OK
+                },
+                "reads one name off upstream but watches 2",
+            ),
+            (
+                Watch {
+                    read: arms,
+                    when: When::Appears,
+                    siblings: Some(ALL),
+                    ..OK
+                },
+                "sweeps siblings on a watch that does not fire on a vanish",
+            ),
+            (
+                Watch {
+                    siblings: Some(ALL),
+                    ..OK
+                },
+                "sweeps siblings off a reader that yields none",
+            ),
+            (
+                Watch {
+                    read: Read::MdTable { header: "E" },
+                    siblings: Some(ALL),
+                    ..OK
+                },
+                "sweeps `Family::All` off a reader that yields more than the family",
+            ),
+        ];
+        assert_eq!(OK.unrunnable(), None);
+        for (w, why) in cases {
+            assert_eq!(w.unrunnable().as_deref(), Some(why));
         }
     }
 }

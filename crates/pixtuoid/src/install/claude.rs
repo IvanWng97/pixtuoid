@@ -8,7 +8,7 @@ use crate::install::host_plugin::{self, NAME};
 use crate::install::io;
 use crate::install::merge;
 #[cfg(any(test, feature = "upstream"))]
-use crate::install::target::UNFIRED_HOOK;
+use crate::install::target::UNDOCUMENTED_HOOK;
 use crate::install::target::{HostRegistration, LegacyConfig, Unregistered};
 use crate::install::verify::ShimRef;
 #[cfg(any(test, feature = "upstream"))]
@@ -42,7 +42,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[Watch {
     }],
     read: Read::MdTable { header: "Event" },
     when: When::Vanishes,
-    finding: Finding::Breaking(UNFIRED_HOOK),
+    finding: Finding::Breaking(UNDOCUMENTED_HOOK),
     siblings: None,
 }];
 

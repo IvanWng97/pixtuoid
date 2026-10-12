@@ -226,6 +226,10 @@ pub enum Unregistered {
 pub(crate) const UNFIRED_HOOK: &str =
     "we register a hook it never fires, so the decoder is never reached (no sprite)";
 
+/// A docs page can lag the CLI, so its vanish is a likely rename, not a proven one.
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const UNDOCUMENTED_HOOK: &str = "likely renamed: we register a hook it no longer fires, so the decoder is never reached (no sprite)";
+
 pub(crate) const CLAUDE: Target = Target {
     name: "claude",
     core_source: pixtuoid_core::source::claude_code::SOURCE_NAME,

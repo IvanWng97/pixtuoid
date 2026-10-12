@@ -758,8 +758,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
     """The gate #941 asks for: EVERY surface row's check, both directions, offline.
 
     Each document is BUILT from the set we depend on, so an added event cannot make
-    this stale, and in the UPSTREAM spelling — the trap that hid codewhale's arm in
-    review (upstream declares `MessageSubmit`, we register `message_submit`)."""
+    this stale."""
     real = d.fetch
     try:
         rep0 = d.Report()
@@ -768,12 +767,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
         full: dict[str, list[str]] = {
             f: sorted(getattr(ours, f) or ()) for f, *_ in d.SURFACE_ROWS
         }
-
-        def pascal(name: str) -> str:
-            return "".join(p.title() for p in name.split("_"))
-
-        def bare_enum(enum: str, names: list[str]) -> str:
-            return f"pub enum {enum} {{\n" + "".join(f"    {n},\n" for n in names) + "}\n"
 
         def omp_extension_docs(reads: list[str]) -> dict[str, str]:
             """The three extension-API docs, shaped like upstream: the anchors'
@@ -818,10 +811,10 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             }
 
         cases = [
-            ("openclaw_gateway_port", str, lambda ns: {
+            ("openclaw_gateway_port", lambda ns: {
                 d.OPENCLAW_PATHS_URL: f"export const DEFAULT_GATEWAY_PORT = {ns[0]};\n"}),
-            ("omp_extension_reads", str, omp_extension_docs),
-            ("omp_extension_subdir", str, lambda ns: {
+            ("omp_extension_reads", omp_extension_docs),
+            ("omp_extension_subdir", lambda ns: {
                 d.OMP_EXT_DISCOVERY_URL:
                     "export async function discoverExtensionModulePaths() {}\n"
                     + "".join(
@@ -831,7 +824,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 d.OMP_DIRS_URL:
                     "export function getAgentDir(): string {\n"
                     "\treturn dirs.agentDir;\n}\n"}),
-            ("dsh_plugin_events", str, lambda ns: {
+            ("dsh_plugin_events", lambda ns: {
                 d.DSH_RUNTIME_TYPES_URL:
                     "declare module '@deepseek-ai/cordis' {\n  interface Events {\n"
                     + "\n".join(f"'{n}'" for n in ns),
@@ -862,27 +855,24 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             d.run_checks(d.read_our_names(rep), report=rep)
             return rep
 
-        for field, spell, build in cases:
+        for field, build in cases:
             names = full[field]
             check(bool(names), f"{field}: the fragment supplies a set")
             victims = names[:1]
-            # The vanish arm ADDS as it drops, in the name's own shape — below the
-            # floor the check SKIPS. `_` not case is the axis (cursor's lone `stop`).
-            # The decoy is built from the VICTIM, so the mutated document carries the
-            # dropped name's spelling in a NON-declaration position: that is the only
-            # shape that can tell `f'"{name}"' not in text` from `name not in text`.
-            stem = spell(victims[0])
+            # The vanish arm ADDS as it drops, in the name's own shape. The decoy is
+            # built from the VICTIM, so the mutated document carries the dropped
+            # name's spelling in a NON-declaration position: that is the only shape
+            # that can tell `f'"{name}"' not in text` from `name not in text`.
+            stem = victims[0]
             if stem.isdigit():
                 # A numeric VALUE row: a `Pxd` suffix leaves our digits at the front,
                 # where the reader's `(\d+)` finds them and the arm reads unchanged.
                 sfx = ("0", "00")
-            elif "_" in stem:
-                sfx = ("_pxd", "_pxdb")
             else:
                 sfx = ("Pxd", "Pxdb")
-            kept = [spell(n) for n in names if n not in victims]
+            kept = [n for n in names if n not in victims]
 
-            intact = drive(build([spell(n) for n in names]))
+            intact = drive(build(names))
             check(not intact.breaking,
                   f"{field}: an intact document must stay silent; got {intact.breaking}")
             rep = drive(build(kept + [stem + s for s in sfx]))

@@ -360,6 +360,8 @@ hack:
     cargo hack --feature-powerset --no-dev-deps clippy --workspace -- -D warnings
     cargo clippy -p pixtuoid-scene --no-default-features --all-targets -- -D warnings
     just test -p pixtuoid-scene --no-default-features
+    # The powerset builds no example, and otherwise only the weekly drift job builds this one.
+    cargo clippy -p pixtuoid --no-default-features --features upstream --example drift_watch -- -D warnings
 
 # Same toolchain gotcha as `api-surface` and `gen-wasm`, and it bites HARDER
 # here because the compiler's own advice is wrong: a Homebrew cargo ahead of the
@@ -909,11 +911,12 @@ gen-contract:
     SNAPSHOTS=overwrite just test -p pixtuoid --lib schema_matches_the_committed_contract
     npm --prefix integrations/raycast run gen:contract
 
-# Regenerate the committed drift-surface fragments — the values each crate's
-# install templates ship. `check_upstream_drift.py` reads these instead of
-# parsing our Rust, so a rename must be re-emitted or the watch narrows. The gate is the crates' own tests, which fail on a stale file; this is
-# just the writer. The filter runs the writing test alone: a sibling that reads
-# the stale file fails and, under nextest's fail-fast, can cancel the write.
+# Regenerate the committed drift-surface fragments — the names each crate's
+# installers ship. `check_upstream_drift.py` reads these instead of
+# parsing our Rust, so a rename must be re-emitted or the watch narrows. The
+# gate is the crates' own tests, which fail on a stale file; this is just the
+# writer. The filter runs the writing test alone: a sibling that reads the stale
+# file fails and, under nextest's fail-fast, can cancel the write.
 [doc('Regenerate crates/*/drift-surface.json after changing a shipped name')]
 [group('gen')]
 gen-drift-surface:
