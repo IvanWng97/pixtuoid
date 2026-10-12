@@ -1,7 +1,8 @@
 //! Pure mixing math — target-chasing gain ramps plus the typing/raindrop
 //! schedulers. No devices, no clocks: time arrives as `dt`/`now_s` parameters.
 
-use super::dsp::NoiseStream;
+use pixtuoid_lofi::dsp::NoiseStream;
+
 use crate::audio::StemLevels;
 
 /// The looped stems the sink plays. `typing` is NOT here — it is a scheduled
