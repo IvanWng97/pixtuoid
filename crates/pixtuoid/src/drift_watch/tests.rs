@@ -249,10 +249,10 @@ fn one_unreadable_document_skips_the_whole_union() {
     );
 }
 
-/// A pattern or anchor of ours that cannot compile is ours to fix: the
+/// A pattern or item spec of ours that cannot compile is ours to fix: the
 /// upstream wording would send the maintainer to repin a working pin.
 #[test]
-fn a_broken_pattern_of_ours_blames_ours() {
+fn a_broken_spec_of_ours_blames_ours() {
     const EACH: Watch = each(&[doc("e.ts")], r"({name}");
     const ARMS: Watch = Watch {
         id: "t.arms",
