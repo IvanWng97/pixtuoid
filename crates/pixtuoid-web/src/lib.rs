@@ -399,6 +399,21 @@ impl Office {
         pixtuoid_scene::audio::SAMPLE_RATE
     }
 
+    /// The bus ceiling (dBFS) JS's limiter holds: [`pixtuoid_scene::audio::CEILING_DBFS`].
+    pub fn audio_ceiling_dbfs(&self) -> f32 {
+        pixtuoid_scene::audio::CEILING_DBFS
+    }
+
+    /// JS's limiter attack, in seconds: [`pixtuoid_scene::audio::LIMITER_ATTACK`].
+    pub fn audio_limiter_attack_s(&self) -> f32 {
+        pixtuoid_scene::audio::LIMITER_ATTACK.as_secs_f32()
+    }
+
+    /// JS's limiter release, in seconds: [`pixtuoid_scene::audio::LIMITER_RELEASE`].
+    pub fn audio_limiter_release_s(&self) -> f32 {
+        pixtuoid_scene::audio::LIMITER_RELEASE.as_secs_f32()
+    }
+
     /// Zero-copy pointer/length into the looping bed samples for stem `idx`, in
     /// [`LoopStem::ALL`](pixtuoid_scene::audio::mixer::LoopStem::ALL) order.
     /// RE-READ after warmup completes AND whenever a tick reports `swapped`.

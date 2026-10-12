@@ -641,6 +641,7 @@ const officeDriverUrl = asset('office-driver.js');
     const audioBtn = document.getElementById('office-audio');
     const AUDIO_PREF = 'pix:audio';
     let audioCtx = null;
+    let audioBus = null;
     let audioReady = false;
     let audioPlaying = false;
     let audioBooting = false;
@@ -673,7 +674,7 @@ const officeDriverUrl = asset('office-driver.js');
       for (let i = 0; i < LOOP_STEM_COUNT; i++) {
         const g = audioCtx.createGain();
         g.gain.value = 0;
-        g.connect(audioCtx.destination);
+        g.connect(audioBus);
         const s = audioCtx.createBufferSource();
         s.buffer = audioLoopBuffer(i);
         s.loop = true;
@@ -737,7 +738,7 @@ const officeDriverUrl = asset('office-driver.js');
           if (!buf) continue;
           const g = audioCtx.createGain();
           g.gain.value = p[2];
-          g.connect(audioCtx.destination);
+          g.connect(audioBus);
           const s = audioCtx.createBufferSource();
           s.buffer = buf;
           s.connect(g);
@@ -775,6 +776,7 @@ const officeDriverUrl = asset('office-driver.js');
           /* already closed */
         }
         audioCtx = null;
+        audioBus = null;
       }
       if (audioBtn) {
         audioBtn.setAttribute('aria-pressed', 'false');
@@ -915,6 +917,7 @@ const officeDriverUrl = asset('office-driver.js');
         // iOS mutes default WebAudio on the Ring/Silent switch; 'playback' routes to the media channel so the deliberate ♩ tap plays even on silent.
         if ('audioSession' in navigator) navigator.audioSession.type = 'playback';
         audioCtx = new AudioContext();
+        audioBus = officeDriver.audioBus(audioCtx, office);
       } catch (e) {
         // WebAudio unavailable (Tor / hardened Firefox / enterprise lockdown): HIDE the ♩ too, not just a flag-set —
         // a visible button lets the click handler flip to a silent "playing" state and persist AUDIO_PREF=1.

@@ -42,6 +42,26 @@ pub(crate) const PICK_SEED: u64 = 0xDEAD;
 /// device's or AudioContext's own rate.
 pub const SAMPLE_RATE: u32 = dsp::SAMPLE_RATE;
 
+/// The peak each sink's limiter holds its summed bus under, after EBU R 128
+/// (<https://tech.ebu.ch/docs/r/r128.pdf>): "the True Peak Level of a programme
+/// shall not exceed −1 dBTP". Both sinks hold it on SAMPLE peaks, since a true
+/// peak needs oversampling, so a peak between two samples can still pass it.
+pub const CEILING_DBFS: f32 = -1.0;
+
+/// [`CEILING_DBFS`] as a linear amplitude: what each sink's clamp holds.
+#[must_use]
+pub fn ceiling_amplitude() -> f32 {
+    10f32.powf(CEILING_DBFS / 20.0)
+}
+
+/// How fast each sink's limiter pulls its gain down: whatever rises faster
+/// reaches the clamp behind it, which hard-clips it.
+pub const LIMITER_ATTACK: std::time::Duration = std::time::Duration::from_millis(5);
+
+/// How fast each sink's limiter lets its gain back up: well inside one beat
+/// (`compose::DAY_BPM`'s fastest), so one loud hit never ducks the next.
+pub const LIMITER_RELEASE: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// Active-agent count at which the office reads BUSY (full band + dense
 /// typing). 1..BUSY_ACTIVE_MIN is the moderate anchor tier; 0 is empty.
 const BUSY_ACTIVE_MIN: usize = 3;

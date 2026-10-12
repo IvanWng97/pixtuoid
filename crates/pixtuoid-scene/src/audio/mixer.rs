@@ -60,8 +60,7 @@ impl LoopStem {
 pub const RAMP_PER_S: f32 = 0.5;
 
 /// Master-bus trim under the user volume: ambient office sound must sit UNDER
-/// the user's real work/music, and the stems SUM on the live path with no soft
-/// clip.
+/// the user's real work/music.
 const BUS_TRIM: f32 = 0.35;
 
 /// Per-stem gain ramps chasing the scene's target levels. Mute ramps to
