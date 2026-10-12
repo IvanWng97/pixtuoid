@@ -560,7 +560,7 @@ _doc-targets:
 
 # CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
 # profile. Writes lcov.info + target/nextest/ci/junit.xml.
-[doc('Coverage + JUnit XML — the exact command ci-tests.yml runs on every tier, the full one uploading it (needs llvm-cov + nextest)')]
+[doc('Coverage + JUnit XML — ci-tests.yml runs it on every tier with its matrix `features` as args, the full one uploading it (needs llvm-cov + nextest)')]
 [group('rust')]
 coverage *args:
     TZ={{ TEST_TZ }} cargo llvm-cov nextest --workspace --lcov --output-path lcov.info --profile ci "$@"
