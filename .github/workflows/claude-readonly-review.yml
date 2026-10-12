@@ -452,6 +452,9 @@ jobs:
 
           finding_count="$(jq -r '.findings | length' <<< "$REVIEW_JSON")"
           overflow="$(jq -r '.overflow' <<< "$REVIEW_JSON")"
+          # Compared in jq: bash arithmetic on a huge number (1e30) errors, and
+          # an `if` reads that error as false, which would pass the status.
+          past_ceiling="$(jq -r '.overflow > 0' <<< "$REVIEW_JSON")"
           counts="$(jq -r --argjson b "$BOUNDS" '
             [.findings[].severity] as $found
             | [$b.severities[] as $s | "\([$found[] | select(. == $s)] | length) \($s)"]
@@ -473,7 +476,7 @@ jobs:
             echo
             echo "Refuted by the verifier: $REFUTED"
             echo
-            if (( overflow > 0 )); then
+            if [[ "$past_ceiling" == true ]]; then
               echo "**Past the ceiling, not posted: $overflow**"
               echo
             fi
@@ -547,9 +550,9 @@ jobs:
             exit 1
           fi
           # Success whatever the findings: each one blocks as its unresolved
-          # thread. A finding past the ceiling has no thread, so it fails the
-          # status until a re-run after the fold posts it.
-          if (( overflow > 0 )); then
+          # thread. A finding past the ceiling has none, so the status fails at
+          # this head.
+          if [[ "$past_ceiling" == true ]]; then
             state=failure
             description="$overflow findings past the ceiling: answer these threads, then comment /claude-review"
           else

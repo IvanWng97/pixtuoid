@@ -344,7 +344,13 @@ assert_threads 'length == 1' "the findings within the ceiling still open their t
     fail "Claude publisher's summary does not count the findings past its ceiling: $(<"$published_comment")"
 assert_status '.state == "failure" and .sha == "abc123"
     and .description == "2 findings past the ceiling: answer these threads, then comment /claude-review"' \
-    "findings past the ceiling fail the status until a re-run posts them"
+    "findings past the ceiling fail the status at this head"
+# The schema's integer has no maximum, and bash arithmetic reads either of these as not past zero.
+for huge in 1e30 9223372036854775808; do
+    run_publisher "$(jq -c ".overflow = $huge" <<<"$one_finding")" >/dev/null ||
+        fail "Claude publisher rejected the overflow count $huge"
+    assert_status '.state == "failure"' "an overflow count of $huge fails the status"
+done
 run_publisher "$(findings_of "$max_findings")" ||
     fail "Claude publisher rejected the schema's maxItems findings"
 run_publisher "$(findings_of $((max_findings + 1)))" >/dev/null 2>&1 &&
@@ -924,6 +930,7 @@ jq -cs '[.[:2], .[2:]]' <(
 ) >"$round_dir/comments.json"
 assert_round() {
     : >"$round_dir/output"
+    : >"$round_dir/work/.claude-review/review-context.md"
     (cd "$round_dir/work" && PATH="$round_dir/bin:$PATH" ROUND_COMMENTS="${ROUND_COMMENTS_FILE:-$round_dir/comments.json}" \
         GITHUB_OUTPUT="$round_dir/output" \
         GH_TOKEN=t PR_NUMBER=42 REPOSITORY=owner/repo REVIEW_TITLE="$review_title" HEAD_SHA="$1" \
@@ -931,6 +938,8 @@ assert_round() {
         fail "the round count exited non-zero"
     grep -qx "round=$2" "$round_dir/output" ||
         fail "the round count at head $1 output $(<"$round_dir/output"), not round=$2 ($3)"
+    [[ ! -s "$round_dir/work/.claude-review/review-context.md" ]] ||
+        fail "the round count wrote the reviewer's context too: its output is the one place the round lives"
 }
 # A PR diff whose own change is "-old / +$4" and whose hunk sits at line $2 under context $3.
 diff_of() { printf 'diff --git a/f b/f\nindex %s..%s 100644\n--- a/f\n+++ b/f\n@@ -%s,2 +%s,2 @@\n %s\n-old\n+%s\n' "$1" "$1" "$2" "$2" "$3" "$4"; }

@@ -97,8 +97,7 @@ Return only the structured result
 [`review-schema.json`](.github/prompts/review-schema.json) defines: a
 one-sentence `summary`, the kept findings, every blocking one first and
 pre-existing last, and as `overflow` the count of kept findings past the
-schema's `maxItems` ceiling, which fails the review's status until a re-run
-posts them.
+schema's `maxItems` ceiling, which fails the review's status at that head.
 
 ### Re-review
 
@@ -106,9 +105,9 @@ Never re-flag a finding that already has a thread in
 `.claude-review/prior-threads.json` (the review's own threads on the PR),
 resolved or not
 ([re-review convergence](https://code.claude.com/docs/en/code-review#what-you-can-tune));
-new findings follow [Severity](#severity), whatever the round. The round, the
-`Round:` the published review shows, counts the heads it was published at,
-one that only merges main in not advancing it; the
+new findings follow [Severity](#severity), whatever the round. The published
+review shows its `Round:`, the count of heads it was published at, where a head
+that only merges main in does not advance it; the
 [convergence contract](docs/CONTRIBUTING.md#convergence-contract) says what
 each round's fold takes.
 
