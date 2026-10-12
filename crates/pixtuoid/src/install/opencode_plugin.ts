@@ -60,8 +60,10 @@ const send = (payload: string) =>
   })
 
 // The fields of a session's record the decoder reads, or none when it cannot be
-// read: `ctx.session.get` (`packages/plugin/src/promise/session.ts:153-172`)
-// returns the `Session.Info` (`packages/schema/src/session.ts:31-53`).
+// read: `ctx.session.get`'s endpoint answers `{ data: PublicSessionInfo }`
+// (`packages/protocol/src/groups/session.ts:127-130`, `:287-290`), whose lone
+// `data` the promise adapter unwraps (`packages/plugin/src/promise/adapter.ts:186-196`),
+// so it returns the `Session.Info` (`packages/schema/src/session.ts:31-53`).
 const record = async (ctx: any, sessionID: unknown) => {
   try {
     const s = await ctx.session.get({ sessionID })
