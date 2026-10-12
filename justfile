@@ -557,8 +557,6 @@ _doc-targets:
         grep -qx "$target" <<<"$installed" || rustup target add "$target"
     done
 
-# CI-only in practice: needs cargo-llvm-cov + cargo-nextest + the `ci` nextest
-# profile. Writes codecov.json + target/nextest/ci/junit.xml.
 [doc('Coverage + JUnit XML — ci-tests.yml runs it on every tier with its matrix `features` as args, the full one uploading it (needs llvm-cov + nextest)')]
 [group('rust')]
 coverage *args:
