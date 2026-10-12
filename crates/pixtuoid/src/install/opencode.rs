@@ -26,17 +26,21 @@ const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
 const PLUGIN_TEMPLATE: &str = include_str!("opencode_plugin.ts");
 
-/// The events the plugin names: its `FORWARD` set, plus each it compares an
-/// event against (`=== "…"`), so no copy of a name escapes the pins.
+/// Every event name the plugin spells, in `FORWARD` or wherever it compares
+/// an event, read as each quoted `word.word…` literal, so no copy of a name
+/// escapes the pins.
 #[cfg(test)]
 pub(crate) fn plugin_events() -> Vec<&'static str> {
-    let compared = PLUGIN_TEMPLATE
-        .match_indices("=== \"")
-        .filter_map(|(i, m)| PLUGIN_TEMPLATE[i + m.len()..].split_once('"'))
-        .map(|(name, _)| name);
-    let mut names: Vec<&'static str> = crate::install::forward_set(PLUGIN_TEMPLATE)
-        .into_iter()
-        .chain(compared)
+    let mut names: Vec<&'static str> = PLUGIN_TEMPLATE
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .filter(|lit| {
+            lit.contains('.')
+                && lit
+                    .split('.')
+                    .all(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_lowercase()))
+        })
         .collect();
     names.sort_unstable();
     names.dedup();
