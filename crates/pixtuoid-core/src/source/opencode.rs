@@ -9,7 +9,7 @@
 //! {"type":"session.created","location":{"directory":"/repo"},"data":{"sessionID":"ses_…","location":{"directory":"/repo"},"parentID":"ses_…","model":{"id":"…"}},"_pid":12345}
 //! ```
 //!
-//! The upstream facts the decode rests on, at opencode v2 (`@opencode/cli`):
+//! The upstream facts the decode rests on, at opencode v2:
 //!
 //! - `sessionID` is on every session event and is the session's durable key,
 //!   so slots key on it.
