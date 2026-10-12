@@ -47,7 +47,7 @@ headings. A local row lens applies its [row](#escalation).
   the comments on the lines it governs first.
 - Speculative defense in depth where a primary defense holds. Every layer a
   trap names is primary, and a concrete, reachable extra-layer gap at a trust
-  boundary is `issue (non-blocking)`.
+  boundary is non-blocking.
 - Risks needing unlikely or unreachable preconditions; performance unless
   measurable (the TUI repaints at `anim::PAINT_FPS`).
 - A missing comment ([comment audit](#every-changed-file) owns the rest).
@@ -129,7 +129,7 @@ invariant-breaking sequence against:
    not shared topic; verify join keys against real production constants,
    never test fixtures.
 3. Layering: mechanism calls route through the designated orchestrator.
-4. **Proportion**, each with the cheaper alternative, `issue (non-blocking)`
+4. **Proportion**, each with the cheaper alternative, non-blocking
    unless it breaches AGENTS.md: **over-engineering** (YAGNI), a branch,
    helper, parameter, type, fallback arm or test machinery serving no
    reachable case; **low ROI**, code, API change or coupling out of proportion
