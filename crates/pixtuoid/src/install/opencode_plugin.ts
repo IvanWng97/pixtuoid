@@ -59,6 +59,17 @@ const send = (payload: string) =>
     }
   })
 
+// The fields of a session's record (`ctx.session.get`) the decoder reads, or
+// none when it cannot be read.
+const record = async (ctx: any, sessionID: unknown) => {
+  try {
+    const s = await ctx.session.get({ sessionID })
+    return { location: s?.location, parentID: s?.parentID, model: s?.model }
+  } catch {
+    return {}
+  }
+}
+
 export default {
   id: "pixtuoid",
   setup(ctx: any) {
@@ -69,11 +80,17 @@ export default {
       try {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
           if (!FORWARD.has(event?.type)) continue
+          // A turn's start carries only `sessionID`; the session's record adds
+          // what `session.created` did, for a session swept since.
+          const data =
+            event.type === "session.execution.started"
+              ? { ...(await record(ctx, event.data?.sessionID)), ...event.data }
+              : event.data
           await send(
             JSON.stringify({
               type: event.type,
               location: event.location && { directory: event.location.directory },
-              data: allowlisted(event.data),
+              data: allowlisted(data),
               // The opencode server's pid; the daemon's HookPidWatch ends every
               // sprite bound to it when it dies.
               _pid: process.pid,

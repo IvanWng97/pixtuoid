@@ -3,75 +3,99 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - SessionStart:
-    agent_id: 8256116563401147404
+    agent_id: 464895132215048278
     source: opencode
-    session_id: ses_ece799e49ffeXR8xaUT3U2cfud
+    session_id: ses_ece5fc2adffey98zsNTy2PsHRE
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
 - ModelInfo:
-    agent_id: 8256116563401147404
+    agent_id: 464895132215048278
     model: deepseek-flash
     effort: ~
 - SessionStart:
-    agent_id: 8256116563401147404
+    agent_id: 464895132215048278
     source: opencode
-    session_id: ses_ece799e49ffeXR8xaUT3U2cfud
-    cwd: ""
+    session_id: ses_ece5fc2adffey98zsNTy2PsHRE
+    cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
+- ModelInfo:
+    agent_id: 464895132215048278
+    model: deepseek-flash
+    effort: ~
 - Identity:
-    agent_id: 8256116563401147404
+    agent_id: 464895132215048278
     source: opencode
-    session_id: ses_ece799e49ffeXR8xaUT3U2cfud
+    session_id: ses_ece5fc2adffey98zsNTy2PsHRE
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 8256116563401147404
-    tool_use_id: call_00_hp6DBJv0Ss8cv8sXYOLL2851
+    agent_id: 464895132215048278
+    tool_use_id: call_00_suLrlbYWmKGj07G6ESpP1548
     detail:
       Generic:
         display: read
 - Identity:
-    agent_id: 8256116563401147404
+    agent_id: 464895132215048278
     source: opencode
-    session_id: ses_ece799e49ffeXR8xaUT3U2cfud
+    session_id: ses_ece5fc2adffey98zsNTy2PsHRE
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 464895132215048278
+    tool_use_id: call_00_suLrlbYWmKGj07G6ESpP1548
+- Identity:
+    agent_id: 464895132215048278
+    source: opencode
+    session_id: ses_ece5fc2adffey98zsNTy2PsHRE
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 8256116563401147404
-    tool_use_id: call_01_5gXt0CvJh9T4CnZaXLIu9315
+    agent_id: 464895132215048278
+    tool_use_id: call_00_9qpWK3UzHW3rwdRQjWEc5707
     detail:
       Generic:
         display: shell
-- ActivityEnd:
-    agent_id: 8256116563401147404
-    tool_use_id: call_00_hp6DBJv0Ss8cv8sXYOLL2851
 - Identity:
-    agent_id: 8256116563401147404
+    agent_id: 464895132215048278
     source: opencode
-    session_id: ses_ece799e49ffeXR8xaUT3U2cfud
+    session_id: ses_ece5fc2adffey98zsNTy2PsHRE
     cwd: /private/tmp/pixtuoid-capture/proj
 - Waiting:
-    agent_id: 8256116563401147404
+    agent_id: 464895132215048278
     reason: shell
-    tool_use_id: call_01_5gXt0CvJh9T4CnZaXLIu9315
-- ActivityEnd:
-    agent_id: 8256116563401147404
-    tool_use_id: call_01_5gXt0CvJh9T4CnZaXLIu9315
+    tool_use_id: call_00_9qpWK3UzHW3rwdRQjWEc5707
 - Identity:
-    agent_id: 8256116563401147404
+    agent_id: 464895132215048278
     source: opencode
-    session_id: ses_ece799e49ffeXR8xaUT3U2cfud
+    session_id: ses_ece5fc2adffey98zsNTy2PsHRE
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 464895132215048278
+    tool_use_id: call_00_9qpWK3UzHW3rwdRQjWEc5707
+- Identity:
+    agent_id: 464895132215048278
+    source: opencode
+    session_id: ses_ece5fc2adffey98zsNTy2PsHRE
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 8256116563401147404
-    tool_use_id: call_00_PgC2cnfTXEdTW6Jtn5ly5467
+    agent_id: 464895132215048278
+    tool_use_id: call_00_ET_YCpYEVtJITjqDqlbX7y66537
     detail:
       Generic:
         display: read
+- Identity:
+    agent_id: 464895132215048278
+    source: opencode
+    session_id: ses_ece5fc2adffey98zsNTy2PsHRE
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 8256116563401147404
-    tool_use_id: call_00_PgC2cnfTXEdTW6Jtn5ly5467
+    agent_id: 464895132215048278
+    tool_use_id: call_00_ET_YCpYEVtJITjqDqlbX7y66537
+- Identity:
+    agent_id: 464895132215048278
+    source: opencode
+    session_id: ses_ece5fc2adffey98zsNTy2PsHRE
+    cwd: ~
 - ActivityEnd:
-    agent_id: 8256116563401147404
+    agent_id: 464895132215048278
     tool_use_id: ~
 - SessionEnd:
-    agent_id: 8256116563401147404
+    agent_id: 464895132215048278
     as_child: false

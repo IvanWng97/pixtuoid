@@ -630,9 +630,6 @@ fn write_beside(files: &[(PathBuf, String)]) -> Result<()> {
     Ok(())
 }
 
-/// Write `want()` to `p` under `p`'s own lock when the file holds anything else, and
-/// say whether it did. `want` runs under the lock, so a caller can re-derive the
-/// content there; `None` leaves the file alone.
 /// Rewrite `t`'s [`RetiredStub`](target::RetiredStub) where it sits byte-exact;
 /// whether it did. A missing file is left missing.
 pub(crate) fn heal_retired_stub(t: &Target, config: Option<PathBuf>) -> Result<bool> {
@@ -656,6 +653,9 @@ pub(crate) fn heal_retired_stub(t: &Target, config: Option<PathBuf>) -> Result<b
     })
 }
 
+/// Write `want()` to `p` under `p`'s own lock when the file holds anything else, and
+/// say whether it did. `want` runs under the lock, so a caller can re-derive the
+/// content there; `None` leaves the file alone.
 fn write_owned_file(
     p: &std::path::Path,
     want: impl FnOnce() -> Result<Option<String>>,

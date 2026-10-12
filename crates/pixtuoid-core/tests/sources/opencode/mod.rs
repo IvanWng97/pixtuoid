@@ -7,8 +7,8 @@ use pixtuoid_core::AgentId;
 use pixtuoid_core::harness::{Drive, Driven};
 use pixtuoid_core::source::{AgentEvent, ToolDetail};
 
-const PARENT: &str = "ses_ece7901d3ffex2lchQVufOKzj4";
-const CHILD: &str = "ses_ece78fb9bffe9W0erLFCUucJZa";
+const PARENT: &str = "ses_ece5f4fdbffeGVYs58BUwMeUnG";
+const CHILD: &str = "ses_ece5f4850ffe4NtEqtUonBp4gJ";
 
 fn hooks() -> Driven {
     let d = Drive::hooks().lines(super::captures::fixture_lines(

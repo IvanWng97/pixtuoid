@@ -198,10 +198,11 @@ pub struct Transcript {
     pub(crate) cwd_extractor: CwdExtractor,
 }
 
-/// How focus-jump resolves this source's OS pid — a DATA-only capability: this
-/// const table compiles to wasm, so a native-only probe FN POINTER can never
-/// live here (the probes stay in the BINARY's `focus::resolve_pid`). ONE source
-/// of truth for the hook stamp gate and the doctor report bucketing.
+/// Where this source's OS pid comes from — a DATA-only capability: this const
+/// table compiles to wasm, so a native-only probe FN POINTER can never live here
+/// (the probes stay in the BINARY's `focus::resolve_pid`). ONE source of truth
+/// for the focus stamp gate, the hook exit-watch binding and the doctor report
+/// bucketing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusChannel {
     /// The shim RESOLVES the CLI's pid into `_pid` by walking past the runner's
@@ -226,9 +227,10 @@ pub enum FocusChannel {
 }
 
 impl FocusChannel {
-    /// Whether a hook-envelope `_pid` stamp is trustworthy for this source.
+    /// Whether a hook-envelope `_pid` stamp is this session's own focusable
+    /// process.
     #[cfg(feature = "native")]
-    pub(crate) fn accepts_stamp(self) -> bool {
+    pub(crate) fn stamps_focus_pid(self) -> bool {
         matches!(self, FocusChannel::ShimStamp | FocusChannel::PluginStamp)
     }
 }

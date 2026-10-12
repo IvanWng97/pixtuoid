@@ -162,6 +162,43 @@ mod tests {
         assert_eq!(forwarded, decoded);
     }
 
+    /// The `data` paths `allowlisted` copies, dotted, read out of the template.
+    fn allowlisted_fields() -> std::collections::BTreeSet<String> {
+        let block = PLUGIN_TEMPLATE
+            .split_once("const allowlisted = (data: any) => ({")
+            .and_then(|(_, rest)| rest.split_once("})"))
+            .map(|(inner, _)| inner)
+            .expect("the template defines allowlisted");
+        block
+            .lines()
+            .filter_map(|line| {
+                let (key, rest) = line.trim().split_once(':')?;
+                Some(match rest.split_once("&& {") {
+                    Some((_, inner)) => format!("{key}.{}", inner.split_once(':')?.0.trim()),
+                    None => key.to_owned(),
+                })
+            })
+            .collect()
+    }
+
+    /// The plugin strips every field it does not copy, and the decoder's own
+    /// tests build their payloads inline, so the two field lists are pinned
+    /// here, as the event lists are above.
+    #[test]
+    fn the_plugin_copies_exactly_the_fields_the_decoder_reads() {
+        let decoded: std::collections::BTreeSet<String> =
+            pixtuoid_core::source::opencode::DECODED_DATA_FIELDS
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+        assert_eq!(allowlisted_fields(), decoded);
+        assert!(
+            PLUGIN_TEMPLATE
+                .contains("location: event.location && { directory: event.location.directory }"),
+            "the decoder reads the envelope's location.directory as an event's cwd"
+        );
+    }
+
     #[test]
     fn verify_schema_reports_the_baked_shim_and_every_way_the_plugin_can_be_dead() {
         use crate::install::verify::ShimRef;

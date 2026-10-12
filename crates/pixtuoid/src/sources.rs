@@ -261,7 +261,7 @@ fn converge_owned_with(
                 tracing::warn!(cli = t.name, error = ?e, "could not re-copy the plugin to this build");
                 false
             }),
-            None => !done.rewritten.is_empty(),
+            None => !done.rewritten.is_empty() && !t.primary.reloads_on_change(),
         };
         if loads_new {
             refreshed.push(t);
@@ -699,14 +699,15 @@ mod tests {
     #[test]
     fn converge_owned_reaches_only_connected_targets_and_survives_a_failure() {
         // TARGETS order: claude fails first, so a stop-at-first-error loop would never
-        // reach opencode; omp only fails files, so it rewrote nothing to announce.
+        // reach opencode; omp only fails files, so it rewrote nothing to announce;
+        // opencode reloads its plugin itself, so its rewrite needs no notice.
         let seen = std::cell::RefCell::new(Vec::new());
-        let connected = set(&["opencode", "omp", "claude-code"]);
+        let connected = set(&["opencode", "omp", "dsh", "claude-code"]);
         let refreshed = converge_owned_with(install::TARGETS, &connected, |t| {
             seen.borrow_mut().push(t.name);
             match t.name {
                 "claude" => Err(anyhow::anyhow!("no home")),
-                "opencode" => Ok(install::Converged {
+                "opencode" | "dsh" => Ok(install::Converged {
                     rewritten: vec![PathBuf::from("/x/pixtuoid.ts")],
                     failed: Vec::new(),
                 }),
@@ -722,17 +723,17 @@ mod tests {
         });
         assert_eq!(
             refreshed.iter().map(|t| t.name).collect::<Vec<_>>(),
-            ["opencode"]
+            ["dsh"]
         );
-        assert_eq!(seen.into_inner(), ["claude", "opencode", "omp"]);
+        assert_eq!(seen.into_inner(), ["claude", "opencode", "omp", "dsh"]);
     }
 
     #[test]
     fn a_refreshed_notice_names_the_step_that_loads_the_plugin() {
         let openclaw = refreshed_notice(by_source("openclaw").unwrap());
         assert!(openclaw.contains("openclaw gateway restart"), "{openclaw}");
-        let opencode = refreshed_notice(by_source("opencode").unwrap());
-        assert!(opencode.contains("without a restart"), "{opencode}");
+        let claude = refreshed_notice(by_source("claude-code").unwrap());
+        assert!(claude.contains("restart Claude Code"), "{claude}");
     }
 
     #[test]
@@ -759,12 +760,6 @@ mod tests {
             "non-web profiles compose patches once at boot; web hot-reloads — got {hint:?}"
         );
 
-        let hint = post_install_hint("opencode").expect("opencode needs version 2");
-        assert!(
-            hint.contains("opencode 2") && hint.contains("without a restart"),
-            "v1 cannot load the plugin, and v2 hot-reloads it — got {hint:?}"
-        );
-
         let hint = post_install_hint("codex").expect("codex needs a trust step");
         assert!(
             hint.contains("Hooks need review"),
@@ -772,7 +767,7 @@ mod tests {
         );
 
         for id in pixtuoid_core::source::registry::registered_source_names() {
-            if ["codex", "openclaw", "omp", "dsh", "opencode"].contains(&id) {
+            if id == "codex" || id == "openclaw" || id == "omp" || id == "dsh" {
                 continue;
             }
             assert!(

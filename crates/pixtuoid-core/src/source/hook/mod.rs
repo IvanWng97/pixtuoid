@@ -232,7 +232,7 @@ fn patch_identity_pids(evs: &mut [AgentEvent], pid: Option<i32>) {
         if let AgentEvent::Identity { source, pid: p, .. } = ev {
             let channel = crate::source::registry::descriptor_for(source)
                 .map_or(FocusChannel::Unsupported, |d| d.focus_channel());
-            if channel.accepts_stamp() {
+            if channel.stamps_focus_pid() {
                 *p = Some(*stamp.get_or_insert_with(|| crate::source::PidIdentity {
                     pid,
                     started: crate::source::pid_start_marker(pid),

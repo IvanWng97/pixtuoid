@@ -581,6 +581,7 @@ mod tests {
                 "DECODED_FIELDS",
                 "the_field_set_is_exactly_what_the_decoder_reads",
             ),
+            ("DECODED_DATA_FIELDS", "every_decoded_data_field_is_read"),
             (
                 "DECODED_DISPATCH_NAMES",
                 "the_dispatch_name_set_is_exactly_what_the_fallback_matches",

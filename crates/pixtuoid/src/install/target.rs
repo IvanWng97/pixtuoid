@@ -140,6 +140,9 @@ pub enum Primary {
         verify_schema: fn(content: &str) -> crate::install::verify::SchemaParse,
         /// What an older pixtuoid's uninstall left that the CLI no longer loads.
         retired: Option<RetiredStub>,
+        /// Whether the CLI reloads the primary when it changes, so a rewrite
+        /// needs no restart notice.
+        reloads_on_change: bool,
     },
 }
 
@@ -169,6 +172,16 @@ impl Primary {
                 *verify_schema
             }
         }
+    }
+
+    pub(crate) fn reloads_on_change(&self) -> bool {
+        matches!(
+            self,
+            Primary::Owned {
+                reloads_on_change: true,
+                ..
+            }
+        )
     }
 
     pub(crate) fn owned_files(&self) -> Option<OwnedFiles> {
@@ -257,6 +270,7 @@ pub(crate) const CLAUDE: Target = Target {
         uninstall: crate::install::host_plugin::uninstall_hooks,
         verify_schema: crate::install::claude::verify_schema,
         retired: None,
+        reloads_on_change: false,
     },
     // Windows: the exec form embeds the absolute path, and a hook spawned without
     // a shell can't PATH-search, so an unresolvable binary is fatal there.
@@ -286,6 +300,7 @@ pub(crate) const CODEX: Target = Target {
         uninstall: crate::install::host_plugin::uninstall_hooks,
         verify_schema: crate::install::codex::verify_schema,
         retired: None,
+        reloads_on_change: false,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: crate::install::codex::detect_installed,
@@ -313,6 +328,7 @@ pub(crate) const REASONIX: Target = Target {
         uninstall: crate::install::reasonix::uninstall,
         verify_schema: crate::install::reasonix::verify_schema,
         retired: None,
+        reloads_on_change: false,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     presence_probe: crate::install::reasonix::detect_installed,
@@ -366,14 +382,14 @@ pub(crate) const OPENCODE: Target = Target {
             was: crate::install::opencode::V1_REMOVED_STUB,
             now: crate::install::opencode::REMOVED_STUB,
         }),
+        // `packages/core/src/plugin/supervisor.ts:219` watches `plugins/`.
+        reloads_on_change: true,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // A post-uninstall stub still exists, so detect on opencode's own dirs
     // rather than our plugin file.
     presence_probe: crate::install::opencode::detect_installed,
-    // A v1 opencode fails to load a v2 plugin, and v2 reloads `plugins/` on
-    // change (`packages/core/src/plugin/supervisor.ts:219`).
-    post_install_hint: Some("needs opencode 2 or later; it loads the plugin without a restart"),
+    post_install_hint: None,
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
@@ -543,6 +559,7 @@ pub(crate) const OMP: Target = Target {
         uninstall: crate::install::omp::uninstall,
         verify_schema: crate::install::omp::verify_schema,
         retired: None,
+        reloads_on_change: false,
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
     // A post-uninstall stub still exists, so detect on omp's own agent dir

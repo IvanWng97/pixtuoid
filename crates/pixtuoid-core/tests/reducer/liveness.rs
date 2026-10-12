@@ -239,6 +239,12 @@ fn a_quit_opencode_idle_slot_is_swept_short_and_walks_back_in_on_its_next_turn()
         Some(false),
         "a turn after the walkout re-registers it"
     );
+    let slot = &scene.agents[&oc];
+    assert_eq!(
+        (&*slot.cwd, &*slot.label),
+        (std::path::Path::new("/repo"), "oc·repo"),
+        "with the identity the turn's SessionStart carries"
+    );
 }
 
 #[test]
