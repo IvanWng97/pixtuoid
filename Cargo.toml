@@ -79,16 +79,16 @@ debug = "line-tables-only"
 debug = false
 
 [profile.dev.package.pixtuoid-scene]
-# Foley's DSP and the bank's track builds are the compute-bound part of the
-# workspace, and `test` inherits `dev`, so the synthesis tests were paying for
-# unoptimized sin loops. Debug assertions stay ON. This cannot perturb the
-# ratified spectral pins because none of them asserts bit equality — they
+# The layout and pathfinding sweeps and the cutaway, cloud and outside paint
+# tests are the workspace's compute-bound tests, and `test` inherits `dev`.
+# Debug assertions stay ON. This cannot perturb foley's spectral pins: they
 # compare centroid and band-energy shares within tolerances orders of magnitude
 # wider than any codegen-level float difference.
 opt-level = 2
 
 [profile.dev.package.pixtuoid-lofi]
-# The music DSP moved here from scene: the same reason as scene's block above.
+# The bank's synthesis tests render every music lane through it, the
+# workspace's other compute-bound tests.
 opt-level = 2
 
 # Opt-in full debuginfo for an actual debugger session:

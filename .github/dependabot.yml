@@ -17,6 +17,9 @@ updates:
       # fixed.
       drift-readers:
         patterns: ["oxc*", "pulldown-cmark"]
+      # Its own PR, so a red bump elsewhere in rust-deps never holds a lofi patch.
+      lofi:
+        patterns: ["pixtuoid-lofi"]
       rust-deps:
         patterns: ["*"]
     open-pull-requests-limit: 5
