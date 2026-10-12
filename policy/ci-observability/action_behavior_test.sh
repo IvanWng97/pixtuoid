@@ -221,6 +221,7 @@ run_publisher() {
         PR_NUMBER="42" \
         REPOSITORY="owner/repo" \
         REFUTED="${REFUTED-0}" \
+        ROUND="${ROUND-1}" \
         REVIEW_CONTEXT="$review_context" \
         REVIEW_JSON="$review_json" \
         REVIEW_SAFE_PATH="$review_safe_path" \
@@ -257,6 +258,11 @@ yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
     .jobs.analyze.outputs.bounds == "${{ steps.schema.outputs.bounds }}"
     and ([.jobs.publish.steps[].env.BOUNDS // empty] == ["${{ needs.analyze.outputs.bounds }}"])' >/dev/null ||
     fail "$CLAUDE_REVIEW_WORKFLOW_FILE does not hand the schema step's bounds to the publisher"
+# shellcheck disable=SC2016 # Workflow expressions, matched literally.
+yq -o=json '.' "$CLAUDE_REVIEW_WORKFLOW_FILE" | jq -e '
+    .jobs.analyze.outputs.round == "${{ steps.round.outputs.round }}"
+    and ([.jobs.publish.steps[].env.ROUND // empty] == ["${{ needs.analyze.outputs.round }}"])' >/dev/null ||
+    fail "$CLAUDE_REVIEW_WORKFLOW_FILE does not hand the round step's count to the publisher"
 with_bounds() { jq -c "$1" <<<"$bounds"; }
 
 assert_threads() {
@@ -264,7 +270,7 @@ assert_threads() {
         fail "Claude publisher's review threads: $2: $(<"$posted_threads")"
 }
 
-valid_review='{"summary":"No correctness findings.","findings":[]}'
+valid_review='{"summary":"No correctness findings.","overflow":0,"findings":[]}'
 run_publisher "$valid_review" ||
     fail "Claude publisher rejected a valid zero-finding review"
 assert_status '.state == "success" and .sha == "abc123"' "a published review passes the status at the reviewed head"
@@ -276,17 +282,18 @@ assert_status '.state == "success" and .sha == "abc123"' "a published review pas
     fail "Claude publisher posted a review thread for zero findings"
 
 run_publisher "$(jq -cn --argjson s "$severities" \
-    '{summary: "s", findings: [$s[] | {severity: ., lens: "correctness", path: "src/a.rs", line: 2, body: "b"}]}')" ||
+    '{summary: "s", overflow: 0, findings: [$s[] | {severity: ., lens: "correctness", path: "src/a.rs", line: 2, body: "b"}]}')" ||
     fail "Claude publisher rejected a severity the schema allows: $severities"
 [[ "$(<"$published_comment")" == *"$(jq -r '"**Findings: \(length)** (\(map("1 \(.)") | join(", ")))"' <<<"$severities")"* ]] ||
     fail "Claude publisher's count line does not count each of the schema's severities: $(<"$published_comment")"
 assert_status '.state == "success"' "findings still pass the status: their threads block"
-one_finding='{"summary":"s","findings":[{"severity":"blocking","lens":"correctness","path":"src/a.rs","line":2,"body":"b"}]}'
-for bad in '.findings[0].severity = "nit"' '.findings[0].lens = "style"' 'del(.findings[0].lens)' '.coverage = []'; do
+one_finding='{"summary":"s","overflow":0,"findings":[{"severity":"blocking","lens":"correctness","path":"src/a.rs","line":2,"body":"b"}]}'
+for bad in '.findings[0].severity = "nit"' '.findings[0].lens = "style"' 'del(.findings[0].lens)' '.coverage = []' \
+    'del(.overflow)' '.overflow = -1' '.overflow = 1.5' '.overflow = "2"'; do
     run_publisher "$(jq -c "$bad" <<<"$one_finding")" >/dev/null 2>&1 &&
         fail "Claude publisher accepted a review with $bad"
 done
-for bad in "REFUTED=" "REFUTED=-1" "REFUTED=1.5" "SKIPPED=" 'SKIPPED={}' 'SKIPPED=[1]'; do
+for bad in "REFUTED=" "REFUTED=-1" "REFUTED=1.5" "SKIPPED=" 'SKIPPED={}' 'SKIPPED=[1]' "ROUND=" "ROUND=0" "ROUND=01" "ROUND=x"; do
     (export "${bad?}" && run_publisher "$valid_review") >/dev/null 2>&1 &&
         fail "Claude publisher accepted the analyze output $bad"
 done
@@ -322,9 +329,22 @@ assert_schema_bound() {
 
 findings_of() {
     jq -cn --argjson s "$severities" --argjson n "$1" \
-        '{summary: "s", findings: [range($n) | {severity: $s[0], lens: "correctness", path: "src/a.rs", line: 2, body: "b"}]}'
+        '{summary: "s", overflow: 0, findings: [range($n) | {severity: $s[0], lens: "correctness", path: "src/a.rs", line: 2, body: "b"}]}'
 }
 assert_schema_bound max_findings "$(findings_of "$max_findings")" "$(findings_of $((max_findings + 1)))"
+overflow_review="$(jq -c '.overflow = 2' <<<"$one_finding")"
+schema_accepts "$overflow_review" || fail "$REVIEW_SCHEMA_FILE rejects a count of findings past its ceiling"
+for bad in 'del(.overflow)' '.overflow = -1'; do
+    ! schema_accepts "$(jq -c "$bad" <<<"$one_finding")" || fail "$REVIEW_SCHEMA_FILE accepts a review with $bad"
+done
+run_publisher "$overflow_review" ||
+    fail "Claude publisher rejected a review with findings past its ceiling"
+assert_threads 'length == 1' "the findings within the ceiling still open their threads"
+[[ "$(<"$published_comment")" == *"**Past the ceiling, not posted: 2**"* ]] ||
+    fail "Claude publisher's summary does not count the findings past its ceiling: $(<"$published_comment")"
+assert_status '.state == "failure" and .sha == "abc123"
+    and .description == "2 findings past the ceiling: answer these threads, then comment /claude-review"' \
+    "findings past the ceiling fail the status until a re-run posts them"
 run_publisher "$(findings_of "$max_findings")" ||
     fail "Claude publisher rejected the schema's maxItems findings"
 run_publisher "$(findings_of $((max_findings + 1)))" >/dev/null 2>&1 &&
@@ -335,7 +355,7 @@ FAKE_BOUNDS="$(with_bounds '.max_findings += 1')" run_publisher "$(findings_of $
     fail "Claude publisher bounds the findings by its own number, not max_findings"
 review_with() {
     jq -cn --argjson s "$severities" --arg f "$1" --arg v "$(printf 'a%.0s' $(seq "$2"))" '
-        {summary: "s", findings: [{severity: $s[0], lens: "correctness", path: "src/a.rs", line: 2, body: "b"}]}
+        {summary: "s", overflow: 0, findings: [{severity: $s[0], lens: "correctness", path: "src/a.rs", line: 2, body: "b"}]}
         | if $f == "summary" then .summary = $v else .findings[0][$f] = $v end'
 }
 for field in path summary body; do
@@ -348,7 +368,7 @@ for field in path summary body; do
         fail "Claude publisher bounds the $field by its own number, not ${field}_max"
 done
 
-six_blocking="$(jq -cn --argjson s "$severities" '{summary: "s", findings: [
+six_blocking="$(jq -cn --argjson s "$severities" '{summary: "s", overflow: 0, findings: [
     "src/a.rs", "src/b.rs", "img.png", ".github/workflows/ci.yml", "a/.hidden/..x", "crates/c/desk@8x.sprite"
     | {severity: $s[0], lens: "correctness", path: ., line: 1, body: "b"}]}')"
 schema_accepts "$six_blocking" ||
@@ -358,12 +378,12 @@ run_publisher "$six_blocking" ||
 assert_threads 'length == 6' "every blocking finding opens a thread"
 for path in ../outside /etc/passwd src//a.rs src/../a.rs src/ .. ./a a/./b . $'src/a.rs\n'; do
     review="$(jq -cn --argjson s "$severities" --arg p "$path" \
-        '{summary: "s", findings: [{severity: $s[0], lens: "correctness", path: $p, line: 1, body: "b"}]}')"
+        '{summary: "s", overflow: 0, findings: [{severity: $s[0], lens: "correctness", path: $p, line: 1, body: "b"}]}')"
     ! schema_accepts "$review" || fail "$REVIEW_SCHEMA_FILE accepts the unsafe path $path"
     ! run_publisher "$review" >/dev/null 2>&1 || fail "Claude publisher accepted the unsafe path $path"
 done
 
-in_diff_review='{"summary":"s","findings":[
+in_diff_review='{"summary":"s","overflow":0,"findings":[
   {"severity":"blocking","lens":"correctness","path":"src/a.rs","line":2,"body":"added line"},
   {"severity":"non-blocking","lens":"correctness","path":"src/a.rs","line":21,"body":"second hunk"},
   {"severity":"non-blocking","lens":"correctness","path":"src/b.rs","line":5,"body":"count-less hunk header"},
@@ -387,6 +407,13 @@ assert_threads '[.[].body | capture("\\*\\*\($title) · (?<lens>[a-z]+) · (?<l>
         "design issue (blocking)", "correctness issue (pre-existing)"]' \
     "every thread names its lens and its finding's Conventional Comments label"
 
+ROUND=3 run_publisher "$in_diff_review" ||
+    fail "Claude publisher rejected a third-round review"
+# shellcheck disable=SC2016 # Markdown backticks, matched literally.
+[[ "$(<"$published_comment")" == *$'Head: `abc123`\n\nRound: 3\n'* ]] ||
+    fail "Claude publisher's summary does not show the review's round under its head: $(<"$published_comment")"
+assert_threads 'length == 5' "a third round still opens a thread for every finding, blocking or not"
+
 FAKE_FAIL_POST=2 run_publisher "$in_diff_review" >/dev/null 2>&1 &&
     fail "Claude publisher exited zero with a thread not opened"
 assert_threads 'length == 4 and ([.[].body] | any(contains("src/a.rs:21")) | not)' \
@@ -398,7 +425,7 @@ assert_threads 'length == 4 and ([.[].body] | any(contains("src/a.rs:21")) | not
 
 hostile_body="it's \"quoted\" \$(touch $test_dir/pwned) \`touch $test_dir/pwned\` \\n end"
 hostile_review="$(jq -cn --arg b "$hostile_body" \
-    '{summary: "s", findings: [{severity: "blocking", lens: "correctness", path: "docs/other.md", line: 9, body: $b},
+    '{summary: "s", overflow: 0, findings: [{severity: "blocking", lens: "correctness", path: "docs/other.md", line: 9, body: $b},
         {severity: "pre-existing", lens: "correctness", path: "gone.rs", line: 1, body: "removed file"}]}')"
 run_publisher "$hostile_review" ||
     fail "Claude publisher rejected a finding outside the diff"
@@ -420,7 +447,7 @@ jq -e -s --arg b "$hostile_body" '.[0].body | contains("docs/other.md:9") and co
 
 # A rejected path character would fail the lens on every PR touching a
 # density-variant sprite (`<base>@<N>x.sprite`).
-variant_review='{"summary":"One finding on a density variant.","findings":[{"severity":"non-blocking","lens":"design","path":"crates/pixtuoid-scene/sprites/default/desk@8x.sprite","line":6,"body":"Header names a scheme that does not exist."}]}'
+variant_review='{"summary":"One finding on a density variant.","overflow":0,"findings":[{"severity":"non-blocking","lens":"design","path":"crates/pixtuoid-scene/sprites/default/desk@8x.sprite","line":6,"body":"Header names a scheme that does not exist."}]}'
 run_publisher "$variant_review" ||
     fail "Claude publisher rejected a finding on an '@' density-variant path"
 published_content="$(<"$published_comment")"
@@ -896,13 +923,14 @@ jq -cs '[.[:2], .[2:]]' <(
     comment "github-actions[bot]" "## $review_title"$'\n\nHead: `b`'
 ) >"$round_dir/comments.json"
 assert_round() {
-    : >"$round_dir/work/.claude-review/review-context.md"
+    : >"$round_dir/output"
     (cd "$round_dir/work" && PATH="$round_dir/bin:$PATH" ROUND_COMMENTS="${ROUND_COMMENTS_FILE:-$round_dir/comments.json}" \
+        GITHUB_OUTPUT="$round_dir/output" \
         GH_TOKEN=t PR_NUMBER=42 REPOSITORY=owner/repo REVIEW_TITLE="$review_title" HEAD_SHA="$1" \
         DEFAULT_BRANCH=main ROUND_DIFFS="$round_dir/diffs" bash -c "$round_script" >/dev/null 2>&1) ||
         fail "the round count exited non-zero"
-    grep -qx "Round: $2" "$round_dir/work/.claude-review/review-context.md" ||
-        fail "the round count at head $1 wrote $(<"$round_dir/work/.claude-review/review-context.md"), not Round: $2 ($3)"
+    grep -qx "round=$2" "$round_dir/output" ||
+        fail "the round count at head $1 output $(<"$round_dir/output"), not round=$2 ($3)"
 }
 # A PR diff whose own change is "-old / +$4" and whose hunk sits at line $2 under context $3.
 diff_of() { printf 'diff --git a/f b/f\nindex %s..%s 100644\n--- a/f\n+++ b/f\n@@ -%s,2 +%s,2 @@\n %s\n-old\n+%s\n' "$1" "$1" "$2" "$2" "$3" "$4"; }

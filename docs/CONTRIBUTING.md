@@ -365,7 +365,8 @@ before re-litigating.
   [in-place](#dispositions) fixes that change no behavior: a comment or doc
   change, or a refactor the existing tests cover (its commit names, for each
   branch it rewrites, the test that fails when that branch takes another
-  branch's action); any other non-blocking finding is a FOLLOW-UP: a
+  branch's action); any other non-blocking finding is a FOLLOW-UP, one PR
+  answering as many as it fixes: a
   review moves on once only non-blocking suggestions remain
   ([GitLab](https://docs.gitlab.com/development/code_review/)). A blocking
   issue confirmed in a fold STOPS the loop: revert the fold and re-land

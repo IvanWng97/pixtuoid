@@ -62,6 +62,7 @@ jobs:
       refuted: ${{ steps.gate.outputs.refuted }}
       review: ${{ steps.claude.outputs.structured_output }}
       reviewable: ${{ steps.pr.outputs.reviewable }}
+      round: ${{ steps.round.outputs.round }}
       skipped: ${{ steps.units.outputs.skipped }}
       state: ${{ steps.pr.outputs.state }}
     steps:
@@ -173,14 +174,15 @@ jobs:
                 "repos/${REPOSITORY}/contents/${path}?ref=${HEAD_SHA}" > ".claude-review/head/$path"
             done
 
-      # REVIEW.md's Re-review keys on it: the heads the review was published
-      # at before this one, from the PR comments headed by its title. A
-      # re-review of a head counts it once, and a head whose own change against
-      # main repeats the previous reviewed head's shares its round. A deleted
-      # comment or a diff that cannot be had leaves its head out, which
-      # undercounts: the review posts more, never less.
+      # The round REVIEW.md's Re-review defines, from the heads the review was
+      # published at before this one, read off the PR comments headed by its
+      # title. A re-review of a head counts it once, and a head whose own change
+      # against main repeats the previous reviewed head's shares its round. A
+      # deleted comment or a diff that cannot be had leaves its head out, which
+      # undercounts: the convergence contract's folds then take more, never less.
       - name: Count the review's rounds
         if: steps.pr.outputs.reviewable == 'true'
+        id: round
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ github.token }}
@@ -212,7 +214,7 @@ jobs:
             [[ -z "$previous_id" || "$change_id" == "$previous_id" ]] || round=$((round + 1))
             previous_id="$change_id"
           done
-          echo "Round: $round" >> .claude-review/review-context.md
+          echo "round=$round" >> "$GITHUB_OUTPUT"
 
       - name: Record the PR title and body
         if: steps.pr.outputs.reviewable == 'true'
@@ -397,6 +399,7 @@ jobs:
           # review-schema.json's bounds, which this job has no checkout to read.
           BOUNDS: ${{ needs.analyze.outputs.bounds }}
           REFUTED: ${{ needs.analyze.outputs.refuted }}
+          ROUND: ${{ needs.analyze.outputs.round }}
           SKIPPED: ${{ needs.analyze.outputs.skipped }}
         run: |
           set -euo pipefail
@@ -412,7 +415,8 @@ jobs:
           jq --exit-status --argjson b "$BOUNDS" "$REVIEW_SAFE_PATH"'
             def valid_path: safe_path and length <= $b.path_max;
             type == "object"
-            and ((keys | sort) == ["findings", "summary"])
+            and ((keys | sort) == ["findings", "overflow", "summary"])
+            and (.overflow | type == "number" and floor == . and . >= 0)
             and (.summary | type == "string" and length > 0 and length <= $b.summary_max)
             and (
               .findings
@@ -430,6 +434,7 @@ jobs:
             )
           ' <<< "$REVIEW_JSON" > /dev/null
           [[ "$REFUTED" =~ ^[0-9]+$ ]] || { echo "::error title=Refuted count invalid::'$REFUTED'"; exit 1; }
+          [[ "$ROUND" =~ ^[1-9][0-9]*$ ]] || { echo "::error title=Round invalid::'$ROUND'"; exit 1; }
           jq --exit-status 'type == "array" and all(.[]; type == "string")' <<< "$SKIPPED" > /dev/null
 
           [[ -n "$REVIEW_TITLE" ]]
@@ -446,6 +451,7 @@ jobs:
           fi
 
           finding_count="$(jq -r '.findings | length' <<< "$REVIEW_JSON")"
+          overflow="$(jq -r '.overflow' <<< "$REVIEW_JSON")"
           counts="$(jq -r --argjson b "$BOUNDS" '
             [.findings[].severity] as $found
             | [$b.severities[] as $s | "\([$found[] | select(. == $s)] | length) \($s)"]
@@ -457,6 +463,8 @@ jobs:
             echo
             echo "Head: \`$EXPECTED_HEAD_SHA\`"
             echo
+            echo "Round: $ROUND"
+            echo
             if (( finding_count == 0 )); then
               echo "**Findings: 0** — No findings"
             else
@@ -465,6 +473,10 @@ jobs:
             echo
             echo "Refuted by the verifier: $REFUTED"
             echo
+            if (( overflow > 0 )); then
+              echo "**Past the ceiling, not posted: $overflow**"
+              echo
+            fi
             # A skipped path outside the safe rule is counted, never echoed.
             jq -r "$REVIEW_SAFE_PATH"'
               if length > 0 then
@@ -534,12 +546,21 @@ jobs:
             echo "::error title=Claude review threads not opened::${failed[*]}"
             exit 1
           fi
-          # Success whatever the findings: each one blocks as its unresolved thread.
-          by_lens="$(jq -r --argjson b "$BOUNDS" '
-            [.findings[].lens] as $found | [$b.lenses[] as $l | "\($l) \([$found[] | select(. == $l)] | length)"]
-            | join(", ")' <<< "$REVIEW_JSON")"
-          jq -n --arg state success --arg context "$REVIEW_CONTEXT" --arg target_url "$RUN_URL" \
-            --arg description "Published at this head: $finding_count findings ($by_lens)" '$ARGS.named' |
+          # Success whatever the findings: each one blocks as its unresolved
+          # thread. A finding past the ceiling has no thread, so it fails the
+          # status until a re-run after the fold posts it.
+          if (( overflow > 0 )); then
+            state=failure
+            description="$overflow findings past the ceiling: answer these threads, then comment /claude-review"
+          else
+            by_lens="$(jq -r --argjson b "$BOUNDS" '
+              [.findings[].lens] as $found | [$b.lenses[] as $l | "\($l) \([$found[] | select(. == $l)] | length)"]
+              | join(", ")' <<< "$REVIEW_JSON")"
+            state=success
+            description="Published at this head: $finding_count findings ($by_lens)"
+          fi
+          jq -n --arg state "$state" --arg context "$REVIEW_CONTEXT" --arg target_url "$RUN_URL" \
+            --arg description "$description" '$ARGS.named' |
             gh api --method POST "repos/${REPOSITORY}/statuses/${EXPECTED_HEAD_SHA}" --input - > /dev/null
 
   # `!cancelled()` is load-bearing: an implicit `success()` would skip this job
