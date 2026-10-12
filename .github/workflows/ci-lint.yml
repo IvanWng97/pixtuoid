@@ -78,6 +78,7 @@ jobs:
       - uses: ./.github/actions/setup-just
       - run: just machete
 
+  # Preflight's `just lint` again, so a skipped local preflight can't land a lint break.
   hygiene:
     name: hygiene
     runs-on: ubuntu-latest

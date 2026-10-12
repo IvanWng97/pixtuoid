@@ -1120,7 +1120,7 @@ npm-check:
 # caches. Tests are CI's: in the hook, every worktree's push re-ran the whole
 # suite on one shared machine. `full` adds the feature powerset and the tests,
 # built with linux-test's features — the Rust recipes CI's lint/clippy/hack/test
-# jobs run; what it still can't see is in CONTRIBUTING.md#ci-gates.
+# jobs run; what it still can't see are ci.yml's other jobs.
 [doc('Local gate: lint → clippy; `full` = lint → clippy → hack → test')]
 [group('meta')]
 preflight mode="":

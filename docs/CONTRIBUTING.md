@@ -35,81 +35,6 @@ Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 (`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
 the tests are CI's).
 
-## CI gates
-
-CI is the gate. Beyond the tests and the feature powerset (`just preflight full`
-runs those locally), it runs the jobs below. Preflight's `just lint` covers
-only **hygiene**, **zizmor**, cargo-deny and the sprite and banner half of
-**generated drift**, so a green preflight does not mean a green PR.
-
-A PR's pushes run only the **light tier** (every job without
-`if: inputs.full`: linters, formatters, unit tests on every platform and
-compile checks), and its `ci-gate` judges that tier. Both tiers run on the
-merge queue's draft PR (`mergify/merge-queue/…`), whose `ci-gate` the queue
-merges on, batching up to `.mergify.yml`'s `batch_size` PRs in one run, and on
-a push to `main` or a manual dispatch
-([two-step CI](https://docs.mergify.com/merge-queue/two-step/)). CodeQL and
-CodSpeed skip drafts. The jobs:
-
-- **advisories** — `just deny-advisories` when a PR changes `Cargo.lock` or
-  `deny.toml`, and site's and Raycast's `npm run audit` when their
-  `package.json` or lockfile changes; `audit.yml` runs all three daily.
-- **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
-  regenerate with `just api-surface` + commit when the public surface moves.
-- **docs** (`just doc-check`) — rustdoc with `-D warnings` over private items,
-  the bins, the examples and each `DOC_TARGETS` triple, plus the doctests
-  nextest skips.
-- **generated drift** (`just gen-readme-check gen-art-check gen-banner-check
-  gen-icons-check compare-selftest`) — generated sprites, icons, the README
-  banner and README freshness, and the image comparator.
-- **smoke** — the release binaries and the hook shim's silent exit. The
-  README's media drift (`just gen-media-check`) is reported in it as evidence,
-  not a gate.
-- **npm package generator** (`just npm-check`) — the npm package generator +
-  OpenClaw plugin contract.
-- **msrv** — the workspace compiles on its declared `rust-version`.
-- **packaging-build** (full tier) — a clean `cargo install --locked` on both
-  Homebrew bottle platforms.
-- **hawk** (full tier) — `just hawk` fails on a `pub` item no other workspace
-  crate's code needs. It builds on `HAWK_RUST`, so a `rust-version` bump past
-  that fails here until `HAWK_VERSION` moves to a hawk built on a newer rustc.
-- **coverage** — every tier runs the suite instrumented; the full tier
-  uploads it to Codecov, whose statuses are informational.
-- **GitGuardian Security Checks** — the GitGuardian app's secret scan, a
-  required status.
-- **windows-check / windows-test** — msvc cross-lint on every PR, and the
-  full suite on a real Windows runner.
-- **other-unix-check** (`just check-other-unix`) — FreeBSD cross-lint for
-  the other-unix arms.
-- **wasm-check** — builds the site's wasm (`just gen-wasm`) and caps its
-  gzipped size (`just gen-wasm-check`).
-- **site** — `site.yml`: format, lint, types, knip and unit tests on every push; the demo-reading test, e2e and
-  Lighthouse on a build with freshly built wasm, so a Rust change that breaks
-  a wasm export the page calls fails before it deploys.
-- **raycast** — `raycast.yml`: contract-types freshness, `ray build` and `ray lint`, `tsc`, `npm test` and
-  `eslint`, run by `ci.yml` only on a PR that changes `integrations/raycast`, the workflow, `setup-npm` or
-  `site/package.json`; any other push skips them and `ci-gate` still passes.
-- **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
-  `just test` can't see.
-- **hygiene** — the same `just lint` recipes preflight runs (its CI job exists
-  so a skipped local preflight can't land a lint break), including `just ci-observability`
-  (`policy/ci-observability/`: contracts for the silent, costly workflow
-  failures actionlint and zizmor can't see, and behavior tests of the
-  workflows' own shell) and
-  `just fixture-pii` (gitleaks over the committed capture tree); the
-  capture-tree rules ride `just test` instead.
-- **zizmor** — workflow/action security: SHA pins outside the namespaces
-  [`.github/zizmor.yml`](../.github/zizmor.yml) relaxes,
-  credential-dropping checkouts, exact inline suppressions.
-- **The automatic Claude review** is the org's shared
-  [`claude-review.yml`](https://github.com/pixtuoid/.github/blob/main/.github/workflows/claude-review.yml),
-  which this repo's [caller](../.github/workflows/claude-review.yml) runs as
-  the required `claude-review / claude-review` check; [`REVIEW.md`](../REVIEW.md#scope)
-  holds what it checks here.
-- **CodeQL**, advisory (not a required check), stays the advanced workflow (`codeql.yml`): explicit languages,
-  a SARIF health gate on Rust's `none`-mode extraction, and an inline query
-  filter dropping `rust/cleartext-logging` (WHY on the init step).
-
 ## Releasing
 
 ### Versioning
@@ -228,27 +153,6 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    a line on the narrowest rule it amends — never an agent's private memory,
    which nobody reviews and nothing executes.
 
-**Skills.** Repo skills live in [`.claude/skills/`](../.claude/skills/)
-(committed; `.agents/skills/` aliases them for Codex).
-On a fresh machine or a non-Claude tool, `git clone` gives you the repo skills
-and every `just` gate; this section IS the loop for tools without skills. Do
-not scaffold a `CONTEXT.md`/`docs/adr/` convention here — a declaration's own
-doc comment is the design record, and the nested `AGENTS.md` says only what its
-crate IS.
-
-### The running order
-
-| when | run |
-|---|---|
-| before code, if non-trivial (new seam / ≥3 files) | plan against [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) |
-| touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` |
-| before push | the [self-review](#the-arc-loop) (step 7); the pre-push hook runs `just preflight` (never pipe it: a pipe eats the exit code) |
-| while the work is in progress | push the branch with no PR: no workflow runs on a push to a branch other than `main`, so a PR-less branch costs the shared runners nothing |
-| once the branch is ready to merge and [a PR slot](../AGENTS.md#workflow) is free | open the PR ready: the light tier and the review bots run; a failure only the full tier catches surfaces in the queue, which dequeues the PR |
-| once the PR is open, when a REVIEW.md local row matches | the `local-review` skill, its record on the PR |
-| once [the merge gate](#the-merge-gate) holds | the session comments `@mergifyio queue` |
-| a source/lifecycle change | dogfood against live CC, or replay hermetically (tiers below) |
-
 The e2e tiers live under `scripts/lib/`; none runs in CI. Cheapest first:
 `just openclaw-e2e` (hermetic envelopes, free) · `just replay <fixture>` (a
 captured rollout through the full headless path) · `just openclaw-multi-e2e`
@@ -256,11 +160,6 @@ captured rollout through the full headless path) · `just openclaw-multi-e2e`
 `just live-sources [id ...]` (one BILLED turn per installed CLI; the only tier
 proving a real CLI's output becomes a sprite — sources with no invocation
 entry are listed `NOT COVERED`, never skipped silently).
-
-Advisory backstops that surface risk but never gate:
-`just drift-watch` (wire-format drift) · `just fixture-age`
-(which recorded fixtures a local CLI has moved past; LOCAL-only) ·
-`just bench` / `just bench-pacing` / CodSpeed (local numbers authoritative; CI benches advisory).
 
 ### Parallel sessions
 
@@ -275,14 +174,7 @@ Advisory backstops that surface risk but never gate:
   order, at once; dequeue one only when it would jump a priority PR that is
   already green.
 
-## Conventions and architecture invariants
-
-Both live in [`AGENTS.md`](../AGENTS.md) ("Conventions", "Architecture
-invariants"), which every contributor and agent reads first.
-
 ## Pull requests
-
-- Review rules: [`REVIEW.md`](../REVIEW.md).
 
 ### The merge gate
 
@@ -366,14 +258,6 @@ before re-litigating.
 - **A fix round adds no new gate** — a wanted check is its own PR, asserting
   facts in its own layer (a Rust fact from Rust, never a Python regex over
   `.rs`).
-
-### Handy `gh` commands
-
-```bash
-gh pr checks --watch                         # live CI status
-gh issue develop <number> --checkout         # branch linked to an issue
-gh run rerun --failed                        # rerun only failed CI jobs
-```
 
 ## Adding a new agent CLI
 

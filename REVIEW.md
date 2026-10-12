@@ -41,7 +41,7 @@ headings. A local row lens applies its [row](#escalation).
 
 ### Do not flag
 
-- Anything a [CI gate](docs/CONTRIBUTING.md#ci-gates) or clippy/rustfmt
+- Anything a [CI gate](.github/workflows/ci.yml) or clippy/rustfmt
   enforces, compiling included; pure style.
 - Behavior documented where it is constrained: read the item's doc comment and
   the comments on the lines it governs first.

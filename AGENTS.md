@@ -64,7 +64,7 @@ cargo run --profile release-local --example snapshot -- /tmp/snap.png   # the sa
 - Real wire bytes ride ONE pipeline, `pixtuoid_core::harness::Drive` — rules in [`tests/AGENTS.md`](crates/pixtuoid-core/tests/AGENTS.md#the-one-pipeline).
 - Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED), and the recorder blanks every subtree no decoder reads (derived by probe, never listed); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just restrip-fixtures` re-strips the committed corpus offline; `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.
 - Visual verification for sprite work: snapshot example → `scripts/crop-snapshot.py` → READ the PNG; loop in `.claude/skills/beautify-decoration/SKILL.md`.
-- CI gates, and which of them preflight can't see (a green preflight is NOT a green PR): [`CONTRIBUTING.md#ci-gates`](docs/CONTRIBUTING.md#ci-gates) lists them and what each catches. A PR's pushes run only the light tier; the full tier runs in the merge queue and on `main` (two-step CI).
+- CI is the gate, and a green preflight is NOT a green PR: each job in [`ci.yml`](.github/workflows/ci.yml) says what it catches where it is defined. A PR's pushes run only the light tier; the full tier runs in the merge queue and on `main` (two-step CI).
 - Advisory (never gates): `just mutants`, `just bench`, `just bench-pacing`, CodSpeed.
 - Fluency gate, local and pre-release (a wall-clock budget, so never CI): `just pace-check`; its runs and verdict in `scripts/pace-check.py`'s header.
 - Hooks: `git config core.hooksPath .githooks` once per clone; `just setup-tools` installs cargo tools (incl. rust-analyzer — without it the agent LSP degrades to grep).
@@ -153,6 +153,6 @@ taller-cell terminals; bundled base character sprites max at 8×12 px (their
 ## Where to look
 
 - Tool call → sprite: `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → watch channel → `TuiRenderer::render` → `pixtuoid_scene::floor::OfficeSession::render` → `pixtuoid_scene::look::render` → `tui::renderer::flush_classic`.
-- Architecture + data flow: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). What to run when: [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-running-order).
+- Architecture + data flow: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - Refactoring the channel type, `Source` trait, `AgentEvent`, or reducer signature touches all four test areas (`tests/reducer/`, `tests/e2e.rs`, `tests/transport/socket.rs`, `tests/watcher/`) + `runtime/driver.rs`; a new `AgentEvent` variant needs an `agent_id()` arm.
 - Adding an agent CLI: source module + `SourceDescriptor` row (`source/registry.rs`) + `runtime/driver.rs` wiring + `site/src/sources.json` row; full checklist in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#adding-a-new-agent-cli); `add-source` skill drives it.

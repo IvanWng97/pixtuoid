@@ -69,6 +69,7 @@ jobs:
           shared-key: site
       - uses: ./.github/actions/gen-demos
       - run: npm run test:demos
+      # Built fresh, so a Rust change that breaks a wasm export the page calls fails before it deploys.
       - uses: ./.github/actions/gen-wasm
       - run: npm run build
         env:
