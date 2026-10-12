@@ -400,6 +400,88 @@ test('the hero ♩ sound toggle: muted by default, gesture-gated, no AudioContex
   expect(errors()).toEqual([]);
 });
 
+test('the ♩ bus holds an over-full sum under the native ceiling and passes a quiet one at unity', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  const { ceiling, loudPeak, quietPeak } = await page.evaluate(async () => {
+    const { officeDriverUrl, wasmJsUrl } = (
+      document.querySelector('script[data-office-driver-url]') as HTMLScriptElement
+    ).dataset;
+    const drv = await import(officeDriverUrl!);
+    const office = new (await drv.sharedWasm(wasmJsUrl!)).Office(0);
+    const rate = 48_000;
+    // Each tone starts at `startS`; the peak is read from `fromS` on, since the spec starts the compressor's detector
+    // average at 0.
+    async function peak(amplitudes: number[], startS: number, fromS: number): Promise<number> {
+      const ctx = new OfflineAudioContext(1, rate * 2, rate);
+      const bus = drv.audioBus(ctx, office);
+      amplitudes.forEach((gain, i) => {
+        const tone = new OscillatorNode(ctx, { frequency: 110 * (i + 1) });
+        tone.connect(new GainNode(ctx, { gain })).connect(bus);
+        tone.start(startS);
+      });
+      const out = (await ctx.startRendering()).getChannelData(0).subarray(fromS * rate);
+      return out.reduce((a, v) => Math.max(a, Math.abs(v)), 0);
+    }
+    return {
+      ceiling: Math.fround(10 ** (office.audio_ceiling_dbfs() / 20)),
+      loudPeak: await peak([0.9, 0.9, 0.9], 0.5, 0),
+      quietPeak: await peak([0.1], 0, 1),
+    };
+  });
+  expect(loudPeak, 'a burst of three summed lanes passed the ceiling').toBeLessThanOrEqual(ceiling);
+  expect(loudPeak, 'the summed lanes never reached the output').toBeGreaterThan(ceiling / 2);
+  expect(quietPeak, 'a −20 dBFS tone came out scaled: the makeup gain is uncancelled').toBeCloseTo(
+    0.1,
+    3
+  );
+  expect(errors()).toEqual([]);
+});
+
+test('every ♩ lane and one-shot reaches the speakers only through the limiter bus', async ({
+  page,
+}) => {
+  type Wiring = { intoBus: { from: string; at: number }[]; intoDestination: string[] };
+  await page.addInitScript(() => {
+    const w = window as unknown as { __wiring: Wiring };
+    w.__wiring = { intoBus: [], intoDestination: [] };
+    const real = AudioNode.prototype.connect;
+    AudioNode.prototype.connect = function (this: AudioNode, ...args: unknown[]) {
+      const [to] = args;
+      const from = this.constructor.name;
+      if (to instanceof DynamicsCompressorNode)
+        w.__wiring.intoBus.push({ from, at: performance.now() });
+      if (to instanceof AudioDestinationNode) w.__wiring.intoDestination.push(from);
+      return Reflect.apply(real, this, args);
+    } as typeof real;
+  });
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  await page.locator('#office-audio').click();
+  await page.waitForFunction(
+    () => (window as unknown as { __pixAudioReadyAt?: number }).__pixAudioReadyAt !== undefined,
+    undefined,
+    { timeout: 60_000 }
+  );
+  const wiring = () => page.evaluate(() => (window as unknown as { __wiring: Wiring }).__wiring);
+  // The lanes connect while the buffers upload, before ready; a one-shot only after.
+  const readyAt = await page.evaluate(
+    () => (window as unknown as { __pixAudioReadyAt: number }).__pixAudioReadyAt
+  );
+  await expect
+    .poll(async () => (await wiring()).intoBus.filter((c) => c.at > readyAt).length, {
+      message: 'no one-shot joined the bus',
+      timeout: 15_000,
+    })
+    .toBeGreaterThan(0);
+  const { intoBus, intoDestination } = await wiring();
+  expect(new Set(intoBus.map((c) => c.from))).toEqual(new Set(['GainNode']));
+  expect(intoDestination, 'only the bus clamp may reach the speakers').toEqual(['WaveShaperNode']);
+  expect(errors()).toEqual([]);
+});
+
 test('background playback: a hidden tab keeps ticking, reduced-motion stops it cold', async ({
   page,
 }) => {
