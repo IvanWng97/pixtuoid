@@ -6,8 +6,7 @@
 // The office's half of the synthesis — pooled foley, the bank that orders every
 // build, runtime mixer/schedulers — over `pixtuoid-lofi`'s music. Shared so the
 // native device gateway and the wasm WebAudio painter build the SAME sample
-// buffers, with no audio-device deps (pure math; the rodio/cpal ban still
-// holds).
+// buffers.
 #[doc(hidden)]
 pub mod bank;
 #[doc(hidden)]
@@ -49,8 +48,8 @@ pub fn ceiling_amplitude() -> f32 {
 /// reaches the clamp behind it, which hard-clips it.
 pub const LIMITER_ATTACK: std::time::Duration = std::time::Duration::from_millis(5);
 
-/// How fast each sink's limiter lets its gain back up: well inside one beat, so
-/// one loud hit never ducks the next.
+/// How fast each sink's limiter lets its gain back up: well inside one beat
+/// ([`pixtuoid_lofi::Score::bpm`]), so one loud hit never ducks the next.
 pub const LIMITER_RELEASE: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Active-agent count at which the office reads BUSY (full band + dense

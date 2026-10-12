@@ -174,9 +174,7 @@ impl AssetBank {
 }
 
 /// One mood track's loop beds — built by [`Synthesis`] per [`TrackId`],
-/// registered (or swapped in) with the sink, then DROPPED. The five musical beds
-/// and the NIGHT texture share ONE sample count (phase-locked); the DAY texture
-/// keeps its free-running power-of-two length.
+/// registered (or swapped in) with the sink, then DROPPED.
 #[derive(Debug)]
 pub struct TrackBeds {
     beds: [Arc<Vec<f32>>; TRACK_STEMS.len()],

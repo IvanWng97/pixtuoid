@@ -3,8 +3,7 @@
 //! that pools them rather than in the music synth: they change when the office
 //! does. Pure buffer generators (mono f32 at [`SAMPLE_RATE`]), run once at
 //! startup; every constant is an auditioned, ratified value. Tuned with
-//! [procedural-lofi](https://github.com/pixtuoid/lofi/tree/main/.claude/skills/procedural-lofi)'s
-//! analyzers (`analyze_rain`, `analyze_typing`, `analyze_drops`).
+//! [procedural-lofi's analyzers](https://github.com/pixtuoid/lofi/tree/main/.claude/skills/procedural-lofi/scripts).
 
 use pixtuoid_lofi::dsp::{NoiseStream, bandpass, lowpass, shaped_noise_loop};
 
