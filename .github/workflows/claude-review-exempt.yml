@@ -121,6 +121,8 @@ jobs:
                     and ([$after[0] | pkgs[] | .resolved // empty | select(startswith("https://registry.npmjs.org/") | not)] == [])
                 ' > /dev/null || refuse "a package, install script or host new to $lock"
                 ;;
+              # A caller's pattern can admit a lockfile at a path no arm above reads.
+              *) refuse "a lockfile this exemption cannot read: $lock" ;;
             esac
           done < <(jq -r 'select(.filename | test("(^|/)(Cargo\\.lock|package-lock\\.json)$")) | .filename' "$files")
 

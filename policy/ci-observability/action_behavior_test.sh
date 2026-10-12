@@ -936,7 +936,7 @@ run_exempt() {
     local fixtures="$1" current_head="${2:-head123}"
     PATH="$exempt_bin:$PATH" EXEMPT_FIXTURES="$fixtures" EXEMPT_CURRENT_HEAD="$current_head" \
         GH_TOKEN=test-token REPOSITORY=owner/repo PR_NUMBER=42 HEAD_SHA=head123 BASE_SHA=main123 \
-        ALLOW="$exempt_allow" REVIEW_CONTEXT=claude-review RUN_URL=https://example.test/run \
+        ALLOW="${4:-$exempt_allow}" REVIEW_CONTEXT=claude-review RUN_URL=https://example.test/run \
         bash -c "$exempt_script" >/dev/null 2>&1 || fail "the exemption exited non-zero on $3"
 }
 assert_exempt() {
@@ -1192,6 +1192,22 @@ f="$(exempt_case nested-name)"
 file_row scripts/Cargo.toml >"$f/files.jsonl"
 run_exempt "$f" head123 "a manifest name below a directory the pattern names"
 assert_exempt "$f" pending "a manifest name below a directory the pattern names"
+
+# A caller's pattern may admit a lockfile where no check reads one.
+f="$(exempt_case root-npm-lock)"
+file_row package-lock.json >"$f/files.jsonl"
+echo '{"packages": {"": {}, "node_modules/a": {}}}' >"$f/base123/package-lock.json"
+echo '{"packages": {"": {}, "node_modules/a": {}, "node_modules/b": {"hasInstallScript": true}}}' >"$f/head123/package-lock.json"
+run_exempt "$f" head123 "a root package-lock.json" 'package-lock\.json'
+assert_exempt "$f" pending "a root package-lock.json"
+
+f="$(exempt_case nested-cargo-lock)"
+file_row x/Cargo.lock >"$f/files.jsonl"
+mkdir -p "$f/base123/x" "$f/head123/x"
+crate serde 1.0.1 >"$f/base123/x/Cargo.lock"
+{ crate serde 1.0.1 && crate evil 0.1.0; } >"$f/head123/x/Cargo.lock"
+run_exempt "$f" head123 "a nested Cargo.lock" 'x/Cargo\.lock'
+assert_exempt "$f" pending "a nested Cargo.lock"
 
 # The mask covers a whole version string and nothing else, in the order lines
 # appear; requirements-dev.txt bumps a pin; a Cargo.lock reads only as Cargo
