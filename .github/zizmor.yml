@@ -16,6 +16,6 @@ rules:
         # Floats on a major under .github/dependabot.yml's ignore, which names
         # the same namespace.
         actions/*: ref-pin
-        # The org's one shared review runs at `@main`, which changes only
-        # through a PR (https://github.com/pixtuoid/.github/rules/24918053).
+        # The org's shared workflows and actions run at `@main`, which changes
+        # only through a PR (https://github.com/pixtuoid/.github/rules/24918053).
         pixtuoid/.github/*: ref-pin
