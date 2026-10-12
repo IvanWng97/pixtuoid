@@ -40,15 +40,6 @@ pub(crate) const REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by di
 /// What a pre-v2 pixtuoid's disconnect wrote, which opencode 2 cannot load.
 pub(crate) const V1_REMOVED_STUB: &str = "// pixtuoid opencode plugin removed by disconnecting opencode in pixtuoid's Sources panel (press s).\nexport {}\n";
 
-/// Whether `content` default-exports the `{ id, setup }` object opencode loads;
-/// it reports any other module as a failed plugin
-/// (`packages/core/src/plugin/module.ts:78-91`, `supervisor.ts:63`, `:79-84`).
-fn exports_a_plugin(content: &str) -> bool {
-    content
-        .split_once("export default {")
-        .is_some_and(|(_, rest)| rest.contains("id:") && rest.contains("setup("))
-}
-
 fn opencode_config_dir() -> Result<PathBuf> {
     config_dir_from(
         pixtuoid_core::platform::path_env("OPENCODE_CONFIG_DIR").as_deref(),
@@ -126,11 +117,6 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     let Some(p) = crate::install::verify::baked_hook_path(content) else {
         return SchemaParse::broken("could not read HOOK_PATH from the opencode plugin");
     };
-    if !exports_a_plugin(content) {
-        return SchemaParse::broken(
-            "the opencode plugin predates opencode 2, which cannot load it — reconnect opencode",
-        );
-    }
     SchemaParse {
         shim: ShimRef::Absolute(p),
         ..Default::default()
@@ -249,27 +235,13 @@ mod tests {
             "an unsubstituted placeholder must be reported"
         );
 
-        let no_binding = format!("// {SENTINEL}\nexport default {{ id: \"x\", setup() {{}} }}\n");
+        let no_binding = format!("// {SENTINEL}\nexport default function () {{}}\n");
         assert!(
             verify_schema(&no_binding)
                 .issues
                 .iter()
                 .any(|i| i.contains("HOOK_PATH")),
             "an unreadable HOOK_PATH must be reported, not silently accepted"
-        );
-
-        // What a pre-v2 pixtuoid rendered: a function default export.
-        let v1 = format!(
-            "// {SENTINEL}\nconst HOOK_PATH: string = \"/opt/bin/pixtuoid-hook\"\n\
-             export const PixtuoidOpencode = async () => ({{}})\nexport default PixtuoidOpencode\n"
-        );
-        assert!(
-            verify_schema(&v1)
-                .issues
-                .iter()
-                .any(|i| i.contains("opencode 2") && i.contains("reconnect opencode")),
-            "a plugin opencode 2 cannot load must be a HARD issue — got {:?}",
-            verify_schema(&v1).issues
         );
     }
 
@@ -328,6 +300,15 @@ mod tests {
             "stub must drop the sentinel so detection flips"
         );
         assert_eq!(removed.content, REMOVED_STUB);
+    }
+
+    /// Whether `content` default-exports the `{ id, setup }` object opencode loads;
+    /// it reports any other module as a failed plugin
+    /// (`packages/core/src/plugin/module.ts:78-91`, `supervisor.ts:63`, `:79-84`).
+    fn exports_a_plugin(content: &str) -> bool {
+        content
+            .split_once("export default {")
+            .is_some_and(|(_, rest)| rest.contains("id:") && rest.contains("setup("))
     }
 
     /// The stub is still loaded as a plugin, so it must be a valid one.

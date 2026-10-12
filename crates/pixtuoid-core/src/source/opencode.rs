@@ -207,16 +207,21 @@ fn session_start(
     event: &str,
 ) -> Result<Vec<AgentEvent>> {
     let (agent_id, session_id) = session(data, event)?;
-    let mut out = vec![AgentEvent::SessionStart {
+    let cwd = field(data, "location.directory").or(at);
+    let mut out = Vec::new();
+    // A start the plugin could not read a record for has no cwd, and a
+    // cwd-less SessionStart registers on the short unknown-cwd window; an
+    // Identity marks the slot a live process's instead (`apply_identity`).
+    if cwd.is_none() {
+        out.push(identity(agent_id, session_id, None));
+    }
+    out.push(AgentEvent::SessionStart {
         agent_id,
         source: SOURCE_NAME.to_string(),
         session_id: session_id.to_string(),
-        cwd: field(data, "location.directory")
-            .or(at)
-            .unwrap_or_default()
-            .into(),
+        cwd: cwd.unwrap_or_default().into(),
         parent_id: field(data, "parentID").map(|p| AgentId::from_parts(SOURCE_NAME, p)),
-    }];
+    });
     if let Some(model) = field(data, "model.id") {
         out.push(AgentEvent::ModelInfo {
             agent_id,
@@ -443,9 +448,9 @@ mod tests {
 
     /// `session.forked`'s `parentID` is the session it was copied from, beside
     /// a message `boundary` (`packages/schema/src/session-event.ts:187-200`),
-    /// and the fork's own record keeps it as `fork`, not `parentID`
-    /// (`packages/core/src/session/projector.ts:160-161`), so a fork registers
-    /// as its own root on its first turn.
+    /// and the fork's own row keeps it as `fork_session_id`, with `parent_id`
+    /// null (`packages/core/src/session/projector.ts:160-161`), so a fork
+    /// registers as its own root on its first turn.
     #[test]
     fn a_fork_is_its_own_root_not_a_child() {
         assert!(
@@ -470,8 +475,6 @@ mod tests {
         );
     }
 
-    /// Led by Identity (#221), so an end for a slot the reaper removed
-    /// registers it with its identity rather than as a blank `#N`.
     #[test]
     fn a_tool_success_or_failure_ends_its_call() {
         for ev in [TOOL_SUCCESS, TOOL_FAILED] {
@@ -486,9 +489,7 @@ mod tests {
         }
     }
 
-    /// The start re-emits SessionStart, the event that walks a swept session
-    /// back in, with the session record the plugin read; an end must not
-    /// resurrect one, but leads with Identity like every other end.
+    /// An end must not resurrect a swept session.
     #[test]
     fn an_execution_start_is_a_session_start_with_its_record_and_its_end_closes_the_turn() {
         let start = decode_all(
@@ -502,6 +503,17 @@ mod tests {
             ] if session_id == "ses_c" && cwd.as_path() == std::path::Path::new("/repo")
                 && *p == AgentId::from_parts(SOURCE_NAME, "ses_p") && m == "m-1"),
             "{start:?}"
+        );
+        let bare = decode_all(json!({"type": EXECUTION_STARTED, "data": {"sessionID": "ses_c"}}));
+        assert!(
+            matches!(
+                bare.as_slice(),
+                [
+                    AgentEvent::Identity { cwd: None, .. },
+                    AgentEvent::SessionStart { .. }
+                ]
+            ),
+            "a start with no record is process-proven: {bare:?}"
         );
         for ev in [EXECUTION_SUCCEEDED, EXECUTION_FAILED, EXECUTION_INTERRUPTED] {
             let got = decode_all(json!({"type": ev, "data": {"sessionID": "ses_x"}}));
@@ -575,7 +587,9 @@ mod tests {
     #[test]
     fn a_long_model_slug_is_truncated_at_the_decode_boundary() {
         let long = "m".repeat(MAX_DECODED_FIELD_CHARS + 10);
-        let evs = decode_all(created(json!({"sessionID": "s", "model": {"id": long}})));
+        let evs = decode_all(created(
+            json!({"sessionID": "s", "location": {"directory": "/r"}, "model": {"id": long}}),
+        ));
         assert!(
             matches!(&evs[1], AgentEvent::ModelInfo { model: Some(m), .. }
             if m.chars().count() <= MAX_DECODED_FIELD_CHARS + 1)

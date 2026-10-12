@@ -309,11 +309,14 @@ fn a_retired_stub_is_rewritten_and_stays_disconnected() {
     };
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join("plugins").join("pixtuoid.ts");
-    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
 
     assert!(!heal_retired_stub(t, Some(cfg.clone())).unwrap());
-    assert!(!cfg.exists(), "no file is created where none was");
+    assert!(
+        !cfg.parent().unwrap().exists(),
+        "no dir or lock is created beside a CLI the user may not have"
+    );
 
+    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
     std::fs::write(&cfg, stub.was).unwrap();
     assert!(!has_hooks(t, Some(cfg.clone())));
     assert!(heal_retired_stub(t, Some(cfg.clone())).unwrap());

@@ -214,32 +214,37 @@ fn is_on(app: &config::AppConfig, sid: &str, hooked: impl Fn(&str) -> Option<boo
     hooked(sid).unwrap_or_else(|| app.sources.get(sid) == Some(&true))
 }
 
-/// Bring every connected source's owned plugin files to this build
+/// Rewrite every target's [`RetiredStub`](install::target::RetiredStub), connected
+/// or not, then bring every connected source's owned plugin files to this build
 /// ([`install::converge`]), and the copy a CLI runs to those files, and return the
 /// targets whose CLI now has a newer plugin to load at its next start. A failure
 /// leaves the install for the boot warning and doctor to report, and the next
 /// launch retries it.
 pub(crate) fn converge_owned(connected: &HashSet<String>) -> Vec<&'static Target> {
-    for t in install::TARGETS {
-        match install::heal_retired_stub(t, None) {
+    converge_owned_with(
+        install::TARGETS,
+        connected,
+        |t| install::heal_retired_stub(t, None),
+        |t| install::converge(t, None),
+    )
+}
+
+/// [`converge_owned`] over `targets`, with the heal and the convergence injected.
+fn converge_owned_with(
+    targets: &[&'static Target],
+    connected: &HashSet<String>,
+    heal: impl Fn(&'static Target) -> Result<bool>,
+    converge: impl Fn(&'static Target) -> Result<install::Converged>,
+) -> Vec<&'static Target> {
+    let mut refreshed = Vec::new();
+    for t in targets.iter().copied() {
+        match heal(t) {
             Ok(true) => tracing::info!(cli = t.name, "rewrote a stub an older pixtuoid left"),
             Ok(false) => {}
             Err(e) => {
                 tracing::warn!(cli = t.name, error = ?e, "could not rewrite a stub an older pixtuoid left");
             }
         }
-    }
-    converge_owned_with(install::TARGETS, connected, |t| install::converge(t, None))
-}
-
-/// [`converge_owned`] over `targets`, with the convergence injected.
-fn converge_owned_with(
-    targets: &[&'static Target],
-    connected: &HashSet<String>,
-    converge: impl Fn(&'static Target) -> Result<install::Converged>,
-) -> Vec<&'static Target> {
-    let mut refreshed = Vec::new();
-    for t in targets.iter().copied() {
         if !connected.contains(t.core_source) {
             continue;
         }
@@ -687,7 +692,8 @@ mod tests {
             ENABLED.store(enabled, SeqCst);
             STALE.store(stale, SeqCst);
             STALE_ERRS.store(errs, SeqCst);
-            let refreshed = converge_owned_with(&[&COPYING], &connected, |_| rewrote());
+            let refreshed =
+                converge_owned_with(&[&COPYING], &connected, |_| Ok(false), |_| rewrote());
             assert_eq!(
                 !refreshed.is_empty(),
                 announced,
@@ -703,29 +709,55 @@ mod tests {
         // opencode reloads its plugin itself, so its rewrite needs no notice.
         let seen = std::cell::RefCell::new(Vec::new());
         let connected = set(&["opencode", "omp", "dsh", "claude-code"]);
-        let refreshed = converge_owned_with(install::TARGETS, &connected, |t| {
-            seen.borrow_mut().push(t.name);
-            match t.name {
-                "claude" => Err(anyhow::anyhow!("no home")),
-                "opencode" | "dsh" => Ok(install::Converged {
-                    rewritten: vec![PathBuf::from("/x/pixtuoid.ts")],
-                    failed: Vec::new(),
-                }),
-                "omp" => Ok(install::Converged {
-                    rewritten: Vec::new(),
-                    failed: vec![(
-                        PathBuf::from("/x/pixtuoid.ts"),
-                        anyhow::anyhow!("could not lock"),
-                    )],
-                }),
-                _ => Ok(install::Converged::default()),
-            }
-        });
+        let refreshed = converge_owned_with(
+            install::TARGETS,
+            &connected,
+            |_| Ok(false),
+            |t| {
+                seen.borrow_mut().push(t.name);
+                match t.name {
+                    "claude" => Err(anyhow::anyhow!("no home")),
+                    "opencode" | "dsh" => Ok(install::Converged {
+                        rewritten: vec![PathBuf::from("/x/pixtuoid.ts")],
+                        failed: Vec::new(),
+                    }),
+                    "omp" => Ok(install::Converged {
+                        rewritten: Vec::new(),
+                        failed: vec![(
+                            PathBuf::from("/x/pixtuoid.ts"),
+                            anyhow::anyhow!("could not lock"),
+                        )],
+                    }),
+                    _ => Ok(install::Converged::default()),
+                }
+            },
+        );
         assert_eq!(
             refreshed.iter().map(|t| t.name).collect::<Vec<_>>(),
             ["dsh"]
         );
         assert_eq!(seen.into_inner(), ["claude", "opencode", "omp", "dsh"]);
+    }
+
+    /// The heal's whole population is the disconnected: a stub is what a
+    /// disconnect left.
+    #[test]
+    fn a_launch_heals_every_target_connected_or_not() {
+        let healed = std::cell::RefCell::new(Vec::new());
+        let refreshed = converge_owned_with(
+            install::TARGETS,
+            &HashSet::new(),
+            |t| {
+                healed.borrow_mut().push(t.name);
+                Ok(false)
+            },
+            |_| panic!("nothing is connected, so nothing converges"),
+        );
+        assert!(refreshed.is_empty());
+        assert_eq!(
+            healed.into_inner(),
+            install::TARGETS.iter().map(|t| t.name).collect::<Vec<_>>()
+        );
     }
 
     #[test]
