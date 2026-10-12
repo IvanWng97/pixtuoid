@@ -1109,8 +1109,8 @@ mod tests {
 }
 
 /// The LISTEN gate: renders each busy-ness tier through the REAL
-/// mixer/schedulers/synth into wav files for the owner's audition. No track gets bus-glue
-/// compression (rodio has no insert), so every mix is verified by ear.
+/// mixer/schedulers/synth and the device's [`sink::limited`] output into wav files for the
+/// owner's audition.
 /// `#[ignore]` — run explicitly:
 /// `just test -p pixtuoid --lib audio::listen_gate --run-ignored only --no-capture`
 #[cfg(all(test, feature = "audio"))]
@@ -1249,48 +1249,7 @@ mod listen_gate {
             sink.advance(step_n);
             now_s += f64::from(step_s);
         }
-        sink.master
-    }
-
-    /// The stems sum with no soft clip (`BUS_TRIM`'s doc), so the loudest
-    /// office there is stays under full scale: every agent active, a storm's
-    /// rain, and the appliances firing together over and over, through a whole
-    /// loop of epoch 0's day and night tracks once the gains have ramped.
-    #[test]
-    fn the_loudest_mix_stays_under_full_scale() {
-        let mut synthesis = Synthesis::new();
-        let bank = synthesis.assets();
-        let rain = synthesis.rain();
-        let day = synthesis.track(TrackId::GenDay(0));
-        let night = synthesis.track(TrackId::GenNight(0));
-        // The busy tier saturates, so no count is louder.
-        let busiest = pixtuoid_scene::tally::StateCounts {
-            active: usize::MAX,
-            waiting: 0,
-            idle: 0,
-            exiting: 0,
-            total: usize::MAX,
-        };
-        let stems = pixtuoid_scene::audio::stem_levels(&busiest, 1.0);
-        let volley: Vec<(f32, OneShot)> = (0..8u8)
-            .flat_map(|k| {
-                let at = 1.0 + f32::from(k) * 1.5;
-                [
-                    OneShot::DoorChime,
-                    OneShot::PrinterWhir,
-                    OneShot::VendingDrop,
-                ]
-                .map(|e| (at, e))
-            })
-            .collect();
-        for (beds, track) in [(&day, TrackId::GenDay(0)), (&night, TrackId::GenNight(0))] {
-            // One loop of the track: its phase-locked pad bed's length.
-            let secs = beds.bed_slice(LoopStem::Pad).len() as f32 / SAMPLE_RATE as f32
-                + 1.0 / pixtuoid_scene::audio::mixer::RAMP_PER_S;
-            let buf = render_tier(&bank, beds, &rain, track, stems, &volley, secs);
-            let peak = buf.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
-            assert!(peak < 1.0, "{track:?} peaks at {peak}");
-        }
+        sink::limited(sink::mono(&sink.master)).collect()
     }
 
     #[test]
@@ -1321,11 +1280,25 @@ mod listen_gate {
             (10.0, OneShot::PrinterWhir),
             (15.0, OneShot::VendingDrop),
         ];
+        // The limiter's worst case: every appliance at once, over and over, on
+        // the busiest tier in a storm.
+        let pileup: Vec<(f32, OneShot)> = (0..8u8)
+            .flat_map(|k| {
+                let at = 5.0 + f32::from(k) * 1.5;
+                [
+                    OneShot::DoorChime,
+                    OneShot::PrinterWhir,
+                    OneShot::VendingDrop,
+                ]
+                .map(|e| (at, e))
+            })
+            .collect();
         for (name, stems, events) in [
             ("tier_1_empty", quiet, &[][..]),
             ("tier_2_moderate", moderate, &[][..]),
             ("tier_3_busy_oneshot_volley", busy, &volley[..]),
             ("tier_4_rainy_busy", rainy, &[][..]),
+            ("tier_5_rainy_busy_pileup", rainy, &pileup[..]),
         ] {
             let buf = render_tier(&bank, &beds, &rain, TrackId::GenDay(0), stems, events, 60.0);
             assert!(

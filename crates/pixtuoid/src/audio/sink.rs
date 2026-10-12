@@ -5,6 +5,8 @@
 use std::sync::Arc;
 
 use pixtuoid_scene::audio::mixer::LoopStem;
+use pixtuoid_scene::audio::{CEILING_DBFS, LIMITER_ATTACK, LIMITER_RELEASE, ceiling_amplitude};
+use rodio::source::{LimitSettings, Source};
 
 pub(crate) trait AudioSink: Send {
     /// Start `stem` looping `samples` (mono f32 at [`pixtuoid_scene::audio::SAMPLE_RATE`]) at gain 0.
@@ -52,6 +54,40 @@ impl AudioSink for NullSink {
     }
 }
 
+/// A synthesized buffer (mono f32 at [`pixtuoid_scene::audio::SAMPLE_RATE`]) as
+/// a rodio source.
+pub(crate) fn mono(samples: &[f32]) -> rodio::buffer::SamplesBuffer {
+    let channels = std::num::NonZero::new(1u16).expect("1 != 0");
+    let rate =
+        std::num::NonZero::new(pixtuoid_scene::audio::SAMPLE_RATE).expect("SAMPLE_RATE != 0");
+    rodio::buffer::SamplesBuffer::new(channels, rate, samples)
+}
+
+/// `source` held under [`CEILING_DBFS`]: the one output stage of the device's
+/// bus and the LISTEN render alike.
+pub(crate) fn limited<S: Source>(source: S) -> impl Source {
+    let settings = LimitSettings::default()
+        .with_threshold(CEILING_DBFS)
+        .with_attack(LIMITER_ATTACK)
+        .with_release(LIMITER_RELEASE);
+    // A distortion of gain 1 is a bare clamp. It catches what overshoots the
+    // limiter, which is feedforward with no lookahead (`rodio::source::limit`).
+    source.limit(settings).distortion(1.0, ceiling_amplitude())
+}
+
+/// The bus every lane and one-shot sums into, at the device's format, and its
+/// [`limited`] output for the device's mixer.
+pub(crate) fn bus(
+    channels: rodio::ChannelCount,
+    rate: rodio::SampleRate,
+) -> (rodio::mixer::Mixer, impl Source + Send + 'static) {
+    let (mixer, out) = rodio::mixer::mixer(channels, rate);
+    // An empty mixer ends (`rodio::mixer::mixer`), and the device's mixer
+    // drops an ended source for good: silence holds it open.
+    mixer.add(rodio::source::Zero::new(channels, rate));
+    (mixer, limited(out))
+}
+
 /// The real device sink — rodio/cpal construction glue. Needs real audio hardware,
 /// so it is codecov-excluded and has no unit tests.
 #[cfg(feature = "audio")]
@@ -62,7 +98,8 @@ pub(crate) mod rodio_sink {
     pub(crate) struct RodioSink {
         // field order = drop order: players release before the device sink
         loops: HashMap<LoopStem, rodio::Player>,
-        stream: rodio::MixerDeviceSink,
+        bus: rodio::mixer::Mixer,
+        _stream: rodio::MixerDeviceSink,
     }
 
     impl RodioSink {
@@ -80,9 +117,13 @@ pub(crate) mod rodio_sink {
             match opened {
                 Ok(mut stream) => {
                     stream.log_on_drop(false);
+                    let config = stream.config();
+                    let (bus, out) = bus(config.channel_count(), config.sample_rate());
+                    stream.mixer().add(out);
                     Some(Self {
                         loops: HashMap::new(),
-                        stream,
+                        bus,
+                        _stream: stream,
                     })
                 }
                 Err(e) => {
@@ -90,13 +131,6 @@ pub(crate) mod rodio_sink {
                     None
                 }
             }
-        }
-
-        fn source_of(samples: &Arc<Vec<f32>>) -> rodio::buffer::SamplesBuffer {
-            let mono = std::num::NonZero::new(1u16).expect("1 != 0");
-            let rate = std::num::NonZero::new(pixtuoid_scene::audio::SAMPLE_RATE)
-                .expect("SAMPLE_RATE != 0");
-            rodio::buffer::SamplesBuffer::new(mono, rate, samples.as_slice())
         }
     }
 
@@ -133,10 +167,9 @@ pub(crate) mod rodio_sink {
 
     impl AudioSink for RodioSink {
         fn start_loop(&mut self, stem: LoopStem, samples: Arc<Vec<f32>>) {
-            use rodio::Source;
-            let player = rodio::Player::connect_new(self.stream.mixer());
+            let player = rodio::Player::connect_new(&self.bus);
             player.set_volume(0.0);
-            player.append(Self::source_of(&samples).repeat_infinite());
+            player.append(mono(&samples).repeat_infinite());
             self.loops.insert(stem, player);
         }
 
@@ -159,10 +192,91 @@ pub(crate) mod rodio_sink {
             if gain <= 0.0 {
                 return;
             }
-            let player = rodio::Player::connect_new(self.stream.mixer());
+            let player = rodio::Player::connect_new(&self.bus);
             player.set_volume(gain);
-            player.append(Self::source_of(&samples));
+            player.append(mono(&samples));
             player.detach();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pixtuoid_scene::audio::SAMPLE_RATE;
+
+    fn tone(amplitude: f32, hz: f32, secs: f32) -> Vec<f32> {
+        let n = (secs * SAMPLE_RATE as f32) as usize;
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / SAMPLE_RATE as f32;
+                // cos, not sin: the burst starts at its crest
+                amplitude * (std::f32::consts::TAU * hz * t).cos()
+            })
+            .collect()
+    }
+
+    fn peak(samples: &[f32]) -> f32 {
+        samples.iter().fold(0.0f32, |a, &v| a.max(v.abs()))
+    }
+
+    #[test]
+    fn a_burst_from_silence_never_passes_the_ceiling() {
+        let mut input = vec![0.0; SAMPLE_RATE as usize / 2];
+        input.extend(tone(2.0, 440.0, 1.0));
+        let out: Vec<f32> = limited(mono(&input)).collect();
+        assert!(
+            peak(&out) <= ceiling_amplitude(),
+            "the limiter's attack lets the burst's first samples through: {}",
+            peak(&out)
+        );
+    }
+
+    #[test]
+    fn a_sustained_overload_comes_out_limited_not_clipped() {
+        let input = tone(2.0, 110.0, 2.0);
+        let out: Vec<f32> = limited(mono(&input)).collect();
+        let attack = (LIMITER_ATTACK.as_secs_f32() * SAMPLE_RATE as f32) as usize;
+        let settled = &out[10 * attack..];
+        let at_clamp = settled
+            .iter()
+            .filter(|v| v.abs() >= ceiling_amplitude())
+            .count();
+        let share = at_clamp as f32 / settled.len() as f32;
+        // Only the crests the release lets past between two peaks: a clamp
+        // alone holds most of this tone's samples there.
+        assert!(share < 0.15, "{share} of the samples sit at the clamp");
+    }
+
+    #[test]
+    fn a_quiet_signal_passes_unchanged() {
+        let input = tone(0.1, 440.0, 1.0);
+        let out: Vec<f32> = limited(mono(&input)).collect();
+        let worst = input
+            .iter()
+            .zip(&out)
+            .fold(0.0f32, |a, (x, y)| a.max((x - y).abs()));
+        assert!(worst < 1e-6, "a −20 dBFS tone moved by {worst}");
+    }
+
+    #[test]
+    fn the_bus_limits_every_source_summed_into_it() {
+        let channels = std::num::NonZero::new(2u16).expect("2 != 0");
+        let rate = std::num::NonZero::new(48_000u32).expect("48 kHz != 0");
+        let (bus, mut out) = bus(channels, rate);
+        assert_eq!(
+            out.next(),
+            Some(0.0),
+            "an empty bus must stay open, or the device mixer drops it before the first lane"
+        );
+        for _ in 0..3 {
+            bus.add(mono(&tone(0.9, 110.0, 1.0)));
+        }
+        let mixed: Vec<f32> = out.take(rate.get() as usize).collect();
+        assert!(peak(&mixed) <= ceiling_amplitude(), "{}", peak(&mixed));
+        assert!(
+            peak(&mixed) > ceiling_amplitude() / 2.0,
+            "the summed sources never reached the output"
+        );
     }
 }
