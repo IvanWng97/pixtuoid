@@ -944,6 +944,12 @@ gen-media *args:
 gen-icons:
     .venv/bin/python3 scripts/gen-pix-icons.py
 
+# The wasm-bindgen CLI must match the crate's version exactly, and Cargo.lock is
+# that authority: gen-wasm checks the CLI against it, CI installs it.
+[private]
+wasm-bindgen-version:
+    @awk '$0 == "name = \"wasm-bindgen\"" { getline; gsub(/"/, "", $3); print $3; found = 1 } END { exit !found }' Cargo.lock
+
 # The output is gitignored; CI builds it through .github/actions/gen-wasm.
 # Toolchain gotcha: the PATH cargo/rustc may be Homebrew's, which has NO wasm32
 # std — and even `rustup run stable cargo` fails because cargo resolves `rustc`
@@ -954,7 +960,9 @@ gen-icons:
 gen-wasm:
     #!/usr/bin/env sh
     set -eu
-    command -v wasm-bindgen >/dev/null || { echo "needs wasm-bindgen-cli at Cargo.lock's wasm-bindgen version: cargo install wasm-bindgen-cli --locked --version X.Y.Z"; exit 1; }
+    want="$(just wasm-bindgen-version)"
+    have="$(wasm-bindgen --version 2>/dev/null || true)"
+    [ "${have#wasm-bindgen }" = "$want" ] || { echo "needs wasm-bindgen-cli $want (Cargo.lock's), found ${have:-none}: cargo install wasm-bindgen-cli --locked --version $want"; exit 1; }
     command -v wasm-opt >/dev/null || { echo "needs wasm-opt: brew install binaryen"; exit 1; }
     command -v rustup >/dev/null || { echo "needs rustup (Homebrew rust has no wasm std)"; exit 1; }
     rustup target list --toolchain stable --installed | grep -q wasm32-unknown-unknown \
