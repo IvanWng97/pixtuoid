@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     ArrayExpressionElement, BindingPattern, Declaration, Expression, ModuleDeclaration, Statement,
-    TSNamespaceDeclarationBody, TSSignature,
+    TSNamespaceDeclarationBody, TSSignature, VariableDeclarationKind,
 };
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use regex::Regex;
@@ -92,7 +92,7 @@ fn rust_file(text: &str) -> Result<syn::File, Unread> {
 struct RustItems<'ast> {
     enums: Vec<&'ast syn::ItemEnum>,
     structs: Vec<&'ast syn::ItemStruct>,
-    consts: Vec<&'ast syn::ItemConst>,
+    consts: Vec<(&'ast syn::Ident, &'ast syn::Expr)>,
     impls: Vec<&'ast syn::ItemImpl>,
     fns: Vec<(&'ast syn::Ident, &'ast syn::Block)>,
     macros: Vec<&'ast syn::Macro>,
@@ -118,8 +118,13 @@ impl<'ast> Visit<'ast> for RustItems<'ast> {
     }
 
     fn visit_item_const(&mut self, i: &'ast syn::ItemConst) {
-        self.consts.push(i);
+        self.consts.push((&i.ident, &i.expr));
         syn::visit::visit_item_const(self, i);
+    }
+
+    fn visit_impl_item_const(&mut self, i: &'ast syn::ImplItemConst) {
+        self.consts.push((&i.ident, &i.expr));
+        syn::visit::visit_impl_item_const(self, i);
     }
 
     fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
@@ -135,6 +140,13 @@ impl<'ast> Visit<'ast> for RustItems<'ast> {
     fn visit_impl_item_fn(&mut self, i: &'ast syn::ImplItemFn) {
         self.fns.push((&i.sig.ident, &i.block));
         syn::visit::visit_impl_item_fn(self, i);
+    }
+
+    fn visit_trait_item_fn(&mut self, i: &'ast syn::TraitItemFn) {
+        if let Some(block) = &i.default {
+            self.fns.push((&i.sig.ident, block));
+        }
+        syn::visit::visit_trait_item_fn(self, i);
     }
 
     fn visit_macro(&mut self, i: &'ast syn::Macro) {
@@ -257,12 +269,43 @@ fn pattern_strings(pat: &syn::Pat) -> Vec<String> {
             ..
         }) => vec![s.value()],
         syn::Pat::Or(or) => or.cases.iter().flat_map(pattern_strings).collect(),
+        syn::Pat::Guard(g) => pattern_strings(&g.pat),
         _ => Vec::new(),
     }
 }
 
+/// `src` as its own tokens span it: comments gone, and each gap between two
+/// tokens one space, so a pattern reads the code however it is laid out.
+fn code_text(src: &str) -> Option<String> {
+    use proc_macro2::TokenTree;
+    fn spans(ts: proc_macro2::TokenStream, out: &mut Vec<std::ops::Range<usize>>) {
+        for t in ts {
+            match t {
+                TokenTree::Group(g) => {
+                    out.push(g.span_open().byte_range());
+                    spans(g.stream(), out);
+                    out.push(g.span_close().byte_range());
+                }
+                leaf => out.push(leaf.span().byte_range()),
+            }
+        }
+    }
+    let mut ranges = Vec::new();
+    spans(src.parse().ok()?, &mut ranges);
+    let mut out = String::new();
+    let mut end = 0;
+    for r in ranges {
+        if r.start > end && !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(src.get(r.clone())?);
+        end = r.end;
+    }
+    Some(out)
+}
+
 /// The literal-matching arms of the ONE `fn name` whose body begins with what
-/// `arm` matches, read off the arm's own source text.
+/// `arm` matches, read off the arm's own code.
 pub(super) fn rust_arms(text: &str, name: &str, arm: &str) -> Result<Names, Unread> {
     let target = Regex::new(&format!(r"\A(?:{arm})"))?;
     let file = rust_file(text)?;
@@ -278,7 +321,8 @@ pub(super) fn rust_arms(text: &str, name: &str, arm: &str) -> Result<Names, Unre
         .iter()
         .filter(|a| {
             text.get(a.body.span().byte_range())
-                .is_some_and(|src| target.is_match(src))
+                .and_then(code_text)
+                .is_some_and(|code| target.is_match(&code))
         })
         .flat_map(|a| pattern_strings(&a.pat))
         .filter(|s| !s.is_empty())
@@ -303,7 +347,14 @@ pub(super) fn rust_str(text: &str, item: &str) -> Result<Names, Unread> {
     let value: &syn::Expr = match &spec.qself {
         None => {
             let name = last(&spec.path).unwrap_or_default();
-            &one(items.consts.iter().filter(|c| c.ident == name), &what)?.expr
+            one(
+                items
+                    .consts
+                    .iter()
+                    .filter(|(ident, _)| **ident == name)
+                    .map(|(_, expr)| *expr),
+                &what,
+            )?
         }
         Some(qself) => {
             let ty = match qself.ty.as_ref() {
@@ -485,7 +536,9 @@ pub(super) fn ts_const_array(text: &str, name: &str) -> Result<Names, Unread> {
             decls
                 .iter()
                 .filter_map(|d| match d {
-                    Declaration::VariableDeclaration(v) => Some(v.declarations.iter()),
+                    Declaration::VariableDeclaration(v) if v.kind == VariableDeclarationKind::Const => {
+                        Some(v.declarations.iter())
+                    }
                     _ => None,
                 })
                 .flatten()
@@ -850,6 +903,9 @@ mod tests {
             }
             impl Display for AgentTool {
                 fn name(&self) -> &'static str { "display" }
+            }
+            impl AgentTool {
+                const KIND: &str = "subagent";
             }"#;
         assert_eq!(
             found(rust_str(src, "METHOD")),
@@ -859,6 +915,7 @@ mod tests {
             found(rust_str(src, "<AgentTool as ToolSpec>::name")),
             names(&["agent"])
         );
+        assert_eq!(found(rust_str(src, "KIND")), names(&["subagent"]));
         assert_eq!(
             found(rust_str(src, "OTHER")),
             Err("`OTHER` not a string literal".to_owned())
@@ -891,6 +948,8 @@ mod tests {
                     // "commented" => Ok(Action::Start),
                     "start" | "spawn" => Ok(Action::Start),
                     "wait" => Ok( Action::Wait ),
+                    "noted" => Ok(/* the original */ Action::Start),
+                    "guarded" if ready => Ok(Action::Start),
                     "list" => Ok(Action::List),
                     _ => { Err(()) }
                 }
@@ -899,7 +958,14 @@ mod tests {
                 match b { "x" => Ok(Action::Start), _ => Err(()) }
             }"#;
         let read = |t: &str| found(rust_arms(t, "parse", arm));
-        assert_eq!(read(src), names(&["spawn", "start", "wait"]));
+        // A comment inside an arm is no part of its code; a guarded arm still
+        // decodes its literal.
+        assert_eq!(
+            read(src),
+            names(&["guarded", "noted", "spawn", "start", "wait"])
+        );
+        let default = "trait T {\n    fn parse(i: &str) -> Result<Action> {\n        match i { \"t\" => Ok(Action::Start), _ => Err(()) }\n    }\n}";
+        assert_eq!(read(default), names(&["t"]));
         assert_eq!(read("fn parsed() {}"), Err("no `fn parse`".to_owned()));
         assert_eq!(
             read("fn parse() { match a { \"list\" => Ok(Action::List) } }"),
@@ -999,6 +1065,10 @@ mod tests {
             Err("no `const NAME` array".to_owned())
         );
         assert!(found(ts_const_array(&format!("{src}{src}"), "NAMES")).is_err());
+        assert_eq!(
+            found(ts_const_array("let NAMES = [\"x\"];", "NAMES")),
+            Err("no `const NAMES` array".to_owned())
+        );
     }
 
     #[test]
