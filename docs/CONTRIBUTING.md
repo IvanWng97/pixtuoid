@@ -102,7 +102,7 @@ CodSpeed skip drafts. The jobs:
 - **The automatic Claude review** rides `claude-readonly-review.yml`: on the
   trusted default branch, a read-only model reads the PR diff, its head files,
   title, body and prior threads as inert data, and spawns the
-  [`REVIEW.md`](../REVIEW.md#scope) readers: repeated passes per planned unit,
+  [`review-protocol.md`](../.github/prompts/review-protocol.md#scope) readers: repeated passes per planned unit,
   one per lens over the whole diff, a verifier per candidate. A unit it skips
   fails the run; a separate least-privilege publisher opens a review thread
   per finding and sets the one required `claude-review` status, with each
@@ -222,7 +222,8 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    whole-file comment audit: every file the PR touches — even by one line —
    gets its entire comment population re-read against `AGENTS.md`'s comment
    rules, and the cleanup rides the same PR (population and dispositions:
-   [`REVIEW.md`](../REVIEW.md#unit)'s comment audit). Not the merge gate.
+   [`review-protocol.md`](../.github/prompts/review-protocol.md#unit)'s comment
+   audit). Not the merge gate.
 8. **Merge gate** — [the gate](#the-merge-gate); the `local-review` skill
    runs its local rows; merging is `@mergifyio queue`, a release PR by hand.
 9. **Wrap** — retro; a durable lesson becomes a mechanism (a test, a gate) or
@@ -364,7 +365,8 @@ before re-litigating.
 - **Deletion census** — before deleting N members of a class, the full list
   and its criterion land in the first commit or the PR body (#943).
 - **Fixes are never put off; severity ends the loop.** The folds answering
-  rounds 1 and 2 (the review's [`Round:`](../REVIEW.md#re-review)) each take
+  rounds 1 and 2 (the review's
+  [`Round:`](../.github/prompts/review-protocol.md#re-review)) each take
   every accepted finding, whatever code it names, into ONE commit: a
   defect this change introduced is FIXED in it, since a clean-up left for
   later rarely lands ([Google](https://google.github.io/eng-practices/review/reviewer/pushback.html#cleaning-it-up-later)).

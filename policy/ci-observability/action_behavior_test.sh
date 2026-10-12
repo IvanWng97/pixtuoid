@@ -255,6 +255,13 @@ done < <(stage '"sparse-checkout"')
 : >"$test_dir/schema-output"
 (cd "$schema_work" && GITHUB_OUTPUT="$test_dir/schema-output" bash -c "$schema_script") ||
     fail "the review schema step exited non-zero on the staged files"
+# Every reader is pointed at the protocol where the checkout stages it.
+protocol=.github/prompts/review-protocol.md
+[[ -s "$schema_work/$stage_path/$protocol" ]] || fail "$CLAUDE_REVIEW_WORKFLOW_FILE does not stage $protocol"
+while IFS= read -r reader; do
+    [[ "$reader" == *"$stage_path/$protocol"* ]] ||
+        fail "a review prompt does not name the staged $stage_path/$protocol: $reader"
+done < <(jq -r '.[].prompt' .github/prompts/review-agents.json && printf '%s\n' "$prompt")
 bounds="$(sed -n 's/^bounds=//p' "$test_dir/schema-output")"
 severities="$(jq -c '.severities' <<<"$bounds")"
 max_findings="$(jq '.max_findings' <<<"$bounds")"

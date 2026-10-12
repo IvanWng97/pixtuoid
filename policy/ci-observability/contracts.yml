@@ -46,15 +46,16 @@
 - id: reviewer-stages-its-own-files
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    The review schema and agents are this workflow's code, so they come from
-    the commit that defines the job, never a caller's tree, which an outside
-    caller pins apart from this workflow. Cone mode adds every top-level file
+    The review schema, agents and protocol are this workflow's code, so they
+    come from the commit that defines the job, never a caller's tree, which an
+    outside caller pins apart from this workflow. Cone mode adds every top-level file
     (git-scm.com/docs/git-sparse-checkout, "Cone mode handling"), which would
     set this repository's AGENTS.md and REVIEW.md before a caller's review;
     the path is inside reviewer-model-only-reads' claudeMdExcludes and apart
     from .claude-review/head/, where a PR's own copies of these files land.
   expected: |-
     .github/prompts/review-agents.json
+    .github/prompts/review-protocol.md
     .github/prompts/review-schema.json
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@")) | select(.with.repository != null)]

@@ -8,8 +8,9 @@ metadata:
 
 # local-review — local orchestration of REVIEW.md
 
-Every rule is [`REVIEW.md`](../../../REVIEW.md)'s; fill briefs from it, never a
-paraphrase here.
+Every rule is [`REVIEW.md`](../../../REVIEW.md)'s or
+[`review-protocol.md`](../../../.github/prompts/review-protocol.md)'s; fill
+briefs from them, never a paraphrase here.
 
 ## When to run
 
@@ -32,8 +33,8 @@ paraphrase here.
    Worktree: <path> (branch <name>, base <sha>, head <sha>), read-only;
    stop if HEAD is not that head.
    Diff: git -C <path> diff <base>..<head>.
-   Read AGENTS.md, then apply REVIEW.md's <row> and its Common
-   section.
+   Read AGENTS.md, then apply REVIEW.md's <row> and the Common
+   sections of REVIEW.md and .github/prompts/review-protocol.md.
    <change-specific claims (from the PR body's impl-plan answers) or design
    questions, one per line>
    Run the applicable gates; report each exit code as observed, never through

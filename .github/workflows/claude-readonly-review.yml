@@ -119,6 +119,7 @@ jobs:
           sparse-checkout: |
             .github/prompts/review-schema.json
             .github/prompts/review-agents.json
+            .github/prompts/review-protocol.md
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -190,7 +191,7 @@ jobs:
                 "repos/${REPOSITORY}/contents/${path}?ref=${HEAD_SHA}" > ".claude-review/head/$path"
             done
 
-      # The round REVIEW.md's Re-review defines, from the heads the review was
+      # The round the protocol's Re-review defines, from the heads the review was
       # published at before this one, read off the PR comments headed by its
       # title. A re-review of a head counts it once, and a head whose own change
       # against main repeats the previous reviewed head's shares its round. A
@@ -313,8 +314,10 @@ jobs:
           display_report: false
           show_full_output: false
           prompt: >-
-            Follow ${{ inputs.prompt_path }}'s Scope, Common and Orchestrator
-            sections. Your inputs are under .claude-review/: pr.diff
+            Follow the Scope, Common and Orchestrator sections of the review
+            protocol, .claude-review/workflow/.github/prompts/review-protocol.md,
+            and ${{ inputs.prompt_path }}'s Common section. Your inputs are
+            under .claude-review/: pr.diff
             (the PR against the trusted default-branch tree you run in),
             review-context.md, pr-description.json, prior-threads.json,
             units.json (the units planned for you), skipped.json, and head/ (each
