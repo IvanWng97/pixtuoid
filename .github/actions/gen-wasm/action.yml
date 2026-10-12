@@ -4,13 +4,11 @@ description: 'Runs `just gen-wasm` into site/public/wasm/, on the Rust toolchain
 runs:
   using: 'composite'
   steps:
-    # The CLI must match the crate's wasm-bindgen exactly; Cargo.lock is that authority.
     - id: bindgen
       shell: bash
       run: |
         set -euo pipefail
-        ver=$(awk '$0 == "name = \"wasm-bindgen\"" { getline; gsub(/"/, "", $3); print $3 }' "$GITHUB_WORKSPACE/Cargo.lock")
-        test -n "$ver"
+        ver="$(just _wasm-bindgen-version)"
         echo "version=$ver" >> "$GITHUB_OUTPUT"
     # The pinned install-action knows only the wasm-bindgen versions released
     # by its own date, and Cargo.lock moves on its own lane: a fallback keeps a
