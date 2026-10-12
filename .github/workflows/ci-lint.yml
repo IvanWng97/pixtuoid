@@ -78,7 +78,7 @@ jobs:
       - uses: ./.github/actions/setup-just
       - run: just machete
 
-  # The `just lint` recipes no other job runs; a recipe added to `just lint` needs a step here.
+  # The `just lint` recipes no other job runs, so a skipped local preflight can't land their break.
   hygiene:
     name: hygiene
     runs-on: ubuntu-latest
