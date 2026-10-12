@@ -33,7 +33,6 @@ jobs:
     uses: ./.github/workflows/claude-readonly-review.yml
     with:
       pr_number: ${{ github.event.issue.number || github.event.pull_request.number }}
-      prompt_path: REVIEW.md
       max_turns: 120
       max_budget_usd: 50
       allow_fork: ${{ github.event_name == 'issue_comment' }}
@@ -43,19 +42,7 @@ jobs:
       group: claude-review-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
 
-  # The owner's policy: Dependabot's dependency and action bumps merge without
-  # the model review, which reads a lockfile diff it cannot audit. Main requires
-  # the review's status by name from this app, and no protection rule can key on
-  # a PR's author, so the exemption is posted as that status. Anything short of
-  # a same-name bump of Dependabot's own manifests gets `pending` and waits for
-  # a maintainer's /claude-review.
   exempt:
-    if: >
-      github.event_name == 'pull_request_target' &&
-      contains(fromJSON('["opened", "synchronize"]'), github.event.action) &&
-      github.event.pull_request.user.login == 'dependabot[bot]' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.base.ref == github.event.repository.default_branch
     permissions:
       contents: read
       pull-requests: read

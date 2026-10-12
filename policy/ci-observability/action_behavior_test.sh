@@ -280,10 +280,14 @@ staged="$(cd "$own_dir/work/.claude-review" && find . -type f)"
 protocol_dest=".claude-review/${staged#./}"
 cmp -s "$own_dir/work/$protocol_dest" .github/prompts/review-protocol.md ||
     fail "the review's own files step staged something other than review-protocol.md at $protocol_dest"
+# Every reader reads the caller's rules where the checkout put them.
 while IFS= read -r reader; do
-    [[ "$reader" == *"$protocol_dest"* ]] ||
-        fail "a review prompt does not name the protocol at $protocol_dest: $reader"
+    [[ "$reader" == *"$protocol_dest"* && "$reader" == *"$REVIEW_RULES_FILE's"* ]] ||
+        fail "a review prompt does not name the protocol at $protocol_dest and $REVIEW_RULES_FILE: $reader"
 done < <(jq -r '.[].prompt' .github/prompts/review-agents.json && printf '%s\n' "$prompt")
+# Staged alone, the protocol resolves only its own anchors and absolute URLs.
+dead_links="$(grep -noE '\]\([^)]*\)' "$own_dir/work/$protocol_dest" | grep -vE '\]\((#|https://)' || true)"
+[[ -z "$dead_links" ]] || fail "the staged protocol links what its location lacks: ${dead_links//$'\n'/ }"
 bounds="$(sed -n 's/^bounds=//p' "$test_dir/schema-output")"
 severities="$(jq -c '.severities' <<<"$bounds")"
 max_findings="$(jq '.max_findings' <<<"$bounds")"
