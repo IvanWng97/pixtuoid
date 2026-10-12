@@ -64,11 +64,9 @@ pub fn omp_agent_dir() -> PathBuf {
     resolve_omp_agent_dir(&env)
 }
 
-/// The subdirectory omp's loader scans for extension modules — upstream
-/// `discovery/builtin.ts` joins this onto `getAgentDir()`. Watched by the
-/// drift surface (`omp.extension_subdir`): a silent upstream rename would
-/// leave the installer writing where omp never looks while every local check
-/// reads green.
+/// The subdirectory omp's loader scans for extension modules: upstream joins
+/// it onto each config dir, and `omp.extension_subdir` watches that join,
+/// since a rename leaves every local check green.
 pub(crate) const EXTENSIONS_SUBDIR: &str = "extensions";
 
 /// Where the bridge extension installs: [`omp_agent_dir`] +
@@ -1005,6 +1003,27 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             "if `getAgentDir()` gained a redirect (XDG or otherwise), `omp_agent_dir()`'s \
              no-flatten rule is stale and the bridge installs where omp never scans; re-verify \
              dirs.ts",
+        ),
+        siblings: None,
+    },
+    Watch {
+        id: "omp.extension_subdir",
+        ours: || vec![EXTENSIONS_SUBDIR],
+        docs: &[omp_doc(
+            "packages/coding-agent/src/discovery/builtin.ts",
+            r"(?m)^async function loadExtensionModules\b",
+            "`loadExtensionModules`",
+        )],
+        // Bound to the module discovery: `loadExtensions` joins the same
+        // subdir for another loader. Whitespace-tolerant, since a call past
+        // the formatter's width wraps.
+        read: Read::Each {
+            pattern: r#"discoverExtensionModulePaths\(\s*ctx,\s*path\.join\(\s*dir,\s*"{name}"\s*\)"#,
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the installer writes the bridge where omp's loader never looks: it installs \
+             cleanly and never loads",
         ),
         siblings: None,
     },

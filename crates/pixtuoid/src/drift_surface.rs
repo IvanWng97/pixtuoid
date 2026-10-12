@@ -17,27 +17,13 @@ fn surface() -> Value {
     let mut shipped: BTreeMap<&str, Value> = BTreeMap::new();
     shipped.insert(
         "openclaw.default_gateway_port",
-        json!([openclaw_default_gateway_port()
+        json!([crate::install::openclaw::default_gateway_port()
             .expect("openclaw_plugin.js declares DEFAULT_GATEWAY_PORT")]),
     );
 
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
     root.insert("shipped", json!(shipped));
     json!(root)
-}
-
-/// The fallback port the bundled OpenClaw plugin ships with. The port IS the
-/// daemon's runtime identity, so a silent upstream bump collapses two live
-/// gateways onto one mascot.
-fn openclaw_default_gateway_port() -> Option<&'static str> {
-    let after = crate::install::openclaw::PLUGIN_TEMPLATE
-        .split_once("const DEFAULT_GATEWAY_PORT")?
-        .1
-        .split_once('=')?
-        .1;
-    let digits = after.trim_start();
-    let end = digits.find(|c: char| !c.is_ascii_digit())?;
-    (end > 0).then(|| &digits[..end])
 }
 
 #[cfg(test)]
@@ -58,19 +44,6 @@ mod tests {
             Some(snapbox::data::DataFormat::Text),
         );
         snapbox::assert_data_eq!(want, committed.raw());
-    }
-
-    /// The port reader finds the shipped literal, and refuses a shape it cannot
-    /// read rather than emitting a plausible wrong answer.
-    #[test]
-    fn the_gateway_port_is_read_from_the_template_not_copied() {
-        let got = openclaw_default_gateway_port().expect("the template declares it");
-        assert!(
-            crate::install::openclaw::PLUGIN_TEMPLATE
-                .contains(&format!("const DEFAULT_GATEWAY_PORT = {got};")),
-            "the emitted port {got} is not the literal the template ships",
-        );
-        assert!(got.chars().all(|c| c.is_ascii_digit()) && !got.is_empty());
     }
 
     /// No group or set is empty: an emptied set would narrow the watch to nothing

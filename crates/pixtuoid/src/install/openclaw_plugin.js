@@ -43,8 +43,8 @@ const HOOK_PATH = "{{HOOK_PATH_JSON}}";
 const ALLOW = ["runId", "sessionId"];
 
 // OpenClaw's own `DEFAULT_GATEWAY_PORT`, un-importable from here (see the module
-// note). Named ONCE and emitted into the drift surface by `drift_surface.rs`,
-// which reads THIS literal — a copy anywhere else would drift off what ships.
+// note). Named ONCE: `openclaw.default_gateway_port` reads THIS literal, so a
+// copy anywhere else would drift off what ships.
 const DEFAULT_GATEWAY_PORT = 18789;
 
 // The gateway's resolved port — the mascot's identity. Seeded at registration,

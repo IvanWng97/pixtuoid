@@ -71,6 +71,20 @@ pub(crate) const PORT_FIELDS: &[&str] = &["port"];
 #[cfg(feature = "upstream")]
 pub(crate) const RUN_KEY_FIELDS: &[&str] = &["runId", "sessionId"];
 
+/// The fallback port the plugin template ships, read off its one
+/// `DEFAULT_GATEWAY_PORT` rather than copied; `None` for a shape it cannot read.
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) fn default_gateway_port() -> Option<&'static str> {
+    let after = PLUGIN_TEMPLATE
+        .split_once("const DEFAULT_GATEWAY_PORT")?
+        .1
+        .split_once('=')?
+        .1;
+    let digits = after.trim_start();
+    let end = digits.find(|c: char| !c.is_ascii_digit())?;
+    (end > 0).then(|| &digits[..end])
+}
+
 #[cfg(feature = "upstream")]
 const fn openclaw(path: &'static str) -> At {
     At::Path {
@@ -196,6 +210,24 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         "the decoder pairs a run's start and end by these ids, so concurrent runs share one key \
          and the first to end shows the gateway idle while the rest still run",
     ),
+    Watch {
+        id: "openclaw.default_gateway_port",
+        ours: || default_gateway_port().into_iter().collect(),
+        docs: &[Doc {
+            at: openclaw("src/config/paths.ts"),
+            anchor: r"(?m)^export const DEFAULT_GATEWAY_PORT\b",
+            owns: "`DEFAULT_GATEWAY_PORT`",
+        }],
+        read: Read::TsConst {
+            name: "DEFAULT_GATEWAY_PORT",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "a gateway on OpenClaw's new default is stamped with the plugin's stale fallback \
+             port, so two live gateways collapse onto one mascot until a TTL sweeps it",
+        ),
+        siblings: None,
+    },
 ];
 
 const MANIFEST: &str = r#"{
@@ -673,6 +705,18 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The port reader finds the shipped literal, and refuses a shape it cannot
+    /// read rather than answering a plausible wrong one.
+    #[test]
+    fn the_gateway_port_is_read_from_the_template_not_copied() {
+        let got = default_gateway_port().expect("the template declares it");
+        assert!(
+            PLUGIN_TEMPLATE.contains(&format!("const DEFAULT_GATEWAY_PORT = {got};")),
+            "the read port {got} is not the literal the template ships",
+        );
+        assert!(got.chars().all(|c| c.is_ascii_digit()) && !got.is_empty());
+    }
 
     #[test]
     fn openclaw_state_dir_override_wins_outright() {
