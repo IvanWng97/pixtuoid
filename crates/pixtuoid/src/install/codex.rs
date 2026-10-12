@@ -38,6 +38,8 @@ const MARKETPLACES: &str = "marketplaces";
 const SOURCE: &str = "source";
 const PLUGINS: &str = "plugins";
 const ENABLED: &str = "enabled";
+/// Where in a marketplace root Codex reads its manifest.
+const MARKETPLACE_MANIFEST: &str = ".agents/plugins/marketplace.json";
 
 #[cfg(feature = "upstream")]
 const fn codex(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
@@ -124,13 +126,13 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     ),
     host_plugin::premise(
         "codex.marketplace_manifest",
-        || vec![r#"".agents/plugins/marketplace.json""#],
+        || vec![MARKETPLACE_MANIFEST],
         &[codex(
             "codex-rs/core-plugins/src/marketplace.rs",
             r"const MARKETPLACE_MANIFEST_RELATIVE_PATHS\b",
             "`MARKETPLACE_MANIFEST_RELATIVE_PATHS`",
         )],
-        r"{name},",
+        r#""{name}","#,
         "where `register` writes the marketplace manifest may have changed",
     ),
     host_plugin::premise(
@@ -250,9 +252,9 @@ pub(crate) fn installed_shim(content: &str) -> ShimRef {
 }
 
 fn marketplace_manifest(root: &Path) -> PathBuf {
-    root.join(".agents")
-        .join("plugins")
-        .join("marketplace.json")
+    MARKETPLACE_MANIFEST
+        .split('/')
+        .fold(root.to_path_buf(), |path, part| path.join(part))
 }
 
 fn register(config: &Path) -> Result<()> {

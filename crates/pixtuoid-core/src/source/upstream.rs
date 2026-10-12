@@ -337,6 +337,15 @@ mod tests {
             ),
             (
                 Watch {
+                    ours: || vec!["a"],
+                    read: Read::TsReturn { function: "f" },
+                    siblings: Some(ALL),
+                    ..OK
+                },
+                "sweeps siblings off a reader that yields none",
+            ),
+            (
+                Watch {
                     read: Read::TsFields { name: "T" },
                     siblings: Some(ALL),
                     ..OK

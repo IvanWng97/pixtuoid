@@ -31,11 +31,12 @@ const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 pub(crate) const EXTENSION_TEMPLATE: &str = include_str!("omp_extension.ts");
 
 /// The upstream extension-API names the bridge reads: each event field
-/// (`ev?.…`), the session getters and the context's `cwd`.
+/// (`ev?.…`) and context member (`ctx?.…`), and the session getters.
 #[cfg(all(test, feature = "upstream"))]
 pub(crate) fn extension_reads() -> Vec<&'static str> {
-    let mut names: Vec<&'static str> = EXTENSION_TEMPLATE
-        .match_indices("ev?.")
+    let mut names: Vec<&'static str> = ["ev?.", "ctx?."]
+        .into_iter()
+        .flat_map(|marker| EXTENSION_TEMPLATE.match_indices(marker))
         .map(|(i, m)| {
             let rest = &EXTENSION_TEMPLATE[i + m.len()..];
             let end = rest
@@ -47,7 +48,6 @@ pub(crate) fn extension_reads() -> Vec<&'static str> {
     for (probe, name) in [
         (".getSessionFile", "getSessionFile"),
         (".getSessionId", "getSessionId"),
-        ("ctx?.cwd", "cwd"),
     ] {
         if EXTENSION_TEMPLATE.contains(probe) {
             names.push(name);
@@ -130,7 +130,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     },
     Watch {
         id: "omp.extension_context",
-        ours: || vec!["cwd"],
+        ours: || vec!["cwd", "sessionManager"],
         docs: &[Doc {
             at: At::Path {
                 repo: "can1357/oh-my-pi",

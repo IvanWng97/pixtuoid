@@ -430,8 +430,12 @@ fn check_watch(source: &str, w: &Watch, fetched: &mut Fetched, report: &mut Repo
                 )
             });
             for name in ours.iter().filter(|n| !upstream.contains(**n)) {
-                // Out of the read's sight, so no evidence it vanished.
-                if let Some(why) = &partial {
+                // Out of the read's sight, so no evidence it vanished; a fact
+                // of a field the read sees is not.
+                if let Some(why) = partial
+                    .as_ref()
+                    .filter(|_| !upstream.contains(read::field_of(name)))
+                {
                     report.add_blind(
                         &format!("`{name}` ({source}: `{}`)", w.id),
                         &at,

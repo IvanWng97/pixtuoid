@@ -68,7 +68,15 @@ impl From<Declared> for Names {
 
 /// Whether `name` is a field, not one of a `TsFields` read's facts beside it.
 pub(super) fn is_bare(name: &str) -> bool {
-    !name.ends_with('?') && !name.contains(":\"")
+    field_of(name) == name
+}
+
+/// The field a `TsFields` fact is about: itself for a field.
+pub(super) fn field_of(name: &str) -> &str {
+    match name.split_once(":\"") {
+        Some((field, _)) => field,
+        None => name.strip_suffix('?').unwrap_or(name),
+    }
 }
 
 fn joined(why: BTreeSet<String>) -> Option<String> {
@@ -1486,6 +1494,11 @@ mod tests {
         assert_eq!(
             found(ts_members(src, &["Gone", "Lost"])),
             Err("no interface or class `Gone`, `Lost`".to_owned())
+        );
+        let extended = "interface Events extends Base {\n  'a': 1\n}\n";
+        assert_eq!(
+            partial(ts_members(extended, &events)).as_deref(),
+            Some("`interface Events` extends another type")
         );
     }
 

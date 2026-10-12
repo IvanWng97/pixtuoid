@@ -46,9 +46,10 @@ pub(crate) const REASONIX_EVENTS: &[&str] = &[
 ];
 
 /// `reasonix plugin install`'s flags: link in place, re-link over an existing
-/// install, and consent to write.
+/// install.
 const LINK: &str = "--link";
 const REPLACE: &str = "--replace";
+/// The consent to write that `install` and `remove` both require.
 const YES: &str = "--yes";
 /// The `reasonix plugin` subcommand that uninstalls one.
 const REMOVE: &str = "remove";
@@ -74,8 +75,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         docs: &[Doc {
             at: At::Path {
                 repo: "esengine/DeepSeek-Reasonix",
-                branch: "main-v2",
-                path: "internal/hook/hook.go",
+                branch: "studio",
+                path: "internal/ext/hook/hook.go",
             },
             anchor: r"type Event string\b",
             owns: "the `Event` type",
@@ -98,28 +99,35 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         "reasonix.yes_flag",
         || vec![YES],
         PACKAGES_DOC,
-        "`{name}` is required for any install that writes files",
-        "the consent flag `register` and `unregister` pass may have changed",
+        r"`{name}` is required for any install that writes files\.",
+        "the consent flag `register` passes may have changed",
     ),
     host_plugin::premise(
         "reasonix.replace_flag",
         || vec![REPLACE],
         PACKAGES_DOC,
-        "`{name}` allows the source to replace an installed plugin",
+        "`{name}` allows the source to replace an installed plugin with the same",
         "the re-link a repeat `register` relies on may have changed",
     ),
     host_plugin::premise(
         "reasonix.remove_command",
         || vec![REMOVE],
         PACKAGES_DOC,
-        "`{name}` also accepts `uninstall` as an alias",
+        r"`{name}` also accepts `uninstall` as an alias\.",
         "the uninstall command `unregister` runs may have changed",
+    ),
+    host_plugin::premise(
+        "reasonix.remove_consent",
+        || vec![YES],
+        PACKAGES_DOC,
+        r"as an alias\. It requires `{name}` because it",
+        "the consent flag `unregister` passes to `remove` may have changed",
     ),
     host_plugin::premise(
         "reasonix.packages_file",
         || vec![PACKAGES],
         PACKAGES_DOC,
-        r"~/\.reasonix/{name}\s+",
+        r"~/\.reasonix/{name}\b",
         "where `is_registered` reads an install from may have changed",
     ),
     host_plugin::premise(

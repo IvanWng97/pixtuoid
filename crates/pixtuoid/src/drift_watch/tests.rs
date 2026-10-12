@@ -404,6 +404,30 @@ fn a_name_missing_from_a_partial_read_is_blind() {
     );
 }
 
+/// A literal lost on a field the read still sees is a certain loss: no base
+/// type can add it back, so a partial read judges it.
+#[test]
+fn a_fact_of_a_visible_field_is_judged_in_a_partial_read() {
+    const W: Watch = Watch {
+        id: "t.facts",
+        ours: || vec!["a:\"x\""],
+        docs: &[doc("t.ts")],
+        read: Read::TsFields { name: "X" },
+        when: When::Vanishes,
+        finding: Finding::Breaking("x"),
+        siblings: None,
+    };
+    let narrowed = Served::default().with(
+        &raw("t.ts"),
+        "enum Events {}\nexport type X = Base & { a: \"y\" };\n",
+    );
+    let r = check(&narrowed, &W);
+    assert!(
+        r.blind.is_empty() && r.breaking.len() == 1 && r.breaking[0].contains(r#"`a:"x"`"#),
+        "{r:?}"
+    );
+}
+
 /// The floor counts fields, never the facts beside them: a read that kept
 /// `a` and `a?` kept one field of the two ours names.
 #[test]
@@ -1080,8 +1104,10 @@ fn the_report_title_carries_the_strongest_disposition_and_the_exit_code() {
     );
 }
 
-/// What a shipped template reads is what its watches read: a read added
-/// without its watch, or a watch outliving its read, fails here.
+/// What a shipped template reads is what its watches read. omp and dsh, both
+/// ways: a read added without its watch, or a watch outliving its read, fails
+/// here. OpenClaw, one way: each field and literal its Degraded consts name is
+/// still read or compared; a new read is not detected.
 #[test]
 fn each_template_read_is_watched() {
     use crate::install::{dsh, omp, openclaw};
@@ -1101,8 +1127,12 @@ fn each_template_read_is_watched() {
     }
     let fields = [openclaw::AGENT_END_FIELDS, openclaw::MODEL_CALL_BASE_FIELDS].concat();
     for field in fields {
+        let read = format!("ev.{field}");
         assert!(
-            openclaw::PLUGIN_TEMPLATE.contains(&format!("ev.{field}")),
+            openclaw::PLUGIN_TEMPLATE
+                .match_indices(&read)
+                .any(|(i, _)| !openclaw::PLUGIN_TEMPLATE[i + read.len()..]
+                    .starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '$')),
             "the plugin no longer reads `{field}`"
         );
     }

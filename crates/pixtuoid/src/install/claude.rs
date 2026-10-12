@@ -85,14 +85,15 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         "claude.plugin_enabled_key",
         || vec![ENABLED_PLUGINS],
         INSTALL_PAGE,
-        r"The entry goes in `{name}` in `~/\.claude/settings\.json`",
+        r"The entry goes in `{name}` in `~/\.claude/settings\.json`\.",
         "where `is_registered` reads a user-scope install may have changed",
     ),
     host_plugin::premise(
         "claude.plugin_install_command",
         || vec![INSTALL],
         INSTALL_PAGE,
-        r"Run `claude plugin {name}` in your shell",
+        "Run `claude plugin {name}` in your shell to install a plugin without starting a Claude Code \
+         session",
         "the shell install command `register` runs may have changed",
     ),
     host_plugin::premise(
@@ -103,7 +104,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             ]
         },
         INSTALL_PAGE,
-        r"{name}\s+",
+        r"{name}\b",
         "whether removing the marketplace still uninstalls the plugin `unregister` relies on may have changed",
     ),
     host_plugin::premise(
@@ -114,7 +115,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             r"(?m)^# Plugin loading reference",
             "the plugin-loading page",
         )],
-        r"{name}\.",
+        r"{name}\b",
         "whether a local-path marketplace loads in place, so a rewrite needs no reinstall, may have changed",
     ),
 ];
