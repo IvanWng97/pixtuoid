@@ -15,8 +15,6 @@ pub(crate) mod cli;
 pub(crate) mod config;
 pub(crate) mod doctor;
 
-#[cfg(test)]
-mod drift_surface;
 #[cfg(feature = "upstream")]
 mod drift_watch;
 pub(crate) mod floating;
@@ -46,7 +44,7 @@ pub mod dev {
     /// The upstream drift watch, apart from [`crate::run`], the program.
     #[cfg(feature = "upstream")]
     pub mod drift_watch {
-        pub use crate::drift_watch::{Report, run, run_legacy};
+        pub use crate::drift_watch::{Report, run};
     }
     pub use crate::floating::compose::{Change, XrgbSurface, composite, composition};
     pub use crate::floating::geometry::{Zoom, window_geometry};
