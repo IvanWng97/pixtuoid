@@ -577,7 +577,7 @@ const DSH: SourceDescriptor = SourceDescriptor {
     label_prefix: "ds",
     // dsh's banner carries a prerelease suffix (`-rc.N`); `doctor::parse_version`
     // keeps only the dotted digit run, so the suffix never reaches this pin.
-    verified_version: "0.1.5",
+    verified_version: "0.2.0",
     version_probe: Some(&["dsh", "--version"]),
     // `DSH_HOME` is honored INSTALLER-side (the plugin file + patch row live
     // under it); hook-only, so core resolves no root to relocate.
