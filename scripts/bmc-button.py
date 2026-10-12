@@ -178,6 +178,10 @@ def test_button_slug_is_the_funded_account_the_readme_links() -> None:
         check(_raises(button_slug, _funding(bmc), other), f"README {other!r} must raise, not count another account")
     for funding in ({}, {"data": None}, _funding(), _funding(("GITHUB", "https://github.com/someone")), _funding(("BUY_ME_A_COFFEE", "https://example.com/SomeOne42"))):
         check(_raises(button_slug, funding, readme), f"fundingLinks {funding!r} must raise, not guess an account")
+    # Funding and README agree on these, so only the one-account rule refuses them.
+    other = ("BUY_ME_A_COFFEE", "https://buymeacoffee.com/Other")
+    for funding, agreeing in ((_funding(), "no link"), (_funding(bmc, other), readme + " https://buymeacoffee.com/Other")):
+        check(_raises(button_slug, funding, agreeing), f"fundingLinks {funding!r} must raise, not pick an account")
 
 
 def test_count_is_the_public_supporters_count() -> None:

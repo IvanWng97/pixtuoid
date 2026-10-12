@@ -987,8 +987,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         ),
         siblings: None,
     },
-    // `omp_agent_dir`'s no-flatten rule rests on it. Review: a reformat
-    // changes the text with no behavior change.
+    // Review, not Breaking: a reformat of `getAgentDir` changes the text with
+    // no behavior change.
     Watch {
         id: "omp.agent_dir",
         ours: || vec!["dirs.agentDir"],

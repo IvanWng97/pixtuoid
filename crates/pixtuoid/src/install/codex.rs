@@ -29,10 +29,13 @@ pub(crate) const CODEX_EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-/// The `codex plugin` and `codex plugin marketplace` subcommands that add and
-/// remove one.
-const ADD: &str = "add";
-const REMOVE: &str = "remove";
+/// The `codex plugin` subcommands that add and remove one.
+const PLUGIN_ADD: &str = "add";
+const PLUGIN_REMOVE: &str = "remove";
+/// The `codex plugin marketplace` subcommands that add and remove one: a
+/// separate upstream enum, so each moves with its own watch.
+const MARKETPLACE_ADD: &str = "add";
+const MARKETPLACE_REMOVE: &str = "remove";
 /// The `config.toml` tables and keys a marketplace and a plugin are recorded in.
 const MARKETPLACES: &str = "marketplaces";
 const SOURCE: &str = "source";
@@ -40,6 +43,10 @@ const PLUGINS: &str = "plugins";
 const ENABLED: &str = "enabled";
 /// Where in a marketplace root Codex reads its manifest.
 const MARKETPLACE_MANIFEST: &str = ".agents/plugins/marketplace.json";
+/// Where under Codex's home it caches an installed plugin.
+const PLUGINS_CACHE: &str = "plugins/cache";
+/// The version directory a version-less plugin lands in.
+const LOCAL_VERSION: &str = "local";
 
 #[cfg(feature = "upstream")]
 const fn codex(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
@@ -53,6 +60,12 @@ const fn codex(path: &'static str, anchor: &'static str, owns: &'static str) -> 
         owns,
     }
 }
+
+#[cfg(feature = "upstream")]
+const INSTALLED_RS: &str = "codex-rs/core-plugin-common/src/installed.rs";
+#[cfg(feature = "upstream")]
+const STALE_COPY: &str = "`copy_is_stale` reads where Codex no longer keeps the plugin, so every \
+                          pass re-adds it and every launch asks to restart codex for nothing";
 
 #[cfg(feature = "upstream")]
 const PLUGIN_CMD: &[Doc] = &[codex(
@@ -98,28 +111,28 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     },
     host_plugin::premise(
         "codex.plugin_add",
-        || vec![ADD],
+        || vec![PLUGIN_ADD],
         PLUGIN_CMD,
         r#"bin_name = "codex plugin {name}""#,
         "the install command `register` runs to add and reload the plugin may have changed",
     ),
     host_plugin::premise(
         "codex.plugin_remove",
-        || vec![REMOVE],
+        || vec![PLUGIN_REMOVE],
         PLUGIN_CMD,
         r#"bin_name = "codex plugin {name}""#,
         "the uninstall command `unregister` runs may have changed",
     ),
     host_plugin::premise(
         "codex.marketplace_add",
-        || vec![ADD],
+        || vec![MARKETPLACE_ADD],
         MARKETPLACE_CMD,
         r#"bin_name = "codex plugin marketplace {name}""#,
         "the marketplace add command `register` runs may have changed",
     ),
     host_plugin::premise(
         "codex.marketplace_remove",
-        || vec![REMOVE],
+        || vec![MARKETPLACE_REMOVE],
         MARKETPLACE_CMD,
         r#"bin_name = "codex plugin marketplace {name}""#,
         "the marketplace remove command `unregister` runs may have changed",
@@ -176,6 +189,36 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         r#"plugin\["{name}"\]"#,
         "the key `is_registered` reads an install as enabled from may have changed",
     ),
+    Watch {
+        id: "codex.plugin_cache_dir",
+        ours: || vec![PLUGINS_CACHE],
+        docs: &[codex(
+            INSTALLED_RS,
+            r"pub const PLUGINS_CACHE_DIR\b",
+            "`PLUGINS_CACHE_DIR`",
+        )],
+        read: Read::RustStr {
+            item: "PLUGINS_CACHE_DIR",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(STALE_COPY),
+        siblings: None,
+    },
+    Watch {
+        id: "codex.local_plugin_version",
+        ours: || vec![LOCAL_VERSION],
+        docs: &[codex(
+            INSTALLED_RS,
+            r"pub const DEFAULT_PLUGIN_VERSION\b",
+            "`DEFAULT_PLUGIN_VERSION`",
+        )],
+        read: Read::RustStr {
+            item: "DEFAULT_PLUGIN_VERSION",
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(STALE_COPY),
+        siblings: None,
+    },
 ];
 
 /// Codex loads the hooks through its plugin system: a local marketplace it records in
@@ -289,7 +332,7 @@ fn register(config: &Path) -> Result<()> {
     CLI.run(&[
         "plugin".as_ref(),
         "marketplace".as_ref(),
-        ADD.as_ref(),
+        MARKETPLACE_ADD.as_ref(),
         root.as_os_str(),
     ])?;
     add_plugin()
@@ -318,7 +361,7 @@ fn remove_marketplace() -> Result<()> {
     CLI.run(&[
         "plugin".as_ref(),
         "marketplace".as_ref(),
-        REMOVE.as_ref(),
+        MARKETPLACE_REMOVE.as_ref(),
         NAME.as_ref(),
     ])?;
     Ok(())
@@ -329,25 +372,21 @@ fn remove_marketplace() -> Result<()> {
 fn add_plugin() -> Result<()> {
     CLI.run(&[
         "plugin".as_ref(),
-        ADD.as_ref(),
+        PLUGIN_ADD.as_ref(),
         host_plugin::plugin_id().as_ref(),
     ])?;
     Ok(())
 }
 
-/// Whether the hooks file Codex runs, `<codex_home>/plugins/cache/<marketplace>/
-/// <plugin>/local/hooks/hooks.json` (`codex-rs/core-plugins/src/store.rs`
+/// Whether the hooks file Codex runs, under [`PLUGINS_CACHE`]`/<marketplace>/
+/// <plugin>/`[`LOCAL_VERSION`] (`codex-rs/core-plugins/src/store.rs`
 /// @ rust-v0.162.1), differs from ours at `config`. A missing copy differs.
 fn copy_is_stale(config: &Path) -> Result<bool> {
-    let copy = host_plugin::HOOKS_FILE.iter().fold(
-        pixtuoid_core::source::codex::codex_home()
-            .join("plugins")
-            .join("cache")
-            .join(NAME)
-            .join(NAME)
-            .join("local"),
-        |p, c| p.join(c),
-    );
+    let copy = PLUGINS_CACHE
+        .split('/')
+        .chain([NAME, NAME, LOCAL_VERSION])
+        .chain(host_plugin::HOOKS_FILE.iter().copied())
+        .fold(pixtuoid_core::source::codex::codex_home(), |p, c| p.join(c));
     Ok(io::read_config(&copy)? != io::read_config(config)?)
 }
 
@@ -370,7 +409,7 @@ fn unregister(config: &Path) -> Result<Unregistered> {
     if installed {
         CLI.run(&[
             "plugin".as_ref(),
-            REMOVE.as_ref(),
+            PLUGIN_REMOVE.as_ref(),
             host_plugin::plugin_id().as_ref(),
         ])?;
     }

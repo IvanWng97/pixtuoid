@@ -11,7 +11,7 @@
 //! ```
 //!
 //! camelCase fields, `event` discriminator (not `hook_event_name`), and no
-//! transcript path or tool-call id anywhere (`internal/hook/hook.go` Payload).
+//! transcript path or tool-call id anywhere (`internal/ext/hook/hook.go` Payload).
 //! It DOES carry `sessionId` — 44/44 payloads across the recorded fixtures — so
 //! that is the AgentId key, cwd only as the fallback for a build that omits it.
 //! Keying on the workspace instead would merge two sessions in ONE project into
@@ -42,7 +42,7 @@ const SUBAGENT_TOOLS: &[&str] = &["task", "explore", "research", "review", "secu
 
 /// Decode one Reasonix hook payload (already identified by
 /// `_pixtuoid_source == "reasonix"`). Envelope verified against
-/// `internal/hook/hook.go`. An unregistered event bails rather than
+/// `internal/ext/hook/hook.go`. An unregistered event bails rather than
 /// dropping silently, so registered-vs-decoded drift is loud.
 ///
 /// The activity arms prepend an [`AgentEvent::Identity`] (#221) because

@@ -322,44 +322,44 @@ def test_every_surface_row_names_a_key_the_emitter_actually_writes() -> None:
 
 def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
     """A gap in the emitted surface costs exactly what it feeds: per-KEY
-    isolation, or one missing row silently darkens the whole watch."""
+    isolation, or one missing row silently darkens the whole watch. Each row and
+    each fragment is holed in turn, so a row after the gap is always checked."""
     real = d.load_fragment
     try:
         full = {rel: real(rel) for rel in (d.CORE_LIB_FRAGMENT, d.CORE_BIN_FRAGMENT)}
+        fields = [field for field, *_ in d.SURFACE_ROWS]
 
-        holed = {rel: json.loads(json.dumps(f)) for rel, f in full.items()}
-        del holed[d.CORE_BIN_FRAGMENT]["shipped"]["openclaw.default_gateway_port"]
-        d.load_fragment = lambda rel: holed[rel]
-        rep = d.Report()
-        ours = d.read_our_names(rep)
-        check(
-            ours.openclaw_gateway_port is None,
-            f"the holed field is dark, got {ours.openclaw_gateway_port!r}",
-        )
-        check(bool(ours.omp_extension_subdir), "omp_extension_subdir must survive a sibling's gap")
-        named = [b for b in rep.blind if "`openclaw_gateway_port`" in b]
-        check(
-            len(named) == 1,
-            f"exactly one probe-health line names openclaw_gateway_port: {rep.blind}",
-        )
+        for field, rel, group, key in d.SURFACE_ROWS:
+            holed = {r: json.loads(json.dumps(f)) for r, f in full.items()}
+            del holed[rel][group][key]
+            d.load_fragment = lambda r, holed=holed: holed[r]
+            rep = d.Report()
+            ours = d.read_our_names(rep)
+            for other in fields:
+                got = getattr(ours, other)
+                if other == field:
+                    check(got is None, f"the holed {field} is dark, got {got!r}")
+                else:
+                    check(bool(got), f"{other} must survive {field}'s gap")
+            named = [b for b in rep.blind if f"`{field}`" in b]
+            check(len(named) == 1, f"exactly one probe-health line names {field}: {rep.blind}")
 
         # A fragment that does not load at all darkens only what IT feeds.
-        def half(rel):
-            if rel == d.CORE_BIN_FRAGMENT:
-                raise OSError("gone")
-            return full[rel]
+        for gone in full:
 
-        d.load_fragment = half
-        rep2 = d.Report()
-        ours2 = d.read_our_names(rep2)
-        check(
-            ours2.openclaw_gateway_port is None,
-            "a field of the missing fragment is dark when its fragment is gone",
-        )
-        check(
-            bool(ours2.omp_extension_subdir),
-            "a field of the other fragment survives it going missing",
-        )
+            def half(rel, gone=gone):
+                if rel == gone:
+                    raise OSError("gone")
+                return full[rel]
+
+            d.load_fragment = half
+            ours = d.read_our_names(d.Report())
+            for field, rel, *_ in d.SURFACE_ROWS:
+                got = getattr(ours, field)
+                if rel == gone:
+                    check(got is None, f"{field} is dark when {gone} is gone, got {got!r}")
+                else:
+                    check(bool(got), f"{field} survives {gone} going missing")
     finally:
         d.load_fragment = real
 
