@@ -54,10 +54,10 @@ updates:
       - dependency-name: "winit"
         update-types:
           ["version-update:semver-minor", "version-update:semver-major"]
-      # A lofi minor (0.y) is a new Mood/Lane or a dsp output change: a sound
-      # change that needs pixtuoid code and the owner's LISTEN, so a person
-      # bumps it. Patches flow: nothing here pins lofi's output, so one is a
-      # lock-only bump.
+      # A lofi minor (0.y) is a new Mood/Lane or a dsp output change
+      # (https://github.com/pixtuoid/lofi/blob/main/AGENTS.md): a sound change
+      # that needs pixtuoid code and the owner's LISTEN, so a person bumps it.
+      # Patches flow: nothing here pins lofi's output, so one is a lock-only bump.
       - dependency-name: "pixtuoid-lofi"
         update-types:
           ["version-update:semver-minor", "version-update:semver-major"]
