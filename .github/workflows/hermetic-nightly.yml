@@ -85,8 +85,6 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
-      # It shares macOS runners with the merge queue's hermetic run.
-      max-parallel: 1
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.bumps) }}
     steps:
