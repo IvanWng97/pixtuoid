@@ -611,8 +611,6 @@ mod recorder {
         })
     }
 
-    /// A file with a non-JSON line is left as recorded rather than half-rewritten;
-    /// `refuse_on_pii` still reads it for the operator's own identity.
     fn report_not_json(strip: &reads::Strip) {
         for (file, error) in &strip.not_json {
             eprintln!("{}", not_json_notice(file, error));

@@ -181,8 +181,6 @@ fn drive_for(source: &str, file: &Path) -> Option<Drive> {
     }
 }
 
-/// The inner `Err` is a line that is not JSON: the file is left as recorded
-/// rather than half-rewritten.
 type Parsed = (Vec<String>, Vec<Value>);
 
 fn parsed_lines(file: &Path) -> std::io::Result<Result<Parsed, serde_json::Error>> {
@@ -239,7 +237,8 @@ fn events_of(source: &str, drive: &Drive, lines: &[Value]) -> Decoded {
 }
 
 /// A hook envelope's top-level `_` keys are the shim's stamps, kept by namespace:
-/// `_shim_ts_ms` is read by no decoder, only by `captures.rs`, which dates a capture by it.
+/// `_shim_ts_ms` is read by no decoder, only by `tests/sources/captures.rs`,
+/// which dates a capture by it.
 fn probe(
     source: &str,
     drive: &Drive,
