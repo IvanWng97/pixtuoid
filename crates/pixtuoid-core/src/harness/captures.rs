@@ -1,5 +1,6 @@
 //! The committed capture corpus: where each capture's bytes live and which
-//! registered source owns them, read off the tree's layout.
+//! registered source owns them, read off the tree's layout; and the recorder's
+//! contract with its callers: its workspace, raw record and flag spellings.
 
 use std::path::{Path, PathBuf};
 
