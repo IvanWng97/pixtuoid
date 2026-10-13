@@ -79,7 +79,8 @@ pub struct Profile {
     /// Homes the registry row does not name, each pointed into the sandbox.
     pub homes: &'static [&'static str],
     /// Fixed system paths the CLI reads policy or config from, which no home
-    /// redirects: a run on a machine that has one is not hermetic.
+    /// redirects: a run on a machine that has one is not hermetic. A macOS MDM
+    /// managed-preferences domain is not checked: its docs give no path.
     pub unsandboxed: &'static [&'static str],
     /// Names the CLI reads from the workspace's ancestor directories, which
     /// sit outside the sandbox: a run under one that has any is not hermetic.
@@ -219,10 +220,11 @@ pub const PROFILES: &[Profile] = &[
         // reaches them (`codex-rs/config/src/loader/mod.rs:69`, `:102-107`,
         // `layer_io.rs:222-227`).
         unsandboxed: &["/etc/codex"],
-        // Project config and AGENTS.md up to the project root
-        // (`codex-rs/config/src/loader/mod.rs:112-126`, `core/src/agents_md.rs:1-13`);
-        // with no `.git` above the workspace, every ancestor is checked.
-        ancestor_config: &[".codex", "AGENTS.md", "AGENTS.override.md"],
+        // Its project config and AGENTS.md stop at the project root, which is the
+        // workspace itself unless a `.git` above it marks one
+        // (`codex-rs/config/src/loader/mod.rs:1497-1532`, `:1662`,
+        // `core/src/agents_md.rs:8-12`).
+        ancestor_config: &[".git"],
         config: &[ConfigFile {
             home: "CODEX_HOME",
             path: "config.toml",
