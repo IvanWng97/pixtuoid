@@ -99,11 +99,9 @@ pub fn strip_unread(source: &str, files: &[PathBuf]) -> std::io::Result<Strip> {
 }
 
 /// Write `bytes` over `file` through a sibling and a rename, so a reader never
-/// sees a half-written capture. Std rather than `tempfile`: that crate would pull
-/// `tempfile`, `fastrand`, `getrandom` and `r-efi` into `deny-arch.toml`'s core
-/// allowlist (architecture invariant #1) for one dev-only rewrite. The sibling's
-/// name is unique per process and call, it keeps the original's permissions, and
-/// it is removed if any step fails.
+/// sees a half-written capture. Std rather than `tempfile`: its dependencies are
+/// not on `deny-arch.toml`'s core allowlist (architecture invariant #1). The
+/// sibling keeps the original's permissions and is removed if any step fails.
 fn replace_atomically(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = sibling_of(file);
     let written = (|| {
@@ -739,12 +737,12 @@ mod tests {
         let d = tempfile::tempdir().expect("tempdir");
         let file = d.path().join("payloads.jsonl");
         std::fs::write(&file, "old\n").expect("write");
-        // Not 0o644: that is a new file's mode under the usual umask, so a
-        // rewrite that dropped the copy would still pass.
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+        // An execute bit: no umask gives a new file one, so a rewrite that
+        // dropped the copy fails whatever the umask.
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o700)).expect("chmod");
         replace_atomically(&file, b"new\n").expect("replace");
         let mode = std::fs::metadata(&file).expect("stat").permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "the capture keeps its mode");
+        assert_eq!(mode, 0o700, "the capture keeps its mode");
     }
 
     #[test]
