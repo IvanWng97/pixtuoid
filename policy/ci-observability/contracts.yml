@@ -127,11 +127,11 @@
   assert: |
     all(.jobs[]; (.permissions | type) == "object"
                  and (.permissions["id-token"] != "write"
-                      or any(.steps[]?; .uses == "./.github/actions/upload-codecov")))
+                      or any(.steps[]?; .uses == "pixtuoid/.github/.github/actions/upload-codecov@main")))
   break:
     - del(.jobs.snapshots.permissions)
     - .jobs.smoke.permissions["id-token"] = "write"
-    - .jobs.test.steps |= map(select(.uses != "./.github/actions/upload-codecov"))
+    - .jobs.test.steps |= map(select(.uses != "pixtuoid/.github/.github/actions/upload-codecov@main"))
 
 # ── The merge gate
 
