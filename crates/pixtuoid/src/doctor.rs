@@ -5,6 +5,7 @@
 //! hooks stays the Sources panel's job) and never spawns the TUI.
 //! The PROBED CLI is not read-only about its own state — see `may_probe_version`.
 
+use pixtuoid_core::source::registry::Hyphen;
 use pixtuoid_core::source::{drift, registry};
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -347,15 +348,24 @@ const CALVER_YEAR: u64 = 1000;
 
 /// Installed-vs-verified comparison, `None` when either side can't parse or
 /// there is no anchor.
-pub(crate) fn version_cmp(installed: Option<&str>, verified: &str) -> Option<std::cmp::Ordering> {
-    let installed = installed.and_then(registry::cli_version)?;
-    Some(installed.cmp_precedence(&registry::cli_version(verified)?))
+pub(crate) fn version_cmp(
+    installed: Option<&str>,
+    verified: &str,
+    hyphen: Hyphen,
+) -> Option<std::cmp::Ordering> {
+    let installed = installed.and_then(|s| registry::cli_version(s, hyphen))?;
+    Some(installed.cmp_precedence(&registry::cli_version(verified, hyphen)?))
 }
 
 /// The version a skew verdict compared — for the `versions` category, where
 /// showing the two COMPARED values beats echoing a raw banner.
-fn parsed_version_display(s: &str) -> Option<String> {
-    registry::cli_version(s).map(|v| v.to_string())
+fn parsed_version_display(s: &str, hyphen: Hyphen) -> Option<String> {
+    registry::cli_version(s, hyphen).map(|v| v.to_string())
+}
+
+/// How the row's CLI writes a `-` in its version.
+fn hyphen_of(r: &DoctorSourceRow) -> Hyphen {
+    registry::descriptor_for(r.source_id).map_or(Hyphen::Prerelease, |d| d.version_hyphen)
 }
 
 /// A broken install outranks drift (✗ vs !); the two quiet
@@ -1001,10 +1011,10 @@ fn sources_category(rows: &[DoctorSourceRow], ink: &Ink) -> Category {
 /// Whether the installed MAJOR is below the verified one: only the latest
 /// release is supported, and a new major is where a wire breaks. A CalVer
 /// year is no major.
-fn below_verified_major(installed: Option<&str>, verified: &str) -> bool {
+fn below_verified_major(installed: Option<&str>, verified: &str, hyphen: Hyphen) -> bool {
     match (
-        installed.and_then(registry::cli_version),
-        registry::cli_version(verified),
+        installed.and_then(|s| registry::cli_version(s, hyphen)),
+        registry::cli_version(verified, hyphen),
     ) {
         (Some(i), Some(v)) => i.major < v.major && v.major < CALVER_YEAR,
         _ => false,
@@ -1018,13 +1028,22 @@ fn below_verified_major(installed: Option<&str>, verified: &str) -> bool {
 fn versions_category(rows: &[DoctorSourceRow]) -> Category {
     let older: Vec<&DoctorSourceRow> = rows
         .iter()
-        .filter(|r| below_verified_major(r.installed_version.as_deref(), r.verified_version))
+        .filter(|r| {
+            below_verified_major(
+                r.installed_version.as_deref(),
+                r.verified_version,
+                hyphen_of(r),
+            )
+        })
         .collect();
     let newer: Vec<&DoctorSourceRow> = rows
         .iter()
         .filter(|r| {
-            version_cmp(r.installed_version.as_deref(), r.verified_version)
-                == Some(std::cmp::Ordering::Greater)
+            version_cmp(
+                r.installed_version.as_deref(),
+                r.verified_version,
+                hyphen_of(r),
+            ) == Some(std::cmp::Ordering::Greater)
         })
         .collect();
     if older.is_empty() && newer.is_empty() {
@@ -1040,7 +1059,7 @@ fn versions_category(rows: &[DoctorSourceRow]) -> Category {
         let inst = r
             .installed_version
             .as_deref()
-            .and_then(parsed_version_display)
+            .and_then(|s| parsed_version_display(s, hyphen_of(r)))
             .unwrap_or_else(|| "unknown".to_string());
         format!(
             "{DETAIL_INDENT}{:<15} {inst} installed \u{b7} {} verified{tail}",
@@ -2489,20 +2508,44 @@ mod tests {
     #[test]
     fn version_cmp_compares_only_with_a_known_anchor() {
         use std::cmp::Ordering;
-        assert_eq!(version_cmp(Some("3.4.5"), "unknown"), None);
+        let cmp = |installed, verified| version_cmp(installed, verified, Hyphen::Prerelease);
+        assert_eq!(cmp(Some("3.4.5"), "unknown"), None);
+        assert_eq!(cmp(Some("1.1.0"), "1.0.62"), Some(Ordering::Greater));
+        assert_eq!(cmp(Some("1.0.0"), "1.0.62"), Some(Ordering::Less));
+        assert_eq!(cmp(Some("1.0.62"), "1.0.62"), Some(Ordering::Equal));
+        assert_eq!(cmp(None, "1.0.62"), None);
+        assert_eq!(cmp(Some("garbage"), "1.0.62"), None);
         assert_eq!(
-            version_cmp(Some("1.1.0"), "1.0.62"),
-            Some(Ordering::Greater)
-        );
-        assert_eq!(version_cmp(Some("1.0.0"), "1.0.62"), Some(Ordering::Less));
-        assert_eq!(version_cmp(Some("1.0.62"), "1.0.62"), Some(Ordering::Equal));
-        assert_eq!(version_cmp(None, "1.0.62"), None);
-        assert_eq!(
-            version_cmp(Some("0.2.0-rc.3"), "0.2.0-rc.2"),
+            cmp(Some("0.2.0-rc.3"), "0.2.0-rc.2"),
             Some(Ordering::Greater),
             "a prerelease past the pin runs ahead of it"
         );
-        assert_eq!(version_cmp(Some("garbage"), "1.0.62"), None);
+        assert_eq!(
+            cmp(Some("1.2.3+a"), "1.2.3+b"),
+            Some(Ordering::Equal),
+            "build metadata never orders"
+        );
+    }
+
+    #[test]
+    fn a_same_day_build_of_a_build_hyphen_cli_is_its_pin() {
+        use std::cmp::Ordering;
+        for installed in [
+            "2026.09.18-abc1234",
+            "2026.09.18-1234567",
+            "2026.09.18-0123456",
+        ] {
+            assert_eq!(
+                version_cmp(Some(installed), "2026.09.18", Hyphen::Build),
+                Some(Ordering::Equal),
+                "{installed}"
+            );
+        }
+        assert_eq!(
+            registry::descriptor_for("cursor").map(|d| d.version_hyphen),
+            Some(Hyphen::Build),
+            "cursor-agent prints its build id after a `-`"
+        );
     }
 
     /// The footer's drift is this run's breadcrumbs alone, each source once,

@@ -145,7 +145,8 @@ pub struct SourceDescriptor {
     /// The CLI version this build's decoder + fixtures were last verified
     /// against, as the CLI prints it, prerelease or build suffix included.
     /// `"unknown"`, NOT `""`, where we have no fixed anchor — `pixtuoid doctor`
-    /// only flags SKEW when [`cli_version`] reads one.
+    /// only flags SKEW when [`cli_version`] reads one, with this row's
+    /// [`Self::version_hyphen`].
     /// Pinned to the highest recorded capture's `version` banner by
     /// `a_recorded_capture_anchors_its_sources_verified_version`, so a
     /// re-record bumps it.
@@ -153,6 +154,8 @@ pub struct SourceDescriptor {
     /// argv to probe the installed CLI version. `None` = no stable CLI binary;
     /// `doctor` runs it best-effort and degrades to "version: unknown".
     pub version_probe: Option<&'static [&'static str]>,
+    /// What a `-` after the numbers of this CLI's version starts.
+    pub version_hyphen: Hyphen,
     /// The CLI-specific env var relocating the root
     /// [`crate::source::resolved_source_root`] reports. Compiler-forced, which
     /// is the recurrence gate for the #880 class; pinned truthful by
@@ -360,20 +363,30 @@ pub fn descriptor_for(name: &str) -> Option<&'static SourceDescriptor> {
     REGISTRY.iter().find(|d| d.name == name)
 }
 
-/// The version in a CLI's `--version` banner, or in a `verified_version`: the
-/// first token, split on whitespace and `/`, shaped
-/// `v?MAJOR.MINOR[.PATCH][-PRE][+BUILD]`. One grammar for every CLI, so a
-/// banner whose wording changed between releases still reads, and a
-/// parenthesized date or sha (`(2026.8.31)`, `(e178c39)`) never does. A
-/// component's leading zeros drop (CalVer `2026.09.18`), and a dot no digit
-/// follows ends the version (copilot's `1.0.62.`).
-pub fn cli_version(banner: &str) -> Option<semver::Version> {
-    banner
-        .split(|c: char| c.is_whitespace() || c == '/')
-        .find_map(version_token)
+/// What a `-` after a version's numbers starts, which only the CLI knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hyphen {
+    /// A semver prerelease, ordered below its release (dsh's `0.2.0-rc.2`).
+    Prerelease,
+    /// A build id, which no comparison reads (cursor's `2026.09.18-9a7762b`).
+    Build,
 }
 
-fn version_token(token: &str) -> Option<semver::Version> {
+/// The version in a CLI's `--version` banner, or in a `verified_version`: the
+/// first token, split on whitespace and `/`, shaped
+/// `v?MAJOR.MINOR[.PATCH][-SUFFIX][+BUILD]`, its `-` read as `hyphen` says.
+/// One grammar for every CLI, so a banner whose wording changed between
+/// releases still reads, and a parenthesized date or sha (`(2026.8.31)`,
+/// `(e178c39)`) never does. A component's leading zeros drop (CalVer
+/// `2026.09.18`), and a dot no digit follows ends the version (copilot's
+/// `1.0.62.`). Compare two with `cmp_precedence`, which skips build ids.
+pub fn cli_version(banner: &str, hyphen: Hyphen) -> Option<semver::Version> {
+    banner
+        .split(|c: char| c.is_whitespace() || c == '/')
+        .find_map(|token| version_token(token, hyphen))
+}
+
+fn version_token(token: &str, hyphen: Hyphen) -> Option<semver::Version> {
     let token = token.strip_prefix(['v', 'V']).unwrap_or(token);
     let bytes = token.as_bytes();
     let mut end = 0;
@@ -392,10 +405,15 @@ fn version_token(token: &str) -> Option<semver::Version> {
     }
     let mut version = semver::Version::new(major, minor, patch);
     let rest = &token[end..];
-    if let Some(pre) = rest.strip_prefix('-') {
-        version.pre = semver::Prerelease::new(identifiers(pre)).ok()?;
+    if let Some(suffix) = rest.strip_prefix('-').map(identifiers) {
+        match hyphen {
+            Hyphen::Prerelease => version.pre = semver::Prerelease::new(suffix).ok()?,
+            Hyphen::Build => version.build = semver::BuildMetadata::new(suffix).ok()?,
+        }
     }
-    if let Some((_, build)) = rest.split_once('+') {
+    if let Some((_, build)) = rest.split_once('+')
+        && version.build.is_empty()
+    {
         version.build = semver::BuildMetadata::new(identifiers(build)).ok()?;
     }
     Some(version)
@@ -486,6 +504,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     label_prefix: "cc",
     verified_version: "2.1.278",
     version_probe: Some(&["claude", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     home_env: Some("CLAUDE_CONFIG_DIR"),
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Watched(&[claude_code::UPSTREAM]),
@@ -524,6 +543,7 @@ const CODEX: SourceDescriptor = SourceDescriptor {
     label_prefix: "cx",
     verified_version: "0.155.1",
     version_probe: Some(&["codex", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     home_env: Some("CODEX_HOME"),
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Watched(&[codex::UPSTREAM]),
@@ -559,6 +579,7 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
     label_prefix: "ag",
     verified_version: "unknown",
     version_probe: Some(&["agy", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Closed {
@@ -605,6 +626,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
     label_prefix: "rx",
     verified_version: "1.38.7",
     version_probe: Some(&["reasonix", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Installer,
@@ -642,6 +664,7 @@ const DSH: SourceDescriptor = SourceDescriptor {
     label_prefix: "ds",
     verified_version: "0.2.0-rc.2",
     version_probe: Some(&["dsh", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     // `DSH_HOME` is honored INSTALLER-side (the plugin file + patch row live
     // under it); hook-only, so core resolves no root to relocate.
     home_env: None,
@@ -690,6 +713,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
     label_prefix: "cw",
     verified_version: "0.10.1",
     version_probe: Some(&["codewhale", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Watched(&[codewhale::UPSTREAM]),
@@ -719,6 +743,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
     label_prefix: "oc",
     verified_version: "2.0.27",
     version_probe: Some(&["opencode", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Watched(&[opencode::UPSTREAM]),
@@ -753,6 +778,7 @@ const OPENCLAW: SourceDescriptor = SourceDescriptor {
     label_prefix: "ok",
     verified_version: "2026.10.1",
     version_probe: Some(&["openclaw", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Installer,
@@ -770,6 +796,7 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
     label_prefix: "cp",
     verified_version: "unknown",
     version_probe: Some(&["copilot", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     home_env: Some("COPILOT_HOME"),
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Watched(&[copilot::UPSTREAM]),
@@ -805,8 +832,9 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
 const CURSOR: SourceDescriptor = SourceDescriptor {
     name: cursor::SOURCE_NAME,
     label_prefix: "cu",
-    verified_version: "2026.09.18-9a7762b",
+    verified_version: "2026.09.18",
     version_probe: Some(&["cursor-agent", "--version"]),
+    version_hyphen: Hyphen::Build,
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Installer,
@@ -844,6 +872,7 @@ const HERMES: SourceDescriptor = SourceDescriptor {
     label_prefix: "hm",
     verified_version: "0.21.0",
     version_probe: Some(&["hermes", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     home_env: Some("HERMES_HOME"),
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Installer,
@@ -879,6 +908,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
     label_prefix: "gk",
     verified_version: "1.0.25",
     version_probe: Some(&["grok", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     home_env: Some("GROK_HOME"),
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Watched(&[grok::UPSTREAM, acp::UPSTREAM]),
@@ -933,6 +963,7 @@ const OMP: SourceDescriptor = SourceDescriptor {
     label_prefix: "om",
     verified_version: "18.2.6",
     version_probe: Some(&["omp", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     home_env: Some("PI_CODING_AGENT_DIR"),
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Watched(&[omp::UPSTREAM]),
@@ -993,6 +1024,7 @@ const KIMI: SourceDescriptor = SourceDescriptor {
     label_prefix: "km",
     verified_version: "2.0.1",
     version_probe: Some(&["kimi", "--version"]),
+    version_hyphen: Hyphen::Prerelease,
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
     upstream: Upstream::Installer,
@@ -1028,7 +1060,7 @@ mod tests {
 
     #[test]
     fn a_banner_reads_as_its_first_version_shaped_token() {
-        let version = |s: &str| cli_version(s).map(|v| v.to_string());
+        let version = |s: &str| cli_version(s, Hyphen::Prerelease).map(|v| v.to_string());
         for (banner, want) in [
             // Real banners, from the captures' provenance.
             ("2.1.278 (Claude Code)", Some("2.1.278")),
@@ -1037,30 +1069,61 @@ mod tests {
             ("omp/18.2.6", Some("18.2.6")),
             ("Hermes Agent v0.21.0 (2026.8.31)", Some("0.21.0")),
             ("grok 1.0.25 (f7e67d6988e2) [stable]", Some("1.0.25")),
-            ("2026.09.18-9a7762b", Some("2026.9.18-9a7762b")),
             ("0.2.0-rc.2", Some("0.2.0-rc.2")),
             ("GitHub Copilot CLI 1.0.62.", Some("1.0.62")),
-            // A parenthesized date or sha is never the version, nor a bare major.
+            // A parenthesized date or sha is never the version, nor a bare major,
+            // nor a fourth component semver has no place for.
             ("(2026.8.31)", None),
             ("2026", None),
+            ("2.1.233.4", None),
             ("no version here", None),
             // A major no u64 holds is skipped for the next version-shaped token.
             ("99999999999999999999999.0 v1.2.3", Some("1.2.3")),
             ("1.2.3+build.7", Some("1.2.3+build.7")),
+            // Punctuation closing the suffix is not an identifier.
+            ("1.0.0-rc.", Some("1.0.0-rc")),
         ] {
             assert_eq!(version(banner).as_deref(), want, "{banner:?}");
         }
     }
 
     #[test]
+    fn a_build_hyphen_reads_as_build_metadata_whatever_the_id() {
+        for (banner, build) in [
+            ("2026.09.18-9a7762b", "9a7762b"),
+            ("2026.09.18-1234567", "1234567"),
+            ("2026.09.18-0123456", "0123456"),
+        ] {
+            let v = cli_version(banner, Hyphen::Build).expect(banner);
+            assert_eq!(
+                (v.to_string(), v.build.as_str()),
+                (format!("2026.9.18+{build}"), build)
+            );
+            assert!(v.pre.is_empty(), "{banner:?}: a build id is no prerelease");
+        }
+    }
+
+    #[test]
     fn a_prerelease_orders_below_its_release_and_by_its_identifiers() {
-        let v = |s: &str| cli_version(s).expect(s);
+        let v = |s: &str| cli_version(s, Hyphen::Prerelease).expect(s);
         assert!(v("0.2.0-rc.1") < v("0.2.0-rc.2"));
         assert!(v("0.2.0-rc.2") < v("0.2.0"));
         assert!(
             v("2026.09.18") < v("2026.10.1"),
             "CalVer orders by its numbers"
         );
+    }
+
+    #[test]
+    fn every_row_reads_its_own_verified_version() {
+        for d in REGISTRY.iter().filter(|d| d.verified_version != "unknown") {
+            assert!(
+                cli_version(d.verified_version, d.version_hyphen).is_some(),
+                "{}: {:?} does not read as a version",
+                d.name,
+                d.verified_version
+            );
+        }
     }
 
     #[test]

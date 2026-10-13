@@ -629,18 +629,24 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
         );
         // Version first, `captured` only as TIE-BREAK: without it two captures of one
         // version resolve by dir iteration order.
+        let version = |s: &str| registry::cli_version(s, d.version_hyphen);
         let highest = &dated
             .iter()
             .max_by(|a, b| {
-                registry::cli_version(&a.1)
-                    .cmp(&registry::cli_version(&b.1))
-                    .then_with(|| a.0.cmp(&b.0))
+                let precedence = match (version(&a.1), version(&b.1)) {
+                    (Some(a), Some(b)) => a.cmp_precedence(&b),
+                    (a, b) => a.is_some().cmp(&b.is_some()),
+                };
+                precedence.then_with(|| a.0.cmp(&b.0))
             })
             .expect("non-empty")
             .1;
-        let pinned = registry::cli_version(highest);
+        let pinned = version(highest);
         assert!(
-            pinned.is_some() && pinned == registry::cli_version(d.verified_version),
+            pinned
+                .as_ref()
+                .zip(version(d.verified_version))
+                .is_some_and(|(p, v)| p.cmp_precedence(&v).is_eq()),
             "{source}: `verified_version` is {:?}, but the highest recorded capture \
              ({highest:?}) pins {:?} — the newest wire we hold is the one that counts",
             d.verified_version,
