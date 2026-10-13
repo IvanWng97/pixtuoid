@@ -95,9 +95,6 @@ impl Endpoint {
         #[cfg(not(windows))]
         let mut conn = tokio::net::UnixStream::connect(&self.0).await?;
         conn.write_all(bytes).await?;
-        // A pipe's write completes asynchronously: closing before it does can
-        // lose the payload when nothing else drives this runtime meanwhile.
-        conn.flush().await?;
         conn.shutdown().await
     }
 }
@@ -216,15 +213,13 @@ impl Tap {
 /// in its scene log.
 async fn keep(mut conn: HookConn, sink: Arc<Mutex<Vec<String>>>, tee: Arc<Option<Endpoint>>) {
     let mut bytes = Vec::new();
-    match (&mut conn)
+    if (&mut conn)
         .take(MAX_CONN_BYTES)
         .read_to_end(&mut bytes)
         .await
+        .is_err()
     {
-        // A pipe whose writer closed reads as `ERROR_BROKEN_PIPE`, not as an end
-        // (learn.microsoft.com, ReadFile, "Pipes"); what came before it stands.
-        Err(e) if e.kind() != std::io::ErrorKind::BrokenPipe => return,
-        _ => {}
+        return;
     }
     let text = String::from_utf8_lossy(&bytes).into_owned();
     if text.trim().is_empty() {
@@ -250,22 +245,34 @@ mod tests {
         tempfile::tempdir().expect("tempdir")
     }
 
-    #[tokio::test]
-    async fn a_payload_is_kept_and_teed() {
+    /// `bytes` to `at` on a runtime that ends with the call: a Windows pipe
+    /// client's handle closes only while its runtime runs, and a test that then
+    /// blocks in `settle` would hold it open past the tap's budget.
+    fn deliver(at: &Endpoint, bytes: &str) {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(at.send(bytes.as_bytes()))
+            .expect("send");
+    }
+
+    #[test]
+    fn a_payload_is_kept_and_teed() {
         let d = private_dir();
         let tee_at = Endpoint::in_dir(d.path(), "tee");
         let tee = Tap::bind(&tee_at, None).expect("tee");
         let at = Endpoint::in_dir(d.path(), "tap");
         let tap = Tap::bind(&at, Some(tee_at)).expect("tap");
-        at.send(LINE.as_bytes()).await.expect("send");
+        deliver(&at, LINE);
         tap.settle();
         tee.settle();
         assert_eq!(tap.take(), [LINE]);
         assert_eq!(tee.take(), [LINE]);
     }
 
-    #[tokio::test]
-    async fn accepting_turns_true_on_bind_and_takes_no_instance() {
+    #[test]
+    fn accepting_turns_true_on_bind_and_takes_no_instance() {
         let d = private_dir();
         let at = Endpoint::in_dir(d.path(), "tap");
         assert!(!at.accepting(), "nothing listens yet");
@@ -275,7 +282,7 @@ mod tests {
             at.accepting(),
             "a probe leaves the instance for the next one"
         );
-        at.send(LINE.as_bytes()).await.expect("send");
+        deliver(&at, LINE);
         tap.settle();
         assert_eq!(tap.take(), [LINE]);
     }
@@ -289,12 +296,12 @@ mod tests {
         assert_eq!(second.kind(), std::io::ErrorKind::AddrInUse, "{second}");
     }
 
-    #[tokio::test]
-    async fn a_tee_with_no_listener_costs_the_recording_nothing() {
+    #[test]
+    fn a_tee_with_no_listener_costs_the_recording_nothing() {
         let d = private_dir();
         let at = Endpoint::in_dir(d.path(), "tap");
         let tap = Tap::bind(&at, Some(Endpoint::in_dir(d.path(), "absent"))).expect("tap");
-        at.send(LINE.as_bytes()).await.expect("send");
+        deliver(&at, LINE);
         tap.settle();
         assert_eq!(tap.take(), [LINE]);
     }
