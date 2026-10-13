@@ -898,6 +898,21 @@ mod tests {
     }
 
     #[test]
+    fn a_committed_hook_the_profile_owes_needs_no_run() {
+        // fixtures/claude-code/permission-recorded fires both; a tool run neither.
+        let owed = ["hook:Notification", "hook:PermissionRequest"];
+        let d = run_from("claude-code", "tool-run-recorded", CC_SCENE);
+        let v = verify_source("claude-code", &[d.path().to_path_buf()]).expect("verify");
+        assert!(
+            !v.findings()
+                .iter()
+                .any(|f| owed.iter().any(|k| f.1.starts_with(&format!("{k}:")))),
+            "{:?}",
+            v.findings()
+        );
+    }
+
+    #[test]
     fn a_line_the_strip_blanked_whole_adds_no_kind() {
         let p = profile("codex").expect("codex");
         let mut f = Fields::default();
