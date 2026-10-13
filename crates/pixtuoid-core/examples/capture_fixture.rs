@@ -45,8 +45,11 @@ mod recorder {
         "Read NOTE.txt, then list this directory, then read NOTE.txt again.";
 
     use pixtuoid_core::harness::CAPTURE_WORKSPACE as WORKSPACE;
-    use pixtuoid_core::harness::recorder_flag::{ENV, OUT, TEE, WITHIN};
-    use pixtuoid_core::harness::{CAPTURE_RECORD, CaptureRecord, HOOK_PAYLOADS, PROVENANCE};
+    use pixtuoid_core::harness::hermetic::{self, MANIFEST, Manifest};
+    use pixtuoid_core::harness::recorder_flag::{ENV, OUT, PROMOTE, TEE, WITHIN};
+    use pixtuoid_core::harness::{
+        CAPTURE_RECORD, CaptureRecord, HOOK_PAYLOADS, PROVENANCE, jsonl_files_under,
+    };
 
     /// Where a driver names the CLI it drives, a command or the path to its
     /// binary, for the recorder to ask its `--version`.
@@ -81,6 +84,9 @@ mod recorder {
         /// Set on the CLI after the agent-env scrub, which would strip a
         /// caller's own `CLAUDE_CODE_*` opt-outs with the agent's.
         env: Vec<(String, String)>,
+        /// Run no CLI: write this hermetic run's raw capture into the committed
+        /// fixture its scenario names, as a live recording would be written.
+        promote: Option<PathBuf>,
     }
 
     /// Leading option pairs, each a [`pixtuoid_core::harness::recorder_flag`]
@@ -100,6 +106,7 @@ mod recorder {
                 OUT => options.out = Some(PathBuf::from(take(&mut args, OUT)?)),
                 TEE => options.tee = Some(PathBuf::from(take(&mut args, TEE)?)),
                 WITHIN => options.within = Some(PathBuf::from(take(&mut args, WITHIN)?)),
+                PROMOTE => options.promote = Some(PathBuf::from(take(&mut args, PROMOTE)?)),
                 ENV => {
                     let value = take(&mut args, ENV)?;
                     let (k, v) = value
@@ -141,12 +148,16 @@ mod recorder {
                 std::process::exit(2);
             }
         };
+        if let Some(run) = options.promote.as_deref() {
+            return promote(run);
+        }
         if args.len() < 3 {
             eprintln!(
                 "usage: capture_fixture [{OUT} <dir>] [{TEE} <socket>] [{WITHIN} <dir>] [{ENV} K=V]... \
                  <source-id> <scenario> <cmd...>   \
                  ('{{prompt}}' expands)\n       \
-                 capture_fixture --strip-corpus   (strip every committed capture in place)"
+                 capture_fixture --strip-corpus   (strip every committed capture in place)\n       \
+                 capture_fixture {PROMOTE} <run>   (write a hermetic run into its fixture)"
             );
             std::process::exit(2);
         }
@@ -270,6 +281,70 @@ mod recorder {
             eprintln!("WARNING: the CLI exited {status} — this capture may be truncated");
         }
         println!("next: just test conformance   then   cargo insta review");
+        Ok(())
+    }
+
+    /// `run`'s raw capture, a hermetic run the tier judged, written into the
+    /// fixture its scenario names: stripped, recorded and scanned like a live
+    /// capture. It replaces the fixture's bytes whole; the old ones are git's.
+    fn promote(run: &Path) -> std::io::Result<()> {
+        let manifest: Manifest =
+            serde_json::from_str(&std::fs::read_to_string(run.join(MANIFEST))?)?;
+        let named = format!("{}/{}", manifest.source, manifest.scenario);
+        let scenario = hermetic::profile(&manifest.source)
+            .and_then(|p| {
+                p.scenarios
+                    .iter()
+                    .find(|s| s.shape.name() == manifest.scenario)
+            })
+            .ok_or_else(|| std::io::Error::other(format!("{named}: no profiled scenario")))?;
+        let fixture = scenario
+            .fixture
+            .ok_or_else(|| std::io::Error::other(format!("{named}: records no fixture")))?;
+        let dest = sources_root().join(fixture);
+        for old in jsonl_files_under(&dest)
+            .into_iter()
+            .chain([dest.join(PROVENANCE)])
+        {
+            match std::fs::remove_file(&old) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+                _ => {}
+            }
+        }
+        let mut wrote = Vec::new();
+        for raw in jsonl_files_under(run) {
+            let to = dest.join(raw.strip_prefix(run).map_err(std::io::Error::other)?);
+            if let Some(dir) = to.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::copy(&raw, &to)?;
+            wrote.push(to);
+        }
+        let strip = reads::strip_unread(&manifest.source, &wrote)?;
+        report_not_json(&strip);
+        let script = scenario.script(&manifest.source);
+        let script = script
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(&script)
+            .display()
+            .to_string();
+        let command = ["just", "hermetic", "--record", manifest.source.as_str()].map(String::from);
+        write_provenance(
+            &dest,
+            (&manifest.capture.cli, &manifest.capture.version),
+            &command,
+            &Deidentified::Stripped(strip.blanked),
+            &[
+                ("aimock", Some(manifest.aimock.clone())),
+                ("script", Some(script)),
+            ],
+        )?;
+        refuse_on_pii(&wrote)?;
+        println!(
+            "recorded {named} into {} (blanked {} subtrees)",
+            dest.display(),
+            strip.blanked
+        );
         Ok(())
     }
 

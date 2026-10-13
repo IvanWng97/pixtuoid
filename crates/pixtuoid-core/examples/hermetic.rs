@@ -100,6 +100,8 @@ mod run {
     #[derive(Debug, PartialEq, Eq)]
     struct Args {
         versions: Versions,
+        /// Write each passing source's runs into the fixtures its scenarios name.
+        record: bool,
         source: Option<String>,
         scenario: Option<String>,
     }
@@ -108,6 +110,12 @@ mod run {
         /// A selection that names nothing runnable is an operator's typo, not
         /// a run where everything was blocked.
         fn check(&self) -> Result<(), String> {
+            if self.record && self.versions == Versions::Latest {
+                return Err("--record writes fixtures of the pinned CLIs only".into());
+            }
+            if self.record && self.scenario.is_some() {
+                return Err("--record writes a whole source: its census judges every run".into());
+            }
             let Some(source) = self.source.as_deref() else {
                 return Ok(());
             };
@@ -120,6 +128,9 @@ mod run {
                 Some(sc) if !p.scenarios.iter().any(|s| s.shape.name() == sc) => {
                     Err(format!("{source} has no scenario {sc}"))
                 }
+                _ if self.record && p.scenarios.iter().all(|s| s.fixture.is_none()) => {
+                    Err(format!("{source} records no fixture"))
+                }
                 _ => Ok(()),
             }
         }
@@ -130,19 +141,30 @@ mod run {
         }
     }
 
-    fn parse(args: &[String]) -> Result<Args, String> {
-        let (versions, rest) = match args {
-            [flag, v, rest @ ..] if flag == "--cli" => match v.as_str() {
-                "pinned" => (Versions::Pinned, rest),
-                "latest" => (Versions::Latest, rest),
-                _ => return Err("--cli takes pinned or latest".into()),
-            },
-            [flag] if flag == "--cli" => return Err("--cli takes pinned or latest".into()),
-            rest => (Versions::Pinned, rest),
-        };
+    fn parse(mut rest: &[String]) -> Result<Args, String> {
+        let (mut versions, mut record) = (Versions::Pinned, false);
+        loop {
+            match rest {
+                [flag, v, tail @ ..] if flag == "--cli" => {
+                    versions = match v.as_str() {
+                        "pinned" => Versions::Pinned,
+                        "latest" => Versions::Latest,
+                        _ => return Err("--cli takes pinned or latest".into()),
+                    };
+                    rest = tail;
+                }
+                [flag] if flag == "--cli" => return Err("--cli takes pinned or latest".into()),
+                [flag, tail @ ..] if flag == "--record" => {
+                    record = true;
+                    rest = tail;
+                }
+                _ => break,
+            }
+        }
         match rest {
             [] | [_] | [_, _] => Ok(Args {
                 versions,
+                record,
                 source: rest.first().cloned(),
                 scenario: rest.get(1).cloned(),
             }),
@@ -155,7 +177,9 @@ mod run {
         let args = match parse(&std::env::args().skip(1).collect::<Vec<_>>()) {
             Ok(a) => a,
             Err(e) => {
-                eprintln!("{e}\nusage: hermetic [--cli pinned|latest] [<source> [<scenario>]]");
+                eprintln!(
+                    "{e}\nusage: hermetic [--cli pinned|latest] [--record] [<source> [<scenario>]]"
+                );
                 std::process::exit(2);
             }
         };
@@ -180,12 +204,13 @@ mod run {
         let mut entries = Vec::new();
         for p in PROFILES {
             let mut judged = Vec::new();
+            let mut passed = true;
             for scenario in p.scenarios {
                 let name = scenario.shape.name();
                 if !args.selects(p.source, name) {
                     continue;
                 }
-                let dir = runs.join(p.source).join(name);
+                let dir = run_dir(&runs, p, scenario);
                 std::fs::create_dir_all(&dir)?;
                 let key = format!("{}/{name}", p.source);
                 println!("== {key}");
@@ -196,19 +221,48 @@ mod run {
                 if verdict.judged() {
                     judged.push(dir);
                 }
+                passed &= verdict.label() == Label::Pass;
                 entries.push(Entry::new(key, version, verdict));
             }
             if judges_source(&judged, p.scenarios.len()) {
                 let key = format!("{} (every scenario)", p.source);
                 println!("== {key}");
                 let verdict = verify::verify_source(p, &judged)?;
+                passed &= verdict.label() == Label::Pass;
                 entries.push(Entry::new(key, None, verdict));
+                if args.record && passed {
+                    record(&ctx, p, &runs)?;
+                }
             }
         }
         let report = report(args.versions, &entries);
         std::fs::write(runs.join(REPORT), &report)?;
         println!("\n{report}");
         Ok(entries.iter().all(|e| e.verdict.label() == Label::Pass))
+    }
+
+    /// Where `scenario`'s run of `p` lives under `runs`.
+    fn run_dir(runs: &Path, p: &Profile, scenario: &Scenario) -> PathBuf {
+        runs.join(p.source).join(scenario.shape.name())
+    }
+
+    /// Each of `p`'s runs under `runs` whose scenario names a fixture, written
+    /// into it by the recorder: called once every run and the census passed.
+    fn record(ctx: &Ctx, p: &Profile, runs: &Path) -> std::io::Result<()> {
+        for scenario in p.scenarios.iter().filter(|s| s.fixture.is_some()) {
+            let status = Command::new(&ctx.built.recorder)
+                .arg(recorder_flag::PROMOTE)
+                .arg(run_dir(runs, p, scenario))
+                .status()?;
+            if !status.success() {
+                return Err(std::io::Error::other(format!(
+                    "recording {}/{} exited {status}",
+                    p.source,
+                    scenario.shape.name()
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Whether `verify_source` takes a source's `judged` runs: only when they are
@@ -994,6 +1048,29 @@ mod run {
             assert!(check(&["no-such-source"]).is_err());
             let (absent, _) = NOT_HERMETIC[0];
             assert!(check(&[absent]).is_err(), "an unprofiled source says why");
+        }
+
+        #[test]
+        fn record_takes_whole_pinned_sources_that_record() {
+            let a = parse(&args(&["--record", "--cli", "pinned", "dsh"])).expect("parse");
+            assert!(a.record);
+            assert_eq!(a.versions, Versions::Pinned);
+            let check = |v: &[&str]| parse(&args(v)).expect("parse").check();
+            assert!(check(&["--record"]).is_ok());
+            assert!(check(&["--record", "dsh"]).is_ok());
+            assert!(
+                check(&["--cli", "latest", "--record"]).is_err(),
+                "fixtures track the pin"
+            );
+            assert!(
+                check(&["--record", "dsh", "tool-run"]).is_err(),
+                "the census needs all"
+            );
+            assert!(
+                check(&["--record", "codex"]).is_err(),
+                "codex records no fixture"
+            );
+            assert!(!parse(&args(&["dsh"])).expect("parse").record);
         }
     }
 }
