@@ -93,8 +93,8 @@ pub fn verify(dir: &Path) -> std::io::Result<Verdict> {
 
 /// Judge `source`'s runs together, `dirs` being all of them, for what no one
 /// scenario owns: a `not_yet` hook any run fired is Stale, and the field census
-/// ([`census`]) over `source`'s committed captures, where a kind or a field
-/// upstream renamed or dropped fails though the decoder still parses the line.
+/// over `source`'s committed captures, where a kind or a field upstream renamed
+/// or dropped fails though the decoder still parses the line.
 ///
 /// # Errors
 ///
