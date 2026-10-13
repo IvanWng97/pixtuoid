@@ -62,6 +62,8 @@ pub mod recorder_flag {
     pub const WITHIN: &str = "--within";
     /// `Options::env`.
     pub const ENV: &str = "--env";
+    /// `Options::promote`.
+    pub const PROMOTE: &str = "--promote";
 }
 
 /// What only the recorder knows about a raw (`--out`) capture.
@@ -100,7 +102,7 @@ impl Capture {
 }
 
 /// Every `.jsonl` under `dir`, recursively, sorted.
-pub(crate) fn jsonl_files_under(dir: &Path) -> Vec<PathBuf> {
+pub fn jsonl_files_under(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
     while let Some(d) = pending.pop() {

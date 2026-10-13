@@ -283,11 +283,10 @@ fn agent_cases() -> Vec<WireCase> {
             must_reach: &[Reach::Waiting],
         },
         WireCase {
-            // The authed capture (read/bash/read rounds) pins Active on real
-            // wire.
+            // The recorded tool run pins Active on real wire.
             name: "dsh",
             source: "dsh",
-            fixture: "fixtures/dsh/tool-round-recorded/hook-payloads.jsonl",
+            fixture: "fixtures/dsh/tool-run-recorded/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active],
         },

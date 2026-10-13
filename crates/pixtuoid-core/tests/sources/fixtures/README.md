@@ -3,8 +3,8 @@
 Golden fixtures for the per-CLI decode + hook↔JSONL **coalescing** contract,
 driven by `tests/sources/conformance.rs`.
 
-**Record these; do not compose them.** `just capture-fixture <source> <scenario>
-<cmd...>` runs the CLI invocation you give it and records what its hooks send.
+**Record these; do not compose them.** `just hermetic --record <source>` records a CLI
+whose scenarios name a fixture; `just capture-fixture <source> <scenario> <cmd...>` the rest.
 
 ```text
 just capture-fixture kimi tool-run kimi -p '{prompt}'
@@ -24,7 +24,7 @@ redacted cwd and an invented one look alike. `origin` is one of:
 
 | origin | required | means |
 | --- | --- | --- |
-| `recorded` | `cli`, `version`, `captured`, `command` | real wire bytes, stripped of every subtree no decoder reads — unless `deidentified.method` is `none`, a reviewed per-capture exemption with its reason for a test that reads raw bytes the decoder drops; the recorder writes this file itself |
+| `recorded` | `cli`, `version`, `captured`, `command` | real wire bytes — a real CLI's against a scripted model where `aimock` and `script` name it — stripped of every subtree no decoder reads — unless `deidentified.method` is `none`, a reviewed per-capture exemption with its reason for a test that reads raw bytes the decoder drops; the recorder writes this file itself |
 | `composed` | `note` | hand-written, and the note says how you can tell |
 | `unknown` | `note` | predates the rule; nobody recorded where it came from |
 
@@ -81,12 +81,12 @@ there (omp's bridge rounds), else to the conformance root — where a new
 directory would be auto-scanned by `conformance.rs` with no committed bytes
 beside it for the `.new` no-clobber rule to protect.
 
-**Re-recording an existing scenario needs a hand.** The recorder never
-overwrites committed bytes — it writes `<name>.new` beside them, so a re-record
-can be diffed rather than trusted. Nothing READS a `.new`: `conformance.rs` walks
-`*.jsonl` and opens `provenance.json` by exact name. So a re-record that you do not promote costs a billed turn and
-changes nothing while the suite stays green. Diff the pair, then `mv` the `.new`
-over the old one or delete it.
+**Re-recording an existing scenario needs a hand** unless the tier records it:
+`just hermetic --record` replaces a fixture's bytes whole, and git holds the diff.
+`just capture-fixture` never overwrites committed bytes: it writes `<name>.new`
+beside them to be diffed, not trusted, and since only `*.jsonl` and
+`provenance.json` are read, one you do not promote costs a billed turn and changes
+nothing. Diff the pair, then `mv` the `.new` over the old one or delete it.
 
 **A capture can only be recorded on Unix.** The recorder listens on a
 `UnixListener`; the Windows shim speaks a named pipe, so there is no Windows arm

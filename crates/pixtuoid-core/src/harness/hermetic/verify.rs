@@ -245,7 +245,7 @@ const HOOK: &str = "hook:";
 /// read but recorded blank is not seen.
 /// A capture the strip skips proves nothing about reads.
 pub(crate) fn committed_reads(p: &Profile) -> std::io::Result<Fields> {
-    let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources");
+    let corpus = crate::harness::sources_root();
     let mut reads = Fields::default();
     for capture in captures(&corpus) {
         if capture.source != p.source {
@@ -390,24 +390,38 @@ fn judge(
         );
     }
 
+    let sessions = match scenario.shape {
+        Shape::ToolRun | Shape::Permission => 1,
+        Shape::Subagent => 2,
+    };
+    started_in(&events, &manifest.capture.workspace, sessions, findings);
     match scenario.shape {
-        Shape::ToolRun => tool_run(&events, &reached, &manifest.capture.workspace, findings),
+        Shape::ToolRun => tool_run(&events, &reached, findings),
+        Shape::Permission => permission(&events, &reached, findings),
+        Shape::Subagent => subagent(&events, &reached, findings),
     }
-    judge_scene(p, scene, findings);
+    let shown = match scenario.shape {
+        Shape::ToolRun | Shape::Subagent => "active",
+        Shape::Permission => "waiting",
+    };
+    judge_scene(p, scene, shown, findings);
     Ok(())
 }
 
-fn tool_run(
+fn started_in(
     events: &[AgentEvent],
-    reached: &[Reach],
     workspace: &Path,
+    sessions: usize,
     findings: &mut Vec<(Label, String)>,
 ) {
     let ids: BTreeSet<_> = events.iter().map(AgentEvent::agent_id).collect();
-    if ids.len() != 1 {
+    if ids.len() != sessions {
         findings.push((
             Label::Fail,
-            format!("one session must decode to ONE agent; got {}", ids.len()),
+            format!(
+                "{sessions} session(s) must decode to {sessions} agent(s); got {}",
+                ids.len()
+            ),
         ));
     }
     let want = canonical(workspace);
@@ -430,6 +444,9 @@ fn tool_run(
             ),
         ));
     }
+}
+
+fn tool_run(events: &[AgentEvent], reached: &[Reach], findings: &mut Vec<(Label, String)>) {
     let named = events.iter().any(|e| {
         matches!(e, AgentEvent::ActivityStart { detail: Some(d), .. }
             if !d.display().trim().is_empty() && d.display() != "?")
@@ -451,25 +468,83 @@ fn tool_run(
     }
 }
 
+fn permission(events: &[AgentEvent], reached: &[Reach], findings: &mut Vec<(Label, String)>) {
+    if !reached.contains(&Reach::Waiting) {
+        findings.push((Label::Fail, "the slot never went Waiting".into()));
+    }
+    // In any order: a hook payload's arrival order is its shim process's, not
+    // the CLI's, so the wait, the decision and the result can land in any order.
+    let waited: BTreeSet<&String> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::Waiting {
+                tool_use_id: Some(t),
+                ..
+            } => Some(t),
+            _ => None,
+        })
+        .collect();
+    let ended = events.iter().any(
+        |e| matches!(e, AgentEvent::ActivityEnd { tool_use_id: Some(t), .. } if waited.contains(t)),
+    );
+    if !ended {
+        findings.push((
+            Label::Fail,
+            "the tool the slot waited on never ended".into(),
+        ));
+    }
+}
+
+fn subagent(events: &[AgentEvent], reached: &[Reach], findings: &mut Vec<(Label, String)>) {
+    let ids: BTreeSet<_> = events.iter().map(AgentEvent::agent_id).collect();
+    let child = events.iter().find_map(|e| match e {
+        AgentEvent::SessionStart {
+            agent_id,
+            parent_id: Some(parent),
+            ..
+        } if parent != agent_id && ids.contains(parent) => Some(*agent_id),
+        _ => None,
+    });
+    match child {
+        None => findings.push((Label::Fail, "no session started as another's child".into())),
+        Some(child) => {
+            let ended = events.iter().any(
+                |e| matches!(e, AgentEvent::SessionEnd { agent_id, .. } if *agent_id == child),
+            );
+            if !ended {
+                findings.push((Label::Fail, "the child session never ended".into()));
+            }
+        }
+    }
+    if !reached.contains(&Reach::Delegating) {
+        findings.push((Label::Fail, "the parent never went Delegating".into()));
+    }
+    if !reached.contains(&Reach::Active) {
+        findings.push((Label::Fail, "the child's tool never went Active".into()));
+    }
+}
+
 /// The scene a headless pixtuoid painted, and every drift breadcrumb it logged.
-/// The agent must be seen active, and gone once the CLI has exited: every
-/// profiled CLI's clean exit ends its sprite, whether by an end event or by its
-/// process's death, so one left standing is a session pixtuoid lost track of.
-fn judge_scene(p: &Profile, scene: &str, findings: &mut Vec<(Label, String)>) {
+/// The agent must be seen in the `shown` state its shape is about, and gone once
+/// the CLI has exited: every profiled CLI's clean exit ends its sprite, whether
+/// by an end event or by its process's death, so one left standing is a session
+/// pixtuoid lost track of.
+fn judge_scene(p: &Profile, scene: &str, shown: &str, findings: &mut Vec<(Label, String)>) {
     let prefix = format!("{}\u{b7}", p.descriptor().label_prefix);
     let frames: Vec<&str> = scene
         .lines()
         .filter_map(|l| l.split_once("agents=[").map(|(_, agents)| agents))
         .collect();
-    let shows = |frame: &str, active: bool| {
+    let state = format!(":{shown}");
+    let shows = |frame: &str, in_state: bool| {
         frame
             .split(", ")
-            .any(|a| a.starts_with(&prefix) && (!active || a.contains(":active")))
+            .any(|a| a.starts_with(&prefix) && (!in_state || a.contains(&state)))
     };
     if !frames.iter().any(|f| shows(f, true)) {
         findings.push((
             Label::Fail,
-            format!("the scene never showed a {prefix} agent active"),
+            format!("the scene never showed a {prefix} agent {shown}"),
         ));
     }
     if frames.last().is_some_and(|last| shows(last, false)) {
@@ -510,17 +585,32 @@ mod tests {
     /// A run directory built from a committed recording of `source`'s tool run,
     /// judged as if the tier had just produced it.
     fn run_from(source: &str, scenario_dir: &str, scene: &str) -> tempfile::TempDir {
-        let d = tempfile::tempdir().expect("tempdir");
-        let src = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/sources/fixtures")
+        let src = crate::harness::sources_root()
+            .join("fixtures")
             .join(source)
             .join(scenario_dir);
-        for f in jsonl_files_under(&src) {
-            let to = d.path().join(f.strip_prefix(&src).expect("under"));
+        run_of(&src, source, Shape::ToolRun, scene)
+    }
+
+    /// A run directory built from the recording `source`'s `shape` scenario
+    /// writes, judged as that scenario's run.
+    fn recorded(source: &str, shape: Shape, scene: &str) -> tempfile::TempDir {
+        let fixture = profile(source)
+            .and_then(|p| p.scenarios.iter().find(|s| s.shape == shape))
+            .and_then(|s| s.fixture)
+            .expect("a scenario that records");
+        let src = crate::harness::sources_root().join(fixture);
+        run_of(&src, source, shape, scene)
+    }
+
+    fn run_of(src: &Path, source: &str, shape: Shape, scene: &str) -> tempfile::TempDir {
+        let d = tempfile::tempdir().expect("tempdir");
+        for f in jsonl_files_under(src) {
+            let to = d.path().join(f.strip_prefix(src).expect("under"));
             std::fs::create_dir_all(to.parent().expect("parent")).expect("mkdir");
             std::fs::copy(&f, &to).expect("copy");
         }
-        write_manifest(d.path(), source, |_| {});
+        write_manifest(d.path(), source, |m| m.scenario = shape.name().into());
         std::fs::write(d.path().join(SCENE_LOG), scene).expect("scene");
         d
     }
@@ -544,16 +634,24 @@ mod tests {
             .expect("write");
     }
 
-    /// Rewrite every hook line; `None` drops it.
-    fn edit_hooks(dir: &Path, mut f: impl FnMut(Value) -> Option<Value>) {
+    /// Rewrite the hook lines through `f`, which may reorder them.
+    fn reorder_hooks(dir: &Path, f: impl FnOnce(&mut Vec<Value>)) {
         let path = dir.join(HOOK_PAYLOADS);
-        let text = std::fs::read_to_string(&path).expect("read");
-        let out: Vec<String> = text
+        let mut lines: Vec<Value> = std::fs::read_to_string(&path)
+            .expect("read")
             .lines()
-            .filter_map(|l| f(serde_json::from_str(l).expect("json")))
-            .map(|v| v.to_string())
+            .map(|l| serde_json::from_str(l).expect("json"))
             .collect();
+        f(&mut lines);
+        let out: Vec<String> = lines.iter().map(Value::to_string).collect();
         std::fs::write(&path, out.join("\n") + "\n").expect("write");
+    }
+
+    /// Rewrite every hook line; `None` drops it.
+    fn edit_hooks(dir: &Path, f: impl FnMut(Value) -> Option<Value>) {
+        reorder_hooks(dir, |lines| {
+            *lines = std::mem::take(lines).into_iter().filter_map(f).collect();
+        });
     }
 
     fn blank_transcripts(dir: &Path) {
@@ -574,6 +672,172 @@ mod tests {
     const CX_SCENE: &str = "agents=[cx\u{b7}proj@0:active(Bash: cat NOTE.txt)]\n\
                             agents=[cx\u{b7}proj@0:idle]\nagents=[] daemons=[]\n";
     const CC_SCENE: &str = "agents=[cc\u{b7}proj@0:active(Read: NOTE.txt)]\nagents=[] daemons=[]\n";
+
+    const DS_WAIT_SCENE: &str =
+        "agents=[ds\u{b7}proj@0:waiting(bash: escalate)]\nagents=[] daemons=[]\n";
+    const DS_DELEGATE_SCENE: &str = "agents=[ds\u{b7}proj@0:active(Delegating), \
+                                     ds\u{b7}proj@1:active(read)]\nagents=[] daemons=[]\n";
+
+    #[test]
+    fn a_recorded_dsh_permission_run_passes() {
+        let d = recorded("dsh", Shape::Permission, DS_WAIT_SCENE);
+        let v = verify(d.path()).expect("verify");
+        assert_eq!(v.label(), Label::Pass, "{:?}", v.findings());
+    }
+
+    #[test]
+    fn a_permission_run_that_never_waits_fails() {
+        let d = recorded("dsh", Shape::Permission, DS_WAIT_SCENE);
+        edit_hooks(d.path(), |v| (v["type"] != "approval_asked").then_some(v));
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "never went Waiting"),
+            "{:?}",
+            v.findings()
+        );
+    }
+
+    #[test]
+    fn a_permission_scene_that_never_shows_the_wait_fails() {
+        let d = recorded(
+            "dsh",
+            Shape::Permission,
+            "agents=[ds\u{b7}proj@0:active(bash)]\n",
+        );
+        let v = verify(d.path()).expect("verify");
+        assert!(has(&v, Label::Fail, "agent waiting"), "{:?}", v.findings());
+    }
+
+    #[test]
+    fn a_wait_whose_tool_never_ends_fails() {
+        let d = recorded("dsh", Shape::Permission, DS_WAIT_SCENE);
+        edit_hooks(d.path(), |v| {
+            (v["type"] != "tool_result" && v["type"] != "approval_decided").then_some(v)
+        });
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "the slot waited on never ended"),
+            "{:?}",
+            v.findings()
+        );
+    }
+
+    #[test]
+    fn a_wait_that_lands_after_every_end_of_its_tool_still_passes() {
+        let d = recorded("dsh", Shape::Permission, DS_WAIT_SCENE);
+        reorder_hooks(d.path(), |lines| {
+            let asked = lines
+                .iter()
+                .position(|v| v["type"] == "approval_asked")
+                .expect("recorded");
+            let wait = lines.remove(asked);
+            let end = lines
+                .iter()
+                .position(|v| v["type"] == "session_end")
+                .expect("recorded");
+            lines.insert(end, wait);
+        });
+        let v = verify(d.path()).expect("verify");
+        assert_eq!(v.label(), Label::Pass, "{:?}", v.findings());
+    }
+
+    #[test]
+    fn a_wait_ended_only_by_another_tool_fails() {
+        let d = recorded("dsh", Shape::Permission, DS_WAIT_SCENE);
+        edit_hooks(d.path(), |mut v| {
+            if v["type"] == "tool_result" {
+                v["callId"] = "another-call".into();
+            }
+            (v["type"] != "approval_decided").then_some(v)
+        });
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "the slot waited on never ended"),
+            "{:?}",
+            v.findings()
+        );
+    }
+
+    #[test]
+    fn a_parent_that_never_delegates_or_a_child_that_never_works_fails() {
+        let delegation = |v: &Value| v["type"] == "tool_call" && v["toolName"] == "subagent";
+        let d = recorded("dsh", Shape::Subagent, DS_DELEGATE_SCENE);
+        edit_hooks(d.path(), |v| (!delegation(&v)).then_some(v));
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "never went Delegating"),
+            "{:?}",
+            v.findings()
+        );
+        let d = recorded("dsh", Shape::Subagent, DS_DELEGATE_SCENE);
+        edit_hooks(d.path(), |v| {
+            (v["type"] != "tool_call" || delegation(&v)).then_some(v)
+        });
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "child's tool never went Active"),
+            "{:?}",
+            v.findings()
+        );
+    }
+
+    #[test]
+    fn a_session_that_names_itself_its_parent_is_no_child() {
+        let d = recorded("dsh", Shape::Subagent, DS_DELEGATE_SCENE);
+        let mut parent = None;
+        edit_hooks(d.path(), |mut v| {
+            if let Some(p) = v.as_object_mut().and_then(|o| o.remove("parentSession")) {
+                parent = Some(p);
+            }
+            Some(v)
+        });
+        let parent = parent.expect("the recording links its child");
+        edit_hooks(d.path(), |mut v| {
+            if v["type"] == "session_start" && v["sessionId"] == parent {
+                v["parentSession"] = parent.clone();
+            }
+            Some(v)
+        });
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "as another's child"),
+            "{:?}",
+            v.findings()
+        );
+    }
+
+    #[test]
+    fn a_recorded_dsh_subagent_run_passes() {
+        let d = recorded("dsh", Shape::Subagent, DS_DELEGATE_SCENE);
+        let v = verify(d.path()).expect("verify");
+        assert_eq!(v.label(), Label::Pass, "{:?}", v.findings());
+    }
+
+    #[test]
+    fn a_child_that_names_no_parent_or_never_ends_fails() {
+        let d = recorded("dsh", Shape::Subagent, DS_DELEGATE_SCENE);
+        edit_hooks(d.path(), |v| {
+            (!(v["type"] == "session_end" && v.get("parentSession").is_some())).then_some(v)
+        });
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "child session never ended"),
+            "{:?}",
+            v.findings()
+        );
+        edit_hooks(d.path(), |mut v| {
+            if let Some(o) = v.as_object_mut() {
+                o.remove("parentSession");
+            }
+            Some(v)
+        });
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "as another's child"),
+            "{:?}",
+            v.findings()
+        );
+    }
 
     #[test]
     fn a_recorded_codex_tool_run_passes() {
@@ -602,7 +866,7 @@ mod tests {
         assert!(has(
             &verify(d.path()).expect("verify"),
             Label::Fail,
-            "ONE agent"
+            "must decode to 1 agent(s)"
         ));
     }
 

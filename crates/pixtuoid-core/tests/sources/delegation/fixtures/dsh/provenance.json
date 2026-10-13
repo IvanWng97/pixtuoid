@@ -1,11 +1,13 @@
 {
-  "captured": "2026-09-01",
-  "cli": "dsh",
-  "command": "scripts/lib/capture-dsh-authed.sh — authed `dsh --profile headless`, CAPTURE_PROMPT asking for a subagent delegation (parent `subagent` dispatch + parentSession-linked child lifecycle)",
   "origin": "recorded",
-  "version": "0.1.1-rc.2",
+  "cli": "dsh",
+  "version": "0.2.0-rc.2",
+  "captured": "2026-10-13",
+  "command": "just hermetic --record dsh",
   "deidentified": {
     "method": "decoder-allowlist",
     "blanked": 5
-  }
+  },
+  "aimock": "1.43.0",
+  "script": "tests/sources/hermetic/dsh/subagent.json"
 }

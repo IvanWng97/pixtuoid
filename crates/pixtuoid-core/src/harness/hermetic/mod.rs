@@ -4,7 +4,7 @@
 //! the home variable (`home_env`) and the pinned version (`verified_version`);
 //! a profile holds only what it doesn't.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -35,6 +35,12 @@ pub enum Shape {
     /// A turn that reads a file: the session registers in the workspace, a tool
     /// starts with a detail naming it, and it ends.
     ToolRun,
+    /// A turn whose tool call needs an approval the run cannot give: the slot
+    /// waits on it, then the refused tool ends.
+    Permission,
+    /// A turn that hands a file read to a child session: the parent delegates,
+    /// the child registers as its child and reads, and both end.
+    Subagent,
 }
 
 impl Shape {
@@ -42,6 +48,8 @@ impl Shape {
     pub const fn name(self) -> &'static str {
         match self {
             Self::ToolRun => "tool-run",
+            Self::Permission => "permission",
+            Self::Subagent => "subagent",
         }
     }
 }
@@ -53,6 +61,9 @@ pub struct Scenario {
     pub shape: Shape,
     /// The hook events this run must fire, as `Profile::event_name` reads them.
     pub expects: &'static [&'static str],
+    /// The committed recording `--record` rewrites, under `tests/sources`. Only
+    /// a profile that owes no field has one: its recording would lose the field.
+    pub fixture: Option<&'static str>,
 }
 
 /// A config file the tier writes into a sandbox home BEFORE `pixtuoid connect`,
@@ -154,6 +165,21 @@ fn type_field(v: &Value) -> Option<&str> {
     v.get("type")?.as_str()
 }
 
+/// The event dsh's plugin forwards as each payload `type` (`dsh_plugin.mjs`).
+fn dsh_event(v: &Value) -> Option<&str> {
+    Some(match type_field(v)? {
+        "session_start" => "agent/created",
+        "session_end" => "agent/disposed",
+        "model" => "request/header",
+        "usage" => "assistant/message",
+        "tool_call" => "tool/call",
+        "tool_result" => "tool/result",
+        "approval_asked" => "approval/asked",
+        "approval_decided" => "approval/decided",
+        _ => return None,
+    })
+}
+
 /// The profiled CLIs.
 pub const PROFILES: &[Profile] = &[
     Profile {
@@ -183,6 +209,7 @@ pub const PROFILES: &[Profile] = &[
         scenarios: &[Scenario {
             shape: Shape::ToolRun,
             expects: &["SessionStart", "PreToolUse", "PostToolUse", "SessionEnd"],
+            fixture: None,
         }],
         not_yet: &[
             "Notification",
@@ -253,6 +280,7 @@ wire_api = "responses"
                 "Stop",
                 "SessionEnd",
             ],
+            fixture: None,
         }],
         not_yet: &["SubagentStart", "SubagentStop", "PermissionRequest"],
         event_name: hook_event_name,
@@ -333,6 +361,7 @@ wire_api = "responses"
                 "session.tool.success",
                 "session.execution.succeeded",
             ],
+            fixture: None,
         }],
         not_yet: &[
             "session.deleted",
@@ -348,6 +377,71 @@ wire_api = "responses"
             ("hook:session.execution.started", "/data/parentID"),
         ],
     },
+    // dsh's cites are `deepseek-ai/deepseek-harness` at `dsh-v0.2.0-rc.2`.
+    Profile {
+        source: "dsh",
+        package: Package::Npm("@deepseek-ai/dsh"),
+        invocation: &["dsh", "--profile", "headless", "{prompt}"],
+        // The Messages endpoint and key come from the launch environment
+        // (`packages/llm/llm-deepseek/src/config.ts:290`,
+        // `packages/llm/llm-deepseek-api-key/src/index.ts:20-35`); the feedback
+        // upload's switch (`packages/bundle/base/cordis.patch.yml:193-195`).
+        env: &[
+            ("DEEPSEEK_BASE_URL", "http://127.0.0.1:{port}"),
+            ("DEEPSEEK_API_KEY", "{key}"),
+            ("DSH_TELEMETRY_DISABLED", "1"),
+        ],
+        homes: &["DSH_HOME"],
+        system_config: &[],
+        // AGENTS.md and CLAUDE.md stop at the nearest `.git`
+        // (`packages/context/agent-instructions/README.md:36`), which the
+        // recorder's `git init` makes the workspace.
+        ancestor_config: &[],
+        config: &[],
+        scenarios: &[
+            Scenario {
+                shape: Shape::ToolRun,
+                expects: &[
+                    "agent/created",
+                    "request/header",
+                    "assistant/message",
+                    "tool/call",
+                    "tool/result",
+                    "agent/disposed",
+                ],
+                fixture: Some("fixtures/dsh/tool-run-recorded"),
+            },
+            Scenario {
+                shape: Shape::Permission,
+                expects: &[
+                    "agent/created",
+                    "request/header",
+                    "assistant/message",
+                    "tool/call",
+                    "approval/asked",
+                    "approval/decided",
+                    "tool/result",
+                    "agent/disposed",
+                ],
+                fixture: Some("fixtures/dsh/permission-recorded"),
+            },
+            Scenario {
+                shape: Shape::Subagent,
+                expects: &[
+                    "agent/created",
+                    "request/header",
+                    "assistant/message",
+                    "tool/call",
+                    "tool/result",
+                    "agent/disposed",
+                ],
+                fixture: Some("delegation/fixtures/dsh"),
+            },
+        ],
+        not_yet: &[],
+        event_name: dsh_event,
+        not_yet_fields: &[],
+    },
 ];
 
 /// Every registered source without a profile, and why.
@@ -356,7 +450,6 @@ pub const NOT_HERMETIC: &[(&str, Absence)] = &[
     ("cursor", Absence::NoModelEndpoint),
     ("antigravity", Absence::AwaitingProfile),
     ("reasonix", Absence::AwaitingProfile),
-    ("dsh", Absence::AwaitingProfile),
     ("codewhale", Absence::AwaitingProfile),
     ("openclaw", Absence::AwaitingProfile),
     ("copilot", Absence::AwaitingProfile),
@@ -374,7 +467,7 @@ pub fn profile(source: &str) -> Option<&'static Profile> {
 /// Where each profile's scenario scripts live, as `<source>/<shape>.json`, and
 /// the scripted model's npm lockfile, under `aimock/`.
 pub fn scripts_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources/hermetic")
+    crate::harness::sources_root().join("hermetic")
 }
 
 impl Scenario {
@@ -389,6 +482,7 @@ impl Scenario {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::path::Path;
 
     use super::*;
 
@@ -472,11 +566,37 @@ mod tests {
     #[test]
     fn the_drift_watchs_npm_release_installs_the_profiles_package() {
         use crate::source::upstream::Release;
-        let Release::Npm { package, .. } = crate::source::opencode::REPO.release else {
-            panic!("opencode's watch reads its npm release");
-        };
-        let p = profile("opencode").expect("profiled");
-        assert_eq!(p.package, Package::Npm(package));
+        for (source, repo) in [
+            ("opencode", crate::source::opencode::REPO),
+            ("dsh", crate::source::dsh::REPO),
+        ] {
+            let Release::Npm { package, .. } = repo.release else {
+                panic!("{source}'s watch reads its npm release");
+            };
+            let p = profile(source).expect("profiled");
+            assert_eq!(p.package, Package::Npm(package), "{source}");
+        }
+    }
+
+    #[test]
+    fn a_scenario_records_only_for_a_profile_that_owes_no_field() {
+        let mut fixtures = BTreeSet::new();
+        for p in PROFILES {
+            for s in p.scenarios {
+                let Some(fixture) = s.fixture else { continue };
+                assert!(
+                    p.not_yet_fields.is_empty(),
+                    "{}: owes {:?}, which a recording would lose",
+                    p.source,
+                    p.not_yet_fields
+                );
+                assert!(fixtures.insert(fixture), "{fixture} recorded twice");
+                let prov = crate::harness::sources_root()
+                    .join(fixture)
+                    .join(crate::harness::PROVENANCE);
+                assert!(prov.is_file(), "{}: no {}", p.source, prov.display());
+            }
+        }
     }
 
     #[test]
