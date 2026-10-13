@@ -46,7 +46,7 @@ fn transcript() -> Driven {
 #[test]
 fn a_blocking_spawn_is_a_task_and_the_parent_goes_delegating() {
     // Whose Task it is, asserted on the EVENT rather than on `reached` or on the
-    // final slot: `reached` is a union over every live slot (harness.rs says so)
+    // final slot: `reached` is a union over every live slot (`Driven::reached`)
     // and this run drives two, while the parent's final state is Idle because the
     // turn completed. The event carries the agent_id, so it answers the half this
     // name promises — that the PARENT delegated.
