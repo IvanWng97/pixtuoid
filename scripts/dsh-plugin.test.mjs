@@ -17,8 +17,6 @@ const HOOK_PLACEHOLDER = '"{{HOOK_PATH_JSON}}"';
 
 const POSIX = process.platform !== "win32";
 
-// A recorder that holds each call open, so two shims spawned together overlap,
-// and logs when each starts and ends beside the payload it received.
 async function renderPlugin(t) {
   const root = await mkdtemp(join(tmpdir(), "pixtuoid-dsh-plugin-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -28,6 +26,7 @@ async function renderPlugin(t) {
   const outFile = join(root, "payloads.ndjson");
   const traceFile = join(root, "trace.txt");
   const hookPath = join(root, "recorder-hook");
+  // Holds each call open, so two shims spawned together overlap in the trace.
   await writeFile(
     hookPath,
     `#!/bin/sh\necho begin >> ${JSON.stringify(traceFile)}\nsleep 0.1\n` +
@@ -54,35 +53,68 @@ function apply(module) {
   return handlers;
 }
 
-async function recorded(outFile, n) {
+// The first `n` lines of `file` once it holds them: the shims write after the
+// listeners return.
+async function lines(file, n) {
   const deadline = Date.now() + 10_000;
   for (;;) {
-    const text = await readFile(outFile, "utf8").catch(() => "");
-    const lines = text.split("\n").filter((l) => l.trim().length > 0);
-    if (lines.length >= n) return lines.map((l) => JSON.parse(l));
+    const text = await readFile(file, "utf8").catch(() => "");
+    const got = text.split("\n").filter((l) => l.trim().length > 0);
+    if (got.length >= n) return got.slice(0, n);
     if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${n} payload(s); got ${lines.length}`);
+      throw new Error(`timed out waiting for ${n} line(s) of ${file}; got ${got.length}`);
     }
     await new Promise((r) => setTimeout(r, 25));
   }
 }
 
+const header = { id: "s1", cwd: "/w" };
+const session = { header };
+
 test("events reach the shim in emission order, one shim at a time", { skip: !POSIX }, async (t) => {
   const { module, outFile, traceFile } = await renderPlugin(t);
   const handlers = apply(module);
-  const header = { id: "s1", cwd: "/w" };
-  const session = { header };
   const event = (type, data) => handlers.get("session/event")(session, { type, data });
 
-  // Synchronous and void: `agent/created` is serial in dsh, so a returned
-  // promise would hold the agent's creation.
-  assert.equal(handlers.get("agent/created")({ agent: { session } }), undefined);
+  handlers.get("agent/created")({ agent: { session } });
   event("approval/asked", { id: "a1", callId: "c1", toolName: "bash", reason: "wider" });
   event("approval/decided", { id: "a1", outcome: "unavailable" });
   event("tool/result", { message: { toolCallId: "c1" } });
 
-  const types = (await recorded(outFile, 4)).map((p) => p.type);
+  const types = (await lines(outFile, 4)).map((l) => JSON.parse(l).type);
   assert.deepEqual(types, ["session_start", "approval_asked", "approval_decided", "tool_result"]);
-  const trace = (await readFile(traceFile, "utf8")).trim().split("\n");
+  const trace = await lines(traceFile, 8);
   assert.deepEqual(trace, ["begin", "end", "begin", "end", "begin", "end", "begin", "end"]);
+});
+
+test("agent/created's listener returns nothing", async (t) => {
+  const { module } = await renderPlugin(t);
+  const handlers = apply(module);
+  assert.equal(
+    handlers.get("agent/created")({ agent: { session } }),
+    undefined,
+    "agent/created's listener must return nothing",
+  );
+});
+
+test("forwards no prompt, message, tool argument, result or output", { skip: !POSIX }, async (t) => {
+  const { module, outFile } = await renderPlugin(t);
+  const handlers = apply(module);
+  const event = (type, data) => handlers.get("session/event")(session, { type, data });
+
+  handlers.get("agent/created")({
+    agent: { session: { header: { ...header, title: "SECRET_TITLE", prompt: "SECRET_PROMPT" } } },
+  });
+  event("tool/call", { callId: "c1", name: "bash", input: { command: "SECRET_ARGUMENT" } });
+  event("tool/result", { message: { toolCallId: "c1", content: [{ text: "SECRET_RESULT" }] } });
+  event("assistant/message", {
+    content: [{ type: "text", text: "SECRET_OUTPUT" }],
+    usage: { inputTokens: 1, outputTokens: 2 },
+  });
+  event("request/header", {
+    header: { config: { model: "m", system: "SECRET_SYSTEM" }, messages: ["SECRET_MESSAGE"] },
+  });
+
+  const forwarded = (await lines(outFile, 5)).join("\n");
+  assert.ok(!forwarded.includes("SECRET"), `no content may leak: ${forwarded}`);
 });
