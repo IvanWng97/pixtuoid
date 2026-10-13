@@ -1129,17 +1129,18 @@ mod recorder {
             let sandbox = tempfile::tempdir().expect("sandbox");
             let ws = tempfile::tempdir().expect("workspace");
             let sock = sandbox.path().join("capture.sock");
-            // A caller's `CLAUDE_CODE_*` opt-out outlives the agent-env scrub.
+            // An inherited agent var is scrubbed; a caller's `CLAUDE_CODE_*`
+            // opt-out outlives the scrub.
             let script = format!(
-                r#"test "${VERSION_ENV}" = 1.0.0 && test "$CLAUDE_CODE_PROBE" = 1 && echo dsh >"${CLI_ENV}""#
+                r#"test "${VERSION_ENV}" = 1.0.0 && test -z "$CLAUDE_CODE_CHILD_SESSION" \
+                   && test "$CLAUDE_CODE_PROBE" = 1 && echo dsh >"${CLI_ENV}""#
             );
             let cmd = ["sh", "-c", &script].map(String::from);
             let env = [("CLAUDE_CODE_PROBE".to_string(), "1".to_string())];
-            assert!(
-                run_cli(&cmd, ws.path(), &sock, "1.0.0", &env)
-                    .expect("runs")
-                    .success()
-            );
+            let ran = temp_env::with_var("CLAUDE_CODE_CHILD_SESSION", Some("1"), || {
+                run_cli(&cmd, ws.path(), &sock, "1.0.0", &env).expect("runs")
+            });
+            assert!(ran.success());
             assert_eq!(
                 std::fs::read_to_string(named_cli(&sock)).ok().as_deref(),
                 Some("dsh\n")

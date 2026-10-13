@@ -480,7 +480,11 @@ mod run {
             aimock,
             versions,
         } = ctx;
-        if let Some(found) = outside_config(p) {
+        if let Some(found) = outside_config(
+            p.unsandboxed,
+            p.ancestor_config,
+            Path::new(CAPTURE_WORKSPACE),
+        ) {
             return Err(std::io::Error::other(format!(
                 "{} configures {} from outside the sandbox",
                 found.display(),
@@ -532,15 +536,14 @@ mod run {
 
         let recorder = sandbox
             .command(&built.recorder)
-            .arg("--out")
-            .arg(dir)
-            .arg("--tee")
-            .arg(&sandbox.sock)
-            .arg("--within")
-            .arg(sandbox.dir.path())
-            .args(sandbox.cli_env.iter().flat_map(|kv| ["--env", kv]))
-            .args([p.source, scenario.shape.name()])
-            .args(p.invocation)
+            .args(recorder_args(
+                dir,
+                &sandbox.sock,
+                sandbox.dir.path(),
+                &sandbox.cli_env,
+                p,
+                scenario,
+            ))
             .stdout(log(dir, "recorder.log")?)
             .stderr(log(dir, "recorder.log")?)
             .status()?;
@@ -582,27 +585,54 @@ mod run {
         Ok(manifest)
     }
 
-    /// Config `p`'s CLI would read that no sandbox home redirects: a system
-    /// path, or one of its names in an ancestor of the workspace. `/tmp` is a
-    /// symlink on macOS, so the ancestors of its target count too.
-    fn outside_config(p: &Profile) -> Option<PathBuf> {
-        let workspace = Path::new(CAPTURE_WORKSPACE);
-        let mut ancestors: Vec<PathBuf> = workspace
-            .ancestors()
-            .skip(1)
-            .map(Path::to_path_buf)
-            .collect();
-        if let Some(real) = workspace
-            .parent()
-            .and_then(|d| std::fs::canonicalize(d).ok())
-        {
-            ancestors.extend(real.ancestors().map(Path::to_path_buf));
-        }
-        let system = p.unsandboxed.iter().map(PathBuf::from);
+    /// Config a CLI would read that no sandbox home redirects: one of
+    /// `unsandboxed`'s system paths, or one of `names` in an ancestor of
+    /// `workspace`, which need not exist yet. An ancestor may be a symlink
+    /// (macOS's `/tmp`), so the ancestors of the nearest existing one's target
+    /// count too.
+    fn outside_config(unsandboxed: &[&str], names: &[&str], workspace: &Path) -> Option<PathBuf> {
+        let lexical = workspace.ancestors().skip(1);
+        let real = lexical
+            .clone()
+            .find_map(|a| std::fs::canonicalize(a).ok())
+            .into_iter()
+            .flat_map(|r| r.ancestors().map(Path::to_path_buf).collect::<Vec<_>>());
+        let ancestors: Vec<PathBuf> = lexical.map(Path::to_path_buf).chain(real).collect();
         let inherited = ancestors
             .iter()
-            .flat_map(|dir| p.ancestor_config.iter().map(move |name| dir.join(name)));
-        system.chain(inherited).find(|path| path.exists())
+            .flat_map(|dir| names.iter().map(move |name| dir.join(name)));
+        unsandboxed
+            .iter()
+            .map(PathBuf::from)
+            .chain(inherited)
+            .find(|path| path.exists())
+    }
+
+    /// The recorder's command line for one run: the raw capture into `dir`,
+    /// teed to the headless scene at `sock`, its harvest held inside `within`,
+    /// and the profile's env set on the CLI after the recorder's agent-env scrub.
+    fn recorder_args(
+        dir: &Path,
+        sock: &Path,
+        within: &Path,
+        cli_env: &[String],
+        p: &Profile,
+        scenario: &Scenario,
+    ) -> Vec<OsString> {
+        let mut args: Vec<OsString> = vec![
+            "--out".into(),
+            dir.into(),
+            "--tee".into(),
+            sock.into(),
+            "--within".into(),
+            within.into(),
+        ];
+        for kv in cli_env {
+            args.extend(["--env".into(), kv.into()]);
+        }
+        args.extend([p.source, scenario.shape.name()].map(OsString::from));
+        args.extend(p.invocation.iter().map(OsString::from));
+        args
     }
 
     /// The scenario's script with `{workspace}` expanded: a CLI that takes an
@@ -682,6 +712,52 @@ mod run {
             assert!(parse(&args(&["--cli"])).is_err());
             assert!(parse(&args(&["--cli", "newest"])).is_err());
             assert!(parse(&args(&["codex", "tool-run", "extra"])).is_err());
+        }
+
+        #[test]
+        fn config_outside_the_sandbox_is_found_through_a_symlinked_ancestor() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let real = d.path().join("real/sub");
+            std::fs::create_dir_all(&real).expect("mkdir");
+            std::os::unix::fs::symlink(&real, d.path().join("alias")).expect("symlink");
+            // The workspace and its parent don't exist yet, as on a clean runner.
+            let workspace = d.path().join("alias/capture/proj");
+            let names = &["hermetic-probe.md"];
+            assert_eq!(outside_config(&[], names, &workspace), None);
+            let planted = d.path().join("real/hermetic-probe.md");
+            std::fs::write(&planted, "").expect("plant");
+            let found = outside_config(&[], names, &workspace).expect("found");
+            assert_eq!(
+                std::fs::canonicalize(found).ok(),
+                std::fs::canonicalize(&planted).ok()
+            );
+            let system = d.path().join("etc-cli");
+            std::fs::create_dir(&system).expect("mkdir");
+            let system = system.to_str().expect("utf-8");
+            assert_eq!(
+                outside_config(&[system], &[], &workspace),
+                Some(PathBuf::from(system))
+            );
+        }
+
+        #[test]
+        fn the_recorder_is_held_to_the_sandbox_and_handed_the_clis_env() {
+            let p = &PROFILES[0];
+            let args = recorder_args(
+                Path::new("/runs/x"),
+                Path::new("/sb/pix.sock"),
+                Path::new("/sb"),
+                &["A=b".to_string()],
+                p,
+                &p.scenarios[0],
+            );
+            let pair =
+                |flag: &str, value: &str| args.windows(2).any(|w| w[0] == *flag && w[1] == *value);
+            assert!(pair("--within", "/sb"), "{args:?}");
+            assert!(pair("--env", "A=b"), "{args:?}");
+            assert!(pair("--tee", "/sb/pix.sock"), "{args:?}");
+            let tail: Vec<OsString> = p.invocation.iter().map(OsString::from).collect();
+            assert!(args.ends_with(&tail), "{args:?}");
         }
 
         #[test]
