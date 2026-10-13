@@ -79,7 +79,7 @@ jobs:
         run: just coverage ${{ matrix.features }}
       - name: Upload coverage to Codecov
         if: ${{ inputs.full }}
-        uses: ./.github/actions/upload-codecov
+        uses: pixtuoid/.github/.github/actions/upload-codecov@main
         with:
           file: codecov.json
           flag: ${{ matrix.flag }}
