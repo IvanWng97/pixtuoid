@@ -68,6 +68,24 @@ async function lines(file, n) {
   }
 }
 
+// Every payload once `agent/disposed`'s session_end, sent last, has landed: the
+// queue is first in, first out, so nothing sent before it can still be missing.
+async function payloadsThroughEnd(file) {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const text = await readFile(file, "utf8").catch(() => "");
+    const got = text
+      .split("\n")
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l));
+    if (got.some((p) => p.type === "session_end")) return got;
+    if (Date.now() > deadline) {
+      throw new Error(`timed out waiting for session_end in ${file}; got ${got.length} line(s)`);
+    }
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 const header = { id: "s1", cwd: "/w" };
 const session = { header };
 
@@ -80,11 +98,18 @@ test("events reach the shim in emission order, one shim at a time", { skip: !POS
   event("approval/asked", { id: "a1", callId: "c1", toolName: "bash", reason: "wider" });
   event("approval/decided", { id: "a1", outcome: "unavailable" });
   event("tool/result", { message: { toolCallId: "c1" } });
+  handlers.get("agent/disposed")({ agent: { session } });
 
-  const types = (await lines(outFile, 4)).map((l) => JSON.parse(l).type);
-  assert.deepEqual(types, ["session_start", "approval_asked", "approval_decided", "tool_result"]);
-  const trace = await lines(traceFile, 8);
-  assert.deepEqual(trace, ["begin", "end", "begin", "end", "begin", "end", "begin", "end"]);
+  const types = (await payloadsThroughEnd(outFile)).map((p) => p.type);
+  assert.deepEqual(types, [
+    "session_start",
+    "approval_asked",
+    "approval_decided",
+    "tool_result",
+    "session_end",
+  ]);
+  const trace = await lines(traceFile, 2 * types.length);
+  assert.deepEqual(trace, types.flatMap(() => ["begin", "end"]));
 });
 
 test("agent/created's listener returns nothing", async (t) => {
@@ -123,11 +148,11 @@ test("forwards only the allowlist, never content", { skip: !POSIX }, async (t) =
     header: { config: { model: "m", system: "SECRET_SYSTEM" } },
     messages: ["SECRET_MESSAGE"],
   });
+  handlers.get("agent/disposed")({ agent: { session } });
 
-  // Exact payloads: a key nobody planted fails too.
+  // Exact payloads: a key nobody planted fails too, and so does a payload.
   const at = { sessionId: "s1", cwd: "/w", _pid: process.pid };
-  const forwarded = (await lines(outFile, 7)).map((l) => JSON.parse(l));
-  assert.deepEqual(forwarded, [
+  assert.deepEqual(await payloadsThroughEnd(outFile), [
     { type: "session_start", ...at },
     { type: "tool_call", ...at, callId: "c1", toolName: "bash" },
     { type: "approval_asked", ...at, callId: "c1", toolName: "bash", reason: "wider access" },
@@ -135,5 +160,6 @@ test("forwards only the allowlist, never content", { skip: !POSIX }, async (t) =
     { type: "tool_result", ...at, callId: "c1" },
     { type: "usage", ...at, inputTokens: 1, outputTokens: 2 },
     { type: "model", ...at, model: "m" },
+    { type: "session_end", ...at },
   ]);
 });
