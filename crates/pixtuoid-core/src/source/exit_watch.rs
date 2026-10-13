@@ -924,8 +924,8 @@ mod tests {
             for child in &children {
                 watch.watch(child.id() as i32);
             }
-            let (inside, past) = (children[0].id() as i32, children[CAP].id() as i32);
-            kill_and_reap(&mut children[0]);
+            let (inside, past) = (children[CAP - 1].id() as i32, children[CAP].id() as i32);
+            kill_and_reap(&mut children[CAP - 1]);
             kill_and_reap(&mut children[CAP]);
             let fired = wait_for_pid(&mut rx, inside, LIVE_PID_DEADLINE).await;
             assert_no_pid_within(&mut rx, past, Duration::from_millis(500), "never watched").await;
@@ -933,7 +933,7 @@ mod tests {
             for child in &mut children {
                 kill_and_reap(child);
             }
-            assert!(fired, "a pid inside the cap must still fire");
+            assert!(fired, "the last pid inside the cap must still fire");
             assert!(
                 !closed,
                 "the wait must never be handed more handles than it takes"
