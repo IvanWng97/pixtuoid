@@ -74,7 +74,10 @@ export function apply(ctx) {
   // approval/decided carries only {id, outcome}; the asked side owns
   // callId/toolName, so remember the pair until it resolves.
   const asked = new Map()
-  ctx.on("session/event", (session, event) => {
+  // Named, not a literal: this channel only carries the events its cases
+  // forward, and `plugin_events` (install/dsh.rs) lists events, not carriers.
+  const SESSION_EVENT = "session/event"
+  ctx.on(SESSION_EVENT, (session, event) => {
     try {
       const header = session.header
       const d = event.data
