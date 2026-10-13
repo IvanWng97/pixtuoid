@@ -354,7 +354,7 @@ mod run {
         dir: tempfile::TempDir,
         env: Vec<(String, OsString)>,
         /// The profile's env for the CLI alone, handed to the recorder as
-        /// `--env` pairs it sets after its agent-env scrub.
+        /// `--env` pairs.
         cli_env: Vec<String>,
         sock: PathBuf,
     }
@@ -610,7 +610,7 @@ mod run {
 
     /// The recorder's command line for one run: the raw capture into `dir`,
     /// teed to the headless scene at `sock`, its harvest held inside `within`,
-    /// and the profile's env set on the CLI after the recorder's agent-env scrub.
+    /// and the profile's env for the CLI.
     fn recorder_args(
         dir: &Path,
         sock: &Path,
@@ -732,11 +732,16 @@ mod run {
                 std::fs::canonicalize(&planted).ok()
             );
             let system = d.path().join("etc-cli");
-            std::fs::create_dir(&system).expect("mkdir");
-            let system = system.to_str().expect("utf-8");
+            let listed = system.to_str().expect("utf-8");
             assert_eq!(
-                outside_config(&[system], &[], &workspace),
-                Some(PathBuf::from(system))
+                outside_config(&[listed], &[], &workspace),
+                None,
+                "listed but absent"
+            );
+            std::fs::create_dir(&system).expect("mkdir");
+            assert_eq!(
+                outside_config(&[listed], &[], &workspace),
+                Some(PathBuf::from(listed))
             );
         }
 

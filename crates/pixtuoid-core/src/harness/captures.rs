@@ -50,15 +50,16 @@ pub const PROVENANCE: &str = "provenance.json";
 /// A raw capture's [`CaptureRecord`].
 pub const CAPTURE_RECORD: &str = "capture.json";
 
-/// The recorder's (`capture_fixture`) options, as its callers spell them.
+/// The recorder's (`capture_fixture`) options, as its callers spell them; each
+/// does what the recorder's `Options` field of its name says.
 pub mod recorder_flag {
-    /// Write the raw capture to this directory.
+    /// `Options::out`.
     pub const OUT: &str = "--out";
-    /// Forward each payload to this socket.
+    /// `Options::tee`.
     pub const TEE: &str = "--tee";
-    /// Refuse a harvest root outside this directory.
+    /// `Options::within`.
     pub const WITHIN: &str = "--within";
-    /// Set this `KEY=VALUE` on the CLI after the agent-env scrub.
+    /// `Options::env`.
     pub const ENV: &str = "--env";
 }
 
