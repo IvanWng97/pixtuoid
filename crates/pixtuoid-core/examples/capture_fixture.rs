@@ -61,7 +61,8 @@ mod recorder {
     const QUIET_ROUNDS: u32 = 4;
     const MAX_ROUNDS: u32 = 40;
 
-    /// Where a hermetic run sends the capture instead of the committed tree.
+    /// A hermetic run's overrides: where the capture goes, and what the harvest
+    /// and the CLI may see.
     #[derive(Debug, Default, PartialEq)]
     struct Options {
         /// Write the RAW capture here: not stripped, no provenance, no PII scan.
@@ -1137,9 +1138,14 @@ mod recorder {
             );
             let cmd = ["sh", "-c", &script].map(String::from);
             let env = [("CLAUDE_CODE_PROBE".to_string(), "1".to_string())];
-            let ran = temp_env::with_var("CLAUDE_CODE_CHILD_SESSION", Some("1"), || {
-                run_cli(&cmd, ws.path(), &sock, "1.0.0", &env).expect("runs")
-            });
+            // The host holds the probe too, so only scrub-then-set yields its 1.
+            let ran = temp_env::with_vars(
+                [
+                    ("CLAUDE_CODE_CHILD_SESSION", Some("1")),
+                    ("CLAUDE_CODE_PROBE", Some("0")),
+                ],
+                || run_cli(&cmd, ws.path(), &sock, "1.0.0", &env).expect("runs"),
+            );
             assert!(ran.success());
             assert_eq!(
                 std::fs::read_to_string(named_cli(&sock)).ok().as_deref(),
