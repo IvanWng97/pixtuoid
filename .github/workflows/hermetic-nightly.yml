@@ -99,6 +99,9 @@ jobs:
       - uses: ./.github/actions/setup-npm
         with:
           directory: crates/pixtuoid-core/tests/sources/hermetic/aimock
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-nextest
       - name: Re-record at the version the drift run passed
         env:
           SOURCE: ${{ matrix.source }}
@@ -251,7 +254,8 @@ jobs:
   file:
     name: file the hermetic report
     needs: [drift, plan, bump, publish]
-    if: ${{ always() && contains(needs.*.result, 'failure') }}
+    # A dispatch on a branch is a pre-merge proof, not the watch.
+    if: ${{ always() && github.ref == 'refs/heads/main' && contains(needs.*.result, 'failure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
