@@ -1,0 +1,13 @@
+{
+  "origin": "recorded",
+  "cli": "codex",
+  "version": "codex-cli 0.155.1",
+  "captured": "2026-10-13",
+  "command": "just hermetic --record codex",
+  "deidentified": {
+    "method": "decoder-allowlist",
+    "blanked": 112
+  },
+  "aimock": "1.43.0",
+  "script": "tests/sources/hermetic/codex/tool-run.json"
+}

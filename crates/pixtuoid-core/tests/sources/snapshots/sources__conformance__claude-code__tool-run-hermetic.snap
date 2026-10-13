@@ -1,0 +1,63 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- ModelInfo:
+    agent_id: 12983296095546708410
+    model: claude-opus-5
+    effort: ~
+- Usage:
+    agent_id: 12983296095546708410
+    fresh_tokens: 19
+- ActivityStart:
+    agent_id: 12983296095546708410
+    tool_use_id: toolu_6aaT1WnnIq4uGm_o
+    detail:
+      Generic:
+        display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+- ActivityEnd:
+    agent_id: 12983296095546708410
+    tool_use_id: toolu_6aaT1WnnIq4uGm_o
+- ModelInfo:
+    agent_id: 12983296095546708410
+    model: claude-opus-5
+    effort: ~
+- Usage:
+    agent_id: 12983296095546708410
+    fresh_tokens: 19
+- SessionStart:
+    agent_id: 12983296095546708410
+    source: claude-code
+    session_id: c3db4e74-6d1b-46d2-9738-339c24427645
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- Identity:
+    agent_id: 12983296095546708410
+    source: claude-code
+    session_id: c3db4e74-6d1b-46d2-9738-339c24427645
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 12983296095546708410
+    tool_use_id: toolu_6aaT1WnnIq4uGm_o
+    detail:
+      Generic:
+        display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+- ModelInfo:
+    agent_id: 12983296095546708410
+    model: ~
+    effort: high
+- Identity:
+    agent_id: 12983296095546708410
+    source: claude-code
+    session_id: c3db4e74-6d1b-46d2-9738-339c24427645
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 12983296095546708410
+    tool_use_id: toolu_6aaT1WnnIq4uGm_o
+- ModelInfo:
+    agent_id: 12983296095546708410
+    model: ~
+    effort: high
+- SessionEnd:
+    agent_id: 12983296095546708410
+    as_child: false
