@@ -201,7 +201,7 @@ mod run {
             if judges_source(&judged, p.scenarios.len()) {
                 let key = format!("{} (every scenario)", p.source);
                 println!("== {key}");
-                let verdict = verify::verify_source(p.source, &judged)?;
+                let verdict = verify::verify_source(p, &judged)?;
                 entries.push(Entry::new(key, None, verdict));
             }
         }

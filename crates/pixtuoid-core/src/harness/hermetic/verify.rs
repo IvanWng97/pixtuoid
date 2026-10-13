@@ -91,17 +91,15 @@ pub fn verify(dir: &Path) -> std::io::Result<Verdict> {
     Ok(Verdict::new(findings))
 }
 
-/// Judge `source`'s runs together, `dirs` being all of them, for what no one
+/// Judge `p`'s runs together, `dirs` being all of them, for what no one
 /// scenario owns: a `not_yet` hook any run fired is Stale, and the field census
-/// over `source`'s committed captures, where a kind or a field upstream renamed
-/// or dropped fails though the decoder still parses the line.
+/// over `p`'s committed captures, where a kind or a field upstream renamed or
+/// dropped fails though the decoder still parses the line.
 ///
 /// # Errors
 ///
-/// If a run's or a committed capture's file cannot be read, or `source` has no
-/// profile.
-pub fn verify_source(source: &str, dirs: &[PathBuf]) -> std::io::Result<Verdict> {
-    let p = profile(source).ok_or_else(|| invalid(format!("{source}: not a profiled source")))?;
+/// If a run's or a committed capture's file cannot be read.
+pub fn verify_source(p: &Profile, dirs: &[PathBuf]) -> std::io::Result<Verdict> {
     let mut fired = BTreeSet::new();
     let mut carried = Fields::default();
     for dir in dirs {
@@ -121,7 +119,7 @@ pub fn verify_source(source: &str, dirs: &[PathBuf]) -> std::io::Result<Verdict>
         &carried,
         p.not_yet,
         p.not_yet_fields,
-        source,
+        p.source,
     );
     for hook in p.not_yet {
         if fired.contains(*hook) {
@@ -792,7 +790,11 @@ mod tests {
             }
             Some(v)
         });
-        let v = verify_source("codex", &[d.path().to_path_buf()]).expect("verify");
+        let v = verify_source(
+            profile("codex").expect("profile"),
+            &[d.path().to_path_buf()],
+        )
+        .expect("verify");
         assert!(has(&v, Label::Stale, "SubagentStart"), "{:?}", v.findings());
     }
 
@@ -805,7 +807,11 @@ mod tests {
             }
             Some(v)
         });
-        let v = verify_source("claude-code", &[d.path().to_path_buf()]).expect("verify");
+        let v = verify_source(
+            profile("claude-code").expect("profile"),
+            &[d.path().to_path_buf()],
+        )
+        .expect("verify");
         assert!(
             has(&v, Label::Fail, "hook:PreToolUse /tool_name"),
             "{:?}",
@@ -822,7 +828,11 @@ mod tests {
             }
             Some(v)
         });
-        let v = verify_source("claude-code", &[d.path().to_path_buf()]).expect("verify");
+        let v = verify_source(
+            profile("claude-code").expect("profile"),
+            &[d.path().to_path_buf()],
+        )
+        .expect("verify");
         assert!(
             has(&v, Label::Stale, "hook:SessionStart /model"),
             "{:?}",
@@ -902,7 +912,11 @@ mod tests {
         // fixtures/claude-code/permission-recorded fires both; a tool run neither.
         let owed = ["hook:Notification", "hook:PermissionRequest"];
         let d = run_from("claude-code", "tool-run-recorded", CC_SCENE);
-        let v = verify_source("claude-code", &[d.path().to_path_buf()]).expect("verify");
+        let v = verify_source(
+            profile("claude-code").expect("profile"),
+            &[d.path().to_path_buf()],
+        )
+        .expect("verify");
         assert!(
             !v.findings()
                 .iter()
@@ -960,7 +974,11 @@ mod tests {
                 .collect();
             std::fs::write(&t, out.join("\n") + "\n").expect("write");
         }
-        let v = verify_source("codex", &[d.path().to_path_buf()]).expect("verify");
+        let v = verify_source(
+            profile("codex").expect("profile"),
+            &[d.path().to_path_buf()],
+        )
+        .expect("verify");
         assert!(
             has(&v, Label::Fail, "with no type reads"),
             "{:?}",
