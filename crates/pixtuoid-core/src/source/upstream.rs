@@ -130,18 +130,17 @@ pub enum Read {
     /// The top-level fields of the ONE interface or type alias `name`: each
     /// field, `field?` when optional, and `field:"lit"` per string literal its
     /// type admits.
-    /// With a `member`, the fields of that member's inline type instead: a
-    /// property's type, or a method's first parameter after `this`.
     TsFields {
         name: &'static str,
+        /// Read this member's inline type instead: a property's type, or a
+        /// method's first parameter after `this`.
         member: Option<&'static str>,
     },
     /// Every member key of the interfaces and classes named `of`, merged
     /// across a document's declarations as TS merges augmentations.
     TsMembers { of: &'static [&'static str] },
-    /// The field keys of the Effect Schema struct `at` locates. A spread, a
-    /// bare name or `.fields` resolves through its one binding in the document;
-    /// anything else is out of the read's sight.
+    /// The field keys of the Effect Schema struct `at` locates; what the
+    /// reader cannot resolve is out of its sight.
     EffectSchema { at: SchemaAt },
     /// Every `return` of the ONE `function name`, in order, as one name.
     TsReturn { function: &'static str },
@@ -580,8 +579,7 @@ mod tests {
         let body = &after[..after.find("\n}\n").unwrap_or(after.len())];
         // The bare-literal ban runs at EVERY depth, not just the level the export
         // is collected from: a nested `match` (acp's on `status`) would otherwise
-        // hide wire values behind an indent the collector skips. Naming them is
-        // what puts them in front of a reviewer and lets them be exported.
+        // hide wire values behind an indent the collector skips.
         for line in body.lines() {
             let Some((head, _)) = line.split_once("=>") else {
                 continue;

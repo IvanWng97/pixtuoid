@@ -18,9 +18,11 @@ use anyhow::Result;
 use crate::install::io;
 use crate::install::target::MergeOutcome;
 #[cfg(feature = "upstream")]
+use crate::install::{calls, reads};
+#[cfg(feature = "upstream")]
 use pixtuoid_core::source::opencode::REPO;
 #[cfg(feature = "upstream")]
-use pixtuoid_core::source::upstream::{Finding, Read, Watch, When};
+use pixtuoid_core::source::upstream::{Finding, Watch};
 
 /// Marks the plugin as ours — absent from the removed-stub, so an uninstall of
 /// a foreign/removed file is a clean no-op.
@@ -46,56 +48,44 @@ const NO_FORWARD: &str =
 /// event, and `ctx.session.get` a turn start's record.
 #[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
-    Watch {
-        id: "opencode.plugin_context",
-        ours: || vec!["event", "session"],
-        docs: &[REPO.doc(
+    reads(
+        "opencode.plugin_context",
+        || vec!["event", "session"],
+        &[REPO.doc(
             "packages/plugin/src/promise/plugin.ts",
             r"(?m)^export interface Context\b",
             "the plugin `Context`",
         )],
-        read: Read::TsFields {
-            name: "Context",
-            member: None,
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(NO_FORWARD),
-        siblings: None,
-    },
-    Watch {
-        id: "opencode.event_api",
-        ours: || vec!["subscribe"],
-        docs: &[REPO.doc(
+        "Context",
+        None,
+        Finding::Breaking(NO_FORWARD),
+    ),
+    calls(
+        "opencode.event_api",
+        || vec!["subscribe"],
+        &[REPO.doc(
             "packages/plugin/src/promise/event.ts",
             r"(?m)^export interface EventDomain\b",
             "`EventDomain`",
         )],
-        read: Read::TsMembers {
-            of: &["EventDomain"],
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(NO_FORWARD),
-        siblings: None,
-    },
-    Watch {
-        id: "opencode.session_api",
-        ours: || vec!["get"],
-        docs: &[REPO.doc(
+        &["EventDomain"],
+        Finding::Breaking(NO_FORWARD),
+    ),
+    reads(
+        "opencode.session_api",
+        || vec!["get"],
+        &[REPO.doc(
             "packages/plugin/src/promise/session.ts",
             r"(?m)^export type SessionDomain\b",
             "`SessionDomain`",
         )],
-        read: Read::TsFields {
-            name: "SessionDomain",
-            member: None,
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(
+        "SessionDomain",
+        None,
+        Finding::Breaking(
             "a turn start reaches pixtuoid without its record, so a session it first sees \
              mid-turn shows no cwd, parent or model",
         ),
-        siblings: None,
-    },
+    ),
 ];
 
 /// A no-op plugin WITHOUT the sentinel, so a re-uninstall is a no-op.

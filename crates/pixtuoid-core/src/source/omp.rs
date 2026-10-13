@@ -534,10 +534,7 @@ pub(crate) const DECODED_TITLE_FIELDS: &[&str] = &[TITLE_FIELD];
 const SESSION: &str = "session";
 
 /// A turn entry. `role:"assistant"` content carries `toolCall` blocks
-/// (`{id,name,arguments}`); `role:"toolResult"` closes one by `toolCallId`. Its
-/// `usage.input` EXCLUDES the cache share (`totalTokens` = input + output +
-/// cacheRead + cacheWrite), so fresh spend is input + cacheWrite + output — cache
-/// READS are re-served context, not new spend.
+/// (`{id,name,arguments}`); `role:"toolResult"` closes one by `toolCallId`.
 const MESSAGE: &str = "message";
 
 /// The `custom` entry envelope. Its `customType:"tool_execution_start"` duplicates
@@ -584,9 +581,7 @@ const BLOCK_TOOL_CALL: &str = "toolCall";
 
 /// The tool that BLOCKS on human input: its `ActivityStart` binds the reducer's
 /// `gated_before_waiting` gate to the ask's own tool_use_id, so the answer's
-/// `toolResult` resolves the Wait. Ask pairs are appended LAST — a sibling's later
-/// ActivityStart would flip the slot back to Active, drop the gate, and strand the
-/// Wait forever.
+/// `toolResult` resolves the Wait.
 const TOOL_ASK: &str = "ask";
 
 #[cfg(any(test, feature = "upstream"))]
@@ -601,7 +596,7 @@ pub(crate) const DECODED_MESSAGE_VOCAB: &[&str] =
 /// content-derived label, shared by the subagent-stem deriver and the session
 /// title, so neither can bypass the bound that keeps an untrusted string out of
 /// the painter and the headless summary. The prefix is read from the registry,
-/// never hardcoded (invariant #3).
+/// never hardcoded.
 fn omp_label(source: &str, text: &str) -> String {
     let prefix = crate::source::decoder::label_prefix_for(source);
     format!("{prefix}·{}", ellipsize(text, MAX_DECODED_FIELD_CHARS))
@@ -696,6 +691,9 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                     }
                     if let Some(usage) = msg.get("usage").and_then(|u| u.as_object()) {
                         let field = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+                        // `input` EXCLUDES the cache share (`totalTokens` = input +
+                        // output + cacheRead + cacheWrite); cache READS are
+                        // re-served context, not new spend.
                         let fresh = field("input")
                             .saturating_add(field("cacheWrite"))
                             .saturating_add(field("output"));
@@ -737,6 +735,8 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                             });
                         }
                     }
+                    // LAST: a sibling's later ActivityStart would flip the slot
+                    // back to Active, drop the gate, and strand the Wait forever.
                     out.extend(asks);
                     out
                 }
@@ -1315,8 +1315,6 @@ mod tests {
         assert_eq!(omp_parent_key_from_path(Path::new(&p)), None);
     }
 
-    /// omp subagents run IN-PROCESS and inherit the parent's `cwd`, so the
-    /// default cwd-basename deriver renders a fan-out as N identical labels.
     #[test]
     fn subagent_labels_come_from_the_task_name_not_the_shared_cwd() {
         let cwd = Path::new("/home/u/proj");
@@ -1398,10 +1396,7 @@ mod tests {
         }
     }
 
-    /// The first-sight carrier of the same title. Most root transcripts are
-    /// already past `MAX_PENDING_BYTES` when first seen, and that path decodes
-    /// NOTHING — so without this the decoder's `title` arm never runs for the
-    /// common case and the root keeps the shared cwd basename.
+    /// The first-sight carrier of the same title.
     #[test]
     fn head_title_names_a_root_at_first_sight_but_never_on_an_empty_slot() {
         let head = |s: &str| omp_head_title(&serde_json::from_str(s).unwrap());
@@ -1739,7 +1734,6 @@ mod tests {
                 },
             ] => {
                 assert_eq!(*agent_id, root());
-                // Forwarded RAW: `burn::MAX_EFFORTS` already contains "xhigh"
                 assert_eq!(effort.as_str(), "xhigh");
             }
             other => panic!("expected one model-free ModelInfo, got {other:?}"),
@@ -2460,9 +2454,6 @@ mod tests {
         );
     }
 
-    /// The overlay is DIRECTORY vars only: upstream's rebuild reuses the profile
-    /// frozen at module load, so a file-borne profile moves nothing there and
-    /// honoring one here would invent a tree omp never selected.
     #[test]
     fn a_dotenv_profile_is_ignored_because_upstream_freezes_the_profile() {
         assert_eq!(
@@ -2475,11 +2466,6 @@ mod tests {
         );
     }
 
-    /// The files are located from the PRE-overlay env, because upstream reads
-    /// them with the resolver `dirs.ts` froze at module load and only THEN calls
-    /// `refreshDirsFromEnv()`. Recomputing the search from the merged env would
-    /// read a `.env` omp never opened — so a home file that moves `PI_CONFIG_DIR`
-    /// must NOT move where the config-root file is looked for.
     #[test]
     fn dotenv_files_are_located_before_the_overlay_can_move_them() {
         assert_eq!(
@@ -2536,8 +2522,6 @@ mod tests {
         );
     }
 
-    /// Upstream's `OMP_<X>` → `PI_<X>` alias, which OVERRIDES an explicit `PI_`
-    /// key in the same file — hence the pass over the WHOLE file, not per line.
     #[test]
     fn a_dotenv_omp_prefixed_key_aliases_and_overrides_its_pi_twin() {
         assert_eq!(
@@ -2903,9 +2887,6 @@ mod tests {
 
     #[test]
     fn a_stamped_omp_payload_routes_to_this_decoder_through_the_registry() {
-        // Red until the registry row carries `HookCustom::ClaimsAll`: without
-        // it the payload falls through to the CC-shaped shared arms, which
-        // find no `hook_event_name` and decode nothing.
         let evs = crate::source::decoder::decode_hook_payload(serde_json::json!({
             "_pixtuoid_source": "omp",
             "type": "session_start", "sessionFile": HOOK_ROOT,

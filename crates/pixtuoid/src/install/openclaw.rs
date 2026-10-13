@@ -7,8 +7,7 @@
 //! v2026.10.1), while `plugins install --link` creates a managed install record that
 //! requires capability consent (`docs/plugins/manage-plugins.md:216-218`). The
 //! `allowConversationAccess` grant un-gates `before_agent_run`/`agent_end` (the busy
-//! tell) and UNINSTALL REVOKES it; the plugin FILES are left in place (the config
-//! un-merge stops the gateway loading them).
+//! tell) and UNINSTALL REVOKES it.
 
 use std::path::{Path, PathBuf};
 
@@ -17,6 +16,8 @@ use serde_json::{Value, json};
 
 use crate::install::io;
 use crate::install::merge::{prune_empty, prune_empty_root};
+#[cfg(feature = "upstream")]
+use crate::install::reads;
 use crate::install::target::MergeOutcome;
 #[cfg(feature = "upstream")]
 use pixtuoid_core::source::openclaw::REPO;
@@ -105,26 +106,6 @@ const DEGRADED: &str =
 const IDENTITY: &str = "the plugin keys each gateway's mascot on the port it reads, so a `--port` \
                         gateway falls back to the default and two live gateways collapse onto one";
 
-/// The fields of the ONE type `name` that the plugin reads.
-#[cfg(feature = "upstream")]
-const fn reads(
-    id: &'static str,
-    ours: fn() -> Vec<&'static str>,
-    docs: &'static [Doc],
-    name: &'static str,
-    says: &'static str,
-) -> Watch {
-    Watch {
-        id,
-        ours,
-        docs,
-        read: Read::TsFields { name, member: None },
-        when: When::Vanishes,
-        finding: Finding::Breaking(says),
-        siblings: None,
-    }
-}
-
 #[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
@@ -151,7 +132,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             owns: "`PluginHookAgentEndEvent`",
         }],
         "PluginHookAgentEndEvent",
-        DEGRADED,
+        None,
+        Finding::Breaking(DEGRADED),
     ),
     reads(
         "openclaw.model_call_base_fields",
@@ -162,7 +144,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             owns: "`PluginHookModelCallBaseEvent`",
         }],
         "PluginHookModelCallBaseEvent",
-        DEGRADED,
+        None,
+        Finding::Breaking(DEGRADED),
     ),
     reads(
         "openclaw.model_call_ended_fields",
@@ -173,7 +156,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             owns: "`PluginHookModelCallEndedEvent`",
         }],
         "PluginHookModelCallEndedEvent",
-        DEGRADED,
+        None,
+        Finding::Breaking(DEGRADED),
     ),
     reads(
         "openclaw.gateway_start_port",
@@ -184,7 +168,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             owns: "`PluginHookGatewayStartEvent`",
         }],
         "PluginHookGatewayStartEvent",
-        IDENTITY,
+        None,
+        Finding::Breaking(IDENTITY),
     ),
     reads(
         "openclaw.gateway_context_port",
@@ -195,7 +180,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             owns: "`PluginHookGatewayContext`",
         }],
         "PluginHookGatewayContext",
-        IDENTITY,
+        None,
+        Finding::Breaking(IDENTITY),
     ),
     reads(
         "openclaw.agent_context_ids",
@@ -206,8 +192,11 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             "`PluginHookAgentContext`",
         )],
         "PluginHookAgentContext",
-        "the decoder pairs a run's start and end by these ids, so concurrent runs share one key \
+        None,
+        Finding::Breaking(
+            "the decoder pairs a run's start and end by these ids, so concurrent runs share one key \
          and the first to end shows the gateway idle while the rest still run",
+        ),
     ),
     Watch {
         id: "openclaw.default_gateway_port",
@@ -329,9 +318,9 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
 /// Pure core for [`default_config_path`], inputs injected.
 ///
 /// The candidate list is FLAT across both dirs, not "pick a dir, then pick a file
-/// in it" (upstream searches the same way). The nested form had a real hole: with
-/// `~/.openclaw` PRESENT (so it wins as the state dir) but the actual config at
-/// `~/.clawdbot/openclaw.json`, we resolved a path the gateway never reads —
+/// in it" (upstream searches the same way). The nested form, with `~/.openclaw`
+/// PRESENT (so it wins as the state dir) but the config at
+/// `~/.clawdbot/openclaw.json`, would resolve a path the gateway never reads —
 /// installing hooks into a file nobody loads, with `doctor` reporting green.
 /// `home` only contributes the legacy SIBLING (`None` ⇒ just the state dir's two).
 fn resolve_openclaw_config_path(
@@ -460,8 +449,7 @@ fn contains_include(v: &Value) -> bool {
 /// `serde_json`, which cannot represent any of that: parsing it would mean silently
 /// DELETING the user's comments on their next `connect`. So a non-strict document
 /// is refused with the owner-CLI path instead of being rewritten. Upstream's own
-/// `openclaw config patch` re-serializes strict and loses them too — measured, so
-/// don't re-propose it as the fix without re-measuring. Pinned by
+/// `openclaw config patch` re-serializes strict and loses them too. Pinned by
 /// `merge_refuses_a_json5_document_instead_of_dropping_its_comments`.
 fn parse_for_merge(content: &str) -> Result<Value> {
     if content.trim().is_empty() {
@@ -566,7 +554,7 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
             // members), so leaving the dangling id is the fail-CLOSED residue.
             if let Some(allow) = plugins.get_mut("allow").and_then(Value::as_array_mut) {
                 // POST-condition, not a pre-count: `["pixtuoid", " pixtuoid "]` is two
-                // entries BOTH ours, so a `len() > 1` pre-check let the retain empty it.
+                // entries BOTH ours, so a `len() > 1` pre-check would let the retain empty it.
                 let kept: Vec<Value> = allow.iter().filter(|v| !is_plugin_id(v)).cloned().collect();
                 if !kept.is_empty() {
                     *allow = kept;
@@ -600,8 +588,8 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     use crate::install::verify::{SchemaParse, ShimRef};
     let Ok(root) = serde_json::from_str::<Value>(content) else {
         // NOT "broken": OpenClaw reads this as JSON5, so a document our strict parser
-        // rejects may be loading fine. Reporting a break told the user to "reconnect
-        // openclaw" — advice that cannot succeed, the merge refusing the same doc.
+        // rejects may be loading fine. Reporting a break would tell the user to
+        // reconnect, which cannot succeed: the merge refuses the same doc.
         return SchemaParse {
             issues: vec![],
             notes: vec![format!(

@@ -20,9 +20,11 @@ use anyhow::{Result, bail};
 
 use crate::install::target::MergeOutcome;
 #[cfg(feature = "upstream")]
+use crate::install::{calls, reads};
+#[cfg(feature = "upstream")]
 use pixtuoid_core::source::omp::REPO;
 #[cfg(feature = "upstream")]
-use pixtuoid_core::source::upstream::{Doc, Finding, Read, Watch, When};
+use pixtuoid_core::source::upstream::{Finding, Read, Watch, When};
 
 /// Marks the extension as ours — absent from the removed-stub, so an uninstall
 /// of a foreign/removed file is a clean no-op.
@@ -61,32 +63,13 @@ const EXTENSION_TYPES_TS: &str = "packages/coding-agent/src/extensibility/extens
 #[cfg(feature = "upstream")]
 const SHARED_EVENTS_TS: &str = "packages/coding-agent/src/extensibility/shared-events.ts";
 
-/// The fields of the ONE type `name` that the bridge forwards.
-#[cfg(feature = "upstream")]
-const fn forwarded(
-    id: &'static str,
-    ours: fn() -> Vec<&'static str>,
-    docs: &'static [Doc],
-    name: &'static str,
-) -> Watch {
-    Watch {
-        id,
-        ours,
-        docs,
-        read: Read::TsFields { name, member: None },
-        when: When::Vanishes,
-        finding: Finding::Breaking(READ_GONE),
-        siblings: None,
-    }
-}
-
 /// Split by declaring type, so a field moving between the approval events
 /// can't read as present off their union (`ToolApprovalResolvedEvent` has two,
 /// split by verdict). `each_template_read_is_watched` holds `extension_reads`
 /// to the union of every watch's bare names.
 #[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
-    forwarded(
+    reads(
         "omp.approval_requested",
         || vec!["toolCallId", "toolName", "reason"],
         &[REPO.doc(
@@ -95,8 +78,10 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             "`ToolApprovalRequestedEvent`",
         )],
         "ToolApprovalRequestedEvent",
+        None,
+        Finding::Breaking(READ_GONE),
     ),
-    forwarded(
+    reads(
         "omp.approval_resolved",
         // No `reason`: the decoder reads it off the requested event alone.
         || vec!["toolCallId", "toolName", "approved"],
@@ -106,6 +91,8 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             "`ToolApprovalResolvedEvent`",
         )],
         "ToolApprovalResolvedEvent",
+        None,
+        Finding::Breaking(READ_GONE),
     ),
     Watch {
         id: "omp.approved_required",
@@ -127,7 +114,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         ),
         siblings: None,
     },
-    forwarded(
+    reads(
         "omp.extension_context",
         || vec!["cwd", "sessionManager"],
         &[REPO.doc(
@@ -136,8 +123,10 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             "`ExtensionContext`",
         )],
         "ExtensionContext",
+        None,
+        Finding::Breaking(READ_GONE),
     ),
-    forwarded(
+    reads(
         "omp.session_switch",
         || vec!["previousSessionFile"],
         &[REPO.doc(
@@ -146,8 +135,10 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             "`SessionSwitchEvent`",
         )],
         "SessionSwitchEvent",
+        None,
+        Finding::Breaking(READ_GONE),
     ),
-    forwarded(
+    reads(
         "omp.session_branch",
         || vec!["previousSessionFile"],
         &[REPO.doc(
@@ -156,22 +147,20 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             "`SessionBranchEvent`",
         )],
         "SessionBranchEvent",
+        None,
+        Finding::Breaking(READ_GONE),
     ),
-    Watch {
-        id: "omp.session_getters",
-        ours: || vec!["getSessionFile", "getSessionId"],
-        docs: &[REPO.doc(
+    calls(
+        "omp.session_getters",
+        || vec!["getSessionFile", "getSessionId"],
+        &[REPO.doc(
             "packages/coding-agent/src/session/session-manager.ts",
             r"(?m)^export class SessionManager\b",
             "`SessionManager`",
         )],
-        read: Read::TsMembers {
-            of: &["SessionManager"],
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(READ_GONE),
-        siblings: None,
-    },
+        &["SessionManager"],
+        Finding::Breaking(READ_GONE),
+    ),
 ];
 
 /// A valid empty ES module WITHOUT the sentinel, so a re-uninstall is a no-op.

@@ -46,7 +46,6 @@ const TOOL_SUCCESS: &str = "session.tool.success";
 const TOOL_FAILED: &str = "session.tool.failed";
 const PERMISSION_ASKED: &str = "permission.asked";
 
-/// The key every event's `data` names its session by.
 const SESSION_ID: &str = "sessionID";
 
 /// The event types this decoder turns into events. Pinned to the arms below
@@ -85,7 +84,7 @@ pub const DECODED_DATA_FIELDS: &[&str] = &[
 /// The envelope keys the decoder reads, dotted, pinned by
 /// `every_decoded_envelope_field_is_read`.
 #[cfg(any(test, feature = "upstream"))]
-pub(crate) const DECODED_ENVELOPE_FIELDS: &[&str] = &["type", "data", "location.directory"];
+const DECODED_ENVELOPE_FIELDS: &[&str] = &["type", "data", "location.directory"];
 
 #[cfg(any(test, feature = "upstream"))]
 const SESSION_EVENTS: Doc = REPO.doc(
@@ -101,8 +100,6 @@ const PERMISSION_EVENTS: Doc = REPO.doc(
     "the permission `Event` inventory",
 );
 
-/// Session events are declared in `session-event.ts`'s inventory, permission
-/// events in `permission.ts`'s, so the union is the document.
 #[cfg(any(test, feature = "upstream"))]
 const EVENT_DECLARATIONS: &[Doc] = &[SESSION_EVENTS, PERMISSION_EVENTS];
 
@@ -113,7 +110,7 @@ const FIELD_GONE: &str = "the decoder reads a field opencode no longer sends, so
 /// The `data` paths the decoder reads of `event`: each one, blanked, changes
 /// what `event` decodes to.
 #[cfg(any(test, feature = "upstream"))]
-pub(crate) fn reads(event: &str) -> Vec<&'static str> {
+fn reads(event: &str) -> Vec<&'static str> {
     let decoded = |data: &Value| {
         format!(
             "{:?}",
@@ -186,42 +183,19 @@ fn under(head: &str) -> Vec<&'static str> {
     out
 }
 
-/// What the decoder reads of `event`'s own `data`, from its schema in `docs`.
+/// What the decoder reads off the schema `at` locates in `docs`.
 #[cfg(any(test, feature = "upstream"))]
-const fn data_of(
+const fn schema(
     id: &'static str,
-    event: &'static str,
-    docs: &'static [Doc],
     ours: fn() -> Vec<&'static str>,
+    docs: &'static [Doc],
+    at: SchemaAt,
 ) -> Watch {
     Watch {
         id,
         ours,
         docs,
-        read: Read::EffectSchema {
-            at: SchemaAt::Event(event),
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(FIELD_GONE),
-        siblings: None,
-    }
-}
-
-/// What the decoder reads off the struct `name` in `docs`.
-#[cfg(any(test, feature = "upstream"))]
-const fn struct_of(
-    id: &'static str,
-    name: &'static str,
-    docs: &'static [Doc],
-    ours: fn() -> Vec<&'static str>,
-) -> Watch {
-    Watch {
-        id,
-        ours,
-        docs,
-        read: Read::EffectSchema {
-            at: SchemaAt::Struct(name),
-        },
+        read: Read::EffectSchema { at },
         when: When::Vanishes,
         finding: Finding::Breaking(FIELD_GONE),
         siblings: None,
@@ -230,7 +204,7 @@ const fn struct_of(
 
 /// The envelope `function name` builds in `event.ts`.
 #[cfg(any(test, feature = "upstream"))]
-const fn envelope(id: &'static str, name: &'static str, docs: &'static [Doc]) -> Watch {
+const fn envelope(id: &'static str, docs: &'static [Doc], name: &'static str) -> Watch {
     Watch {
         id,
         ours: || heads(DECODED_ENVELOPE_FIELDS.iter().copied()),
@@ -247,7 +221,7 @@ const fn envelope(id: &'static str, name: &'static str, docs: &'static [Doc]) ->
     }
 }
 
-/// Its GitHub `releases/latest` is still the v1 line; v2 installs from npm
+/// Its GitHub `releases/latest` is the v1 line; v2 installs from npm
 /// (`services/www/src/docs/content/index.mdx:16`, v2.0.27).
 #[cfg(any(test, feature = "upstream"))]
 pub const REPO: Repo = Repo {
@@ -274,131 +248,130 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         ),
         siblings: None,
     },
-    data_of(
+    schema(
         "opencode.data.session_created",
-        SESSION_CREATED,
-        &[SESSION_EVENTS],
         || heads(reads(SESSION_CREATED)),
+        &[SESSION_EVENTS],
+        SchemaAt::Event(SESSION_CREATED),
     ),
-    data_of(
+    schema(
         "opencode.data.session_deleted",
-        SESSION_DELETED,
-        &[SESSION_EVENTS],
         || heads(reads(SESSION_DELETED)),
+        &[SESSION_EVENTS],
+        SchemaAt::Event(SESSION_DELETED),
     ),
-    // A turn start's own data is the session key (`schema: Base`,
-    // `session-event.ts:240` at v2.0.27); the rest is the record the plugin
-    // merges over it, read off `Info` below.
-    data_of(
+    // A turn start's own data is only the session key (`schema: Base`,
+    // `session-event.ts:240` at v2.0.27).
+    schema(
         "opencode.data.execution_started",
-        EXECUTION_STARTED,
-        &[SESSION_EVENTS],
         || vec![SESSION_ID],
+        &[SESSION_EVENTS],
+        SchemaAt::Event(EXECUTION_STARTED),
     ),
-    data_of(
+    schema(
         "opencode.data.execution_succeeded",
-        EXECUTION_SUCCEEDED,
-        &[SESSION_EVENTS],
         || heads(reads(EXECUTION_SUCCEEDED)),
+        &[SESSION_EVENTS],
+        SchemaAt::Event(EXECUTION_SUCCEEDED),
     ),
-    data_of(
+    schema(
         "opencode.data.execution_failed",
-        EXECUTION_FAILED,
-        &[SESSION_EVENTS],
         || heads(reads(EXECUTION_FAILED)),
+        &[SESSION_EVENTS],
+        SchemaAt::Event(EXECUTION_FAILED),
     ),
-    data_of(
+    schema(
         "opencode.data.execution_interrupted",
-        EXECUTION_INTERRUPTED,
-        &[SESSION_EVENTS],
         || heads(reads(EXECUTION_INTERRUPTED)),
+        &[SESSION_EVENTS],
+        SchemaAt::Event(EXECUTION_INTERRUPTED),
     ),
-    data_of(
+    schema(
         "opencode.data.tool_started",
-        TOOL_STARTED,
-        &[SESSION_EVENTS],
         || heads(reads(TOOL_STARTED)),
+        &[SESSION_EVENTS],
+        SchemaAt::Event(TOOL_STARTED),
     ),
-    data_of(
+    schema(
         "opencode.data.tool_success",
-        TOOL_SUCCESS,
-        &[SESSION_EVENTS],
         || heads(reads(TOOL_SUCCESS)),
-    ),
-    data_of(
-        "opencode.data.tool_failed",
-        TOOL_FAILED,
         &[SESSION_EVENTS],
+        SchemaAt::Event(TOOL_SUCCESS),
+    ),
+    schema(
+        "opencode.data.tool_failed",
         || heads(reads(TOOL_FAILED)),
+        &[SESSION_EVENTS],
+        SchemaAt::Event(TOOL_FAILED),
     ),
-    data_of(
+    schema(
         "opencode.data.permission_asked",
-        PERMISSION_ASKED,
-        &[PERMISSION_EVENTS],
         || heads(reads(PERMISSION_ASKED)),
+        &[PERMISSION_EVENTS],
+        SchemaAt::Event(PERMISSION_ASKED),
     ),
-    struct_of(
+    schema(
         "opencode.session_record",
-        "Info",
-        &[REPO.doc(
-            "packages/schema/src/session.ts",
-            r"(?m)^export const Info = Schema\.Struct\(",
-            "`Session.Info`",
-        )],
         || {
             heads(reads(EXECUTION_STARTED))
                 .into_iter()
                 .filter(|f| *f != SESSION_ID)
                 .collect()
         },
+        &[REPO.doc(
+            "packages/schema/src/session.ts",
+            r"(?m)^export const Info = Schema\.Struct\(",
+            "`Session.Info`",
+        )],
+        SchemaAt::Struct("Info"),
     ),
-    struct_of(
+    schema(
         "opencode.location_ref",
-        "Ref",
+        || under("location"),
         &[REPO.doc(
             "packages/schema/src/location.ts",
             r"(?m)^export const Ref = Schema\.Struct\(",
             "`Location.Ref`",
         )],
-        || under("location"),
+        SchemaAt::Struct("Ref"),
     ),
-    struct_of(
+    schema(
         "opencode.model_ref",
-        "Ref",
+        || under("model"),
         &[REPO.doc(
             "packages/schema/src/model.ts",
             r"(?m)^export const Ref = Schema\.Struct\(",
             "`Model.Ref`",
         )],
-        || under("model"),
+        SchemaAt::Struct("Ref"),
     ),
-    struct_of(
+    schema(
         "opencode.permission_source",
-        "Source",
+        || under("source"),
         &[REPO.doc(
             "packages/schema/src/permission.ts",
             r"(?m)^export const Source = Schema\.Union\(",
             "`Permission.Source`",
         )],
-        || under("source"),
+        SchemaAt::Struct("Source"),
     ),
     envelope(
         "opencode.envelope.durable",
-        "durable",
         &[REPO.doc(
             "packages/schema/src/event.ts",
             r"(?m)^export function durable\b",
             "`durable`",
         )],
+        "durable",
     ),
     envelope(
         "opencode.envelope.ephemeral",
-        "ephemeral",
         &[REPO.doc(
             "packages/schema/src/event.ts",
             r"(?m)^export function ephemeral\b",
             "`ephemeral`",
         )],
+        "ephemeral",
     ),
 ];
 
@@ -430,7 +403,7 @@ pub(crate) fn decode_oc_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         // A new prompt re-emits SessionStart, the event that walks a swept
         // session back in, mid-walkout too. Its own `data` is only `sessionID`,
         // so the plugin adds the session's record (`ctx.session.get`).
-        SESSION_CREATED | EXECUTION_STARTED => session_start(data, at, event),
+        SESSION_CREATED | EXECUTION_STARTED => session_start(data, event),
         // `data` is only `sessionID` (`packages/schema/src/session-event.ts:178`,
         // `Base`), so a child's end cannot be told from a root's here.
         SESSION_DELETED => Ok(vec![AgentEvent::SessionEnd {
@@ -477,15 +450,9 @@ fn identity(agent_id: AgentId, session_id: &str, at: Option<&str>) -> AgentEvent
     AgentEvent::identity(agent_id, SOURCE_NAME, session_id, at.map(PathBuf::from))
 }
 
-/// `location.directory` is the cwd, `parentID` the parent session, and
-/// `model.id` the raw model slug.
-fn session_start(
-    data: &Map<String, Value>,
-    at: Option<&str>,
-    event: &str,
-) -> Result<Vec<AgentEvent>> {
+fn session_start(data: &Map<String, Value>, event: &str) -> Result<Vec<AgentEvent>> {
     let (agent_id, session_id) = session(data, event)?;
-    let cwd = field(data, "location.directory").or(at);
+    let cwd = field(data, "location.directory");
     let mut out = Vec::new();
     // A start the plugin could not read a record for has no cwd, and a
     // cwd-less SessionStart registers on the short unknown-cwd window; an
@@ -546,8 +513,7 @@ fn tool_started(data: &Map<String, Value>, at: Option<&str>) -> Result<Vec<Agent
             // ctrl+b mid-run, returns the call while the child still runs
             // (`packages/core/src/tool/plugin/subagent.ts:229-243`,
             // `packages/core/src/session.ts:442-455`), and a Task's end would
-            // walk the live child out. The child is its own session, parented
-            // by `parentID`.
+            // walk the live child out.
             detail: Some(generic_tool_display(name, None)),
         },
     ])

@@ -1162,8 +1162,7 @@ fn page(w: &Watch, names: &[&str]) -> String {
                 format!("export function {function}() {{\n  return {value};\n}}"),
             )
         }
-        // A field of its own besides, as `TsFields`: an empty schema is no
-        // declaration the reader reads.
+        // A field of its own besides, as `TsFields`.
         Read::EffectSchema { ref at } => {
             let fields: String = std::iter::once("pxd")
                 .chain(names.iter().copied())
@@ -1888,7 +1887,7 @@ fn an_enum_off_snake_case_is_probe_health() {
 /// vanish watch — a source's or an installer's, so it lives here, where both
 /// rosters are — or exempted below with its adjudicated reason (#943's gate).
 ///
-/// Accepted loosenesses, adjudicated on #943: membership is
+/// Accepted loosenesses: membership is
 /// global across sets, so a cross-source spelling collision passes; a
 /// literal behind a non-exported const escapes the scan; and the scan is
 /// `==`/`!=`-shaped only — a MATCH ARM pattern, a `.starts_with` prefix

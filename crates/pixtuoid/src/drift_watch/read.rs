@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use oxc_allocator::Allocator;
 use oxc_ast::AstKind;
 use oxc_ast::ast::{
-    ArrayExpressionElement, BindingPattern, ClassElement, Declaration, Expression,
+    ArrayExpressionElement, BindingPattern, ClassElement, Declaration, Expression, FunctionBody,
     MethodDefinitionKind, ModuleDeclaration, ObjectPropertyKind, PropertyKey, ReturnStatement,
     Statement, TSLiteral, TSNamespaceDeclarationBody, TSPropertySignature, TSSignature, TSType,
     TSTypeName, TSTypeParameterInstantiation, VariableDeclarationKind,
@@ -383,8 +383,6 @@ pub(super) fn rust_arms(text: &str, name: &str, arm: &str) -> Result<Names, Unre
     Ok(found)
 }
 
-/// The string literal the ONE `item` evaluates to: a const by its name, or a
-/// method as `<Type as Trait>::method`, whose body's tail is the literal.
 pub(super) fn rust_str(text: &str, item: &str) -> Result<Names, Unread> {
     let spec: syn::ExprPath =
         syn::parse_str(item).map_err(|e| Unread::Ours(format!("`{item}`: {e}")))?;
@@ -492,8 +490,8 @@ fn without_attrs(mut row: &[proc_macro2::TokenTree]) -> &[proc_macro2::TokenTree
     }
 }
 
-/// The TS declarations a reader may want: top-level, exported, and inside a
-/// `declare module`, `declare global` or namespace block.
+/// The TS declarations a reader may want, exported or not: top-level, and
+/// inside a `declare module`, `declare global` or namespace block.
 fn ts_declarations<'b, 'a>(stmts: &'b [Statement<'a>], out: &mut Vec<&'b Declaration<'a>>) {
     for stmt in stmts {
         let decl = match stmt.as_module_declaration() {
@@ -544,9 +542,7 @@ fn with_ts<T>(
     f(&decls)
 }
 
-/// The top-level fields of the ONE interface or type alias `name`, or of its
-/// `member`'s inline type, as [`field_facts`] yields them; a nested object's
-/// fields and its methods are not fields of it.
+/// A nested object's fields and its methods are not fields of it.
 pub(super) fn ts_fields(text: &str, name: &str, member: Option<&str>) -> Result<Declared, Unread> {
     with_ts(text, |decls| {
         let decl = one(
@@ -655,8 +651,8 @@ fn member_type<'b, 'a>(s: &'b TSSignature<'a>) -> Option<&'b TSType<'a>> {
 
 /// The members of `ty`'s object-literal operands, through intersections and
 /// parentheses, and the keys of its `Pick` operands, noting an intersection
-/// operand it cannot read; false when `ty` is no object type. A mapped type
-/// indexed by its own keys is read as its value type.
+/// operand it cannot read; false when `ty` is no object type. An index into a
+/// mapped type is read as the mapped type's value.
 fn object_members<'b, 'a>(
     ty: &'b TSType<'a>,
     members: &mut Vec<&'b TSSignature<'a>>,
@@ -771,9 +767,8 @@ fn field_facts(p: &TSPropertySignature<'_>, out: &mut Names) {
     }
 }
 
-/// Every member key of the interfaces and classes named `of`, merged across
-/// their declarations in the document as TS merges augmentations. A private or
-/// protected member is still the runtime's; a `#private` one is no API.
+/// A private or protected member is still the runtime's; a `#private` one is
+/// no API.
 pub(super) fn ts_members(text: &str, of: &[&str]) -> Result<Declared, Unread> {
     with_ts(text, |decls| {
         let mut names = Names::new();
@@ -861,22 +856,11 @@ pub(super) fn ts_members(text: &str, of: &[&str]) -> Result<Declared, Unread> {
     })
 }
 
-/// Every `return` of the ONE `function name`, in order, as one name: its
-/// nested functions' and classes' returns are theirs.
+/// A nested function's or class's returns are its own.
 pub(super) fn ts_return(text: &str, name: &str) -> Result<Names, Unread> {
     with_ts(text, |decls| {
         let what = format!("`function {name}`");
-        let body = one(
-            decls.iter().filter_map(|d| match d {
-                Declaration::FunctionDeclaration(f)
-                    if f.id.as_ref().is_some_and(|id| id.name == name) =>
-                {
-                    f.body.as_deref()
-                }
-                _ => None,
-            }),
-            &what,
-        )?;
+        let body = function_body(decls, name, &what)?;
         let mut returns = Returns::default();
         returns.visit_function_body(body);
         if returns.spans.is_empty() {
@@ -892,6 +876,25 @@ pub(super) fn ts_return(text: &str, name: &str) -> Result<Names, Unread> {
             .collect();
         Ok(Names::from([list.join("; ")]))
     })
+}
+
+/// The body of the ONE `function name`.
+fn function_body<'b, 'a>(
+    decls: &'b [&'b Declaration<'a>],
+    name: &str,
+    what: &str,
+) -> Result<&'b FunctionBody<'a>, Unread> {
+    one(
+        decls.iter().filter_map(|d| match d {
+            Declaration::FunctionDeclaration(f)
+                if f.id.as_ref().is_some_and(|id| id.name == name) =>
+            {
+                f.body.as_deref()
+            }
+            _ => None,
+        }),
+        what,
+    )
 }
 
 /// The spans of the returned expressions at the visited body's own depth.
@@ -929,8 +932,8 @@ impl<'a> oxc_ast_visit::Visit<'a> for Returns {
     }
 }
 
-/// The string elements of the ONE `const name = [ … ]`: the type derived from
-/// it and every comparison against it repeat its names but declare none.
+/// Only the array: the type derived from it and every comparison against it
+/// repeat its names but declare none.
 pub(super) fn ts_const_array(text: &str, name: &str) -> Result<Names, Unread> {
     with_ts(text, |decls| {
         let array = one(
@@ -951,8 +954,8 @@ pub(super) fn ts_const_array(text: &str, name: &str) -> Result<Names, Unread> {
     })
 }
 
-/// The literal the ONE `const name` initializes to: a string's value, or a
-/// number's, which a reformat of its source text leaves as it was.
+/// A number reads as its value, which a reformat of its source text leaves as
+/// it was.
 pub(super) fn ts_const(text: &str, name: &str) -> Result<Names, Unread> {
     with_ts(text, |decls| {
         let value = one(
@@ -967,36 +970,23 @@ pub(super) fn ts_const(text: &str, name: &str) -> Result<Names, Unread> {
     })
 }
 
-/// What each `const name` declarator initializes to, `as` and parentheses
-/// stripped.
+/// What each `const name` declarator initializes to.
 fn const_inits<'b, 'a>(
     decls: &'b [&'b Declaration<'a>],
     name: &'b str,
 ) -> impl Iterator<Item = &'b Expression<'a>> {
-    decls
-        .iter()
-        .filter_map(|d| match d {
-            Declaration::VariableDeclaration(v) if v.kind == VariableDeclarationKind::Const => {
-                Some(v.declarations.iter())
-            }
-            _ => None,
-        })
-        .flatten()
-        .filter(move |v| {
-            matches!(&v.id, BindingPattern::BindingIdentifier(b) if b.name.as_str() == name)
-        })
-        .filter_map(|v| Some(v.init.as_ref()?.get_inner_expression()))
+    all_const_inits(decls)
+        .filter(move |(bound, _)| *bound == Some(name))
+        .map(|(_, init)| init)
 }
 
-/// The field keys of the Effect Schema struct `at` locates, as
-/// [`EffectKeys`] resolves them.
 pub(super) fn effect_schema(text: &str, at: &SchemaAt) -> Result<Declared, Unread> {
     with_ts(text, |decls| {
         let (root, what) = match *at {
             SchemaAt::Event(event) => {
                 let what = format!("`durable`/`ephemeral` call of `type: \"{event}\"`");
                 let schema = one(
-                    all_const_inits(decls).filter_map(|init| event_schema(init, event)),
+                    all_const_inits(decls).filter_map(|(_, init)| event_schema(init, event)),
                     &what,
                 )?;
                 (schema, what)
@@ -1007,17 +997,7 @@ pub(super) fn effect_schema(text: &str, at: &SchemaAt) -> Result<Declared, Unrea
             }
             SchemaAt::Returned(name) => {
                 let what = format!("`function {name}`");
-                let body = one(
-                    decls.iter().filter_map(|d| match d {
-                        Declaration::FunctionDeclaration(f)
-                            if f.id.as_ref().is_some_and(|id| id.name == name) =>
-                        {
-                            f.body.as_deref()
-                        }
-                        _ => None,
-                    }),
-                    &what,
-                )?;
+                let body = function_body(decls, name, &what)?;
                 let returned = one(
                     body.statements.iter().filter_map(|st| match st {
                         Statement::ReturnStatement(r) => r.argument.as_ref(),
@@ -1044,10 +1024,11 @@ pub(super) fn effect_schema(text: &str, at: &SchemaAt) -> Result<Declared, Unrea
     })
 }
 
-/// What every `const` declarator in the document initializes to.
+/// What every `const` declarator in the document initializes to, `as` and
+/// parentheses stripped, beside the name it binds unless it destructures.
 fn all_const_inits<'b, 'a>(
     decls: &'b [&'b Declaration<'a>],
-) -> impl Iterator<Item = &'b Expression<'a>> {
+) -> impl Iterator<Item = (Option<&'b str>, &'b Expression<'a>)> {
     decls
         .iter()
         .filter_map(|d| match d {
@@ -1057,7 +1038,13 @@ fn all_const_inits<'b, 'a>(
             _ => None,
         })
         .flatten()
-        .filter_map(|v| Some(v.init.as_ref()?.get_inner_expression()))
+        .filter_map(|v| {
+            let bound = match &v.id {
+                BindingPattern::BindingIdentifier(b) => Some(b.name.as_str()),
+                _ => None,
+            };
+            Some((bound, v.init.as_ref()?.get_inner_expression()))
+        })
 }
 
 /// The `schema` of `init` when it is a `durable`/`ephemeral` call of `type:
@@ -1105,8 +1092,8 @@ const MAX_HOPS: usize = 16;
 /// An Effect Schema struct's keys. An object literal's own keys count; a spread,
 /// a bare name and `X.fields` resolve through the document's one binding of the
 /// name, whatever namespace holds it; `Struct(..)` reads its argument, `Union`
-/// its one struct, and `.annotate(..)`/`.pipe(..)` what they wrap. Anything
-/// else is out of sight, so the read is partial.
+/// its one struct, and `.annotate(..)` what it wraps. Anything else is out of
+/// sight, so the read is partial.
 struct EffectKeys<'b, 'a> {
     decls: &'b [&'b Declaration<'a>],
     names: Names,
@@ -1140,8 +1127,16 @@ impl<'b, 'a> EffectKeys<'b, 'a> {
                 }
             }
             Expression::CallExpression(c) => match (last_segment(&c.callee), &c.callee) {
-                (Some("annotate" | "pipe"), Expression::StaticMemberExpression(m)) => {
+                // An annotated schema keeps its type ("Preserving Schema Type
+                // After Filtering",
+                // https://github.com/Effect-TS/effect-smol/blob/main/packages/effect/SCHEMA.md).
+                (Some("annotate"), Expression::StaticMemberExpression(m)) => {
                     self.read(&m.object, hops + 1);
+                }
+                // A piped function may reshape what it wraps.
+                (Some("pipe"), Expression::StaticMemberExpression(m)) => {
+                    self.read(&m.object, hops + 1);
+                    self.why.insert("a `.pipe(..)`".to_owned());
                 }
                 (Some("Struct"), _) => match c.arguments.first().and_then(|a| a.as_expression()) {
                     Some(fields) => self.read(fields, hops + 1),
@@ -1253,8 +1248,6 @@ fn md_headings_of(events: &[Event<'_>]) -> Vec<Heading> {
     out
 }
 
-/// The backticked first-column names of the first table in the section whose
-/// header row begins with `header`: a page's later tables repeat its names.
 pub(super) fn md_table(text: &str, header: &str, under: &str) -> Result<Names, Unread> {
     let (section, _) = md_section(text, under)?;
     // Each table as rows of cells, each cell its events.
@@ -1313,8 +1306,6 @@ pub(super) fn md_table(text: &str, header: &str, under: &str) -> Result<Names, U
     Ok(found)
 }
 
-/// The one-word titles of the direct subsections of the ONE heading `under`; a
-/// page's other sections carry one-word headings of their own.
 pub(super) fn md_headings(text: &str, under: &str) -> Result<Names, Unread> {
     let (section, level) = md_section(text, under)?;
     let word = Regex::new(r"\A[A-Za-z_][A-Za-z0-9_]*\z")?;
@@ -1330,8 +1321,8 @@ pub(super) fn md_headings(text: &str, under: &str) -> Result<Names, Unread> {
     Ok(found)
 }
 
-/// Comments go first: a comment quoting `{"action": "continue"}` once ended
-/// the set at its stray `}`. An empty set is an answer, not a miss. Hand-rolled
+/// Comments go first: a comment quoting `{"action": "continue"}` would end the
+/// set at its stray `}`. An empty set is an answer, not a miss. Hand-rolled
 /// on purpose: a Python grammar crate for the set literals hermes' watches read
 /// (`install/hermes.rs`) outweighs this scanner.
 pub(super) fn py_set(text: &str, decl: &str) -> Result<Names, Unread> {
@@ -1566,7 +1557,6 @@ mod tests {
             code_text("Ok( /* c */ a::B ) // d").as_deref(),
             Some("Ok( a::B )")
         );
-        // A doc comment lexes to `#[doc = …]` tokens that all span its text.
         assert_eq!(
             code_text("/// doc\n#[allow(x)] Ok(b)").as_deref(),
             Some("#[allow(x)] Ok(b)")
@@ -1667,7 +1657,6 @@ mod tests {
             found(rust_enum(src, "Missing")),
             Err("no `enum Missing`".to_owned())
         );
-        // A `#[cfg(test)]` twin is ambiguity, never the first one found.
         assert_eq!(
             found(rust_enum(&format!("{src}\n{src}"), "Item")),
             Err("more than one `enum Item`".to_owned())
@@ -1675,7 +1664,6 @@ mod tests {
         // An attribute's own words never name the variant it sits on.
         let attributed = "#[serde(rename_all = \"snake_case\")]\nenum A {\n    #[doc = \"Other\"]\n    Plain,\n}";
         assert_eq!(found(rust_enum(attributed, "A")), names(&["plain"]));
-        // Another spelling is never guessed at: its names would all be wrong.
         let camel = "#[serde(rename_all = \"camelCase\")]\nenum E { OneTwo }";
         assert!(found(rust_enum(camel, "E")).is_err());
     }
@@ -1734,7 +1722,6 @@ mod tests {
         assert_eq!(found(ts_const_array(shapes, "NAMES")), names(&["own"]));
     }
 
-    /// A number reads as its value, so a reformat of the literal is no change.
     #[test]
     fn a_ts_const_is_its_one_literal() {
         let src = "// export const PORT = 1;\nexport const PORT = 18_789;\nconst HEX: number = 0x4965;\nconst NAME = 'agent' as const;\nconst CALL = port();\n";
@@ -1812,8 +1799,6 @@ mod tests {
         );
     }
 
-    /// A type alias is read through its object-literal operands, however
-    /// nested or parenthesised; a named operand's fields are out of sight.
     #[test]
     fn ts_fields_read_a_type_alias_through_its_intersections() {
         let src = "type Plain = { runId?: string; success: boolean };\nexport type Ended = Base & ({ outcome: \"completed\" | \"error\" } & { failureKind?: \"aborted\" });\n";
@@ -1846,8 +1831,7 @@ mod tests {
         }
     }
 
-    /// A member's inline type is a property's type or a method's first
-    /// parameter after `this`, the shapes dsh declares its events in.
+    /// The shapes dsh declares its events in.
     #[test]
     fn ts_fields_read_one_members_inline_type() {
         let src = "declare module 'x' {\n  interface SessionEventMap {\n    'tool/call': { callId: ToolCallId; name: string }\n    'tool/named': Named\n  }\n}\ninterface Events {\n  'agent/created'(this: Scoped<Agent>, payload: { agent: Agent; signal?: AbortSignal }): undefined\n  'agent/bare'(): void\n}\n";
@@ -1874,7 +1858,6 @@ mod tests {
         );
     }
 
-    /// A mapped type indexed by its own keys is read as its value type.
     #[test]
     fn ts_fields_read_a_mapped_types_value() {
         let src = "export type SessionEvent<T extends E = E> = {\n  [K in E]: {\n    type: K\n    seq: number\n    data: SessionEventMap[K]\n  }\n}[T]\n";
@@ -1894,8 +1877,6 @@ mod tests {
         );
     }
 
-    /// A `Pick` of string literals declares the members it keeps; any other
-    /// named type stays out of sight.
     #[test]
     fn a_pick_declares_the_members_it_keeps() {
         let alias = "export type SessionDomain = Pick<\n  SessionApi,\n  | \"create\"\n  | \"get\"\n> & {\n  readonly hook: Hooks\n}\ntype One = Pick<A, \"only\">;\ntype Keyed = Pick<A, K>;\n";
@@ -1922,8 +1903,6 @@ mod tests {
         );
     }
 
-    /// Every member key of the interfaces and classes named, merged across
-    /// their declarations in the document, as TS merges augmentations.
     #[test]
     fn ts_members_read_every_key_of_the_interfaces_and_classes_named() {
         let src = "declare module 'x' {\n  interface Events {\n    'agent/created'(this: S, p: {}): void\n    'agent/status': { a: number }\n  }\n  interface Context { sessions: S }\n}\ninterface SessionEventMap {\n  'turn/start': { turn: number }\n}\ninterface Events {\n  'session/event'(s: S): void\n  'session/event'(s: S, e: E): void\n}\nexport class SessionManager extends Base {\n  private secret = 1;\n  constructor() {}\n  getSessionFile(): string { return ''; }\n  get getter(): number { return 1; }\n  static make() {}\n  #hidden() {}\n  [COMPUTED]() {}\n}\n";
@@ -1938,7 +1917,6 @@ mod tests {
             ])
         );
         assert_eq!(partial(ts_members(src, &events)), None);
-        // A private or protected member is still the runtime's.
         assert_eq!(
             found(ts_members(src, &["SessionManager"])),
             names(&["getSessionFile", "getter", "make", "secret"])
@@ -1968,8 +1946,7 @@ mod tests {
         assert_eq!(found(ts_members(computed, &["C"])), names(&["x"]));
     }
 
-    /// Every `return` of the ONE function, in order, its nested functions'
-    /// aside: an early-return branch is the redirect a watch waits on.
+    /// An early-return branch is the redirect a watch waits on.
     #[test]
     fn ts_return_is_every_return_of_the_one_function() {
         let src = "export function getAgentDir(): string {\n  return dirs.agentDir;\n}\nfunction redirected(): string {\n  if (process.env.X) return process.env.X;\n  const f = () => { return 'nested'; };\n  function g() { return 'decl'; }\n  const h = function () { return 'expr'; };\n  class C { m() { return 'method'; } }\n  return dirs.agentDir;\n}\nfunction none() {}\n";
@@ -2213,7 +2190,10 @@ mod tests {
 
     #[test]
     fn an_effect_schema_resolves_spreads_names_fields_and_wrappers() {
-        let read = |at: SchemaAt| found(effect_schema(EFFECT, &at));
+        let read = |at: SchemaAt| {
+            assert_eq!(partial(effect_schema(EFFECT, &at)), None, "{at:?}");
+            found(effect_schema(EFFECT, &at))
+        };
         assert_eq!(
             read(SchemaAt::Event("session.created")),
             names(&["location", "parentID", "sessionID"])
@@ -2234,17 +2214,13 @@ mod tests {
         );
         assert_eq!(read(SchemaAt::Struct("Source")), names(&["id", "type"]));
         assert_eq!(
-            read(SchemaAt::Returned("durable")),
-            names(&["data", "id", "location", "type"])
-        );
-        assert_eq!(
-            read(SchemaAt::Event("x.gone")),
+            found(effect_schema(EFFECT, &SchemaAt::Event("x.gone"))),
             Err("no `durable`/`ephemeral` call of `type: \"x.gone\"`".to_owned())
         );
     }
 
-    /// What it cannot resolve is out of sight, never a vanish: an import, or a
-    /// name bound twice.
+    /// What it cannot resolve is out of sight, never a vanish: an import, a
+    /// name bound twice, or what a piped function makes of a struct.
     #[test]
     fn an_effect_schema_it_cannot_resolve_is_partial() {
         let imported = effect_schema(EFFECT, &SchemaAt::Event("x.imported"));
@@ -2260,6 +2236,15 @@ mod tests {
         assert_eq!(
             found(effect_schema(EFFECT, &SchemaAt::Event("x.doubled"))),
             names(&["c"])
+        );
+        let piped = effect_schema(EFFECT, &SchemaAt::Returned("durable"));
+        assert!(
+            partial(piped).is_some_and(|why| why.contains("`.pipe(..)`")),
+            "a piped function may drop a field"
+        );
+        assert_eq!(
+            found(effect_schema(EFFECT, &SchemaAt::Returned("durable"))),
+            names(&["data", "id", "location", "type"])
         );
     }
 }

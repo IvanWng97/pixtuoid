@@ -27,8 +27,8 @@ pub(crate) enum OwnedFiles {
 }
 
 impl OwnedFiles {
-    /// Each file at its absolute path with `hook_cmd` baked in, the one that bakes the
-    /// shim first; an owned primary sits at `primary`.
+    /// Each file at its absolute path with `hook_cmd` baked in; an owned primary sits
+    /// at `primary`.
     pub(crate) fn render(self, primary: &Path, hook_cmd: &str) -> Result<Vec<(PathBuf, String)>> {
         match self {
             OwnedFiles::Primary { render, .. } => {
@@ -70,7 +70,7 @@ pub struct MergeOutcome {
 #[derive(Debug)]
 pub struct Target {
     /// The `--target` / CLI-facing id, which does NOT always equal the core
-    /// source id — join against the source registry via `core_source`, never this.
+    /// source id.
     pub name: &'static str,
     /// The core `SourceDescriptor.name` this target installs hooks FOR — usually
     /// `name`, but Claude's target is "claude" while its source is "claude-code".
@@ -476,8 +476,6 @@ pub(crate) const OPENCLAW: Target = Target {
         beside: Some(crate::install::openclaw::plugin_artifacts),
     },
     binary_strategy: BinaryStrategy::EmbedAbsolute,
-    // openclaw.json is created by OpenClaw itself; probe its own dir so
-    // auto-detect fires whether or not we've installed.
     presence_probe: crate::install::openclaw::detect_installed,
     // `plugins.load` is `kind: "restart"` upstream, so a RUNNING gateway does not
     // hot-load the plugin — the lobster appears on its next restart.

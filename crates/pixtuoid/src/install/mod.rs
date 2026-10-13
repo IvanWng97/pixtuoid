@@ -25,6 +25,9 @@ use anyhow::{Context, Result, bail};
 
 use target::{BinaryStrategy, Primary, Target};
 
+#[cfg(feature = "upstream")]
+use pixtuoid_core::source::upstream::{Doc, Finding, Read, Watch, When};
+
 /// The idempotency sentinel stamped on every hook entry pixtuoid merges into a
 /// shared config — those targets key install/uninstall/detect on this, not the
 /// command shape. A plugin's own file (Claude Code's, Codex's, Reasonix's) is ours
@@ -766,6 +769,49 @@ pub(crate) fn forward_set(template: &'static str) -> std::collections::BTreeSet<
         .map(|s| s.trim().trim_matches('"'))
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+/// The fields of the ONE type `name`, or of its `member`'s inline type, that a
+/// shipped template reads.
+#[cfg(feature = "upstream")]
+pub(crate) const fn reads(
+    id: &'static str,
+    ours: fn() -> Vec<&'static str>,
+    docs: &'static [Doc],
+    name: &'static str,
+    member: Option<&'static str>,
+    finding: Finding,
+) -> Watch {
+    Watch {
+        id,
+        ours,
+        docs,
+        read: Read::TsFields { name, member },
+        when: When::Vanishes,
+        finding,
+        siblings: None,
+    }
+}
+
+/// The members of the interfaces and classes `of` that a shipped template
+/// calls.
+#[cfg(feature = "upstream")]
+pub(crate) const fn calls(
+    id: &'static str,
+    ours: fn() -> Vec<&'static str>,
+    docs: &'static [Doc],
+    of: &'static [&'static str],
+    finding: Finding,
+) -> Watch {
+    Watch {
+        id,
+        ours,
+        docs,
+        read: Read::TsMembers { of },
+        when: When::Vanishes,
+        finding,
+        siblings: None,
+    }
 }
 
 #[cfg(test)]
