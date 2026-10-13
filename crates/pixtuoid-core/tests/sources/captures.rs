@@ -629,7 +629,7 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
         );
         // Version first, `captured` only as TIE-BREAK: without it two captures of one
         // version resolve by dir iteration order.
-        let version = |s: &str| registry::cli_version(s, d.version_hyphen);
+        let version = |s: &str| registry::parse_version(s, d.version_hyphen);
         let highest = &dated
             .iter()
             .max_by(|a, b| {

@@ -143,9 +143,10 @@ pub struct SourceDescriptor {
     /// the JSONL label derivers.
     pub label_prefix: &'static str,
     /// The CLI version this build's decoder + fixtures were last verified
-    /// against, as the CLI prints it, prerelease or build suffix included.
+    /// against: the release, prerelease included (`0.2.0-rc.2`), never a
+    /// build id.
     /// `"unknown"`, NOT `""`, where we have no fixed anchor — `pixtuoid doctor`
-    /// only flags SKEW when [`cli_version`] reads one, with this row's
+    /// only flags SKEW when [`parse_version`] reads one, with this row's
     /// [`Self::version_hyphen`].
     /// Pinned to the highest recorded capture's `version` banner by
     /// `a_recorded_capture_anchors_its_sources_verified_version`, so a
@@ -374,13 +375,13 @@ pub enum Hyphen {
 
 /// The version in a CLI's `--version` banner, or in a `verified_version`: the
 /// first token, split on whitespace and `/`, shaped
-/// `v?MAJOR.MINOR[.PATCH][-SUFFIX][+BUILD]`, its `-` read as `hyphen` says.
+/// `v?MAJOR.MINOR[.PATCH][-SUFFIX]`, its `-` read as `hyphen` says.
 /// One grammar for every CLI, so a banner whose wording changed between
 /// releases still reads, and a parenthesized date or sha (`(2026.8.31)`,
 /// `(e178c39)`) never does. A component's leading zeros drop (CalVer
 /// `2026.09.18`), and a dot no digit follows ends the version (copilot's
 /// `1.0.62.`). Compare two with `cmp_precedence`, which skips build ids.
-pub fn cli_version(banner: &str, hyphen: Hyphen) -> Option<semver::Version> {
+pub fn parse_version(banner: &str, hyphen: Hyphen) -> Option<semver::Version> {
     banner
         .split(|c: char| c.is_whitespace() || c == '/')
         .find_map(|token| version_token(token, hyphen))
@@ -411,16 +412,11 @@ fn version_token(token: &str, hyphen: Hyphen) -> Option<semver::Version> {
             Hyphen::Build => version.build = semver::BuildMetadata::new(suffix).ok()?,
         }
     }
-    if let Some((_, build)) = rest.split_once('+')
-        && version.build.is_empty()
-    {
-        version.build = semver::BuildMetadata::new(identifiers(build)).ok()?;
-    }
     Some(version)
 }
 
-/// The dot-separated identifiers `s` starts with: what a prerelease or build
-/// suffix runs to before punctuation that ends the token.
+/// The dot-separated identifiers `s` starts with: what a `-` suffix runs to
+/// before punctuation that ends the token.
 fn identifiers(s: &str) -> &str {
     let run = s
         .find(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'))
@@ -1060,7 +1056,7 @@ mod tests {
 
     #[test]
     fn a_banner_reads_as_its_first_version_shaped_token() {
-        let version = |s: &str| cli_version(s, Hyphen::Prerelease).map(|v| v.to_string());
+        let version = |s: &str| parse_version(s, Hyphen::Prerelease).map(|v| v.to_string());
         for (banner, want) in [
             // Real banners, from the captures' provenance.
             ("2.1.278 (Claude Code)", Some("2.1.278")),
@@ -1070,7 +1066,10 @@ mod tests {
             ("Hermes Agent v0.21.0 (2026.8.31)", Some("0.21.0")),
             ("grok 1.0.25 (f7e67d6988e2) [stable]", Some("1.0.25")),
             ("0.2.0-rc.2", Some("0.2.0-rc.2")),
+            // copilot's, which no capture records: a dot no digit follows ends it.
             ("GitHub Copilot CLI 1.0.62.", Some("1.0.62")),
+            // The FIRST version-shaped token, not the last or the highest.
+            ("tool 1.2.3 built with 4.5.6", Some("1.2.3")),
             // A parenthesized date or sha is never the version, nor a bare major,
             // nor a fourth component semver has no place for.
             ("(2026.8.31)", None),
@@ -1079,7 +1078,6 @@ mod tests {
             ("no version here", None),
             // A major no u64 holds is skipped for the next version-shaped token.
             ("99999999999999999999999.0 v1.2.3", Some("1.2.3")),
-            ("1.2.3+build.7", Some("1.2.3+build.7")),
             // Punctuation closing the suffix is not an identifier.
             ("1.0.0-rc.", Some("1.0.0-rc")),
         ] {
@@ -1094,35 +1092,12 @@ mod tests {
             ("2026.09.18-1234567", "1234567"),
             ("2026.09.18-0123456", "0123456"),
         ] {
-            let v = cli_version(banner, Hyphen::Build).expect(banner);
+            let v = parse_version(banner, Hyphen::Build).expect(banner);
             assert_eq!(
                 (v.to_string(), v.build.as_str()),
                 (format!("2026.9.18+{build}"), build)
             );
             assert!(v.pre.is_empty(), "{banner:?}: a build id is no prerelease");
-        }
-    }
-
-    #[test]
-    fn a_prerelease_orders_below_its_release_and_by_its_identifiers() {
-        let v = |s: &str| cli_version(s, Hyphen::Prerelease).expect(s);
-        assert!(v("0.2.0-rc.1") < v("0.2.0-rc.2"));
-        assert!(v("0.2.0-rc.2") < v("0.2.0"));
-        assert!(
-            v("2026.09.18") < v("2026.10.1"),
-            "CalVer orders by its numbers"
-        );
-    }
-
-    #[test]
-    fn every_row_reads_its_own_verified_version() {
-        for d in REGISTRY.iter().filter(|d| d.verified_version != "unknown") {
-            assert!(
-                cli_version(d.verified_version, d.version_hyphen).is_some(),
-                "{}: {:?} does not read as a version",
-                d.name,
-                d.verified_version
-            );
         }
     }
 

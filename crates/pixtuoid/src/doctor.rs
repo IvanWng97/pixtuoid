@@ -344,7 +344,7 @@ pub(crate) struct DoctorSourceRow {
 
 /// A major at or above this is a CalVer year (openclaw, cursor), and a new
 /// year is no breaking major.
-const CALVER_YEAR: u64 = 1000;
+const CALVER_MIN_MAJOR: u64 = 1000;
 
 /// Installed-vs-verified comparison, `None` when either side can't parse or
 /// there is no anchor.
@@ -353,14 +353,14 @@ pub(crate) fn version_cmp(
     verified: &str,
     hyphen: Hyphen,
 ) -> Option<std::cmp::Ordering> {
-    let installed = installed.and_then(|s| registry::cli_version(s, hyphen))?;
-    Some(installed.cmp_precedence(&registry::cli_version(verified, hyphen)?))
+    let installed = installed.and_then(|s| registry::parse_version(s, hyphen))?;
+    Some(installed.cmp_precedence(&registry::parse_version(verified, hyphen)?))
 }
 
 /// The version a skew verdict compared — for the `versions` category, where
 /// showing the two COMPARED values beats echoing a raw banner.
 fn parsed_version_display(s: &str, hyphen: Hyphen) -> Option<String> {
-    registry::cli_version(s, hyphen).map(|v| v.to_string())
+    registry::parse_version(s, hyphen).map(|v| v.to_string())
 }
 
 /// How the row's CLI writes a `-` in its version.
@@ -1013,10 +1013,10 @@ fn sources_category(rows: &[DoctorSourceRow], ink: &Ink) -> Category {
 /// year is no major.
 fn below_verified_major(installed: Option<&str>, verified: &str, hyphen: Hyphen) -> bool {
     match (
-        installed.and_then(|s| registry::cli_version(s, hyphen)),
-        registry::cli_version(verified, hyphen),
+        installed.and_then(|s| registry::parse_version(s, hyphen)),
+        registry::parse_version(verified, hyphen),
     ) {
-        (Some(i), Some(v)) => i.major < v.major && v.major < CALVER_YEAR,
+        (Some(i), Some(v)) => i.major < v.major && v.major < CALVER_MIN_MAJOR,
         _ => false,
     }
 }
@@ -2521,9 +2521,9 @@ mod tests {
             "a prerelease past the pin runs ahead of it"
         );
         assert_eq!(
-            cmp(Some("1.2.3+a"), "1.2.3+b"),
-            Some(Ordering::Equal),
-            "build metadata never orders"
+            cmp(Some("0.2.0-rc.2"), "0.2.0"),
+            Some(Ordering::Less),
+            "a prerelease runs below its release"
         );
     }
 
