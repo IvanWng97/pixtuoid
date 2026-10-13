@@ -719,7 +719,22 @@ mod tests {
     }
 
     #[test]
-    fn replace_atomically_leaves_no_sibling_and_keeps_the_originals_mode() {
+    fn replace_atomically_replaces_the_file_and_leaves_no_sibling() {
+        let d = tempfile::tempdir().expect("tempdir");
+        let file = d.path().join("payloads.jsonl");
+        std::fs::write(&file, "old\n").expect("write");
+        replace_atomically(&file, b"new\n").expect("replace");
+        assert_eq!(std::fs::read_to_string(&file).expect("read"), "new\n");
+        let left: Vec<_> = std::fs::read_dir(d.path())
+            .expect("read")
+            .flatten()
+            .collect();
+        assert_eq!(left.len(), 1, "no sibling survives: {left:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replace_atomically_keeps_the_originals_mode() {
         use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().expect("tempdir");
         let file = d.path().join("payloads.jsonl");
@@ -728,14 +743,8 @@ mod tests {
         // rewrite that dropped the copy would still pass.
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).expect("chmod");
         replace_atomically(&file, b"new\n").expect("replace");
-        assert_eq!(std::fs::read_to_string(&file).expect("read"), "new\n");
         let mode = std::fs::metadata(&file).expect("stat").permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "the capture keeps its mode");
-        let left: Vec<_> = std::fs::read_dir(d.path())
-            .expect("read")
-            .flatten()
-            .collect();
-        assert_eq!(left.len(), 1, "no sibling survives: {left:?}");
     }
 
     #[test]

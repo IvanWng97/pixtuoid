@@ -257,7 +257,13 @@ pub(crate) enum SourceKind {
     /// Produces `DaemonPresenceUpdate`s → `SceneState::daemons` → a wandering
     /// mascot. It emits ZERO `AgentEvent`s: the `HookRouter` demux routes its
     /// payloads to the sibling channel via `presence_decoder`.
-    Daemon { presence_decoder: PresenceDecoder },
+    Daemon {
+        #[cfg_attr(
+            not(any(feature = "native", feature = "harness")),
+            expect(dead_code, reason = "only the hook demux and the recorder read it")
+        )]
+        presence_decoder: PresenceDecoder,
+    },
 }
 
 impl SourceDescriptor {
@@ -321,6 +327,7 @@ impl SourceDescriptor {
     }
 
     /// The daemon's presence decoder (`None` for an agent source).
+    #[cfg(any(feature = "native", feature = "harness"))]
     pub(crate) fn presence_decoder(&self) -> Option<PresenceDecoder> {
         match &self.kind {
             SourceKind::Daemon { presence_decoder } => Some(*presence_decoder),
@@ -408,6 +415,7 @@ pub(crate) fn path_filter_for(source: &str) -> PathFilter {
 pub(crate) type PresenceDecoder = fn(&Value) -> Result<crate::source::daemon::DecodedPresence>;
 
 /// The presence decoder for a daemon source, or `None` for an agent source.
+#[cfg(any(feature = "native", feature = "harness"))]
 pub(crate) fn presence_decoder_for(source: &str) -> Option<PresenceDecoder> {
     descriptor_for(source).and_then(|d| d.presence_decoder())
 }
