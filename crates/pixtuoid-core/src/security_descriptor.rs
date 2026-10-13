@@ -1,0 +1,140 @@
+//! A Windows security descriptor built from SDDL, for each object created
+//! under it: the hook's pipe, the capture rig's private directory.
+
+use windows_sys::Win32::Foundation::LocalFree;
+use windows_sys::Win32::Security::Authorization::{
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+};
+use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+use windows_sys::core::PCWSTR;
+
+/// Held alive for as long as a create call may borrow its attributes.
+pub(crate) struct SecurityDescriptor {
+    psd: PSECURITY_DESCRIPTOR,
+    attrs: SECURITY_ATTRIBUTES,
+}
+
+impl std::fmt::Debug for SecurityDescriptor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecurityDescriptor")
+            .field("psd", &self.psd)
+            .finish_non_exhaustive()
+    }
+}
+
+// SAFETY: the descriptor is immutable after creation (the Win32 calls only
+// read through these pointers) and freed exactly once in Drop; none of the
+// APIs involved carry thread affinity, so moving the owner across threads
+// (tokio::spawn of the listener task) is sound.
+unsafe impl Send for SecurityDescriptor {}
+
+impl SecurityDescriptor {
+    /// The descriptor `sddl` spells, a NUL-terminated wide string (`w!`).
+    pub(crate) fn from_sddl(sddl: PCWSTR) -> std::io::Result<Self> {
+        let mut psd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+        // SAFETY: `sddl` is a valid NUL-terminated UTF-16 string, psd is a live
+        // out-pointer, and the size out-param is documented optional (null allowed).
+        let ok = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl,
+                SDDL_REVISION_1,
+                &mut psd,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self {
+            psd,
+            attrs: SECURITY_ATTRIBUTES {
+                nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+                lpSecurityDescriptor: psd,
+                bInheritHandle: 0,
+            },
+        })
+    }
+
+    /// A create call's `lpSecurityAttributes`, valid while `self` lives; the
+    /// kernel copies the descriptor during the call.
+    pub(crate) fn attributes(&self) -> *const SECURITY_ATTRIBUTES {
+        &self.attrs
+    }
+
+    /// This descriptor's DACL as SDDL, rendered by the same converter that
+    /// renders one read back off an object.
+    #[cfg(test)]
+    pub(crate) fn dacl(&self) -> String {
+        tests_support::dacl_string(self.psd)
+    }
+}
+
+impl Drop for SecurityDescriptor {
+    fn drop(&mut self) {
+        // SAFETY: psd was LocalAlloc'd by the SDDL conversion (documented
+        // contract: caller frees with LocalFree) and is freed exactly once
+        // here; no other reads can follow Drop.
+        unsafe {
+            LocalFree(self.psd);
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use windows_sys::Win32::Foundation::{HANDLE, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1,
+        SE_OBJECT_TYPE,
+    };
+    use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+
+    /// The DACL the kernel holds for `handle`, as SDDL.
+    pub(crate) fn dacl_sddl(handle: HANDLE, kind: SE_OBJECT_TYPE) -> String {
+        let mut psd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+        // SAFETY: a live handle; every out-pointer this call doesn't fill is
+        // null, as documented optional, and `psd` is a live out-pointer.
+        let rc = unsafe {
+            GetSecurityInfo(
+                handle,
+                kind,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut psd,
+            )
+        };
+        assert_eq!(rc, 0, "GetSecurityInfo");
+        let sddl = dacl_string(psd);
+        // SAFETY: LocalAlloc'd by GetSecurityInfo, freed once here.
+        unsafe { LocalFree(psd) };
+        sddl
+    }
+
+    pub(super) fn dacl_string(psd: PSECURITY_DESCRIPTOR) -> String {
+        let mut text: windows_sys::core::PWSTR = std::ptr::null_mut();
+        // SAFETY: `psd` is a live descriptor; both out-pointers are live.
+        let ok = unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                psd,
+                SDDL_REVISION_1,
+                DACL_SECURITY_INFORMATION,
+                &mut text,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_ne!(
+            ok, 0,
+            "ConvertSecurityDescriptorToStringSecurityDescriptorW"
+        );
+        // SAFETY: `text` is the NUL-terminated string the conversion allocated.
+        let sddl = String::from_utf16_lossy(unsafe {
+            std::slice::from_raw_parts(text, (0..).take_while(|&i| *text.add(i) != 0).count())
+        });
+        // SAFETY: LocalAlloc'd by the conversion, freed once here.
+        unsafe { LocalFree(text.cast()) };
+        sddl
+    }
+}

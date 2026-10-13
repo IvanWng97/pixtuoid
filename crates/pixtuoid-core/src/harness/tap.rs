@@ -41,6 +41,11 @@ impl Endpoint {
         }
     }
 
+    /// The endpoint a caller already named.
+    pub fn at(path: impl Into<PathBuf>) -> Self {
+        Self(path.into())
+    }
+
     /// What `PIXTUOID_SOCKET` and `pixtuoid run --socket` take.
     pub fn path(&self) -> &Path {
         &self.0
@@ -158,7 +163,10 @@ impl Tap {
     }
 
     fn len(&self) -> usize {
-        self.lines.lock().expect("tap sink").len()
+        self.lines
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 
     /// Wait until no payload has arrived for [`QUIET_ROUNDS`] × [`SETTLE`].
@@ -175,7 +183,10 @@ impl Tap {
 
     /// Every payload so far.
     pub fn take(&self) -> Vec<String> {
-        self.lines.lock().expect("tap sink").clone()
+        self.lines
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -197,7 +208,9 @@ async fn keep(mut conn: HookConn, sink: Arc<Mutex<Vec<String>>>, tee: Arc<Option
     if text.trim().is_empty() {
         return;
     }
-    sink.lock().expect("tap sink").push(text);
+    sink.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(text);
     if let Some(to) = tee.as_ref().clone() {
         tokio::spawn(async move {
             let _ = to.send(&bytes).await;

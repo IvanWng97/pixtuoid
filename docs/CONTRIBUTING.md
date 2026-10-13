@@ -154,8 +154,8 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    which nobody reviews and nothing executes.
 
 `just hermetic [--cli pinned|latest] [--record] [source [scenario]]` runs each profiled CLI against a
-scripted model (aimock) with a headless pixtuoid: the full tier gates on it at
-each `verified_version`, the nightly runs it at latest. `scripts/lib/`'s tiers
+scripted model (aimock) with a headless pixtuoid, on macOS or Windows: the full
+tier gates on it at each `verified_version`, the nightly at latest. `scripts/lib/`'s tiers
 run in no CI: `just openclaw-e2e` · `just openclaw-multi-e2e`
 · `just openclaw-backend-e2e` (BILLED) · `just live-sources [id ...]` (BILLED).
 

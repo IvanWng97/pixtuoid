@@ -9,15 +9,6 @@
 //! Exits 0 when every run passed, 1 on any other verdict, and anything else
 //! when the tier itself could not run.
 
-#[cfg(not(unix))]
-fn main() {
-    eprintln!(
-        "hermetic runs the recorder, which records at a Unix socket; run it on macOS or Linux"
-    );
-    std::process::exit(2);
-}
-
-#[cfg(unix)]
 fn main() {
     match run::main() {
         Ok(all_passed) => std::process::exit(i32::from(!all_passed)),
@@ -28,9 +19,8 @@ fn main() {
     }
 }
 
-#[cfg(unix)]
 mod run {
-    use std::ffi::OsString;
+    use std::ffi::{OsStr, OsString};
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::path::{Path, PathBuf};
@@ -39,11 +29,12 @@ mod run {
 
     use pixtuoid_core::harness::hermetic::verify::{self, Label, Verdict};
     use pixtuoid_core::harness::hermetic::{
-        self, DUMMY_KEY, MANIFEST, Manifest, NOT_HERMETIC, NOTE_PLACEHOLDER, PROFILES, Package,
-        Profile, SCENE_LOG, Scenario, USER_PLACEHOLDER,
+        self, DUMMY_KEY, HostConfig, MANIFEST, Manifest, NOT_HERMETIC, NOTE_PLACEHOLDER, PROFILES,
+        Package, PerOs, Profile, SCENE_LOG, Scenario, USER_PLACEHOLDER, WORKSPACE_VAR,
     };
+    use pixtuoid_core::harness::tap::Endpoint;
     use pixtuoid_core::harness::{
-        CAPTURE_NOTE, CAPTURE_RECORD, CAPTURE_WORKSPACE, CaptureRecord, recorder_flag,
+        CAPTURE_NOTE, CAPTURE_RECORD, CaptureRecord, capture_workspace, recorder_flag,
     };
 
     /// How long a server gets to come up before the run gives up.
@@ -55,17 +46,35 @@ mod run {
     /// How long the headless scene runs on after the recorder returns, to
     /// decode the last payloads and log any breadcrumb they provoke.
     const SCENE_SETTLE: Duration = Duration::from_secs(4);
-    /// The variables a CLI may inherit from the host: everything else is
-    /// cleared, so an operator's provider keys can never reach a CLI whose
-    /// base-URL wiring slipped and bill a real provider.
-    const INHERITED: &[&str] = &[
-        "PATH", "LANG", "LC_ALL", "TERM", "TMPDIR", "SHELL", "USER", "LOGNAME",
-    ];
+    /// The variables a CLI may inherit from the host, with each platform's own
+    /// in [`PLATFORM_INHERITED`]: everything else is cleared, so an operator's
+    /// provider keys can never reach a CLI whose base-URL wiring slipped and bill
+    /// a real provider.
+    const INHERITED: &[&str] = &["PATH"];
+    const PLATFORM_INHERITED: PerOs<&[&str]> = PerOs {
+        unix: &[
+            "LANG", "LC_ALL", "TERM", "TMPDIR", "SHELL", "USER", "LOGNAME",
+        ],
+        windows: &[
+            // `connect` finds a CLI's `.cmd` through `which`, which reads it
+            // (`which-8.0.6/src/finder.rs:277`).
+            "PATHEXT",
+            // "In order to run a side-by-side assembly the specified env must
+            // include a valid %SystemRoot%" (docs.python.org, subprocess).
+            "SystemRoot",
+            // A CLI's shell: Node falls back to `cmd.exe` without it
+            // (nodejs.org/api/child_process.html, "Default Windows shell").
+            "ComSpec",
+            // TMPDIR's twins: GetTempPath reads TMP, then TEMP, then
+            // USERPROFILE, a sandbox home (learn.microsoft.com, GetTempPath2W).
+            "TMP",
+            "TEMP",
+        ],
+    };
     /// What npm and aimock inherit beyond [`INHERITED`]: npm's own config, cache
     /// and network settings. A CLI's install scripts and the npm-installed aimock
     /// are untrusted code, so no provider key reaches them either.
     const TOOL_INHERITED: &[&str] = &[
-        "HOME",
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "NO_PROXY",
@@ -74,16 +83,51 @@ mod run {
         "no_proxy",
         "NODE_EXTRA_CA_CERTS",
     ];
+    /// npm's home, whose `cache` is `~/.npm`, or `%LocalAppData%\npm-cache` on
+    /// Windows (docs.npmjs.com/cli/v11/using-npm/config).
+    const PLATFORM_TOOL_INHERITED: PerOs<&[&str]> = PerOs {
+        unix: &["HOME"],
+        windows: &["USERPROFILE", "APPDATA", "LOCALAPPDATA"],
+    };
 
-    /// `program` with the host env cleared to [`INHERITED`], [`TOOL_INHERITED`]
-    /// and npm's `npm_config_*` settings.
-    fn tool(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    /// npm, which Windows installs as a batch file: std runs one with its
+    /// arguments escaped "according to `cmd.exe` rules", refusing at spawn one it
+    /// cannot (std::process, "Batch file special handling"), and an npm name has
+    /// no character that needs it (docs.npmjs.com, package.json `name`).
+    const NPM: &str = if cfg!(windows) { "npm.cmd" } else { "npm" };
+
+    /// Whether `name` is on `list`, as `windows` compares variable names: there
+    /// they ignore case, and a host may spell `PATH` as `Path`.
+    fn listed(windows: bool, list: &[&str], name: &str) -> bool {
+        list.iter().any(|k| {
+            if windows {
+                k.eq_ignore_ascii_case(name)
+            } else {
+                *k == name
+            }
+        })
+    }
+
+    /// Every variable a CLI inherits on this platform.
+    fn inherited() -> impl Iterator<Item = &'static str> {
+        INHERITED
+            .iter()
+            .chain(PLATFORM_INHERITED.here().iter())
+            .copied()
+    }
+
+    /// `program` with the host env cleared to what [`inherited`],
+    /// [`TOOL_INHERITED`] and npm's `npm_config_*` settings keep.
+    fn tool(program: impl AsRef<OsStr>) -> Command {
         let mut c = Command::new(program);
         c.env_clear().stdin(Stdio::null());
+        let keeps: Vec<&str> = inherited()
+            .chain(TOOL_INHERITED.iter().copied())
+            .chain(PLATFORM_TOOL_INHERITED.here().iter().copied())
+            .collect();
         for (k, v) in std::env::vars_os() {
             let keep = k.to_str().is_some_and(|k| {
-                INHERITED.contains(&k)
-                    || TOOL_INHERITED.contains(&k)
+                listed(cfg!(windows), &keeps, k)
                     || k.to_ascii_lowercase().starts_with("npm_config_")
             });
             if keep {
@@ -111,6 +155,12 @@ mod run {
         /// A selection that names nothing runnable is an operator's typo, not
         /// a run where everything was blocked.
         fn check(&self) -> Result<(), String> {
+            if self.record && !cfg!(unix) {
+                return Err(
+                    "--record writes the committed corpus, which pins Unix paths: record on macOS or Linux"
+                        .into(),
+                );
+            }
             if self.record && self.versions == Versions::Latest {
                 return Err("--record writes fixtures of the pinned CLIs only".into());
             }
@@ -233,7 +283,7 @@ mod run {
                 }
             }
         }
-        let report = report(args.versions, &entries);
+        let report = report(args.versions, &host_tools(), &entries);
         std::fs::write(runs.join(REPORT), &report)?;
         println!("\n{report}");
         Ok(entries.iter().all(|e| e.verdict.label() == Label::Pass))
@@ -291,7 +341,31 @@ mod run {
         }
     }
 
-    fn report(versions: Versions, entries: &[Entry]) -> String {
+    /// The host's own tools a CLI runs, which the runner image supplies unpinned.
+    const HOST_TOOLS: PerOs<&[&str]> = PerOs {
+        unix: &["git"],
+        windows: &["git", "pwsh"],
+    };
+
+    /// Each of [`HOST_TOOLS`]' `--version`, or why it has none.
+    fn host_tools() -> Vec<String> {
+        HOST_TOOLS
+            .here()
+            .iter()
+            .map(|t| {
+                tool(t)
+                    .arg("--version")
+                    .output()
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .and_then(|v| v.lines().next().map(str::trim).map(str::to_owned))
+                    .unwrap_or_else(|| format!("{t}: none"))
+            })
+            .collect()
+    }
+
+    fn report(versions: Versions, host: &[String], entries: &[Entry]) -> String {
         let which = match versions {
             Versions::Pinned => "verified",
             Versions::Latest => "latest",
@@ -301,7 +375,11 @@ mod run {
             Some(worst) if labels().any(|l| l != Label::Blocked) => format!("{worst:?}"),
             _ => "NOTHING RAN".to_owned(),
         };
-        let mut out = format!("# hermetic, {which} CLIs: {title}\n");
+        let os = std::env::consts::OS;
+        let mut out = format!(
+            "# hermetic, {which} CLIs on {os}: {title}\n\nHost: {}\n",
+            host.join(", ")
+        );
         for e in entries {
             let version = e
                 .version
@@ -345,10 +423,11 @@ mod run {
                 .parent()
                 .and_then(Path::parent)
                 .ok_or_else(|| std::io::Error::other("an example sits two below its target dir"))?;
+            let exe = |name: &str| format!("{name}{}", std::env::consts::EXE_SUFFIX);
             let found = Self {
-                pixtuoid: profile_dir.join("pixtuoid"),
-                shim: profile_dir.join("pixtuoid-hook"),
-                recorder: me.with_file_name("capture_fixture"),
+                pixtuoid: profile_dir.join(exe("pixtuoid")),
+                shim: profile_dir.join(exe("pixtuoid-hook")),
+                recorder: me.with_file_name(exe("capture_fixture")),
             };
             for p in [&found.pixtuoid, &found.shim, &found.recorder] {
                 if !p.is_file() {
@@ -364,7 +443,7 @@ mod run {
 
     /// The scripted model, installed from the committed lockfile, scripts off.
     struct Aimock {
-        bin: PathBuf,
+        launch: Launch,
         version: String,
     }
 
@@ -384,8 +463,13 @@ mod run {
                 std::fs::copy(src.join(f), dir.join(f))?;
             }
             npm(&dir, &["ci", "--ignore-scripts"])?;
+            let modules = dir.join("node_modules");
             Ok(Self {
-                bin: dir.join("node_modules/.bin/llmock"),
+                launch: Launch::of(
+                    &modules.join("@copilotkit/aimock"),
+                    &modules.join(".bin"),
+                    "llmock",
+                )?,
                 version,
             })
         }
@@ -414,7 +498,7 @@ mod run {
     }
 
     fn npm(dir: &Path, args: &[&str]) -> std::io::Result<()> {
-        let status = tool("npm")
+        let status = tool(NPM)
             .args(args)
             .args(["--no-audit", "--no-fund"])
             .current_dir(dir)
@@ -432,12 +516,12 @@ mod run {
     /// way users install it. Its own install scripts run, since they link the
     /// binary: npm 12 blocks a dependency's unless the project's `allowScripts`
     /// names it (`npm help install-scripts`), and older npm ignores the field.
-    fn install_cli(tier: &Path, p: &Profile, versions: Versions) -> std::io::Result<PathBuf> {
+    fn install_cli(tier: &Path, p: &Profile, versions: Versions) -> std::io::Result<Installed> {
         let Package::Npm(package) = p.package;
         let version = match versions {
             Versions::Pinned => p.descriptor().verified_version.to_string(),
             Versions::Latest => {
-                let out = tool("npm").args(["view", package, "version"]).output()?;
+                let out = tool(NPM).args(["view", package, "version"]).output()?;
                 if !out.status.success() {
                     return Err(std::io::Error::other(format!("npm view {package} failed")));
                 }
@@ -454,7 +538,139 @@ mod run {
             std::fs::write(dir.join("package.json"), project.to_string())?;
             npm(dir, &["install", &pinned])
         })?;
-        Ok(prefix.join("node_modules/.bin"))
+        let modules = prefix.join("node_modules");
+        let bin = modules.join(".bin");
+        let name = p.invocation[0];
+        Ok(Installed {
+            launch: Launch::of(&modules.join(package), &bin, name)?,
+            bin,
+        })
+    }
+
+    /// An installed CLI: the directory npm links its commands into, and how to
+    /// start it.
+    struct Installed {
+        bin: PathBuf,
+        launch: Launch,
+    }
+
+    /// How to start an npm-installed command.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Launch {
+        program: PathBuf,
+        args: Vec<String>,
+        /// What the entry's shebang sets.
+        env: Vec<(String, String)>,
+    }
+
+    impl Launch {
+        /// `name` from the package at `package` npm linked into `bin`: on Unix
+        /// the link itself, which the kernel runs by its shebang; on Windows
+        /// what npm's shim there runs (`Launch::from_bin_field`).
+        fn of(package: &Path, bin: &Path, name: &str) -> std::io::Result<Self> {
+            if cfg!(windows) {
+                Self::from_bin_field(package, bin, name)
+            } else {
+                Ok(Self {
+                    program: bin.join(name),
+                    args: Vec::new(),
+                    env: Vec::new(),
+                })
+            }
+        }
+
+        /// What npm's Windows shim runs for `name`, as cmd-shim writes it
+        /// (`npm/cmd-shim` `lib/index.js:24,50-58,73-119` @v9.0.2): a `bin`
+        /// entry with a shebang runs under its program (the `.exe` beside the
+        /// shim if there is one) with its arguments and variables, and one
+        /// without (a PE) runs itself.
+        fn from_bin_field(package: &Path, bin: &Path, name: &str) -> std::io::Result<Self> {
+            let manifest: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(package.join("package.json"))?)?;
+            let rel = match &manifest["bin"] {
+                serde_json::Value::String(only) => Some(only.as_str()),
+                bins => bins[name].as_str(),
+            }
+            .ok_or_else(|| {
+                std::io::Error::other(format!("{} has no bin {name}", package.display()))
+            })?;
+            let entry = package.join(rel);
+            let mut head = Vec::new();
+            std::fs::File::open(&entry)?
+                .take(SHEBANG_READ)
+                .read_to_end(&mut head)?;
+            let first = String::from_utf8_lossy(&head);
+            let first = first.trim().lines().next().unwrap_or_default();
+            Ok(match Shebang::parse(first) {
+                None => Self {
+                    program: entry,
+                    args: Vec::new(),
+                    env: Vec::new(),
+                },
+                Some(sb) => {
+                    let beside = bin.join(format!("{}.exe", sb.program));
+                    let mut args = sb.args;
+                    args.push(entry.to_string_lossy().into_owned());
+                    Self {
+                        program: if beside.is_file() {
+                            beside
+                        } else {
+                            PathBuf::from(sb.program)
+                        },
+                        args,
+                        env: sb.env,
+                    }
+                }
+            })
+        }
+
+        /// The command line, program first.
+        fn argv(&self) -> Vec<OsString> {
+            std::iter::once(self.program.clone().into_os_string())
+                .chain(self.args.iter().map(OsString::from))
+                .collect()
+        }
+    }
+
+    /// How much of an entry is read for its first line: past any shebang, and
+    /// short of reading a native CLI's whole binary.
+    const SHEBANG_READ: u64 = 4096;
+
+    /// A `#!` line as cmd-shim's `shebangExpr` reads it: `/usr/bin/env`, an
+    /// optional `-S`, leading `VAR=value` words, then the program and its
+    /// arguments.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Shebang {
+        program: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+    }
+
+    impl Shebang {
+        fn parse(line: &str) -> Option<Self> {
+            let rest = line.strip_prefix("#!")?.trim_start();
+            let mut words: Vec<&str> = rest.split_whitespace().collect();
+            let mut env = Vec::new();
+            if words.first() == Some(&"/usr/bin/env") {
+                words.remove(0);
+                if words.first() == Some(&"-S") {
+                    words.remove(0);
+                }
+                while let Some((k, v)) = words.first().and_then(|w| w.split_once('=')) {
+                    if k.is_empty() || v.is_empty() || v.contains('=') {
+                        break;
+                    }
+                    env.push((k.to_owned(), v.to_owned()));
+                    words.remove(0);
+                }
+            }
+            let (program, args) = words.split_first()?;
+            Some(Self {
+                program: (*program).to_owned(),
+                args: args.iter().map(|a| (*a).to_owned()).collect(),
+                env,
+            })
+        }
     }
 
     /// One sandbox: every home a CLI or pixtuoid resolves points inside it, so
@@ -462,8 +678,23 @@ mod run {
     struct Sandbox {
         dir: tempfile::TempDir,
         env: Vec<(String, OsString)>,
-        sock: PathBuf,
+        /// Where the headless pixtuoid listens and the recorder tees to.
+        scene: Endpoint,
     }
+
+    /// Every home a CLI or pixtuoid may resolve, each a directory of the
+    /// sandbox. All are set on every platform: a variable no reader there reads
+    /// is inert.
+    const SANDBOX_HOMES: &[(&str, &str)] = &[
+        ("HOME", "home"),
+        ("USERPROFILE", "home"),
+        ("APPDATA", "home/AppData/Roaming"),
+        ("LOCALAPPDATA", "home/AppData/Local"),
+        ("XDG_CONFIG_HOME", "xdg/config"),
+        ("XDG_DATA_HOME", "xdg/data"),
+        ("XDG_STATE_HOME", "xdg/state"),
+        ("XDG_CACHE_HOME", "xdg/cache"),
+    ];
 
     impl Sandbox {
         fn new(p: &Profile, built: &Built, cli_bin: &Path, port: u16) -> std::io::Result<Self> {
@@ -474,11 +705,15 @@ mod run {
                 Ok(d)
             };
             let bin = at("bin")?;
-            std::os::unix::fs::symlink(&built.shim, bin.join("pixtuoid-hook"))?;
-            let mut env: Vec<(String, OsString)> = INHERITED
-                .iter()
-                .filter(|k| **k != "PATH")
-                .filter_map(|k| std::env::var_os(k).map(|v| ((*k).to_string(), v)))
+            // A copy: a Windows symlink needs privilege, and a hard link cannot
+            // cross from the build's volume to the temp one.
+            std::fs::copy(
+                &built.shim,
+                bin.join(format!("pixtuoid-hook{}", std::env::consts::EXE_SUFFIX)),
+            )?;
+            let mut env: Vec<(String, OsString)> = inherited()
+                .filter(|k| *k != "PATH")
+                .filter_map(|k| std::env::var_os(k).map(|v| (k.to_string(), v)))
                 .collect();
             let host_path = std::env::var_os("PATH").unwrap_or_default();
             let path = std::env::join_paths(
@@ -488,14 +723,8 @@ mod run {
             )
             .map_err(std::io::Error::other)?;
             env.push(("PATH".into(), path));
-            env.push(("HOME".into(), at("home")?.into()));
-            for (var, rel) in [
-                ("XDG_CONFIG_HOME", "xdg/config"),
-                ("XDG_DATA_HOME", "xdg/data"),
-                ("XDG_STATE_HOME", "xdg/state"),
-                ("XDG_CACHE_HOME", "xdg/cache"),
-            ] {
-                env.push((var.into(), at(rel)?.into()));
+            for (var, rel) in SANDBOX_HOMES {
+                env.push(((*var).into(), at(rel)?.into()));
             }
             let homes = p
                 .descriptor()
@@ -515,7 +744,7 @@ mod run {
                 env.push(((*k).to_string(), expand(v).into()));
             }
             let sandbox = Self {
-                sock: dir.path().join("pix.sock"),
+                scene: Endpoint::in_dir(dir.path(), "scene"),
                 dir,
                 env,
             };
@@ -535,15 +764,16 @@ mod run {
             Ok(sandbox)
         }
 
-        /// The profile's pairs as this sandbox holds them, for the recorder to
-        /// set on the CLI as `--env`.
-        fn cli_env(&self, p: &Profile) -> Vec<String> {
+        /// The profile's pairs as this sandbox holds them, then what the CLI's
+        /// launch sets, for the recorder to set on the CLI as `--env`.
+        fn cli_env(&self, p: &Profile, launch: &Launch) -> Vec<String> {
             p.env
                 .iter()
                 .filter_map(|(k, _)| {
                     self.var_os(k)
                         .map(|v| format!("{k}={}", v.to_string_lossy()))
                 })
+                .chain(launch.env.iter().map(|(k, v)| format!("{k}={v}")))
                 .collect()
         }
 
@@ -562,7 +792,7 @@ mod run {
         /// A child of the run. Its stdin is empty: `opencode run` reads a non-TTY
         /// stdin to its end (`packages/cli/src/run/run.ts:76`), so an inherited
         /// one that never closes hangs the run.
-        fn command(&self, program: &Path) -> Command {
+        fn command(&self, program: impl AsRef<OsStr>) -> Command {
             let mut c = Command::new(program);
             c.env_clear()
                 .envs(self.env.iter().map(|(k, v)| (k, v)))
@@ -601,23 +831,21 @@ mod run {
             aimock,
             versions,
         } = ctx;
+        let workspace = capture_workspace()?;
         if let Some(found) = outside_config(
-            p.system_config,
+            p.system_config.here(),
             p.ancestor_config,
-            Path::new(CAPTURE_WORKSPACE),
-            std::env::var_os("USER")
-                .as_deref()
-                .and_then(std::ffi::OsStr::to_str),
+            &workspace,
+            std::env::var_os("USER").as_deref().and_then(OsStr::to_str),
         ) {
             return Err(std::io::Error::other(format!(
-                "{} configures {} from outside the sandbox",
-                found.display(),
+                "{found} configures {} from outside the sandbox",
                 p.source
             )));
         }
-        let cli_bin = install_cli(tier, p, *versions)?;
+        let cli = install_cli(tier, p, *versions)?;
         let port = free_port()?;
-        let sandbox = Sandbox::new(p, built, &cli_bin, port)?;
+        let sandbox = Sandbox::new(p, built, &cli.bin, port)?;
 
         let connect = sandbox
             .command(&built.pixtuoid)
@@ -634,9 +862,13 @@ mod run {
             )));
         }
 
-        let script = render_script(p, scenario, sandbox.dir.path())?;
+        let script = render_script(p, scenario, &workspace, sandbox.dir.path())?;
+        let mut model = tool(&aimock.launch.program);
+        model
+            .args(&aimock.launch.args)
+            .envs(aimock.launch.env.iter().map(|(k, v)| (k, v)));
         let model = Reaped(
-            tool(&aimock.bin)
+            model
                 .args(["-p", &port.to_string(), "-f"])
                 .arg(&script)
                 .stdout(log(dir, "aimock.log")?)
@@ -649,22 +881,29 @@ mod run {
             sandbox
                 .command(&built.pixtuoid)
                 .args(["run", "--headless", "--log-level", "warn", "--socket"])
-                .arg(&sandbox.sock)
+                .arg(sandbox.scene.path())
                 // Its log colors a file too, and the scene log is read as text.
                 .env("NO_COLOR", "1")
                 .stdout(log(dir, SCENE_LOG)?)
                 .stderr(log(dir, SCENE_LOG)?)
                 .spawn()?,
         );
-        wait_until(|| sandbox.sock.exists(), "the headless pixtuoid's socket")?;
+        wait_until(
+            || sandbox.scene.accepting(),
+            "the headless pixtuoid's endpoint",
+        )?;
 
         let recorder = sandbox
             .command(&built.recorder)
             .args(recorder_args(
-                dir,
-                &sandbox.sock,
-                sandbox.dir.path(),
-                &sandbox.cli_env(p),
+                &RecorderRun {
+                    out: dir,
+                    scene: sandbox.scene.path(),
+                    within: sandbox.dir.path(),
+                    cli_env: &sandbox.cli_env(p, &cli.launch),
+                    cli_version: &cli_version(&sandbox, p, &cli.launch)?,
+                    launch: &cli.launch,
+                },
                 p,
                 scenario,
             ))
@@ -710,16 +949,16 @@ mod run {
     }
 
     /// Config a CLI would read that no sandbox home redirects: one of
-    /// `system_config`'s paths, its [`USER_PLACEHOLDER`] the operator's
+    /// `system_config`'s places, its [`USER_PLACEHOLDER`] the operator's
     /// (unchecked with none), or one of `ancestor_config` in an ancestor of
     /// `workspace`, which need not exist yet. An ancestor may be a symlink (macOS's `/tmp`), so
     /// the ancestors of the nearest existing one's target count too.
     fn outside_config(
-        system_config: &[&str],
+        system_config: &[HostConfig],
         ancestor_config: &[&str],
         workspace: &Path,
         user: Option<&str>,
-    ) -> Option<PathBuf> {
+    ) -> Option<String> {
         let lexical = workspace.ancestors().skip(1);
         let real = lexical
             .clone()
@@ -729,57 +968,174 @@ mod run {
         let ancestors: Vec<PathBuf> = lexical.map(Path::to_path_buf).chain(real).collect();
         let inherited = ancestors
             .iter()
-            .flat_map(|dir| ancestor_config.iter().map(move |name| dir.join(name)));
-        let system = system_config.iter().filter_map(|path| match user {
-            _ if !path.contains(USER_PLACEHOLDER) => Some(PathBuf::from(path)),
-            Some(name) => Some(PathBuf::from(path.replace(USER_PLACEHOLDER, name))),
-            None => None,
-        });
-        system.chain(inherited).find(|path| path.exists())
+            .flat_map(|dir| ancestor_config.iter().map(move |name| dir.join(name)))
+            .find(|path| path.exists())
+            .map(|path| path.display().to_string());
+        system_config
+            .iter()
+            .find_map(|row| host_config_found(row, user))
+            .or(inherited)
     }
 
-    /// The recorder's command line for one run: the raw capture into `dir`,
-    /// teed to the headless scene at `sock`, its harvest held inside `within`,
-    /// and the profile's env for the CLI.
-    fn recorder_args(
-        dir: &Path,
-        sock: &Path,
-        within: &Path,
-        cli_env: &[String],
-        p: &Profile,
-        scenario: &Scenario,
-    ) -> Vec<OsString> {
+    /// `row`, as found on this host.
+    fn host_config_found(row: &HostConfig, user: Option<&str>) -> Option<String> {
+        match row {
+            HostConfig::Path(path) => {
+                let path = match user {
+                    _ if !path.contains(USER_PLACEHOLDER) => (*path).to_owned(),
+                    Some(name) => path.replace(USER_PLACEHOLDER, name),
+                    None => return None,
+                };
+                let path = known_folders_expanded(&path)?;
+                path.exists().then(|| path.display().to_string())
+            }
+            #[cfg(windows)]
+            HostConfig::Registry(key) => {
+                pixtuoid_core::harness::host::registry_key_exists(key).then(|| (*key).to_owned())
+            }
+            #[cfg(not(windows))]
+            HostConfig::Registry(_) => None,
+        }
+    }
+
+    /// `path` with a leading known-folder placeholder resolved, or `None` when
+    /// the shell has no such folder.
+    fn known_folders_expanded(path: &str) -> Option<PathBuf> {
+        #[cfg(windows)]
+        {
+            use pixtuoid_core::harness::host::{KnownFolder, known_folder};
+            for folder in KnownFolder::ALL {
+                if let Some(rest) = path.strip_prefix(folder.placeholder()) {
+                    let base = known_folder(folder).ok()?;
+                    return Some(base.join(rest.trim_start_matches('\\')));
+                }
+            }
+        }
+        Some(PathBuf::from(path))
+    }
+
+    /// The CLI's `--version`, asked of it alone in the sandbox the run uses:
+    /// the recorder cannot repeat a launch through an interpreter.
+    fn cli_version(sandbox: &Sandbox, p: &Profile, launch: &Launch) -> std::io::Result<String> {
+        let probe = p
+            .descriptor()
+            .version_probe
+            .ok_or_else(|| std::io::Error::other(format!("{} has no version probe", p.source)))?;
+        let out = sandbox
+            .command(&launch.program)
+            .args(&launch.args)
+            .args(&probe[1..])
+            .envs(launch.env.iter().map(|(k, v)| (k, v)))
+            .output()?;
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .next()
+            .map(|l| l.trim().to_owned())
+            .filter(|v| out.status.success() && !v.is_empty())
+            .ok_or_else(|| {
+                std::io::Error::other(format!(
+                    "{:?} --version answered nothing (exit {})",
+                    launch.program, out.status
+                ))
+            })
+    }
+
+    /// What the tier decides about one recorder run.
+    struct RecorderRun<'a> {
+        /// The raw capture goes here.
+        out: &'a Path,
+        /// Teed to the headless scene listening here.
+        scene: &'a Path,
+        /// Its harvest held inside this sandbox.
+        within: &'a Path,
+        /// Set on the CLI after the recorder's scrub.
+        cli_env: &'a [String],
+        cli_version: &'a str,
+        launch: &'a Launch,
+    }
+
+    /// The recorder's command line for one run: its options, then the source,
+    /// the scenario and the CLI's own launch and invocation.
+    fn recorder_args(run: &RecorderRun<'_>, p: &Profile, scenario: &Scenario) -> Vec<OsString> {
         let mut args: Vec<OsString> = vec![
             recorder_flag::OUT.into(),
-            dir.into(),
+            run.out.into(),
             recorder_flag::TEE.into(),
-            sock.into(),
+            run.scene.into(),
             recorder_flag::WITHIN.into(),
-            within.into(),
+            run.within.into(),
+            recorder_flag::CLI_VERSION.into(),
+            run.cli_version.into(),
         ];
-        for kv in cli_env {
+        for kv in run.cli_env {
             args.extend([recorder_flag::ENV.into(), kv.into()]);
         }
         args.extend([p.source, scenario.shape.name()].map(OsString::from));
-        args.extend(p.invocation.iter().map(OsString::from));
+        args.extend(run.launch.argv());
+        args.extend(p.invocation[1..].iter().map(OsString::from));
         args
     }
 
-    /// The scenario's script with `{workspace}` and [`NOTE_PLACEHOLDER`]
-    /// expanded: a CLI that takes an absolute path gets the one the recorder runs
-    /// it in, and a reply waits for the note it reads.
-    fn render_script(p: &Profile, scenario: &Scenario, into: &Path) -> std::io::Result<PathBuf> {
-        let text = std::fs::read_to_string(scenario.script(p.source))?;
-        let workspace = Path::new(CAPTURE_WORKSPACE);
-        let workspace =
-            std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_path_buf());
+    /// The scenario's script with its placeholders expanded in every string,
+    /// written into `into`: a CLI that takes an absolute path gets the one the
+    /// recorder runs it in, as its own cwd reads it, and a reply waits for the
+    /// note the tool read.
+    fn render_script(
+        p: &Profile,
+        scenario: &Scenario,
+        workspace: &Path,
+        into: &Path,
+    ) -> std::io::Result<PathBuf> {
+        let mut script: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(scenario.script(p.source))?)?;
+        expand_strings(&mut script, &script_values(p, workspace));
         let out = into.join("script.json");
-        std::fs::write(
-            &out,
-            text.replace("{workspace}", &workspace.to_string_lossy())
-                .replace(NOTE_PLACEHOLDER, CAPTURE_NOTE),
-        )?;
+        std::fs::write(&out, serde_json::to_string_pretty(&script)?)?;
         Ok(out)
+    }
+
+    /// Each placeholder's value here. Unix's realpath is what a CLI's `getcwd`
+    /// reports (macOS's `/tmp` is `/private/tmp`); Windows' cwd reads back as
+    /// it was set, and canonicalizing would resolve a junction it never sees.
+    fn script_values(p: &Profile, workspace: &Path) -> Vec<(String, String)> {
+        let workspace = if cfg!(windows) {
+            workspace.to_path_buf()
+        } else {
+            std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_path_buf())
+        };
+        [
+            (
+                WORKSPACE_VAR.to_owned(),
+                workspace.to_string_lossy().into_owned(),
+            ),
+            (NOTE_PLACEHOLDER.to_owned(), CAPTURE_NOTE.to_owned()),
+        ]
+        .into_iter()
+        .chain(
+            p.script_vars
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v.here()).to_owned())),
+        )
+        .collect()
+    }
+
+    /// Replace every placeholder inside `v`'s strings: a raw `C:\…` spliced
+    /// into JSON text would be an invalid escape.
+    fn expand_strings(v: &mut serde_json::Value, values: &[(String, String)]) {
+        match v {
+            serde_json::Value::String(text) => {
+                for (k, value) in values {
+                    *text = text.replace(k.as_str(), value);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                items.iter_mut().for_each(|i| expand_strings(i, values));
+            }
+            serde_json::Value::Object(map) => {
+                map.values_mut().for_each(|i| expand_strings(i, values));
+            }
+            _ => {}
+        }
     }
 
     /// One child's stdout and stderr, interleaved in one file of the run.
@@ -848,6 +1204,8 @@ mod run {
 
         #[test]
         fn the_reports_title_is_the_worst_verdict_or_that_nothing_ran() {
+            let os = std::env::consts::OS;
+            let host = ["git version 2.55.0".to_string()];
             let pass = Entry::new(
                 "codex/tool-run".into(),
                 Some("codex-cli 0.155.1".into()),
@@ -860,14 +1218,18 @@ mod run {
                     Verdict::new(vec![(Label::Blocked, "npm view failed".into())]),
                 )
             };
-            let r = report(Versions::Latest, &[pass, blocked()]);
-            assert_eq!(r.lines().next(), Some("# hermetic, latest CLIs: Blocked"));
-            assert!(r.contains("## opencode/tool-run: Blocked\n- Blocked: npm view failed"));
-            assert!(r.contains("## codex/tool-run (codex-cli 0.155.1): Pass"));
-            let r = report(Versions::Pinned, &[blocked()]);
+            let r = report(Versions::Latest, &host, &[pass, blocked()]);
             assert_eq!(
                 r.lines().next(),
-                Some("# hermetic, verified CLIs: NOTHING RAN")
+                Some(format!("# hermetic, latest CLIs on {os}: Blocked").as_str())
+            );
+            assert!(r.contains("Host: git version 2.55.0"), "{r}");
+            assert!(r.contains("## opencode/tool-run: Blocked\n- Blocked: npm view failed"));
+            assert!(r.contains("## codex/tool-run (codex-cli 0.155.1): Pass"));
+            let r = report(Versions::Pinned, &host, &[blocked()]);
+            assert_eq!(
+                r.lines().next(),
+                Some(format!("# hermetic, verified CLIs on {os}: NOTHING RAN").as_str())
             );
             // The script lost a CLI that then exited: it ran, and its drift is the title.
             let lost = Entry::new(
@@ -878,10 +1240,14 @@ mod run {
                     (Label::Script, "1 unmatched".into()),
                 ]),
             );
-            let r = report(Versions::Latest, &[lost, blocked()]);
-            assert_eq!(r.lines().next(), Some("# hermetic, latest CLIs: Script"));
+            let r = report(Versions::Latest, &host, &[lost, blocked()]);
+            assert_eq!(
+                r.lines().next(),
+                Some(format!("# hermetic, latest CLIs on {os}: Script").as_str())
+            );
         }
 
+        #[cfg(unix)]
         #[test]
         fn config_outside_the_sandbox_is_found_through_a_symlinked_ancestor() {
             let d = tempfile::tempdir().expect("tempdir");
@@ -901,21 +1267,26 @@ mod run {
             );
         }
 
+        /// A profile's rows are `'static`; a test's temp path lives for the run.
+        fn path_row(p: &Path) -> HostConfig {
+            HostConfig::Path(Box::leak(p.to_string_lossy().into_owned().into_boxed_str()))
+        }
+
         #[test]
         fn a_listed_system_path_is_config_outside_the_sandbox_once_it_exists() {
             let d = tempfile::tempdir().expect("tempdir");
             let workspace = d.path().join("proj");
             let system = d.path().join("etc-cli");
-            let listed = system.to_str().expect("utf-8");
+            let listed = [path_row(&system)];
             assert_eq!(
-                outside_config(&[listed], &[], &workspace, None),
+                outside_config(&listed, &[], &workspace, None),
                 None,
                 "listed but absent"
             );
             std::fs::create_dir(&system).expect("mkdir");
             assert_eq!(
-                outside_config(&[listed], &[], &workspace, None),
-                Some(PathBuf::from(listed))
+                outside_config(&listed, &[], &workspace, None),
+                Some(system.display().to_string())
             );
         }
 
@@ -923,27 +1294,26 @@ mod run {
         fn a_per_user_system_path_is_the_operators_and_unchecked_with_no_user() {
             let d = tempfile::tempdir().expect("tempdir");
             let workspace = d.path().join("proj");
-            let per_user = d.path().join("prefs/alice/managed.plist");
+            let per_user = d.path().join("prefs").join("alice").join("managed.plist");
             let pattern = d
                 .path()
-                .join(format!("prefs/{USER_PLACEHOLDER}/managed.plist"));
+                .join("prefs")
+                .join(USER_PLACEHOLDER)
+                .join("managed.plist");
             // The placeholder kept literal, and expanded to nothing: what the
             // no-user arm would find if it checked anything.
             for planted in [&per_user, &pattern, &d.path().join("prefs/managed.plist")] {
                 std::fs::create_dir_all(planted.parent().expect("parent")).expect("mkdir");
                 std::fs::write(planted, "").expect("plant");
             }
-            let pattern = pattern.to_str().expect("utf-8");
+            let rows = [path_row(&pattern)];
             assert_eq!(
-                outside_config(&[pattern], &[], &workspace, Some("alice")),
-                Some(per_user)
+                outside_config(&rows, &[], &workspace, Some("alice")),
+                Some(per_user.display().to_string())
             );
+            assert_eq!(outside_config(&rows, &[], &workspace, Some("bob")), None);
             assert_eq!(
-                outside_config(&[pattern], &[], &workspace, Some("bob")),
-                None
-            );
-            assert_eq!(
-                outside_config(&[pattern], &[], &workspace, None),
+                outside_config(&rows, &[], &workspace, None),
                 None,
                 "no user: unchecked"
             );
@@ -952,11 +1322,20 @@ mod run {
         #[test]
         fn the_recorder_is_held_to_the_sandbox_and_handed_the_clis_env() {
             let p = &PROFILES[0];
+            let launch = Launch {
+                program: PathBuf::from("/cli/node"),
+                args: vec!["/cli/entry.js".into()],
+                env: Vec::new(),
+            };
             let args = recorder_args(
-                Path::new("/runs/x"),
-                Path::new("/sb/pix.sock"),
-                Path::new("/sb"),
-                &["A=b".to_string()],
+                &RecorderRun {
+                    out: Path::new("/runs/x"),
+                    scene: Path::new("/sb/scene.sock"),
+                    within: Path::new("/sb"),
+                    cli_env: &["A=b".to_string()],
+                    cli_version: "1.2.3",
+                    launch: &launch,
+                },
                 p,
                 &p.scenarios[0],
             );
@@ -964,8 +1343,9 @@ mod run {
                 |flag: &str, value: &str| args.windows(2).any(|w| w[0] == *flag && w[1] == *value);
             assert!(pair("--within", "/sb"), "{args:?}");
             assert!(pair("--env", "A=b"), "{args:?}");
-            assert!(pair("--tee", "/sb/pix.sock"), "{args:?}");
+            assert!(pair("--tee", "/sb/scene.sock"), "{args:?}");
             assert!(pair("--out", "/runs/x"), "{args:?}");
+            assert!(pair("--cli-version", "1.2.3"), "{args:?}");
             // The recorder reads options only before its positionals.
             let source = args.iter().position(|a| a == p.source).expect("the source");
             assert!(
@@ -976,8 +1356,9 @@ mod run {
             );
             let positionals: Vec<OsString> = [p.source, p.scenarios[0].shape.name()]
                 .into_iter()
-                .chain(p.invocation.iter().copied())
                 .map(OsString::from)
+                .chain(launch.argv())
+                .chain(p.invocation[1..].iter().map(OsString::from))
                 .collect();
             assert_eq!(args[source..], positionals[..], "{args:?}");
         }
@@ -991,15 +1372,28 @@ mod run {
 
         #[test]
         fn every_child_of_a_run_gets_the_profiles_env_expanded() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let shim = d.path().join("pixtuoid-hook");
+            std::fs::write(&shim, "").expect("a shim");
             let built = Built {
                 pixtuoid: PathBuf::from("/nowhere/pixtuoid"),
-                shim: PathBuf::from("/nowhere/pixtuoid-hook"),
+                shim,
                 recorder: PathBuf::from("/nowhere/capture_fixture"),
             };
+            let launch = Launch::of(d.path(), d.path(), "cli").unwrap_or(Launch {
+                program: PathBuf::from("cli"),
+                args: Vec::new(),
+                env: Vec::new(),
+            });
             for p in PROFILES {
                 let sandbox =
                     Sandbox::new(p, &built, Path::new("/nowhere/bin"), 4321).expect("sandbox");
-                assert_eq!(sandbox.cli_env(p).len(), p.env.len(), "{}", p.source);
+                assert_eq!(
+                    sandbox.cli_env(p, &launch).len(),
+                    p.env.len() + launch.env.len(),
+                    "{}",
+                    p.source
+                );
                 for (k, v) in p.env {
                     let want = v.replace("{port}", "4321").replace("{key}", DUMMY_KEY);
                     assert_eq!(
@@ -1010,10 +1404,14 @@ mod run {
                     );
                     // The only path past the recorder's `CLAUDE_CODE_*` scrub.
                     assert!(
-                        sandbox.cli_env(p).contains(&format!("{k}={want}")),
+                        sandbox.cli_env(p, &launch).contains(&format!("{k}={want}")),
                         "{}: {k} misses the CLI's `--env`",
                         p.source
                     );
+                }
+                for (var, _) in SANDBOX_HOMES {
+                    let home = sandbox.var(var).expect("set");
+                    assert!(home.starts_with(sandbox.dir.path()), "{var} escapes");
                 }
             }
         }
@@ -1026,15 +1424,171 @@ mod run {
                     ("npm_config_cache", Some("/npm-cache")),
                 ],
                 || {
-                    let ok = tool("sh")
-                        .args([
-                            "-c",
-                            r#"test -z "$ANTHROPIC_API_KEY" && test "$npm_config_cache" = /npm-cache"#,
-                        ])
-                        .status()
-                        .expect("sh runs");
-                    assert!(ok.success());
+                    let c = tool("anything");
+                    let envs: Vec<(String, Option<String>)> = c
+                        .get_envs()
+                        .map(|(k, v)| {
+                            (
+                                k.to_string_lossy().into_owned(),
+                                v.map(|v| v.to_string_lossy().into_owned()),
+                            )
+                        })
+                        .collect();
+                    assert!(
+                        !envs
+                            .iter()
+                            .any(|(k, _)| k.eq_ignore_ascii_case("ANTHROPIC_API_KEY")),
+                        "{envs:?}"
+                    );
+                    assert!(
+                        envs.iter()
+                            .any(|(k, v)| k.eq_ignore_ascii_case("npm_config_cache")
+                                && v.as_deref() == Some("/npm-cache")),
+                        "{envs:?}"
+                    );
                 },
+            );
+        }
+
+        #[test]
+        fn a_variable_is_kept_as_its_platform_spells_names() {
+            let list = ["PATH", "SystemRoot"];
+            assert!(listed(true, &list, "Path"), "Windows ignores case");
+            assert!(listed(true, &list, "SYSTEMROOT"));
+            assert!(!listed(false, &list, "Path"), "Unix does not");
+            assert!(listed(false, &list, "PATH"));
+            assert!(!listed(true, &list, "PATHEXT"));
+        }
+
+        #[test]
+        fn a_shebang_reads_as_cmd_shim_reads_it() {
+            let sb = |l: &str| Shebang::parse(l).expect("a shebang");
+            assert_eq!(
+                sb("#!/usr/bin/env node"),
+                Shebang {
+                    program: "node".into(),
+                    args: vec![],
+                    env: vec![]
+                }
+            );
+            assert_eq!(
+                sb("#!/usr/bin/env node --no-warnings --stack-size=8"),
+                Shebang {
+                    program: "node".into(),
+                    args: vec!["--no-warnings".into(), "--stack-size=8".into()],
+                    env: vec![]
+                }
+            );
+            assert_eq!(
+                sb("#!/usr/bin/env -S NODE_OPTIONS=--x DEBUG=1 node --flag"),
+                Shebang {
+                    program: "node".into(),
+                    args: vec!["--flag".into()],
+                    env: vec![
+                        ("NODE_OPTIONS".into(), "--x".into()),
+                        ("DEBUG".into(), "1".into())
+                    ]
+                }
+            );
+            assert_eq!(sb("#!/bin/sh").program, "/bin/sh");
+            assert_eq!(Shebang::parse("MZ\u{90}\0"), None, "a PE has none");
+        }
+
+        /// A package as npm lays it out, its `bin` entry holding `head`.
+        fn package(d: &Path, bin: serde_json::Value, entry: &str, head: &[u8]) -> PathBuf {
+            let pkg = d.join("node_modules/pkg");
+            std::fs::create_dir_all(pkg.join("bin")).expect("mkdir");
+            std::fs::write(
+                pkg.join("package.json"),
+                serde_json::json!({ "bin": bin }).to_string(),
+            )
+            .expect("manifest");
+            std::fs::write(pkg.join(entry), head).expect("entry");
+            pkg
+        }
+
+        #[test]
+        fn a_windows_launch_runs_what_npm_s_shim_runs() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let bin = d.path().join("node_modules/.bin");
+            std::fs::create_dir_all(&bin).expect("mkdir");
+            let node = package(
+                d.path(),
+                serde_json::json!({ "cli": "bin/cli.js" }),
+                "bin/cli.js",
+                b"#!/usr/bin/env node --no-warnings\n",
+            );
+            let l = Launch::from_bin_field(&node, &bin, "cli").expect("launch");
+            assert_eq!(l.program, PathBuf::from("node"), "node on PATH");
+            assert_eq!(
+                l.args,
+                [
+                    "--no-warnings".to_string(),
+                    node.join("bin/cli.js").to_string_lossy().into_owned()
+                ]
+            );
+            std::fs::write(bin.join("node.exe"), "").expect("a node beside the shim");
+            let l = Launch::from_bin_field(&node, &bin, "cli").expect("launch");
+            assert_eq!(
+                l.program,
+                bin.join("node.exe"),
+                "the shim prefers its sibling"
+            );
+            let pe = package(
+                d.path(),
+                serde_json::json!("bin/cli.exe"),
+                "bin/cli.exe",
+                b"MZ\x90\x00",
+            );
+            let l = Launch::from_bin_field(&pe, &bin, "cli").expect("launch");
+            assert_eq!(
+                l,
+                Launch {
+                    program: pe.join("bin/cli.exe"),
+                    args: vec![],
+                    env: vec![]
+                },
+                "a PE runs itself"
+            );
+            assert!(
+                Launch::from_bin_field(&pe, &bin, "other").is_ok(),
+                "a string bin is every name's"
+            );
+        }
+
+        /// A bare name would leave aimock, whose link no run's PATH holds, unfound.
+        #[cfg(unix)]
+        #[test]
+        fn a_unix_launch_is_the_link_npm_made() {
+            let l =
+                Launch::of(Path::new("/m/pkg"), Path::new("/m/.bin"), "llmock").expect("launch");
+            assert_eq!(l.program, PathBuf::from("/m/.bin/llmock"));
+            assert!(l.args.is_empty() && l.env.is_empty());
+        }
+
+        #[test]
+        fn a_script_expands_inside_its_strings_whatever_the_path_holds() {
+            let mut script = serde_json::json!({
+                "fixtures": [{ "response": { "toolCalls": [{
+                    "name": "{shell_tool}",
+                    "arguments": { "file_path": "{workspace}/NOTE.txt" }
+                }]}}]
+            });
+            let values = [
+                (
+                    "{workspace}".to_string(),
+                    r"C:\ProgramData\pixtuoid-capture\proj".to_string(),
+                ),
+                ("{shell_tool}".to_string(), "pwsh".to_string()),
+            ];
+            expand_strings(&mut script, &values);
+            let text = serde_json::to_string(&script).expect("serializes");
+            let back: serde_json::Value = serde_json::from_str(&text).expect("still JSON");
+            let call = &back["fixtures"][0]["response"]["toolCalls"][0];
+            assert_eq!(call["name"], "pwsh");
+            assert_eq!(
+                call["arguments"]["file_path"],
+                r"C:\ProgramData\pixtuoid-capture\proj/NOTE.txt"
             );
         }
 

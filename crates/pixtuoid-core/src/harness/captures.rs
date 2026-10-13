@@ -42,7 +42,27 @@ pub fn transcripts_under(source: &str, root: &Path) -> Vec<PathBuf> {
 /// every payload embeds its own cwd, the decoders read it, so the strip keeps it —
 /// capturing somewhere already generic is what keeps a per-run path out of the
 /// bytes. The recorder prepares it; a hermetic script names files under it.
-pub const CAPTURE_WORKSPACE: &str = "/tmp/pixtuoid-capture/proj";
+///
+/// On Windows it sits under ProgramData, outside every user's profile: CC reads
+/// config from each ancestor of its cwd, a home's `.claude` included.
+///
+/// # Errors
+///
+/// On Windows, if the shell has no ProgramData.
+pub fn capture_workspace() -> std::io::Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        use crate::harness::host::{KnownFolder, known_folder};
+        Ok(known_folder(KnownFolder::ProgramData)?
+            .join("pixtuoid-capture")
+            .join("proj"))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(PathBuf::from("/tmp/pixtuoid-capture/proj"))
+    }
+}
+
 /// The `NOTE.txt` the recorder writes into the workspace: what every scripted
 /// turn reads, and what a script waits for before it replies.
 pub const CAPTURE_NOTE: &str = "pong";
@@ -67,6 +87,8 @@ pub mod recorder_flag {
     pub const ENV: &str = "--env";
     /// `Options::promote`.
     pub const PROMOTE: &str = "--promote";
+    /// `Options::cli_version`.
+    pub const CLI_VERSION: &str = "--cli-version";
 }
 
 /// What only the recorder knows about a raw (`--out`) capture.
