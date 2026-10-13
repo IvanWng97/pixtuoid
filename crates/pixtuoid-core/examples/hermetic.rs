@@ -38,7 +38,7 @@ mod run {
 
     use pixtuoid_core::harness::hermetic::{
         self, DUMMY_KEY, MANIFEST, Manifest, NOT_HERMETIC, PROFILES, Package, Profile, SCENE_LOG,
-        Scenario,
+        Scenario, USER_PLACEHOLDER,
     };
     use pixtuoid_core::harness::{CAPTURE_RECORD, CAPTURE_WORKSPACE, CaptureRecord, recorder_flag};
 
@@ -209,9 +209,6 @@ mod run {
         );
         Ok(all_ran)
     }
-
-    /// The placeholder a `system_config` path takes the operator's user name in.
-    const USER_PLACEHOLDER: &str = "{user}";
 
     /// Where installs and runs live: `hermetic/` in the target dir this example
     /// was built into, which holds `<profile>/examples/hermetic`.
@@ -771,7 +768,9 @@ mod run {
             let per_user = d.path().join("prefs/alice/managed.plist");
             std::fs::create_dir_all(per_user.parent().expect("parent")).expect("mkdir");
             std::fs::write(&per_user, "").expect("plant");
-            let pattern = d.path().join("prefs/{user}/managed.plist");
+            let pattern = d
+                .path()
+                .join(format!("prefs/{USER_PLACEHOLDER}/managed.plist"));
             let pattern = pattern.to_str().expect("utf-8");
             assert_eq!(
                 outside_config(&[pattern], &[], &workspace, Some("alice")),
@@ -831,6 +830,7 @@ mod run {
             for p in PROFILES {
                 let sandbox =
                     Sandbox::new(p, &built, Path::new("/nowhere/bin"), 4321).expect("sandbox");
+                assert_eq!(sandbox.cli_env(p).len(), p.env.len(), "{}", p.source);
                 for (k, v) in p.env {
                     let want = v.replace("{port}", "4321").replace("{key}", DUMMY_KEY);
                     assert_eq!(
