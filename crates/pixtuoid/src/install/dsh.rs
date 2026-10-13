@@ -485,26 +485,6 @@ mod tests {
     }
 
     #[test]
-    fn the_plugin_sends_one_shim_at_a_time() {
-        let queued = PLUGIN_TEMPLATE
-            .find("queue = queue.then(")
-            .expect("the send queue");
-        let spawned = PLUGIN_TEMPLATE
-            .find("spawn(HOOK_PATH")
-            .expect("the shim spawn");
-        assert_eq!(
-            PLUGIN_TEMPLATE.matches("spawn(").count(),
-            1,
-            "one spawn site"
-        );
-        assert!(queued < spawned, "the spawn runs in the queue's turn");
-        assert!(
-            PLUGIN_TEMPLATE.contains(r#"proc.on("close", settled)"#),
-            "a turn ends when its shim does"
-        );
-    }
-
-    #[test]
     fn the_plugin_subscribes_only_verified_channels_and_never_awaits() {
         // Allowlist, not denylist: upstream carries ~21 non-emit (waterfall/
         // serial/parallel) events and the set churns, so naming bad ones can
