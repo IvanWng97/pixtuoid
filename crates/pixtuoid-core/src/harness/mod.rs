@@ -38,7 +38,7 @@ pub mod reads;
 
 pub use captures::{
     CAPTURE_RECORD, CAPTURE_WORKSPACE, Capture, CaptureRecord, HOOK_PAYLOADS, PROVENANCE, captures,
-    transcripts_under,
+    recorder_flag, transcripts_under,
 };
 
 /// A lifecycle CLASS a driven wire pushed the slot through — asserted as

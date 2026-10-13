@@ -40,7 +40,7 @@ mod run {
         self, DUMMY_KEY, MANIFEST, Manifest, NOT_HERMETIC, PROFILES, Package, Profile, SCENE_LOG,
         Scenario,
     };
-    use pixtuoid_core::harness::{CAPTURE_RECORD, CAPTURE_WORKSPACE, CaptureRecord};
+    use pixtuoid_core::harness::{CAPTURE_RECORD, CAPTURE_WORKSPACE, CaptureRecord, recorder_flag};
 
     /// How long a server gets to come up before the run gives up.
     const BOOT: Duration = Duration::from_secs(60);
@@ -620,15 +620,15 @@ mod run {
         scenario: &Scenario,
     ) -> Vec<OsString> {
         let mut args: Vec<OsString> = vec![
-            "--out".into(),
+            recorder_flag::OUT.into(),
             dir.into(),
-            "--tee".into(),
+            recorder_flag::TEE.into(),
             sock.into(),
-            "--within".into(),
+            recorder_flag::WITHIN.into(),
             within.into(),
         ];
         for kv in cli_env {
-            args.extend(["--env".into(), kv.into()]);
+            args.extend([recorder_flag::ENV.into(), kv.into()]);
         }
         args.extend([p.source, scenario.shape.name()].map(OsString::from));
         args.extend(p.invocation.iter().map(OsString::from));
