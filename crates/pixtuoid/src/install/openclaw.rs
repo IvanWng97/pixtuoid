@@ -118,7 +118,7 @@ const fn reads(
         id,
         ours,
         docs,
-        read: Read::TsFields { name },
+        read: Read::TsFields { name, member: None },
         when: When::Vanishes,
         finding: Finding::Breaking(says),
         siblings: None,

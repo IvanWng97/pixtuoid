@@ -130,10 +130,19 @@ pub enum Read {
     /// The top-level fields of the ONE interface or type alias `name`: each
     /// field, `field?` when optional, and `field:"lit"` per string literal its
     /// type admits.
-    TsFields { name: &'static str },
+    /// With a `member`, the fields of that member's inline type instead: a
+    /// property's type, or a method's first parameter after `this`.
+    TsFields {
+        name: &'static str,
+        member: Option<&'static str>,
+    },
     /// Every member key of the interfaces and classes named `of`, merged
     /// across a document's declarations as TS merges augmentations.
     TsMembers { of: &'static [&'static str] },
+    /// The field keys of the Effect Schema struct `at` locates. A spread, a
+    /// bare name or `.fields` resolves through its one binding in the document;
+    /// anything else is out of the read's sight.
+    EffectSchema { at: SchemaAt },
     /// Every `return` of the ONE `function name`, in order, as one name.
     TsReturn { function: &'static str },
     /// Every first group of `pattern`: `Each` turned round, so the floor can
@@ -183,6 +192,7 @@ impl Read {
             Self::RustEnum { .. }
             | Self::RustStruct { .. }
             | Self::TsMembers { .. }
+            | Self::EffectSchema { .. }
             | Self::Matches { .. }
             | Self::MdTable { .. }
             | Self::MdHeadings { .. }
@@ -193,6 +203,17 @@ impl Read {
             | Self::JsonKeys => Yield::Declaration,
         }
     }
+}
+
+/// Where a [`Read::EffectSchema`] struct is declared.
+#[derive(Debug)]
+pub enum SchemaAt {
+    /// The `schema` of the ONE `durable`/`ephemeral` event call of this `type`.
+    Event(&'static str),
+    /// The ONE `const` of this name.
+    Struct(&'static str),
+    /// What the ONE `function` of this name returns.
+    Returned(&'static str),
 }
 
 /// What a [`Read`] yields of upstream's declaration.
@@ -481,7 +502,10 @@ mod tests {
             ),
             (
                 Watch {
-                    read: Read::TsFields { name: "T" },
+                    read: Read::TsFields {
+                        name: "T",
+                        member: None,
+                    },
                     siblings: Some(ALL),
                     ..OK
                 },
@@ -655,6 +679,10 @@ mod tests {
                 "the_field_set_is_exactly_what_the_decoder_reads",
             ),
             ("DECODED_DATA_FIELDS", "every_decoded_data_field_is_read"),
+            (
+                "DECODED_ENVELOPE_FIELDS",
+                "every_decoded_envelope_field_is_read",
+            ),
             (
                 "DECODED_DISPATCH_NAMES",
                 "the_dispatch_name_set_is_exactly_what_the_fallback_matches",

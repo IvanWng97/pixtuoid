@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use pixtuoid_core::source::upstream::SchemaAt;
+
 use super::*;
 
 /// The network as a table: a URL it lacks is a transient failure, so a test
@@ -444,7 +446,10 @@ fn a_name_missing_from_a_partial_read_is_blind() {
         id: "t.fields",
         ours: || vec!["a", "b"],
         docs: &[doc("t.ts")],
-        read: Read::TsFields { name: "X" },
+        read: Read::TsFields {
+            name: "X",
+            member: None,
+        },
         when: When::Vanishes,
         finding: Finding::Breaking("x"),
         siblings: None,
@@ -476,7 +481,10 @@ fn a_partial_read_judges_a_fact_by_whether_its_field_is_seen() {
         id: "t.facts",
         ours: || vec!["a:\"x\"", "b:\"y\""],
         docs: &[doc("t.ts")],
-        read: Read::TsFields { name: "X" },
+        read: Read::TsFields {
+            name: "X",
+            member: None,
+        },
         when: When::Vanishes,
         finding: Finding::Breaking("x"),
         siblings: None,
@@ -535,7 +543,10 @@ fn a_ts_fields_floor_counts_fields_not_their_facts() {
         id: "t.fields",
         ours: || vec!["a", "b"],
         docs: &[doc("t.ts")],
-        read: Read::TsFields { name: "X" },
+        read: Read::TsFields {
+            name: "X",
+            member: None,
+        },
         when: When::Vanishes,
         finding: Finding::Breaking("x"),
         siblings: None,
@@ -1128,12 +1139,14 @@ fn page(w: &Watch, names: &[&str]) -> String {
         }
         // A field of its own besides: an empty interface is no declaration
         // the reader reads, and an `Appears` page names none of ours.
-        Read::TsFields { name } => {
+        Read::TsFields { name, member } => {
             let fields: String = names.iter().map(|n| ts_field(n)).collect();
-            after_decl(
-                w,
-                format!("export interface {name} {{\n  pxd: string;\n{fields}}}"),
-            )
+            let body = format!("  pxd: string;\n{fields}");
+            let decl = match member {
+                None => format!("export interface {name} {{\n{body}}}"),
+                Some(m) => format!("export interface {name} {{\n  \"{m}\": {{\n{body}  }}\n}}"),
+            };
+            after_decl(w, decl)
         }
         Read::TsMembers { of } => {
             let members: String = names
@@ -1148,6 +1161,26 @@ fn page(w: &Watch, names: &[&str]) -> String {
                 w,
                 format!("export function {function}() {{\n  return {value};\n}}"),
             )
+        }
+        // A field of its own besides, as `TsFields`: an empty schema is no
+        // declaration the reader reads.
+        Read::EffectSchema { ref at } => {
+            let fields: String = std::iter::once("pxd")
+                .chain(names.iter().copied())
+                .map(|n| format!("  \"{n}\": Schema.String,\n"))
+                .collect();
+            let decl = match *at {
+                SchemaAt::Event(event) => format!(
+                    "export const PxdEvent = ephemeral({{ type: \"{event}\", schema: {{\n{fields}}} }})"
+                ),
+                SchemaAt::Struct(name) => {
+                    format!("export const {name} = Schema.Struct({{\n{fields}}})")
+                }
+                SchemaAt::Returned(function) => format!(
+                    "export function {function}() {{\n  return Schema.Struct({{\n{fields}}})\n}}"
+                ),
+            };
+            after_decl(w, decl)
         }
         // A JSON document's anchor renders as a key, so each one opens a member.
         Read::JsonUnion { def, prop } => {
@@ -1277,6 +1310,9 @@ fn near_miss(w: &Watch, name: &str) -> String {
             format!("export interface PxdOther {{\n  \"{name}\": string;\n}}")
         }
         Read::TsReturn { .. } => format!("function pxdOther() {{\n  return {name};\n}}"),
+        Read::EffectSchema { .. } => {
+            format!("export const PxdOther = Schema.Struct({{ \"{name}\": Schema.String }})")
+        }
         Read::TsConstArray { .. } => {
             format!("const PXD_OTHER = [\n  \"{name}\",\n];\nif (n === \"{name}\") {{}}\n")
         }

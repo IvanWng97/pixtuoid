@@ -391,7 +391,7 @@ pub(crate) const OPENCODE: Target = Target {
     post_install_hint: None,
     host: None,
     #[cfg(feature = "upstream")]
-    upstream: &[],
+    upstream: crate::install::opencode::UPSTREAM,
     #[cfg(all(test, feature = "upstream"))]
     registers: crate::install::opencode::plugin_events,
 };

@@ -20,7 +20,7 @@ use crate::install::verify::{SchemaParse, ShimRef};
 #[cfg(feature = "upstream")]
 use pixtuoid_core::source::dsh::REPO;
 #[cfg(feature = "upstream")]
-use pixtuoid_core::source::upstream::{Finding, Read, Watch, When};
+use pixtuoid_core::source::upstream::{Doc, Finding, Read, Watch, When};
 
 /// The mount entry's `id` — uninstall and the one-entry verify key on it.
 const PLUGIN_ID: &str = "pixtuoid";
@@ -51,6 +51,81 @@ pub(crate) fn plugin_events() -> Vec<&'static str> {
 /// What the plugin reads off a tool result's message.
 #[cfg(feature = "upstream")]
 pub(crate) const TOOL_RESULT_FIELDS: &[&str] = &["toolCallId"];
+
+#[cfg(feature = "upstream")]
+const SESSION_TYPES: &str = "packages/core/session/src/types.ts";
+#[cfg(feature = "upstream")]
+const RUNTIME_TYPES: &str = "packages/core/agent/src/runtime-types.ts";
+#[cfg(feature = "upstream")]
+const AGENT_INDEX: &str = "packages/core/agent/src/index.ts";
+
+#[cfg(feature = "upstream")]
+const EVENT_MAP: &[Doc] = &[REPO.doc(
+    SESSION_TYPES,
+    r"(?m)^export interface SessionEventMap\b",
+    "`SessionEventMap`",
+)];
+#[cfg(feature = "upstream")]
+const APPROVAL_EVENT_MAP: &[Doc] = &[REPO.doc(
+    "packages/interaction/user-approval/src/types.ts",
+    r"declare module '@deepseek-ai/dsh-session/types' \{\s*interface SessionEventMap \{",
+    "the `SessionEventMap` augmentation",
+)];
+#[cfg(feature = "upstream")]
+const CORDIS_EVENTS: &[Doc] = &[REPO.doc(
+    RUNTIME_TYPES,
+    r"declare module '@deepseek-ai/cordis' \{\s*interface Events \{",
+    "the cordis `Events` augmentation",
+)];
+
+#[cfg(feature = "upstream")]
+const KEY_GONE: &str = "the plugin reads a key dsh no longer declares, so every session collapses \
+                        onto one id, or a call or approval loses its pair";
+#[cfg(feature = "upstream")]
+const DETAIL_GONE: &str = "the plugin forwards an undefined detail (model, effort, tokens or a \
+                           sweep at teardown) dsh no longer declares";
+
+/// The fields `name` (or its `member`'s inline type) declares, which the
+/// template reads.
+#[cfg(feature = "upstream")]
+const fn reads(
+    id: &'static str,
+    docs: &'static [Doc],
+    name: &'static str,
+    member: Option<&'static str>,
+    ours: fn() -> Vec<&'static str>,
+    finding: Finding,
+) -> Watch {
+    Watch {
+        id,
+        ours,
+        docs,
+        read: Read::TsFields { name, member },
+        when: When::Vanishes,
+        finding,
+        siblings: None,
+    }
+}
+
+/// The members the interfaces or classes `of` declare, which the template calls.
+#[cfg(feature = "upstream")]
+const fn calls(
+    id: &'static str,
+    docs: &'static [Doc],
+    of: &'static [&'static str],
+    ours: fn() -> Vec<&'static str>,
+    finding: Finding,
+) -> Watch {
+    Watch {
+        id,
+        ours,
+        docs,
+        read: Read::TsMembers { of },
+        when: When::Vanishes,
+        finding,
+        siblings: None,
+    }
+}
 
 #[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
@@ -102,6 +177,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         )],
         read: Read::TsFields {
             name: "ToolResultMessage",
+            member: None,
         },
         when: When::Vanishes,
         finding: Finding::Breaking(
@@ -110,6 +186,174 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         ),
         siblings: None,
     },
+    reads(
+        "dsh.session_header",
+        &[REPO.doc(
+            SESSION_TYPES,
+            r"(?m)^export interface SessionHeader\b",
+            "`SessionHeader`",
+        )],
+        "SessionHeader",
+        None,
+        || vec!["id", "cwd", "parentSession", "origin:\"subagent\""],
+        Finding::Breaking(KEY_GONE),
+    ),
+    reads(
+        "dsh.session_event",
+        &[REPO.doc(
+            SESSION_TYPES,
+            r"(?m)^export type SessionEvent\b",
+            "`SessionEvent`",
+        )],
+        "SessionEvent",
+        None,
+        || vec!["type", "data"],
+        Finding::Breaking(KEY_GONE),
+    ),
+    reads(
+        "dsh.event.tool_call",
+        EVENT_MAP,
+        "SessionEventMap",
+        Some("tool/call"),
+        || vec!["callId", "name"],
+        Finding::Breaking(KEY_GONE),
+    ),
+    reads(
+        "dsh.event.tool_result",
+        EVENT_MAP,
+        "SessionEventMap",
+        Some("tool/result"),
+        || vec!["message"],
+        Finding::Breaking(KEY_GONE),
+    ),
+    reads(
+        "dsh.event.approval_asked",
+        APPROVAL_EVENT_MAP,
+        "SessionEventMap",
+        Some("approval/asked"),
+        || vec!["id", "toolName", "callId", "reason"],
+        Finding::Breaking(KEY_GONE),
+    ),
+    reads(
+        "dsh.event.approval_decided",
+        APPROVAL_EVENT_MAP,
+        "SessionEventMap",
+        Some("approval/decided"),
+        || vec!["id", "outcome"],
+        Finding::Breaking(KEY_GONE),
+    ),
+    reads(
+        "dsh.event.assistant_message",
+        EVENT_MAP,
+        "SessionEventMap",
+        Some("assistant/message"),
+        || vec!["usage"],
+        Finding::Review(DETAIL_GONE),
+    ),
+    reads(
+        "dsh.event.request_header",
+        EVENT_MAP,
+        "SessionEventMap",
+        Some("request/header"),
+        || vec!["header"],
+        Finding::Review(DETAIL_GONE),
+    ),
+    reads(
+        "dsh.epoch_header",
+        &[REPO.doc(
+            SESSION_TYPES,
+            r"(?m)^export interface EpochHeader\b",
+            "`EpochHeader`",
+        )],
+        "EpochHeader",
+        None,
+        || vec!["config"],
+        Finding::Review(DETAIL_GONE),
+    ),
+    reads(
+        "dsh.token_usage",
+        &[REPO.doc(
+            "packages/llm/llm/src/types.ts",
+            r"(?m)^export interface TokenUsage\b",
+            "`TokenUsage`",
+        )],
+        "TokenUsage",
+        None,
+        || vec!["inputTokens", "outputTokens", "cacheWriteTokens"],
+        Finding::Review(DETAIL_GONE),
+    ),
+    reads(
+        "dsh.call_config",
+        &[REPO.doc(
+            "packages/llm/llm/src/call-config.ts",
+            r"(?m)^export interface LlmCallConfig\b",
+            "`LlmCallConfig`",
+        )],
+        "LlmCallConfig",
+        None,
+        || vec!["model", "reasoningEffort"],
+        Finding::Review(DETAIL_GONE),
+    ),
+    reads(
+        "dsh.agent_created",
+        CORDIS_EVENTS,
+        "Events",
+        Some("agent/created"),
+        || vec!["agent"],
+        Finding::Breaking(KEY_GONE),
+    ),
+    reads(
+        "dsh.agent_disposed",
+        CORDIS_EVENTS,
+        "Events",
+        Some("agent/disposed"),
+        || vec!["agent"],
+        Finding::Breaking(KEY_GONE),
+    ),
+    calls(
+        "dsh.agent_session",
+        &[REPO.doc(
+            RUNTIME_TYPES,
+            r"declare module '\./types\.ts' \{\s*interface Agent \{",
+            "the `Agent` augmentation",
+        )],
+        &["Agent"],
+        || vec!["session"],
+        Finding::Breaking(KEY_GONE),
+    ),
+    calls(
+        "dsh.session_class",
+        &[REPO.doc(
+            "packages/core/session/src/index.ts",
+            r"(?m)^export class Session\b",
+            "`class Session`",
+        )],
+        &["Session"],
+        || vec!["header"],
+        Finding::Breaking(KEY_GONE),
+    ),
+    calls(
+        "dsh.cordis_context",
+        &[REPO.doc(
+            AGENT_INDEX,
+            r"declare module '@deepseek-ai/cordis' \{\s*interface Context \{",
+            "the cordis `Context` augmentation",
+        )],
+        &["Context"],
+        || vec!["agents"],
+        Finding::Review(DETAIL_GONE),
+    ),
+    calls(
+        "dsh.agent_registry",
+        &[REPO.doc(
+            AGENT_INDEX,
+            r"(?m)^export class AgentRegistry\b",
+            "`class AgentRegistry`",
+        )],
+        &["AgentRegistry"],
+        || vec!["list"],
+        Finding::Review(DETAIL_GONE),
+    ),
 ];
 
 /// `$DSH_HOME` else `~/.dsh` — upstream `resolveDshHome`

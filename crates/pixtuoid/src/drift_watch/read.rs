@@ -11,11 +11,13 @@ use oxc_allocator::Allocator;
 use oxc_ast::AstKind;
 use oxc_ast::ast::{
     ArrayExpressionElement, BindingPattern, ClassElement, Declaration, Expression,
-    MethodDefinitionKind, ModuleDeclaration, PropertyKey, ReturnStatement, Statement, TSLiteral,
-    TSNamespaceDeclarationBody, TSPropertySignature, TSSignature, TSType, VariableDeclarationKind,
+    MethodDefinitionKind, ModuleDeclaration, ObjectPropertyKind, PropertyKey, ReturnStatement,
+    Statement, TSLiteral, TSNamespaceDeclarationBody, TSPropertySignature, TSSignature, TSType,
+    TSTypeName, TSTypeParameterInstantiation, VariableDeclarationKind,
 };
 use oxc_ast_visit::Visit as _;
 use oxc_span::GetSpan as _;
+use pixtuoid_core::source::upstream::SchemaAt;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use serde_json::Value;
@@ -542,10 +544,10 @@ fn with_ts<T>(
     f(&decls)
 }
 
-/// The top-level fields of the ONE interface or type alias `name`, as
-/// [`field_facts`] yields them; a nested object's fields and its methods are
-/// not fields of it.
-pub(super) fn ts_fields(text: &str, name: &str) -> Result<Declared, Unread> {
+/// The top-level fields of the ONE interface or type alias `name`, or of its
+/// `member`'s inline type, as [`field_facts`] yields them; a nested object's
+/// fields and its methods are not fields of it.
+pub(super) fn ts_fields(text: &str, name: &str, member: Option<&str>) -> Result<Declared, Unread> {
     with_ts(text, |decls| {
         let decl = one(
             decls.iter().filter(|d| match d {
@@ -557,10 +559,11 @@ pub(super) fn ts_fields(text: &str, name: &str) -> Result<Declared, Unread> {
         )?;
         let mut why = BTreeSet::new();
         let mut members = Vec::new();
+        let mut names = Names::new();
         let what = match decl {
             Declaration::TSInterfaceDeclaration(i) => {
                 let what = format!("`interface {name}`");
-                if !i.extends.is_empty() {
+                if !heritage_picks(&i.extends, &mut names) {
                     why.insert(format!("{what} extends another type"));
                 }
                 members.extend(i.body.body.iter());
@@ -568,18 +571,43 @@ pub(super) fn ts_fields(text: &str, name: &str) -> Result<Declared, Unread> {
             }
             Declaration::TSTypeAliasDeclaration(t) => {
                 let what = format!("`type {name}`");
-                let mut named = false;
-                if !object_members(&t.type_annotation, &mut members, &mut named) {
+                let mut unread = false;
+                if !object_members(&t.type_annotation, &mut members, &mut names, &mut unread) {
                     return Err(missing(format!("{what}, not an object type")));
                 }
-                if named {
-                    why.insert(format!("{what} intersects a named type"));
+                if unread {
+                    why.insert(format!("{what} intersects a type it does not read"));
                 }
                 what
             }
             _ => return Err(missing(format!("no interface or type `{name}`"))),
         };
-        let mut names = Names::new();
+        let (members, what) = match member {
+            None => (members, what),
+            Some(m) => {
+                let found = one(
+                    members
+                        .iter()
+                        .filter(|s| signature_key(s).as_deref() == Some(m)),
+                    &format!("member `{m}` in {what}"),
+                )?;
+                let what = format!("{what}'s `{m}`");
+                // The outer declaration's own keys and partiality are not the member's.
+                names.clear();
+                why.clear();
+                let mut inner = Vec::new();
+                let mut unread = false;
+                if !member_type(found)
+                    .is_some_and(|t| object_members(t, &mut inner, &mut names, &mut unread))
+                {
+                    return Err(missing(format!("{what}, not an object type")));
+                }
+                if unread {
+                    why.insert(format!("{what} intersects a type it does not read"));
+                }
+                (inner, what)
+            }
+        };
         for member in members {
             if let TSSignature::TSPropertySignature(p) = member {
                 if p.computed {
@@ -599,29 +627,124 @@ pub(super) fn ts_fields(text: &str, name: &str) -> Result<Declared, Unread> {
     })
 }
 
+/// The static key of a signature, a property's or a method's.
+fn signature_key<'b>(s: &&'b TSSignature<'_>) -> Option<std::borrow::Cow<'b, str>> {
+    match s {
+        TSSignature::TSPropertySignature(p) if !p.computed => p.key.static_name(),
+        TSSignature::TSMethodSignature(m) if !m.computed => m.key.static_name(),
+        _ => None,
+    }
+}
+
+/// A member's inline type: a property's type, or a method's first parameter
+/// after `this`.
+fn member_type<'b, 'a>(s: &'b TSSignature<'a>) -> Option<&'b TSType<'a>> {
+    match s {
+        TSSignature::TSPropertySignature(p) => {
+            p.type_annotation.as_ref().map(|a| &a.type_annotation)
+        }
+        TSSignature::TSMethodSignature(m) => m
+            .params
+            .items
+            .first()
+            .and_then(|p| p.type_annotation.as_ref())
+            .map(|a| &a.type_annotation),
+        _ => None,
+    }
+}
+
 /// The members of `ty`'s object-literal operands, through intersections and
-/// parentheses, noting an operand that names a type instead; false when `ty`
-/// is no object type.
+/// parentheses, and the keys of its `Pick` operands, noting an intersection
+/// operand it cannot read; false when `ty` is no object type. A mapped type
+/// indexed by its own keys is read as its value type.
 fn object_members<'b, 'a>(
     ty: &'b TSType<'a>,
     members: &mut Vec<&'b TSSignature<'a>>,
-    named: &mut bool,
+    picked: &mut Names,
+    unread: &mut bool,
 ) -> bool {
     match ty {
         TSType::TSTypeLiteral(l) => {
             members.extend(l.members.iter());
             true
         }
-        TSType::TSParenthesizedType(p) => object_members(&p.type_annotation, members, named),
-        TSType::TSIntersectionType(i) => i.types.iter().all(|t| match t {
-            TSType::TSTypeReference(_) => {
-                *named = true;
-                true
+        TSType::TSParenthesizedType(p) => {
+            object_members(&p.type_annotation, members, picked, unread)
+        }
+        TSType::TSIndexedAccessType(i) => match &i.object_type {
+            TSType::TSMappedType(m) => m
+                .type_annotation
+                .as_ref()
+                .is_some_and(|t| object_members(t, members, picked, unread)),
+            _ => false,
+        },
+        TSType::TSTypeReference(r) => match &r.type_name {
+            TSTypeName::IdentifierReference(id) => {
+                pick_keys(&id.name, r.type_arguments.as_deref(), picked)
             }
-            t => object_members(t, members, named),
-        }),
+            _ => false,
+        },
+        TSType::TSIntersectionType(i) => {
+            let mut any = false;
+            for t in &i.types {
+                if object_members(t, members, picked, unread) {
+                    any = true;
+                } else {
+                    *unread = true;
+                }
+            }
+            any
+        }
         _ => false,
     }
+}
+
+/// Whether `name<args>` is a `Pick` of string literals, whose keys TS keeps as
+/// members; they go into `out`.
+fn pick_keys(name: &str, args: Option<&TSTypeParameterInstantiation<'_>>, out: &mut Names) -> bool {
+    let Some(keys) = args
+        .filter(|_| name == "Pick")
+        .and_then(|a| a.params.get(1))
+    else {
+        return false;
+    };
+    let literals: Vec<&TSType<'_>> = match keys {
+        TSType::TSUnionType(u) => u.types.iter().collect(),
+        t => vec![t],
+    };
+    let keys: Option<Vec<String>> = literals
+        .into_iter()
+        .map(|t| match t {
+            TSType::TSLiteralType(l) => match &l.literal {
+                TSLiteral::StringLiteral(s) => Some(s.value.to_string()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    match keys {
+        Some(keys) => {
+            out.extend(keys);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Whether every type an interface extends is a `Pick` of string literals,
+/// whose keys go into `out`.
+fn heritage_picks(extends: &[oxc_ast::ast::TSInterfaceHeritage<'_>], out: &mut Names) -> bool {
+    let mut all = true;
+    for h in extends {
+        let picked = match &h.type_name {
+            TSTypeName::IdentifierReference(id) => {
+                pick_keys(&id.name, h.type_arguments.as_deref(), out)
+            }
+            _ => false,
+        };
+        all &= picked;
+    }
+    all
 }
 
 /// A field, `field?` when optional, and `field:"lit"` per string literal its
@@ -664,12 +787,13 @@ pub(super) fn ts_members(text: &str, of: &[&str]) -> Result<Declared, Unread> {
             }
         };
         let mut extends = BTreeSet::new();
+        let mut picked = Names::new();
         for d in decls {
             match d {
                 Declaration::TSInterfaceDeclaration(i) if of.contains(&i.id.name.as_str()) => {
                     any = true;
                     let what = format!("`interface {}`", i.id.name);
-                    if !i.extends.is_empty() {
+                    if !heritage_picks(&i.extends, &mut picked) {
                         extends.insert(format!("{what} extends another type"));
                     }
                     for m in &i.body.body {
@@ -722,6 +846,7 @@ pub(super) fn ts_members(text: &str, of: &[&str]) -> Result<Declared, Unread> {
         if !any {
             return Err(missing(format!("no interface or class {}", listed())));
         }
+        names.extend(picked);
         if names.is_empty() {
             return Err(missing(format!(
                 "no member in interface or class {}",
@@ -861,6 +986,217 @@ fn const_inits<'b, 'a>(
             matches!(&v.id, BindingPattern::BindingIdentifier(b) if b.name.as_str() == name)
         })
         .filter_map(|v| Some(v.init.as_ref()?.get_inner_expression()))
+}
+
+/// The field keys of the Effect Schema struct `at` locates, as
+/// [`EffectKeys`] resolves them.
+pub(super) fn effect_schema(text: &str, at: &SchemaAt) -> Result<Declared, Unread> {
+    with_ts(text, |decls| {
+        let (root, what) = match *at {
+            SchemaAt::Event(event) => {
+                let what = format!("`durable`/`ephemeral` call of `type: \"{event}\"`");
+                let schema = one(
+                    all_const_inits(decls).filter_map(|init| event_schema(init, event)),
+                    &what,
+                )?;
+                (schema, what)
+            }
+            SchemaAt::Struct(name) => {
+                let what = format!("`const {name}`");
+                (one(const_inits(decls, name), &what)?, what)
+            }
+            SchemaAt::Returned(name) => {
+                let what = format!("`function {name}`");
+                let body = one(
+                    decls.iter().filter_map(|d| match d {
+                        Declaration::FunctionDeclaration(f)
+                            if f.id.as_ref().is_some_and(|id| id.name == name) =>
+                        {
+                            f.body.as_deref()
+                        }
+                        _ => None,
+                    }),
+                    &what,
+                )?;
+                let returned = one(
+                    body.statements.iter().filter_map(|st| match st {
+                        Statement::ReturnStatement(r) => r.argument.as_ref(),
+                        _ => None,
+                    }),
+                    &format!("top-level `return` in {what}"),
+                )?;
+                (returned, what)
+            }
+        };
+        let mut keys = EffectKeys {
+            decls,
+            names: Names::new(),
+            why: BTreeSet::new(),
+        };
+        keys.read(root, 0);
+        if keys.names.is_empty() {
+            return Err(missing(format!("no field in {what}")));
+        }
+        Ok(Declared {
+            names: keys.names,
+            partial: joined(keys.why),
+        })
+    })
+}
+
+/// What every `const` declarator in the document initializes to.
+fn all_const_inits<'b, 'a>(
+    decls: &'b [&'b Declaration<'a>],
+) -> impl Iterator<Item = &'b Expression<'a>> {
+    decls
+        .iter()
+        .filter_map(|d| match d {
+            Declaration::VariableDeclaration(v) if v.kind == VariableDeclarationKind::Const => {
+                Some(v.declarations.iter())
+            }
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|v| Some(v.init.as_ref()?.get_inner_expression()))
+}
+
+/// The `schema` of `init` when it is a `durable`/`ephemeral` call of `type:
+/// event`, the callee matched by its last segment (`Event.durable`, bare
+/// `ephemeral`).
+fn event_schema<'b, 'a>(init: &'b Expression<'a>, event: &str) -> Option<&'b Expression<'a>> {
+    let Expression::CallExpression(call) = init else {
+        return None;
+    };
+    if !matches!(last_segment(&call.callee), Some("durable" | "ephemeral")) {
+        return None;
+    }
+    let Some(Expression::ObjectExpression(input)) =
+        call.arguments.first().and_then(|a| a.as_expression())
+    else {
+        return None;
+    };
+    let field = |key: &str| {
+        input.properties.iter().find_map(|p| match p {
+            ObjectPropertyKind::ObjectProperty(p)
+                if p.key.static_name().as_deref() == Some(key) =>
+            {
+                Some(&p.value)
+            }
+            _ => None,
+        })
+    };
+    match field("type") {
+        Some(Expression::StringLiteral(t)) if t.value == event => field("schema"),
+        _ => None,
+    }
+}
+
+fn last_segment<'b>(callee: &'b Expression<'_>) -> Option<&'b str> {
+    match callee.get_inner_expression() {
+        Expression::Identifier(id) => Some(id.name.as_str()),
+        Expression::StaticMemberExpression(m) => Some(m.property.name.as_str()),
+        _ => None,
+    }
+}
+
+/// A cycle of names (`const A = { ...B }; const B = { ...A }`) stops here.
+const MAX_HOPS: usize = 16;
+
+/// An Effect Schema struct's keys. An object literal's own keys count; a spread,
+/// a bare name and `X.fields` resolve through the document's one binding of the
+/// name, whatever namespace holds it; `Struct(..)` reads its argument, `Union`
+/// its one struct, and `.annotate(..)`/`.pipe(..)` what they wrap. Anything
+/// else is out of sight, so the read is partial.
+struct EffectKeys<'b, 'a> {
+    decls: &'b [&'b Declaration<'a>],
+    names: Names,
+    why: BTreeSet<String>,
+}
+
+impl<'b, 'a> EffectKeys<'b, 'a> {
+    fn read(&mut self, e: &'b Expression<'a>, hops: usize) {
+        if hops > MAX_HOPS {
+            self.why.insert("a cycle of names".to_owned());
+            return;
+        }
+        match e.get_inner_expression() {
+            Expression::ObjectExpression(o) => {
+                for p in &o.properties {
+                    match p {
+                        ObjectPropertyKind::ObjectProperty(p) => {
+                            match p.key.static_name().filter(|_| !p.computed) {
+                                Some(k) => {
+                                    self.names.insert(k.into_owned());
+                                }
+                                None => {
+                                    self.why.insert("a computed key".to_owned());
+                                }
+                            }
+                        }
+                        ObjectPropertyKind::SpreadProperty(spread) => {
+                            self.read(&spread.argument, hops + 1);
+                        }
+                    }
+                }
+            }
+            Expression::CallExpression(c) => match (last_segment(&c.callee), &c.callee) {
+                (Some("annotate" | "pipe"), Expression::StaticMemberExpression(m)) => {
+                    self.read(&m.object, hops + 1);
+                }
+                (Some("Struct"), _) => match c.arguments.first().and_then(|a| a.as_expression()) {
+                    Some(fields) => self.read(fields, hops + 1),
+                    None => {
+                        self.why.insert("a `Struct` of no fields object".to_owned());
+                    }
+                },
+                (Some("Union"), _) => match c.arguments.first().and_then(|a| a.as_expression()) {
+                    Some(Expression::ArrayExpression(arms)) if arms.elements.len() == 1 => {
+                        match arms.elements[0].as_expression() {
+                            Some(only) => self.read(only, hops + 1),
+                            None => {
+                                self.why.insert("a `Union` of a spread".to_owned());
+                            }
+                        }
+                    }
+                    _ => {
+                        self.why
+                            .insert("a `Union` of more than one struct".to_owned());
+                    }
+                },
+                (callee, _) => {
+                    self.why
+                        .insert(format!("a call of `{}`", callee.unwrap_or("an expression")));
+                }
+            },
+            Expression::Identifier(id) => self.binding(id.name.as_str(), hops),
+            Expression::StaticMemberExpression(m) if m.property.name == "fields" => {
+                match m.object.get_inner_expression() {
+                    Expression::Identifier(id) => self.binding(id.name.as_str(), hops),
+                    _ => {
+                        self.why.insert("`.fields` of an expression".to_owned());
+                    }
+                }
+            }
+            _ => {
+                self.why
+                    .insert("an expression it does not resolve".to_owned());
+            }
+        }
+    }
+
+    fn binding(&mut self, name: &'b str, hops: usize) {
+        let mut inits = const_inits(self.decls, name);
+        match (inits.next(), inits.next()) {
+            (Some(init), None) => self.read(init, hops + 1),
+            (None, _) => {
+                self.why
+                    .insert(format!("`{name}`, bound outside this document"));
+            }
+            (Some(_), Some(_)) => {
+                self.why.insert(format!("`{name}`, bound more than once"));
+            }
+        }
+    }
 }
 
 /// A heading's events: where it starts and ends, its level, and its text.
@@ -1251,12 +1587,12 @@ mod tests {
             "Rust that syn cannot parse (",
         );
         rejected(
-            ts_fields("export interface E {", "E"),
+            ts_fields("export interface E {", "E", None),
             "TypeScript that oxc cannot parse (",
         );
         // Recoverable: oxc keeps the whole tree beside the diagnostic.
         rejected(
-            ts_fields("export interface E { a: string }\nconst x;\n", "E"),
+            ts_fields("export interface E { a: string }\nconst x;\n", "E", None),
             "TypeScript that oxc cannot parse (",
         );
     }
@@ -1425,7 +1761,7 @@ mod tests {
         let src = "export interface Entry extends Base {\n  readonly type: \"x\";\n  title?: string;\n  \"quoted-key\": number;\n  nested: {\n    inner: string;\n  };\n  /** hidden: in a comment */\n  later(): void;\n}\nexport interface Other {\n  title: string;\n  only_other: string;\n}\n";
         // A nested object's fields, a comment and a method are no fields of it.
         assert_eq!(
-            found(ts_fields(src, "Entry")),
+            found(ts_fields(src, "Entry", None)),
             names(&[
                 "nested",
                 "quoted-key",
@@ -1436,17 +1772,17 @@ mod tests {
             ])
         );
         assert_eq!(
-            partial(ts_fields(src, "Entry")).as_deref(),
+            partial(ts_fields(src, "Entry", None)).as_deref(),
             Some("`interface Entry` extends another type")
         );
-        assert_eq!(partial(ts_fields(src, "Other")), None);
+        assert_eq!(partial(ts_fields(src, "Other", None)), None);
         assert_eq!(
-            found(ts_fields(src, "Gone")),
+            found(ts_fields(src, "Gone", None)),
             Err("no interface or type `Gone`".to_owned())
         );
         let twice = format!("{src}export interface Other {{\n  b: string;\n}}\n");
         assert_eq!(
-            found(ts_fields(&twice, "Other")),
+            found(ts_fields(&twice, "Other", None)),
             Err("more than one interface or type `Other`".to_owned())
         );
     }
@@ -1457,7 +1793,7 @@ mod tests {
     fn ts_fields_yield_each_fields_optionality_and_string_literals() {
         let src = "export interface E {\n  a: string;\n  b?: number;\n  kind: \"x\" | \"y\" | 3;\n  only?: \"z\";\n  [KEY]: number;\n  run(): void;\n}\n";
         assert_eq!(
-            found(ts_fields(src, "E")),
+            found(ts_fields(src, "E", None)),
             names(&[
                 "a",
                 "b",
@@ -1471,7 +1807,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            partial(ts_fields(src, "E")).as_deref(),
+            partial(ts_fields(src, "E", None)).as_deref(),
             Some("`interface E` has a computed key")
         );
     }
@@ -1482,12 +1818,12 @@ mod tests {
     fn ts_fields_read_a_type_alias_through_its_intersections() {
         let src = "type Plain = { runId?: string; success: boolean };\nexport type Ended = Base & ({ outcome: \"completed\" | \"error\" } & { failureKind?: \"aborted\" });\n";
         assert_eq!(
-            found(ts_fields(src, "Plain")),
+            found(ts_fields(src, "Plain", None)),
             names(&["runId", "runId?", "success"])
         );
-        assert_eq!(partial(ts_fields(src, "Plain")), None);
+        assert_eq!(partial(ts_fields(src, "Plain", None)), None);
         assert_eq!(
-            found(ts_fields(src, "Ended")),
+            found(ts_fields(src, "Ended", None)),
             names(&[
                 "failureKind",
                 "failureKind:\"aborted\"",
@@ -1498,16 +1834,92 @@ mod tests {
             ])
         );
         assert_eq!(
-            partial(ts_fields(src, "Ended")).as_deref(),
-            Some("`type Ended` intersects a named type")
+            partial(ts_fields(src, "Ended", None)).as_deref(),
+            Some("`type Ended` intersects a type it does not read")
         );
         for alias in ["A | B", "Base", "{ [K in Keys]: string }", "Base & (A | B)"] {
             assert_eq!(
-                found(ts_fields(&format!("type X = {alias};"), "X")),
+                found(ts_fields(&format!("type X = {alias};"), "X", None)),
                 Err("`type X`, not an object type".to_owned()),
                 "{alias}"
             );
         }
+    }
+
+    /// A member's inline type is a property's type or a method's first
+    /// parameter after `this`, the shapes dsh declares its events in.
+    #[test]
+    fn ts_fields_read_one_members_inline_type() {
+        let src = "declare module 'x' {\n  interface SessionEventMap {\n    'tool/call': { callId: ToolCallId; name: string }\n    'tool/named': Named\n  }\n}\ninterface Events {\n  'agent/created'(this: Scoped<Agent>, payload: { agent: Agent; signal?: AbortSignal }): undefined\n  'agent/bare'(): void\n}\n";
+        let member = |name, member| found(ts_fields(src, name, Some(member)));
+        assert_eq!(
+            member("SessionEventMap", "tool/call"),
+            names(&["callId", "name"])
+        );
+        assert_eq!(
+            member("Events", "agent/created"),
+            names(&["agent", "signal", "signal?"])
+        );
+        assert_eq!(
+            member("SessionEventMap", "tool/named"),
+            Err("`interface SessionEventMap`'s `tool/named`, not an object type".to_owned())
+        );
+        assert_eq!(
+            member("Events", "agent/bare"),
+            Err("`interface Events`'s `agent/bare`, not an object type".to_owned())
+        );
+        assert_eq!(
+            member("Events", "agent/gone"),
+            Err("no member `agent/gone` in `interface Events`".to_owned())
+        );
+    }
+
+    /// A mapped type indexed by its own keys is read as its value type.
+    #[test]
+    fn ts_fields_read_a_mapped_types_value() {
+        let src = "export type SessionEvent<T extends E = E> = {\n  [K in E]: {\n    type: K\n    seq: number\n    data: SessionEventMap[K]\n  }\n}[T]\n";
+        assert_eq!(
+            found(ts_fields(src, "SessionEvent", None)),
+            names(&["data", "seq", "type"])
+        );
+        // dsh-v0.2.0-rc.2's shape: the value intersects a conditional type.
+        let conditional = "export type SessionEvent<T extends E = E> = {\n  [K in E]: {\n    type: K\n    data: SessionEventMap[K]\n  } & (K extends S ? SurfaceIntent<K> : {\n    surfaceOp?: never\n  })\n}[T]\n";
+        assert_eq!(
+            found(ts_fields(conditional, "SessionEvent", None)),
+            names(&["data", "type"])
+        );
+        assert_eq!(
+            partial(ts_fields(conditional, "SessionEvent", None)).as_deref(),
+            Some("`type SessionEvent` intersects a type it does not read")
+        );
+    }
+
+    /// A `Pick` of string literals declares the members it keeps; any other
+    /// named type stays out of sight.
+    #[test]
+    fn a_pick_declares_the_members_it_keeps() {
+        let alias = "export type SessionDomain = Pick<\n  SessionApi,\n  | \"create\"\n  | \"get\"\n> & {\n  readonly hook: Hooks\n}\ntype One = Pick<A, \"only\">;\ntype Keyed = Pick<A, K>;\n";
+        assert_eq!(
+            found(ts_fields(alias, "SessionDomain", None)),
+            names(&["create", "get", "hook"])
+        );
+        assert_eq!(partial(ts_fields(alias, "SessionDomain", None)), None);
+        assert_eq!(found(ts_fields(alias, "One", None)), names(&["only"]));
+        assert_eq!(
+            found(ts_fields(alias, "Keyed", None)),
+            Err("`type Keyed`, not an object type".to_owned())
+        );
+        let iface = "export interface EventDomain extends Pick<EventApi, \"subscribe\"> {}\ninterface Mixed extends Pick<A, \"a\">, Other { b(): void }\n";
+        assert_eq!(
+            found(ts_members(iface, &["EventDomain"])),
+            names(&["subscribe"])
+        );
+        assert_eq!(partial(ts_members(iface, &["EventDomain"])), None);
+        assert_eq!(found(ts_members(iface, &["Mixed"])), names(&["a", "b"]));
+        assert_eq!(
+            partial(ts_members(iface, &["Mixed"])).as_deref(),
+            Some("`interface Mixed` extends another type")
+        );
     }
 
     /// Every member key of the interfaces and classes named, merged across
@@ -1583,15 +1995,15 @@ mod tests {
     #[test]
     fn ts_fields_read_an_interface_inside_a_module_block() {
         let src = "declare module '@x/core' {\n  interface Context {\n    session: Session\n  }\n  interface Events {\n    'agent/created'(payload: {}): void\n    status: string\n  }\n}\n";
-        assert_eq!(found(ts_fields(src, "Events")), names(&["status"]));
-        assert_eq!(partial(ts_fields(src, "Events")), None);
+        assert_eq!(found(ts_fields(src, "Events", None)), names(&["status"]));
+        assert_eq!(partial(ts_fields(src, "Events", None)), None);
     }
 
     #[test]
     fn ts_fields_read_an_interface_inside_a_namespace_or_global_block() {
         let src = "export {};\nnamespace A.B {\n  export interface X { f: string }\n}\ndeclare global {\n  interface Y { g: string }\n}\n";
-        assert_eq!(found(ts_fields(src, "X")), names(&["f"]));
-        assert_eq!(found(ts_fields(src, "Y")), names(&["g"]));
+        assert_eq!(found(ts_fields(src, "X", None)), names(&["f"]));
+        assert_eq!(found(ts_fields(src, "Y", None)), names(&["g"]));
     }
 
     #[test]
@@ -1759,5 +2171,95 @@ mod tests {
             Err("no `properties`".to_owned())
         );
         assert_eq!(found(json_keys("not json")), Err("no JSON".to_owned()));
+    }
+
+    /// The shapes opencode v2.0.27 declares its event data in
+    /// (`packages/schema/src/session-event.ts`, `permission.ts`, `event.ts`).
+    const EFFECT: &str = r#"
+        const Base = { sessionID: SessionID }
+        const options = { durable: { aggregate: "sessionID", version: 1 } } as const
+        export const Created = Event.durable({
+          type: "session.created",
+          ...options,
+          schema: { ...Base, location: Location.Ref, parentID: SessionID.pipe(optional) },
+        })
+        export namespace Execution {
+          export const Started = Event.durable({ type: "session.execution.started", ...options, schema: Base })
+        }
+        export namespace Tool {
+          const ToolBase = { ...Base, id: Schema.String }
+          export const Started = Event.durable({
+            type: "session.tool.input.started",
+            schema: { ...ToolBase, name: Schema.String },
+          })
+        }
+        const RequestFields = { sessionID: SessionID, action: Schema.String, source: Source.pipe(optional) }
+        export const Request = Schema.Struct({ id: ID, ...RequestFields }).annotate({ identifier: "Request" })
+        export const Source = Schema.Union([
+          Schema.Struct({ type: Schema.Literal("tool"), id: Schema.String }),
+        ]).annotate({ identifier: "Source" })
+        const Asked = ephemeral({ type: "permission.asked", schema: Request.fields })
+        const Imported = ephemeral({ type: "x.imported", schema: { ...Elsewhere, own: Schema.String } })
+        const Twice = { a: Schema.String }
+        export namespace Other { const Twice = { b: Schema.String } }
+        const Doubled = ephemeral({ type: "x.doubled", schema: { ...Twice, c: Schema.String } })
+        export function durable(input) {
+          const data = Schema.Struct(input.schema)
+          return Schema.Struct({ id: ID, type: Schema.Literal(input.type), location: optional(Location.Ref), data })
+            .annotate({ identifier: input.type })
+            .pipe(statics(() => ({ data })))
+        }
+    "#;
+
+    #[test]
+    fn an_effect_schema_resolves_spreads_names_fields_and_wrappers() {
+        let read = |at: SchemaAt| found(effect_schema(EFFECT, &at));
+        assert_eq!(
+            read(SchemaAt::Event("session.created")),
+            names(&["location", "parentID", "sessionID"])
+        );
+        // A bare name, and a namespaced `const` that is the document's only one.
+        assert_eq!(
+            read(SchemaAt::Event("session.execution.started")),
+            names(&["sessionID"])
+        );
+        assert_eq!(
+            read(SchemaAt::Event("session.tool.input.started")),
+            names(&["id", "name", "sessionID"])
+        );
+        // `X.fields` of a Struct seen through `.annotate`, from a bare `ephemeral`.
+        assert_eq!(
+            read(SchemaAt::Event("permission.asked")),
+            names(&["action", "id", "sessionID", "source"])
+        );
+        assert_eq!(read(SchemaAt::Struct("Source")), names(&["id", "type"]));
+        assert_eq!(
+            read(SchemaAt::Returned("durable")),
+            names(&["data", "id", "location", "type"])
+        );
+        assert_eq!(
+            read(SchemaAt::Event("x.gone")),
+            Err("no `durable`/`ephemeral` call of `type: \"x.gone\"`".to_owned())
+        );
+    }
+
+    /// What it cannot resolve is out of sight, never a vanish: an import, or a
+    /// name bound twice.
+    #[test]
+    fn an_effect_schema_it_cannot_resolve_is_partial() {
+        let imported = effect_schema(EFFECT, &SchemaAt::Event("x.imported"));
+        assert!(
+            partial(imported).is_some_and(|why| why.contains("`Elsewhere`")),
+            "an import is out of sight"
+        );
+        let doubled = effect_schema(EFFECT, &SchemaAt::Event("x.doubled"));
+        assert!(
+            partial(doubled).is_some_and(|why| why.contains("`Twice`")),
+            "a name bound twice resolves to neither"
+        );
+        assert_eq!(
+            found(effect_schema(EFFECT, &SchemaAt::Event("x.doubled"))),
+            names(&["c"])
+        );
     }
 }

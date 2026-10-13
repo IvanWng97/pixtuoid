@@ -30,7 +30,7 @@ use crate::source::decoder::{
     DecodeError, DecodeResult as Result, MAX_DECODED_FIELD_CHARS, ellipsize, generic_tool_display,
 };
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{Doc, Finding, Read, Release, Repo, Watch, When};
+use crate::source::upstream::{Doc, Finding, Read, Release, Repo, SchemaAt, Watch, When};
 
 /// The opencode CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "opencode";
@@ -45,6 +45,9 @@ const TOOL_STARTED: &str = "session.tool.input.started";
 const TOOL_SUCCESS: &str = "session.tool.success";
 const TOOL_FAILED: &str = "session.tool.failed";
 const PERMISSION_ASKED: &str = "permission.asked";
+
+/// The key every event's `data` names its session by.
+const SESSION_ID: &str = "sessionID";
 
 /// The event types this decoder turns into events. Pinned to the arms below
 /// by `every_exported_set_is_exactly_its_dispatch_arms`, and to the plugin's
@@ -69,7 +72,7 @@ pub(crate) const DECODED_EVENTS: &[&str] = &[
 /// `the_plugin_copies_exactly_the_fields_the_decoder_reads`.
 #[cfg(any(test, feature = "upstream"))]
 pub const DECODED_DATA_FIELDS: &[&str] = &[
-    "sessionID",
+    SESSION_ID,
     "parentID",
     "location.directory",
     "model.id",
@@ -79,26 +82,175 @@ pub const DECODED_DATA_FIELDS: &[&str] = &[
     "source.id",
 ];
 
+/// The envelope keys the decoder reads, dotted, pinned by
+/// `every_decoded_envelope_field_is_read`.
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) const DECODED_ENVELOPE_FIELDS: &[&str] = &["type", "data", "location.directory"];
+
+#[cfg(any(test, feature = "upstream"))]
+const SESSION_EVENTS: Doc = REPO.doc(
+    "packages/schema/src/session-event.ts",
+    r"(?m)^export const Definitions = Event\.inventory\(",
+    "the session `Definitions` inventory",
+);
+
+#[cfg(any(test, feature = "upstream"))]
+const PERMISSION_EVENTS: Doc = REPO.doc(
+    "packages/schema/src/permission.ts",
+    r"(?m)^export const Event = \{",
+    "the permission `Event` inventory",
+);
+
 /// Session events are declared in `session-event.ts`'s inventory, permission
 /// events in `permission.ts`'s, so the union is the document.
 #[cfg(any(test, feature = "upstream"))]
-const EVENT_DECLARATIONS: &[Doc] = &[
-    REPO.doc(
-        "packages/schema/src/session-event.ts",
-        r"(?m)^export const Definitions = Event\.inventory\(",
-        "the session `Definitions` inventory",
-    ),
-    REPO.doc(
-        "packages/schema/src/permission.ts",
-        r"(?m)^export const Event = \{",
-        "the permission `Event` inventory",
-    ),
-];
+const EVENT_DECLARATIONS: &[Doc] = &[SESSION_EVENTS, PERMISSION_EVENTS];
+
+#[cfg(any(test, feature = "upstream"))]
+const FIELD_GONE: &str = "the decoder reads a field opencode no longer sends, so what it carried \
+                          (session, parent, cwd, model or call id) goes missing";
+
+/// The `data` paths the decoder reads of `event`: each one, blanked, changes
+/// what `event` decodes to.
+#[cfg(any(test, feature = "upstream"))]
+pub(crate) fn reads(event: &str) -> Vec<&'static str> {
+    let decoded = |data: &Value| {
+        format!(
+            "{:?}",
+            decode_oc_hook_payload(&serde_json::json!({"type": event, "data": data}))
+        )
+    };
+    let full = probe_payload(DECODED_DATA_FIELDS);
+    DECODED_DATA_FIELDS
+        .iter()
+        .copied()
+        .filter(|path| decoded(&full) != decoded(&blanked(&full, path)))
+        .collect()
+}
+
+/// An object holding each dotted path, its value the path itself.
+#[cfg(any(test, feature = "upstream"))]
+fn probe_payload(paths: &[&str]) -> Value {
+    let mut full = Value::Object(Map::new());
+    for path in paths {
+        let mut at = &mut full;
+        let mut keys = path.split('.').peekable();
+        while let (Some(key), Some(obj)) = (keys.next(), at.as_object_mut()) {
+            let leaf = keys.peek().is_none();
+            at = obj.entry(key).or_insert_with(|| {
+                if leaf {
+                    Value::String((*path).to_owned())
+                } else {
+                    Value::Object(Map::new())
+                }
+            });
+        }
+    }
+    full
+}
+
+/// `full` with dotted `path` set to the empty string.
+#[cfg(any(test, feature = "upstream"))]
+fn blanked(full: &Value, path: &str) -> Value {
+    let mut out = full.clone();
+    if let Some(leaf) = out.pointer_mut(&format!("/{}", path.replace('.', "/"))) {
+        *leaf = Value::String(String::new());
+    }
+    out
+}
+
+/// The first key of each dotted path, once.
+#[cfg(any(test, feature = "upstream"))]
+fn heads(paths: impl IntoIterator<Item = &'static str>) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    for head in paths.into_iter().filter_map(|p| p.split('.').next()) {
+        if !out.contains(&head) {
+            out.push(head);
+        }
+    }
+    out
+}
+
+/// The keys under `head` the decoder reads, off `data` or the envelope.
+#[cfg(any(test, feature = "upstream"))]
+fn under(head: &str) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    for path in DECODED_DATA_FIELDS.iter().chain(DECODED_ENVELOPE_FIELDS) {
+        if let Some((h, rest)) = path.split_once('.')
+            && h == head
+            && !out.contains(&rest)
+        {
+            out.push(rest);
+        }
+    }
+    out
+}
+
+/// What the decoder reads of `event`'s own `data`, from its schema in `docs`.
+#[cfg(any(test, feature = "upstream"))]
+const fn data_of(
+    id: &'static str,
+    event: &'static str,
+    docs: &'static [Doc],
+    ours: fn() -> Vec<&'static str>,
+) -> Watch {
+    Watch {
+        id,
+        ours,
+        docs,
+        read: Read::EffectSchema {
+            at: SchemaAt::Event(event),
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(FIELD_GONE),
+        siblings: None,
+    }
+}
+
+/// What the decoder reads off the struct `name` in `docs`.
+#[cfg(any(test, feature = "upstream"))]
+const fn struct_of(
+    id: &'static str,
+    name: &'static str,
+    docs: &'static [Doc],
+    ours: fn() -> Vec<&'static str>,
+) -> Watch {
+    Watch {
+        id,
+        ours,
+        docs,
+        read: Read::EffectSchema {
+            at: SchemaAt::Struct(name),
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(FIELD_GONE),
+        siblings: None,
+    }
+}
+
+/// The envelope `function name` builds in `event.ts`.
+#[cfg(any(test, feature = "upstream"))]
+const fn envelope(id: &'static str, name: &'static str, docs: &'static [Doc]) -> Watch {
+    Watch {
+        id,
+        ours: || heads(DECODED_ENVELOPE_FIELDS.iter().copied()),
+        docs,
+        read: Read::EffectSchema {
+            at: SchemaAt::Returned(name),
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the plugin forwards an envelope key opencode no longer sets, so no event decodes \
+             (no sprite)",
+        ),
+        siblings: None,
+    }
+}
 
 /// Its GitHub `releases/latest` is still the v1 line; v2 installs from npm
 /// (`services/www/src/docs/content/index.mdx:16`, v2.0.27).
 #[cfg(any(test, feature = "upstream"))]
-pub(crate) const REPO: Repo = Repo {
+pub const REPO: Repo = Repo {
     name: "anomalyco/opencode",
     release: Release::Npm {
         package: "@opencode/cli",
@@ -107,20 +259,148 @@ pub(crate) const REPO: Repo = Repo {
 };
 
 #[cfg(any(test, feature = "upstream"))]
-pub(crate) const UPSTREAM: &[Watch] = &[Watch {
-    id: "opencode.hook_events",
-    ours: || DECODED_EVENTS.to_vec(),
-    docs: EVENT_DECLARATIONS,
-    // The declaration form: a bare quoted name also matches prose and tests.
-    read: Read::Each {
-        pattern: r#"type: "{name}""#,
+pub(crate) const UPSTREAM: &[Watch] = &[
+    Watch {
+        id: "opencode.hook_events",
+        ours: || DECODED_EVENTS.to_vec(),
+        docs: EVENT_DECLARATIONS,
+        // The declaration form: a bare quoted name also matches prose and tests.
+        read: Read::Each {
+            pattern: r#"type: "{name}""#,
+        },
+        when: When::Vanishes,
+        finding: Finding::Breaking(
+            "the plugin subscribes to an event opencode never fires (no sprite)",
+        ),
+        siblings: None,
     },
-    when: When::Vanishes,
-    finding: Finding::Breaking(
-        "the plugin subscribes to an event opencode never fires (no sprite)",
+    data_of(
+        "opencode.data.session_created",
+        SESSION_CREATED,
+        &[SESSION_EVENTS],
+        || heads(reads(SESSION_CREATED)),
     ),
-    siblings: None,
-}];
+    data_of(
+        "opencode.data.session_deleted",
+        SESSION_DELETED,
+        &[SESSION_EVENTS],
+        || heads(reads(SESSION_DELETED)),
+    ),
+    // A turn start's own data is the session key (`schema: Base`,
+    // `session-event.ts:240` at v2.0.27); the rest is the record the plugin
+    // merges over it, read off `Info` below.
+    data_of(
+        "opencode.data.execution_started",
+        EXECUTION_STARTED,
+        &[SESSION_EVENTS],
+        || vec![SESSION_ID],
+    ),
+    data_of(
+        "opencode.data.execution_succeeded",
+        EXECUTION_SUCCEEDED,
+        &[SESSION_EVENTS],
+        || heads(reads(EXECUTION_SUCCEEDED)),
+    ),
+    data_of(
+        "opencode.data.execution_failed",
+        EXECUTION_FAILED,
+        &[SESSION_EVENTS],
+        || heads(reads(EXECUTION_FAILED)),
+    ),
+    data_of(
+        "opencode.data.execution_interrupted",
+        EXECUTION_INTERRUPTED,
+        &[SESSION_EVENTS],
+        || heads(reads(EXECUTION_INTERRUPTED)),
+    ),
+    data_of(
+        "opencode.data.tool_started",
+        TOOL_STARTED,
+        &[SESSION_EVENTS],
+        || heads(reads(TOOL_STARTED)),
+    ),
+    data_of(
+        "opencode.data.tool_success",
+        TOOL_SUCCESS,
+        &[SESSION_EVENTS],
+        || heads(reads(TOOL_SUCCESS)),
+    ),
+    data_of(
+        "opencode.data.tool_failed",
+        TOOL_FAILED,
+        &[SESSION_EVENTS],
+        || heads(reads(TOOL_FAILED)),
+    ),
+    data_of(
+        "opencode.data.permission_asked",
+        PERMISSION_ASKED,
+        &[PERMISSION_EVENTS],
+        || heads(reads(PERMISSION_ASKED)),
+    ),
+    struct_of(
+        "opencode.session_record",
+        "Info",
+        &[REPO.doc(
+            "packages/schema/src/session.ts",
+            r"(?m)^export const Info = Schema\.Struct\(",
+            "`Session.Info`",
+        )],
+        || {
+            heads(reads(EXECUTION_STARTED))
+                .into_iter()
+                .filter(|f| *f != SESSION_ID)
+                .collect()
+        },
+    ),
+    struct_of(
+        "opencode.location_ref",
+        "Ref",
+        &[REPO.doc(
+            "packages/schema/src/location.ts",
+            r"(?m)^export const Ref = Schema\.Struct\(",
+            "`Location.Ref`",
+        )],
+        || under("location"),
+    ),
+    struct_of(
+        "opencode.model_ref",
+        "Ref",
+        &[REPO.doc(
+            "packages/schema/src/model.ts",
+            r"(?m)^export const Ref = Schema\.Struct\(",
+            "`Model.Ref`",
+        )],
+        || under("model"),
+    ),
+    struct_of(
+        "opencode.permission_source",
+        "Source",
+        &[REPO.doc(
+            "packages/schema/src/permission.ts",
+            r"(?m)^export const Source = Schema\.Union\(",
+            "`Permission.Source`",
+        )],
+        || under("source"),
+    ),
+    envelope(
+        "opencode.envelope.durable",
+        "durable",
+        &[REPO.doc(
+            "packages/schema/src/event.ts",
+            r"(?m)^export function durable\b",
+            "`durable`",
+        )],
+    ),
+    envelope(
+        "opencode.envelope.ephemeral",
+        "ephemeral",
+        &[REPO.doc(
+            "packages/schema/src/event.ts",
+            r"(?m)^export function ephemeral\b",
+            "`ephemeral`",
+        )],
+    ),
+];
 
 /// Decode one opencode plugin envelope (already identified by
 /// `_pixtuoid_source == "opencode"`). An unmapped `type` is a benign skip: the
@@ -171,8 +451,8 @@ pub(crate) fn decode_oc_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
 
 /// The session an event concerns: its agent id and its `sessionID`.
 fn session<'d>(data: &'d Map<String, Value>, event: &str) -> Result<(AgentId, &'d str)> {
-    let session_id = field(data, "sessionID")
-        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, event, "sessionID"))?;
+    let session_id = field(data, SESSION_ID)
+        .ok_or_else(|| DecodeError::missing_in(SOURCE_NAME, event, SESSION_ID))?;
     Ok((AgentId::from_parts(SOURCE_NAME, session_id), session_id))
 }
 
@@ -312,28 +592,29 @@ mod tests {
     }
 
     /// [`field`]'s assertion holds every read to the list; this holds every
-    /// listed path to a read, by blanking it.
+    /// listed path to an event that reads it, by [`reads`]' blanking.
     #[test]
     fn every_decoded_data_field_is_read() {
-        let full = json!({"sessionID": "s", "parentID": "p", "location": {"directory": "/r"},
-            "model": {"id": "m"}, "id": "c", "name": "bash", "action": "shell",
-            "source": {"id": "c"}});
-        let decoded = |ev: &str, data: &Value| {
-            format!(
-                "{:?}",
-                decode_oc_hook_payload(&json!({"type": ev, "data": data}))
-            )
-        };
-        for path in DECODED_DATA_FIELDS {
-            let mut blanked = full.clone();
-            *blanked
-                .pointer_mut(&format!("/{}", path.replace('.', "/")))
-                .expect("the full payload holds every listed path") = json!("");
-            assert!(
-                DECODED_EVENTS
-                    .iter()
-                    .any(|ev| decoded(ev, &full) != decoded(ev, &blanked)),
-                "{path} is in DECODED_DATA_FIELDS, but no event reads it"
+        let mut read: Vec<&str> = DECODED_EVENTS.iter().flat_map(|ev| reads(ev)).collect();
+        read.sort_unstable();
+        read.dedup();
+        let mut listed = DECODED_DATA_FIELDS.to_vec();
+        listed.sort_unstable();
+        assert_eq!(read, listed);
+    }
+
+    /// Each envelope key, blanked, changes what a tool start decodes to.
+    #[test]
+    fn every_decoded_envelope_field_is_read() {
+        let mut full = probe_payload(DECODED_ENVELOPE_FIELDS);
+        full["type"] = json!(TOOL_STARTED);
+        full["data"] = probe_payload(DECODED_DATA_FIELDS);
+        let decoded = |v: &Value| format!("{:?}", decode_oc_hook_payload(v));
+        for path in DECODED_ENVELOPE_FIELDS {
+            assert_ne!(
+                decoded(&full),
+                decoded(&blanked(&full, path)),
+                "{path} is in DECODED_ENVELOPE_FIELDS, but a tool start does not read it"
             );
         }
     }

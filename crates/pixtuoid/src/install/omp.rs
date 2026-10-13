@@ -73,7 +73,7 @@ const fn forwarded(
         id,
         ours,
         docs,
-        read: Read::TsFields { name },
+        read: Read::TsFields { name, member: None },
         when: When::Vanishes,
         finding: Finding::Breaking(READ_GONE),
         siblings: None,
@@ -117,6 +117,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         )],
         read: Read::TsFields {
             name: "ToolApprovalResolvedEvent",
+            member: None,
         },
         when: When::Appears,
         finding: Finding::Breaking(

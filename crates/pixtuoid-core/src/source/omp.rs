@@ -860,7 +860,10 @@ const fn title_watch(id: &'static str, docs: &'static [Doc], carrier: &'static s
         id,
         ours: || DECODED_TITLE_FIELDS.to_vec(),
         docs,
-        read: Read::TsFields { name: carrier },
+        read: Read::TsFields {
+            name: carrier,
+            member: None,
+        },
         when: When::Vanishes,
         finding: Finding::Breaking(
             "first sight or live updates lose the only human-readable root label and fall \
