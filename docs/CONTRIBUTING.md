@@ -32,8 +32,7 @@ just test -p pixtuoid --features upstream drift_watch   # the drift watch's test
 > them.
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
-(`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
-the tests are CI's).
+(`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`).
 
 ## Releasing
 
@@ -117,8 +116,9 @@ our release never builds. Two consequences:
 
 Do not try to preempt BrewTestBot: the formula is on homebrew-core's
 autobump list, so `brew bump-formula-pr pixtuoid` refuses by policy and the
-bot opens the PR itself within ~3 hours of the tag. Watch THAT PR's CI and
-intervene only if it reds.
+bot opens the PR itself on its next scheduled run
+([`autobump.yml`](https://github.com/Homebrew/homebrew-core/blob/main/.github/workflows/autobump.yml)).
+Watch THAT PR's CI and intervene only if it reds.
 
 Publishing uses **OIDC trusted publishing** — CI carries no registry tokens;
 the per-crate/per-package Trusted Publishers, each naming environment
@@ -153,7 +153,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    a line on the narrowest rule it amends — never an agent's private memory,
    which nobody reviews and nothing executes.
 
-`just hermetic [--cli pinned|latest] [source]` runs each profiled CLI against a
+`just hermetic [--cli pinned|latest] [--record] [source [scenario]]` runs each profiled CLI against a
 scripted model (aimock) with a headless pixtuoid: the full tier gates on it at
 each `verified_version`, the nightly runs it at latest. `scripts/lib/`'s tiers
 run in no CI: `just openclaw-e2e` · `just openclaw-multi-e2e`
