@@ -32,8 +32,7 @@ just test -p pixtuoid --features upstream drift_watch   # the drift watch's test
 > them.
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
-(`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`, lint + clippy;
-the tests are CI's).
+(`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`).
 
 ## Releasing
 
@@ -117,8 +116,9 @@ our release never builds. Two consequences:
 
 Do not try to preempt BrewTestBot: the formula is on homebrew-core's
 autobump list, so `brew bump-formula-pr pixtuoid` refuses by policy and the
-bot opens the PR itself within ~3 hours of the tag. Watch THAT PR's CI and
-intervene only if it reds.
+bot opens the PR itself on its next scheduled run
+([`autobump.yml`](https://github.com/Homebrew/homebrew-core/blob/main/.github/workflows/autobump.yml)).
+Watch THAT PR's CI and intervene only if it reds.
 
 Publishing uses **OIDC trusted publishing** — CI carries no registry tokens;
 the per-crate/per-package Trusted Publishers, each naming environment
@@ -142,18 +142,18 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 5. **Mock gate** (taste/visual work only) — ratify the AFTER visual before code
    (`beautify-decoration` skill).
 6. **Build** — TDD: failing test → minimal impl → commit.
-7. **Self-review** — a standards+spec pass before pushing, INCLUDING the
-   whole-file comment audit: every file the PR touches — even by one line —
-   gets its entire comment population re-read against `AGENTS.md`'s comment
-   rules, and the cleanup rides the same PR (population and dispositions:
-   [`REVIEW.md`](../REVIEW.md#every-changed-file)'s comment audit). Not the merge gate.
+7. **Self-review** — a standards+spec pass before EVERY push, a review fold's
+   included, over everything the PR adds, not only the lines a finding names,
+   with the whole-file comment audit: every file the PR touches, by even one
+   line, gets its whole comment population re-read against `AGENTS.md`'s comment
+   rules; the cleanup rides the same PR ([`REVIEW.md`](../REVIEW.md#every-changed-file)'s comment audit). Not the merge gate.
 8. **Merge gate** — [the gate](#the-merge-gate); the `local-review` skill
    runs its local rows; merging is `@mergifyio queue`, a release PR by hand.
 9. **Wrap** — retro; a durable lesson becomes a mechanism (a test, a gate) or
    a line on the narrowest rule it amends — never an agent's private memory,
    which nobody reviews and nothing executes.
 
-`just hermetic [--cli pinned|latest] [source]` runs each profiled CLI against a
+`just hermetic [--cli pinned|latest] [--record] [source [scenario]]` runs each profiled CLI against a
 scripted model (aimock) with a headless pixtuoid: the full tier gates on it at
 each `verified_version`, the nightly runs it at latest. `scripts/lib/`'s tiers
 run in no CI: `just openclaw-e2e` · `just openclaw-multi-e2e`
