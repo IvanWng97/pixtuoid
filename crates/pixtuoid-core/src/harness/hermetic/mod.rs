@@ -224,8 +224,8 @@ wire_api = "responses"
         }],
         not_yet: &["SubagentStart", "SubagentStop", "PermissionRequest"],
     },
-    // opencode's cites are at v2.0.28, npm's `latest`, the release that added
-    // the system config below.
+    // opencode's cites are at v2.0.28, the release that added the system
+    // config below.
     Profile {
         source: "opencode",
         package: Package::Npm("@opencode/cli"),
@@ -422,17 +422,21 @@ mod tests {
     }
 
     #[test]
-    fn a_system_config_path_is_absolute_and_an_ancestor_config_name_is_one_component() {
+    fn config_outside_the_sandbox_is_spelled_as_its_reader_expands_it() {
         for p in PROFILES {
             // Unix paths, as the tier runs only on Unix: `Path::is_absolute`
             // would want a drive on Windows.
             for path in p.system_config {
-                assert!(path.starts_with('/'), "{}: {path}", p.source);
+                assert!(
+                    path.starts_with('/'),
+                    "{}: {path} is not absolute",
+                    p.source
+                );
                 // A misspelled placeholder would be checked as a literal path
                 // that never exists.
                 assert!(
                     !path.replace(USER_PLACEHOLDER, "").contains(['{', '}']),
-                    "{}: {path}",
+                    "{}: {path} spells a placeholder other than {USER_PLACEHOLDER}",
                     p.source
                 );
             }
@@ -440,7 +444,7 @@ mod tests {
                 assert_eq!(
                     Path::new(name).components().count(),
                     1,
-                    "{}: {name}",
+                    "{}: {name} is not one name",
                     p.source
                 );
             }
