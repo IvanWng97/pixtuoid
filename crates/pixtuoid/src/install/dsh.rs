@@ -18,11 +18,11 @@ use saphyr::{LoadableYamlNode, MappingOwned, ScalarOwned, Yaml, YamlEmitter, Yam
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
 #[cfg(feature = "upstream")]
-use crate::install::{calls, reads};
+use crate::install::{fields, members};
 #[cfg(feature = "upstream")]
 use pixtuoid_core::source::dsh::REPO;
 #[cfg(feature = "upstream")]
-use pixtuoid_core::source::upstream::{Doc, Finding, Read, Watch, When};
+use pixtuoid_core::source::upstream::{Doc, Finding, Watch};
 
 /// The mount entry's `id` — uninstall and the one-entry verify key on it.
 const PLUGIN_ID: &str = "pixtuoid";
@@ -95,13 +95,13 @@ const DETAIL_GONE: &str = "the plugin reads a detail dsh no longer declares, so 
 
 #[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
-    Watch {
-        id: "dsh.plugin_events",
-        ours: plugin_events,
+    members(
+        "dsh.plugin_events",
+        plugin_events,
         // dsh declares its events as keys of the cordis `Events` and the
         // session's `SessionEventMap`, each augmented across packages, so one
         // key may live in any of these.
-        docs: &[
+        &[
             CORDIS_EVENTS,
             EVENT_MAP,
             APPROVAL_EVENT_MAP,
@@ -111,36 +111,28 @@ pub(crate) const UPSTREAM: &[Watch] = &[
                 "the cordis augmentation",
             ),
         ],
-        read: Read::TsMembers {
-            of: &["Events", "SessionEventMap"],
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(
+        &["Events", "SessionEventMap"],
+        Finding::Breaking(
             "the plugin listens to an event dsh never fires, so that slice of the office silently \
-         stops updating",
+             stops updating",
         ),
-        siblings: None,
-    },
-    Watch {
-        id: "dsh.tool_result_call_id",
-        ours: || TOOL_RESULT_FIELDS.to_vec(),
-        docs: &[REPO.doc(
+    ),
+    fields(
+        "dsh.tool_result_call_id",
+        || TOOL_RESULT_FIELDS.to_vec(),
+        &[REPO.doc(
             "packages/llm/llm/src/message.ts",
             r"(?m)^export interface ToolResultMessage\b",
             "`ToolResultMessage`",
         )],
-        read: Read::TsFields {
-            name: "ToolResultMessage",
-            member: None,
-        },
-        when: When::Vanishes,
-        finding: Finding::Breaking(
+        "ToolResultMessage",
+        None,
+        Finding::Breaking(
             "every tool result reaches the decoder without its call id: doctor reports it as \
              drift, and its end cannot be paired with its call",
         ),
-        siblings: None,
-    },
-    reads(
+    ),
+    fields(
         "dsh.session_header",
         || vec!["id", "cwd", "parentSession", "origin:\"subagent\""],
         &[REPO.doc(
@@ -152,7 +144,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Breaking(KEY_GONE),
     ),
-    reads(
+    fields(
         "dsh.session_event",
         || vec!["type", "data"],
         &[REPO.doc(
@@ -162,9 +154,12 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         )],
         "SessionEvent",
         None,
-        Finding::Breaking(SESSION_GONE),
+        Finding::Breaking(
+            "the plugin dispatches session events on a key dsh no longer declares, so no \
+             tool, approval, usage or model event reaches pixtuoid",
+        ),
     ),
-    reads(
+    fields(
         "dsh.event.tool_call",
         || vec!["callId", "name"],
         &[EVENT_MAP],
@@ -172,7 +167,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         Some("tool/call"),
         Finding::Breaking(KEY_GONE),
     ),
-    reads(
+    fields(
         "dsh.event.tool_result",
         || vec!["message"],
         &[EVENT_MAP],
@@ -180,7 +175,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         Some("tool/result"),
         Finding::Breaking(KEY_GONE),
     ),
-    reads(
+    fields(
         "dsh.event.approval_asked",
         || vec!["id", "toolName", "callId", "reason"],
         &[APPROVAL_EVENT_MAP],
@@ -188,7 +183,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         Some("approval/asked"),
         Finding::Breaking(KEY_GONE),
     ),
-    reads(
+    fields(
         "dsh.event.approval_decided",
         || vec!["id", "outcome"],
         &[APPROVAL_EVENT_MAP],
@@ -196,7 +191,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         Some("approval/decided"),
         Finding::Breaking(KEY_GONE),
     ),
-    reads(
+    fields(
         "dsh.event.assistant_message",
         || vec!["usage"],
         &[EVENT_MAP],
@@ -204,7 +199,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         Some("assistant/message"),
         Finding::Review(DETAIL_GONE),
     ),
-    reads(
+    fields(
         "dsh.event.request_header",
         || vec!["header"],
         &[EVENT_MAP],
@@ -212,7 +207,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         Some("request/header"),
         Finding::Review(DETAIL_GONE),
     ),
-    reads(
+    fields(
         "dsh.epoch_header",
         || vec!["config"],
         &[REPO.doc(
@@ -224,7 +219,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Review(DETAIL_GONE),
     ),
-    reads(
+    fields(
         "dsh.token_usage",
         || vec!["inputTokens", "outputTokens", "cacheWriteTokens"],
         &[REPO.doc(
@@ -236,7 +231,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Review(DETAIL_GONE),
     ),
-    reads(
+    fields(
         "dsh.call_config",
         || vec!["model", "reasoningEffort"],
         &[REPO.doc(
@@ -248,7 +243,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Review(DETAIL_GONE),
     ),
-    reads(
+    fields(
         "dsh.agent_created",
         || vec!["agent"],
         &[CORDIS_EVENTS],
@@ -256,7 +251,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         Some("agent/created"),
         Finding::Breaking(SESSION_GONE),
     ),
-    reads(
+    fields(
         "dsh.agent_disposed",
         || vec!["agent"],
         &[CORDIS_EVENTS],
@@ -264,7 +259,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         Some("agent/disposed"),
         Finding::Breaking(SESSION_GONE),
     ),
-    calls(
+    members(
         "dsh.agent_session",
         || vec!["session"],
         &[REPO.doc(
@@ -275,7 +270,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         &["Agent"],
         Finding::Breaking(SESSION_GONE),
     ),
-    calls(
+    members(
         "dsh.session_class",
         || vec!["header"],
         &[REPO.doc(
@@ -286,7 +281,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         &["Session"],
         Finding::Breaking(SESSION_GONE),
     ),
-    calls(
+    members(
         "dsh.cordis_context",
         || vec!["agents"],
         &[REPO.doc(
@@ -295,9 +290,14 @@ pub(crate) const UPSTREAM: &[Watch] = &[
             "the cordis `Context` augmentation",
         )],
         &["Context"],
-        Finding::Review(DETAIL_GONE),
+        // cordis runs a plugin only once every service it injects exists
+        // (`vendor/cordis/src/fiber.ts` `_refresh` at dsh-v0.2.0-rc.2).
+        Finding::Breaking(
+            "the plugin injects `agents`, which dsh no longer declares, so cordis never runs it \
+             (no sprite)",
+        ),
     ),
-    calls(
+    members(
         "dsh.agent_registry",
         || vec!["list"],
         &[REPO.doc(

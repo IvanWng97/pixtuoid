@@ -14,10 +14,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 
+#[cfg(feature = "upstream")]
+use crate::install::fields;
 use crate::install::io;
 use crate::install::merge::{prune_empty, prune_empty_root};
-#[cfg(feature = "upstream")]
-use crate::install::reads;
 use crate::install::target::MergeOutcome;
 #[cfg(feature = "upstream")]
 use pixtuoid_core::source::openclaw::REPO;
@@ -123,7 +123,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         finding: Finding::Breaking("the plugin registers a hook OpenClaw never fires"),
         siblings: None,
     },
-    reads(
+    fields(
         "openclaw.agent_end_fields",
         || AGENT_END_FIELDS.to_vec(),
         &[Doc {
@@ -135,7 +135,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Breaking(DEGRADED),
     ),
-    reads(
+    fields(
         "openclaw.model_call_base_fields",
         || MODEL_CALL_BASE_FIELDS.to_vec(),
         &[Doc {
@@ -147,7 +147,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Breaking(DEGRADED),
     ),
-    reads(
+    fields(
         "openclaw.model_call_ended_fields",
         || MODEL_CALL_ENDED_FACTS.to_vec(),
         &[Doc {
@@ -159,7 +159,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Breaking(DEGRADED),
     ),
-    reads(
+    fields(
         "openclaw.gateway_start_port",
         || PORT_FIELDS.to_vec(),
         &[Doc {
@@ -171,7 +171,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Breaking(IDENTITY),
     ),
-    reads(
+    fields(
         "openclaw.gateway_context_port",
         || PORT_FIELDS.to_vec(),
         &[Doc {
@@ -183,7 +183,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Breaking(IDENTITY),
     ),
-    reads(
+    fields(
         "openclaw.agent_context_ids",
         || RUN_KEY_FIELDS.to_vec(),
         &[REPO.doc(

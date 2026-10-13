@@ -771,10 +771,10 @@ pub(crate) fn forward_set(template: &'static str) -> std::collections::BTreeSet<
         .collect()
 }
 
-/// The fields of the ONE type `name`, or of its `member`'s inline type, that a
-/// shipped template reads.
+/// A shipped template's dependence on the fields of the ONE type `name`, or of
+/// its `member`'s inline type.
 #[cfg(feature = "upstream")]
-pub(crate) const fn reads(
+pub(crate) const fn fields(
     id: &'static str,
     ours: fn() -> Vec<&'static str>,
     docs: &'static [Doc],
@@ -793,10 +793,10 @@ pub(crate) const fn reads(
     }
 }
 
-/// The members of the interfaces and classes `of` that a shipped template
-/// calls.
+/// A shipped template's dependence on the members of the interfaces and classes
+/// `of`, merged across their declarations.
 #[cfg(feature = "upstream")]
-pub(crate) const fn calls(
+pub(crate) const fn members(
     id: &'static str,
     ours: fn() -> Vec<&'static str>,
     docs: &'static [Doc],

@@ -1901,6 +1901,16 @@ mod tests {
             partial(ts_members(iface, &["Mixed"])).as_deref(),
             Some("`interface Mixed` extends another type")
         );
+        assert_eq!(
+            found(ts_fields(iface, "EventDomain", None)),
+            names(&["subscribe"])
+        );
+        assert_eq!(partial(ts_fields(iface, "EventDomain", None)), None);
+        assert_eq!(found(ts_fields(iface, "Mixed", None)), names(&["a"]));
+        assert_eq!(
+            partial(ts_fields(iface, "Mixed", None)).as_deref(),
+            Some("`interface Mixed` extends another type")
+        );
     }
 
     #[test]

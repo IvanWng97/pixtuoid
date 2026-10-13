@@ -104,8 +104,8 @@ const PERMISSION_EVENTS: Doc = REPO.doc(
 const EVENT_DECLARATIONS: &[Doc] = &[SESSION_EVENTS, PERMISSION_EVENTS];
 
 #[cfg(any(test, feature = "upstream"))]
-const FIELD_GONE: &str = "the decoder reads a field opencode no longer sends, so what it carried \
-                          (session, parent, cwd, model or call id) goes missing";
+const FIELD_GONE: &str =
+    "the decoder reads a field opencode no longer sends, so what it carried goes missing";
 
 /// The `data` paths the decoder reads of `event`: each one, blanked, changes
 /// what `event` decodes to.

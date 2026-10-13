@@ -20,7 +20,7 @@ use anyhow::{Result, bail};
 
 use crate::install::target::MergeOutcome;
 #[cfg(feature = "upstream")]
-use crate::install::{calls, reads};
+use crate::install::{fields, members};
 #[cfg(feature = "upstream")]
 use pixtuoid_core::source::omp::REPO;
 #[cfg(feature = "upstream")]
@@ -69,7 +69,7 @@ const SHARED_EVENTS_TS: &str = "packages/coding-agent/src/extensibility/shared-e
 /// to the union of every watch's bare names.
 #[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
-    reads(
+    fields(
         "omp.approval_requested",
         || vec!["toolCallId", "toolName", "reason"],
         &[REPO.doc(
@@ -81,7 +81,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Breaking(READ_GONE),
     ),
-    reads(
+    fields(
         "omp.approval_resolved",
         // No `reason`: the decoder reads it off the requested event alone.
         || vec!["toolCallId", "toolName", "approved"],
@@ -114,7 +114,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         ),
         siblings: None,
     },
-    reads(
+    fields(
         "omp.extension_context",
         || vec!["cwd", "sessionManager"],
         &[REPO.doc(
@@ -126,7 +126,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Breaking(READ_GONE),
     ),
-    reads(
+    fields(
         "omp.session_switch",
         || vec!["previousSessionFile"],
         &[REPO.doc(
@@ -138,7 +138,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Breaking(READ_GONE),
     ),
-    reads(
+    fields(
         "omp.session_branch",
         || vec!["previousSessionFile"],
         &[REPO.doc(
@@ -150,7 +150,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         None,
         Finding::Breaking(READ_GONE),
     ),
-    calls(
+    members(
         "omp.session_getters",
         || vec!["getSessionFile", "getSessionId"],
         &[REPO.doc(

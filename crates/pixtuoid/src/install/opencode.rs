@@ -18,11 +18,11 @@ use anyhow::Result;
 use crate::install::io;
 use crate::install::target::MergeOutcome;
 #[cfg(feature = "upstream")]
-use crate::install::{calls, reads};
+use crate::install::{fields, members};
 #[cfg(feature = "upstream")]
 use pixtuoid_core::source::opencode::REPO;
 #[cfg(feature = "upstream")]
-use pixtuoid_core::source::upstream::{Finding, Watch};
+use pixtuoid_core::source::upstream::{Doc, Finding, Watch};
 
 /// Marks the plugin as ours — absent from the removed-stub, so an uninstall of
 /// a foreign/removed file is a clean no-op.
@@ -43,24 +43,38 @@ pub(crate) fn plugin_events() -> Vec<&'static str> {
 #[cfg(feature = "upstream")]
 const NO_FORWARD: &str =
     "the plugin calls an API opencode no longer hands it, so it forwards nothing (no sprite)";
+/// `record` catches a failed read, so the turn start still goes out.
+#[cfg(feature = "upstream")]
+const NO_RECORD: &str = "a turn start reaches pixtuoid without its record, so a session it first \
+                         sees mid-turn shows no cwd, parent or model";
+#[cfg(feature = "upstream")]
+const CONTEXT: Doc = REPO.doc(
+    "packages/plugin/src/promise/plugin.ts",
+    r"(?m)^export interface Context\b",
+    "the plugin `Context`",
+);
 
 /// The plugin API the template calls: `ctx.event.subscribe` carries every
 /// event, and `ctx.session.get` a turn start's record.
 #[cfg(feature = "upstream")]
 pub(crate) const UPSTREAM: &[Watch] = &[
-    reads(
-        "opencode.plugin_context",
-        || vec!["event", "session"],
-        &[REPO.doc(
-            "packages/plugin/src/promise/plugin.ts",
-            r"(?m)^export interface Context\b",
-            "the plugin `Context`",
-        )],
+    fields(
+        "opencode.context.event",
+        || vec!["event"],
+        &[CONTEXT],
         "Context",
         None,
         Finding::Breaking(NO_FORWARD),
     ),
-    calls(
+    fields(
+        "opencode.context.session",
+        || vec!["session"],
+        &[CONTEXT],
+        "Context",
+        None,
+        Finding::Breaking(NO_RECORD),
+    ),
+    members(
         "opencode.event_api",
         || vec!["subscribe"],
         &[REPO.doc(
@@ -71,7 +85,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         &["EventDomain"],
         Finding::Breaking(NO_FORWARD),
     ),
-    reads(
+    fields(
         "opencode.session_api",
         || vec!["get"],
         &[REPO.doc(
@@ -81,10 +95,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         )],
         "SessionDomain",
         None,
-        Finding::Breaking(
-            "a turn start reaches pixtuoid without its record, so a session it first sees \
-             mid-turn shows no cwd, parent or model",
-        ),
+        Finding::Breaking(NO_RECORD),
     ),
 ];
 
