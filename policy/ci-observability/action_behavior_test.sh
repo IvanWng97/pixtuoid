@@ -345,6 +345,7 @@ echo old >"$bump_repo/${registry%/*}/lib.rs"
 git -C "$bump_repo" add -A && git -C "$bump_repo" -c user.email=t@t -c user.name=t commit -qm base
 
 pin() { perl -pi -e "s/\"$1\"/\"$2\"/" "$registry"; }
+# A re-record beside setup-npm's node_modules, which the bump's patch leaves out.
 rerecord() {
     pin 0.2.0-rc.2 0.2.0
     rm "$fx/fixtures/dsh/run/old-session.jsonl"
@@ -352,27 +353,36 @@ rerecord() {
     echo new >"$fx/fixtures/dsh/run/provenance.json"
     echo new >"$fx/delegation/fixtures/dsh/hook-payloads.jsonl"
     echo new >"$fx/snapshots/sources__conformance__dsh__run.snap"
+    mkdir -p "$fx/hermetic/aimock/node_modules/x" && echo x >"$fx/hermetic/aimock/node_modules/x/index.js"
 }
-# The patch the bump job writes from the working tree `edit` leaves, or, with a
-# third argument, from what `edit` staged with rename detection on.
+rerecorded=$(printf '%s\n' "$registry" "$fx/delegation/fixtures/dsh/hook-payloads.jsonl" \
+    "$fx/fixtures/dsh/run/new-session.jsonl" "$fx/fixtures/dsh/run/old-session.jsonl" \
+    "$fx/fixtures/dsh/run/provenance.json" "$fx/snapshots/sources__conformance__dsh__run.snap")
+patch_script="$(workflow_step_script "$nightly" "Write the bump as a patch")"
+# How the patch is made from what `edit` leaves: `honest` runs the bump job's
+# own step; `forged` takes everything, as a CLI owning the runner could upload;
+# `renamed` takes what `edit` staged, with rename detection on.
 check() {
-    local expect="$1" label="$2" edit="$3" renames="${4:-}" version="${VERSION_OVERRIDE:-0.2.0}"
+    local expect="$1" label="$2" edit="$3" made="${4:-forged}" version="${VERSION_OVERRIDE:-0.2.0}"
     (
         cd "$bump_repo"
         "$edit"
-        if [[ -n "$renames" ]]; then
-            git diff --binary -M --cached HEAD >"$test_dir/bump.patch"
-        else
-            git add -N -- . && git diff --binary --no-renames HEAD -- . >"$test_dir/bump.patch"
-        fi
+        case "$made" in
+        honest) RUNNER_TEMP="$test_dir" bash -c "$patch_script" ;;
+        renamed) git diff --binary -M --cached HEAD >"$test_dir/bump.patch" ;;
+        *) git add -N -- . && git diff --binary --no-renames HEAD -- . >"$test_dir/bump.patch" ;;
+        esac
         git reset -q --hard && git clean -qfd
     )
     : >"$test_dir/check-output"
     if (cd "$bump_repo" && SOURCE=dsh VERSION="$version" PATCH="$test_dir/bump.patch" SEMVER="$semver" \
         GITHUB_OUTPUT="$test_dir/check-output" bash -c "$check_script") >/dev/null 2>&1; then
         [[ "$expect" != refuse ]] || fail "publish took $label"
-        [[ "$expect" != take ]] || grep -qx "version=$version" "$test_dir/check-output" ||
-            fail "publish took $label without naming its version"
+        if [[ "$expect" == take ]]; then
+            grep -qx "version=$version" "$test_dir/check-output" || fail "publish took $label without naming its version"
+            [[ "$(git -C "$bump_repo" diff --cached --name-only | sort)" == "$rerecorded" ]] ||
+                fail "publish took $label as other than the re-record: $(git -C "$bump_repo" diff --cached --name-only)"
+        fi
     else
         [[ "$expect" == refuse ]] || fail "publish refused $label"
     fi
@@ -388,9 +398,10 @@ symlink() { rerecord && ln -s ../../../../src/source/lib.rs "$fx/fixtures/dsh/ru
 mode() { rerecord && chmod +x "$fx/fixtures/dsh/run/provenance.json"; }
 binary() { rerecord && printf '\0\1\2' >"$fx/fixtures/dsh/run/b.jsonl"; }
 renamed() { pin 0.2.0-rc.2 0.2.0 && git add -A && git mv "${registry%/*}/lib.rs" "$fx/fixtures/dsh/run/lib.jsonl"; }
-check take "a re-record and its pin" rerecord
-check skip "an empty patch" nothing
-check refuse "a change outside the source's fixtures" outside
+check take "the bump job's own patch of a re-record" rerecord honest
+check skip "an empty patch" nothing honest
+check refuse "a forged change outside the source's fixtures" outside
+check refuse "setup-npm's node_modules" rerecord
 check refuse "another source's fixture" other_source
 check refuse "another row's pin" wrong_row
 check refuse "a second pin" both_rows
@@ -398,5 +409,5 @@ check refuse "a file no decoder reads" not_data
 check refuse "a symlink" symlink
 check refuse "a mode change" mode
 check refuse "a binary" binary
-check refuse "a rename" renamed renames
-VERSION_OVERRIDE=0.2.1 check refuse "a pin other than the version plan named" rerecord
+check refuse "a rename" renamed renamed
+VERSION_OVERRIDE=0.2.1 check refuse "a pin other than the version plan named" rerecord honest
