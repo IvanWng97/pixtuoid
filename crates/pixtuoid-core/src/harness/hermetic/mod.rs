@@ -264,6 +264,7 @@ wire_api = "responses"
             ),
         ],
     },
+    // opencode's cites are at v2.0.28.
     Profile {
         source: "opencode",
         package: Package::Npm("@opencode/cli"),
@@ -280,13 +281,13 @@ wire_api = "responses"
             "{prompt}",
         ],
         // The models.dev fetch and the update check
-        // (`packages/cli/src/server-process.ts:113`, `services/updater.ts:459`).
+        // (`packages/cli/src/server-process.ts:113`, `services/updater.ts:534`).
         env: &[
             ("OPENCODE_DISABLE_MODELS_FETCH", "1"),
             ("OPENCODE_DISABLE_AUTOUPDATE", "1"),
         ],
         homes: &["OPENCODE_CONFIG_DIR"],
-        // System config and managed preferences, read from v2.0.28
+        // System config and managed preferences
         // (`packages/core/src/config/discovery.ts:27-38`).
         system_config: &[
             "/Library/Application Support/opencode",
@@ -294,8 +295,8 @@ wire_api = "responses"
             "/Library/Managed Preferences/ai.opencode.managed.plist",
             "/Library/Managed Preferences/{user}/ai.opencode.managed.plist",
         ],
-        // Project config up to `/` (`packages/core/src/config/discovery.ts:10`,
-        // `:36`); its AGENTS.md walk stops at the git worktree
+        // Project config up to `/` (`packages/core/src/config/discovery.ts:12`,
+        // `:80`); its AGENTS.md walk stops at the git worktree
         // (`config/plugin/instruction.ts:37`), the workspace the recorder inits.
         ancestor_config: &[
             ".claude",
