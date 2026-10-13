@@ -81,25 +81,30 @@ impl Capture {
     /// a scenario's transcript under its session directory, beside the hook
     /// payloads at the top.
     pub(crate) fn jsonl_files(&self) -> Vec<PathBuf> {
-        let mut files = Vec::new();
-        let mut pending = vec![self.dir.clone()];
-        while let Some(d) = pending.pop() {
-            for p in std::fs::read_dir(d)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|e| e.path())
-            {
-                if p.is_dir() {
-                    pending.push(p);
-                } else if p.extension().is_some_and(|x| x == "jsonl") {
-                    files.push(p);
-                }
+        jsonl_files_under(&self.dir)
+    }
+}
+
+/// Every `.jsonl` under `dir`, recursively, sorted.
+pub(crate) fn jsonl_files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(d) = pending.pop() {
+        for p in std::fs::read_dir(d)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+        {
+            if p.is_dir() {
+                pending.push(p);
+            } else if p.extension().is_some_and(|x| x == "jsonl") {
+                files.push(p);
             }
         }
-        files.sort();
-        files
     }
+    files.sort();
+    files
 }
 
 /// THE enumeration of committed captures under a `tests/sources` tree, from the

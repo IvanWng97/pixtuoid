@@ -144,6 +144,7 @@ mod run {
 
         let mut judged = Vec::new();
         for p in PROFILES {
+            let mut ran = Vec::new();
             for scenario in p.scenarios {
                 let name = scenario.shape.name();
                 if !args.selects(p.source, name) {
@@ -153,7 +154,7 @@ mod run {
                 std::fs::create_dir_all(&dir)?;
                 let key = format!("{}/{name}", p.source);
                 println!("== {key}");
-                let (cli, mut verdict) = match run_one(&ctx, p, scenario, &dir) {
+                let (cli, verdict) = match run_one(&ctx, p, scenario, &dir) {
                     Ok(manifest) => (Some(manifest.capture.version), verify::verify(&dir)?),
                     Err(e) => (
                         None,
@@ -163,12 +164,17 @@ mod run {
                         },
                     ),
                 };
-                // A merge gate never passes on "nothing ran".
-                if verdict.label == Label::Blocked && args.versions == Versions::Pinned {
-                    verdict.label = Label::Fail;
+                if verdict.label != Label::Blocked {
+                    ran.push(dir);
                 }
-                println!("   {:?}", verdict.label);
-                judged.push(Judged { key, cli, verdict });
+                judged.push(Judged::new(key, cli, verdict, args.versions));
+            }
+            // A selection of one scenario skips what spans them.
+            if args.scenario.is_none() && !ran.is_empty() {
+                let key = format!("{} (every scenario)", p.source);
+                println!("== {key}");
+                let verdict = verify::verify_source(p.source, &ran)?;
+                judged.push(Judged::new(key, None, verdict, args.versions));
             }
         }
         let report = report(args.versions, &judged);
@@ -182,9 +188,34 @@ mod run {
 
     struct Judged {
         key: String,
-        /// The CLI's `--version`, when it ran.
+        /// The CLI's `--version`, for a scenario's run.
         cli: Option<String>,
+        /// Whether anything was judged, Blocked being the verdict that judges nothing.
+        ran: bool,
         verdict: Verdict,
+    }
+
+    impl Judged {
+        fn new(key: String, cli: Option<String>, mut verdict: Verdict, versions: Versions) -> Self {
+            let ran = verdict.label != Label::Blocked;
+            println!("   {:?}", verdict.label);
+            verdict.label = gated(verdict.label, versions);
+            Self {
+                key,
+                cli,
+                ran,
+                verdict,
+            }
+        }
+    }
+
+    /// A merge gate never passes on "nothing ran": at the pinned versions, a CLI
+    /// that could not run fails.
+    fn gated(label: Label, versions: Versions) -> Label {
+        match (label, versions) {
+            (Label::Blocked, Versions::Pinned) => Label::Fail,
+            (l, _) => l,
+        }
     }
 
     fn report(versions: Versions, judged: &[Judged]) -> String {
@@ -197,10 +228,19 @@ mod run {
             Versions::Pinned => "verified",
             Versions::Latest => "latest",
         };
-        let mut out = format!("# hermetic, {which} CLIs: {worst:?}\n");
+        let title = if judged.iter().any(|j| j.ran) {
+            format!("{worst:?}")
+        } else {
+            "NOTHING RAN".to_owned()
+        };
+        let mut out = format!("# hermetic, {which} CLIs: {title}\n");
         for j in judged {
-            let cli = j.cli.as_deref().unwrap_or("did not run");
-            out += &format!("\n## {} ({cli}): {:?}\n", j.key, j.verdict.label);
+            let cli = j
+                .cli
+                .as_deref()
+                .map_or(String::new(), |c| format!(" ({c})"));
+            let ran = if j.ran { "" } else { ", did not run" };
+            out += &format!("\n## {}{cli}: {:?}{ran}\n", j.key, j.verdict.label);
             for (label, finding) in &j.verdict.findings {
                 out += &format!("- {label:?}: {finding}\n");
             }
@@ -651,32 +691,57 @@ mod run {
             assert!(parse(&args(&["codex", "tool-run", "extra"])).is_err());
         }
 
+        fn verdict(label: Label, finding: &str) -> Verdict {
+            Verdict {
+                label,
+                findings: vec![(label, finding.into())],
+            }
+        }
+
         #[test]
-        fn the_reports_title_is_the_worst_verdict() {
-            let judged = [
-                Judged {
-                    key: "codex/tool-run".into(),
-                    cli: Some("codex-cli 0.155.1".into()),
-                    verdict: Verdict {
-                        label: Label::Pass,
-                        findings: vec![],
-                    },
+        fn the_reports_title_is_the_worst_verdict_or_that_nothing_ran() {
+            let pass = Judged::new(
+                "codex/tool-run".into(),
+                Some("codex-cli 0.155.1".into()),
+                Verdict {
+                    label: Label::Pass,
+                    findings: vec![],
                 },
-                Judged {
-                    key: "opencode/tool-run".into(),
-                    cli: None,
-                    verdict: Verdict {
-                        label: Label::Blocked,
-                        findings: vec![(Label::Blocked, "npm view failed".into())],
-                    },
-                },
-            ];
-            let r = report(Versions::Latest, &judged);
+                Versions::Latest,
+            );
+            let blocked = || {
+                Judged::new(
+                    "opencode/tool-run".into(),
+                    None,
+                    verdict(Label::Blocked, "npm view failed"),
+                    Versions::Latest,
+                )
+            };
+            let r = report(Versions::Latest, &[pass, blocked()]);
             assert_eq!(r.lines().next(), Some("# hermetic, latest CLIs: Blocked"));
             assert!(r.contains(
-                "## opencode/tool-run (did not run): Blocked\n- Blocked: npm view failed"
+                "## opencode/tool-run: Blocked, did not run\n- Blocked: npm view failed"
             ));
             assert!(r.contains("## codex/tool-run (codex-cli 0.155.1): Pass"));
+            let r = report(Versions::Latest, &[blocked()]);
+            assert_eq!(
+                r.lines().next(),
+                Some("# hermetic, latest CLIs: NOTHING RAN")
+            );
+        }
+
+        #[test]
+        fn only_the_pinned_gate_fails_a_cli_that_could_not_run() {
+            assert_eq!(gated(Label::Blocked, Versions::Pinned), Label::Fail);
+            assert_eq!(gated(Label::Blocked, Versions::Latest), Label::Blocked);
+            assert_eq!(gated(Label::Stale, Versions::Pinned), Label::Stale);
+            let j = Judged::new(
+                "x".into(),
+                None,
+                verdict(Label::Blocked, "no npm"),
+                Versions::Pinned,
+            );
+            assert_eq!((j.verdict.label, j.ran), (Label::Fail, false));
         }
 
         #[test]

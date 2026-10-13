@@ -1,37 +1,43 @@
-//! Judging one hermetic run: the CLI's real bytes through the one pipeline
-//! (`Drive`), and the scene a headless pixtuoid painted from the same run.
-//! Ids, timestamps, token counts and model text change every run, so nothing
-//! here compares bytes or goldens: only shapes.
+//! Judging hermetic runs: each scenario's run alone ([`verify`]), and each
+//! source's runs together ([`verify_source`]). A run's bytes ride the one
+//! pipeline (`Drive`), and the scene a headless pixtuoid painted from the same
+//! run is read as text. Ids, timestamps and model text change every run, so
+//! nothing here compares bytes or goldens: only shapes, events and the fields
+//! a decoder reads.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use serde_json::Value;
 
 use super::{MANIFEST, Manifest, Profile, SCENE_LOG, Scenario, Shape, profile};
 use crate::AgentEvent;
-use crate::harness::{Drive, Driven, HOOK_PAYLOADS, Reach};
+use crate::harness::captures::jsonl_files_under;
+use crate::harness::reads::is_hook_envelope;
+use crate::harness::{Drive, Driven, HOOK_PAYLOADS, PROVENANCE, Reach, captures};
 
 /// The tracing target every drift breadcrumb rides (`source::drift::TARGET`).
 const BREADCRUMB_TARGET: &str = crate::source::drift::TARGET;
 
-/// A run's outcome, ordered by severity: a verdict is its worst finding.
+/// A verdict's outcome, ordered by severity: a verdict is its worst finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum Label {
     /// Every check held.
     Pass,
-    /// A hook in the profile's `not_yet` fired: good news, the list shrinks.
+    /// A `not_yet` hook fired or a `not_yet_fields` field was carried: good
+    /// news, the list shrinks.
     Stale,
     /// The CLI could not run (install, network, a login wall): not judged.
     Blocked,
     /// The CLI asked the model something no script line answers: its request
     /// flow changed upstream.
     Script,
-    /// pixtuoid read the run wrong.
+    /// pixtuoid read the run wrong, or upstream stopped sending what it reads.
     Fail,
 }
 
-/// One run's verdict.
+/// One verdict.
 #[derive(Debug)]
 pub struct Verdict {
     /// The worst finding's label.
@@ -40,7 +46,19 @@ pub struct Verdict {
     pub findings: Vec<(Label, String)>,
 }
 
-/// Judge the run in `dir`.
+impl Verdict {
+    fn of(mut findings: Vec<(Label, String)>) -> Self {
+        findings.sort_by_key(|f| std::cmp::Reverse(f.0));
+        let label = findings.first().map_or(Label::Pass, |f| f.0);
+        Self { label, findings }
+    }
+}
+
+fn invalid(message: String) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, message)
+}
+
+/// Judge one scenario's run in `dir`.
 ///
 /// # Errors
 ///
@@ -48,20 +66,164 @@ pub struct Verdict {
 /// profiled scenario.
 pub fn verify(dir: &Path) -> std::io::Result<Verdict> {
     let manifest: Manifest = serde_json::from_str(&std::fs::read_to_string(dir.join(MANIFEST))?)?;
-    let other = |m: String| std::io::Error::new(std::io::ErrorKind::InvalidData, m);
     let p = profile(&manifest.source)
-        .ok_or_else(|| other(format!("{}: not a profiled source", manifest.source)))?;
+        .ok_or_else(|| invalid(format!("{}: not a profiled source", manifest.source)))?;
     let scenario = p
         .scenarios
         .iter()
         .find(|s| s.shape.name() == manifest.scenario)
-        .ok_or_else(|| other(format!("{}: no scenario {}", p.source, manifest.scenario)))?;
+        .ok_or_else(|| invalid(format!("{}: no scenario {}", p.source, manifest.scenario)))?;
     let scene = std::fs::read_to_string(dir.join(SCENE_LOG)).unwrap_or_default();
     let mut findings = Vec::new();
     judge(p, scenario, &manifest, dir, &scene, &mut findings)?;
-    findings.sort_by_key(|f| std::cmp::Reverse(f.0));
-    let label = findings.first().map_or(Label::Pass, |f| f.0);
-    Ok(Verdict { label, findings })
+    Ok(Verdict::of(findings))
+}
+
+/// Judge `source`'s runs together, for what no one scenario owns: a `not_yet`
+/// hook any run fired is Stale, and the field census. A selection of one
+/// scenario skips this, so it never fails on a field another scenario carries.
+///
+/// The census takes every field a decoder reads in a committed capture of
+/// `source` (what the probe left unblanked, never a list), for each kind of
+/// line a run produced, and requires some run to carry it: a field upstream
+/// renamed or dropped fails here though the decoder still parses the line.
+/// A kind no run produced is the event checks' to judge.
+///
+/// # Errors
+///
+/// If a run's or a committed capture's file cannot be read, or `source` has no
+/// profile.
+pub fn verify_source(source: &str, dirs: &[PathBuf]) -> std::io::Result<Verdict> {
+    let p = profile(source).ok_or_else(|| invalid(format!("{source}: not a profiled source")))?;
+    let mut fired = BTreeSet::new();
+    let mut carried = Fields::new();
+    for dir in dirs {
+        for file in jsonl_files_under(dir) {
+            for line in json_lines(&file)? {
+                if is_hook_envelope(&file)
+                    && let Some(event) = (p.event_name)(&line)
+                {
+                    fired.insert(event.to_owned());
+                }
+                carried
+                    .entry(kind_of(p, &file, &line))
+                    .or_default()
+                    .extend(leaves(&line));
+            }
+        }
+    }
+    let mut findings = Vec::new();
+    for hook in p.not_yet {
+        if fired.contains(*hook) {
+            findings.push((
+                Label::Stale,
+                format!("{hook} fired: it leaves the profile's not_yet"),
+            ));
+        }
+    }
+    for (kind, paths) in committed_reads(p)? {
+        let Some(seen) = carried.get(&kind) else {
+            continue;
+        };
+        for path in paths {
+            let owed = p.not_yet_fields.contains(&(kind.as_str(), path.as_str()));
+            match (seen.contains(&path), owed) {
+                (true, true) => findings.push((
+                    Label::Stale,
+                    format!("{kind} {path} was carried: it leaves the profile's not_yet_fields"),
+                )),
+                (false, false) => findings.push((
+                    Label::Fail,
+                    format!(
+                        "{kind} {path}: a decoder reads it in a committed capture, \
+                         and no run of {source} carried it"
+                    ),
+                )),
+                _ => {}
+            }
+        }
+    }
+    Ok(Verdict::of(findings))
+}
+
+/// The non-blank leaves of each kind of line, as JSON pointers with `*` for
+/// an array index.
+pub(crate) type Fields = BTreeMap<String, BTreeSet<String>>;
+
+/// The fields a decoder reads in `p`'s committed captures: the recorder
+/// blanks every subtree no decoder reads (`reads::strip_unread`), so a
+/// stripped recording's non-blank leaves are exactly the read set. A capture
+/// not stripped (composed, or exempt) proves nothing about reads.
+pub(crate) fn committed_reads(p: &Profile) -> std::io::Result<Fields> {
+    let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources");
+    let mut reads = Fields::new();
+    for capture in captures(&corpus) {
+        if capture.source != p.source {
+            continue;
+        }
+        let record: Value =
+            serde_json::from_str(&std::fs::read_to_string(capture.dir.join(PROVENANCE))?)?;
+        if record["origin"] != "recorded" || record["deidentified"]["method"] != "decoder-allowlist"
+        {
+            continue;
+        }
+        for file in capture.jsonl_files() {
+            for line in json_lines(&file)? {
+                reads
+                    .entry(kind_of(p, &file, &line))
+                    .or_default()
+                    .extend(leaves(&line));
+            }
+        }
+    }
+    Ok(reads)
+}
+
+/// A line's kind: the hook event of an envelope, the `type` of a transcript
+/// line.
+fn kind_of(p: &Profile, file: &Path, line: &Value) -> String {
+    if is_hook_envelope(file) {
+        format!("hook:{}", (p.event_name)(line).unwrap_or("?"))
+    } else {
+        format!("tx:{}", line["type"].as_str().unwrap_or("?"))
+    }
+}
+
+/// Every leaf of `v` the probe would not call blank, by its pointer.
+fn leaves(v: &Value) -> Vec<String> {
+    fn walk(v: &Value, at: &str, out: &mut Vec<String>) {
+        match v {
+            Value::Object(m) => {
+                for (k, x) in m {
+                    walk(
+                        x,
+                        &format!("{at}/{}", k.replace('~', "~0").replace('/', "~1")),
+                        out,
+                    );
+                }
+            }
+            Value::Array(a) => {
+                for x in a {
+                    walk(x, &format!("{at}/*"), out);
+                }
+            }
+            Value::Null | Value::Bool(false) => {}
+            Value::String(s) if s.is_empty() => {}
+            Value::Number(n) if n.as_f64() == Some(0.0) => {}
+            _ => out.push(at.to_owned()),
+        }
+    }
+    let mut out = Vec::new();
+    walk(v, "", &mut out);
+    out
+}
+
+/// A file's lines that parse; the Drive reports the ones that don't.
+fn json_lines(file: &Path) -> std::io::Result<Vec<Value>> {
+    Ok(std::fs::read_to_string(file)?
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect())
 }
 
 fn judge(
@@ -93,10 +255,12 @@ fn judge(
         ));
     }
 
+    // Parsed here for the event name, and again by the Drive, which takes the
+    // wire as text: the one pipeline sees the bytes the CLI sent.
     let payloads = hook_lines(dir)?;
     let observed: BTreeSet<String> = payloads
         .iter()
-        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .filter_map(|v| (p.event_name)(&v).map(str::to_owned))
         .collect();
     for want in scenario.expects {
@@ -104,14 +268,6 @@ fn judge(
             findings.push((
                 Label::Fail,
                 format!("the scenario must fire {want}; it did not"),
-            ));
-        }
-    }
-    for n in p.not_yet {
-        if observed.contains(*n) {
-            findings.push((
-                Label::Stale,
-                format!("{n} fired: it leaves the profile's not_yet"),
             ));
         }
     }
@@ -134,7 +290,10 @@ fn judge(
     if !payloads.is_empty() {
         absorb(HOOK_PAYLOADS, Drive::hooks().lines(&payloads), findings);
     }
-    for t in transcripts(dir)? {
+    for t in jsonl_files_under(dir)
+        .into_iter()
+        .filter(|f| !is_hook_envelope(f))
+    {
         let Some(drive) = Drive::transcript_at(p.source, &t) else {
             continue;
         };
@@ -208,19 +367,32 @@ fn tool_run(
 }
 
 /// The scene a headless pixtuoid painted, and every drift breadcrumb it logged.
+/// The agent must be seen active, and gone once the CLI has exited: every
+/// profiled CLI's clean exit ends its sprite, whether by an end event or by its
+/// process's death, so one left standing is a session pixtuoid lost track of.
+/// The registry's `has_exit_signal` cannot predict this: it sets reaper policy,
+/// and codex's stays false though its exit ends the sprite (`registry.rs`).
 fn judge_scene(p: &Profile, scene: &str, findings: &mut Vec<(Label, String)>) {
-    let prefix = p.descriptor().label_prefix;
-    let active = scene.lines().any(|l| {
-        l.split("agents=[").nth(1).is_some_and(|agents| {
-            agents
-                .split(", ")
-                .any(|a| a.starts_with(&format!("{prefix}\u{b7}")) && a.contains(":active"))
-        })
-    });
-    if !active {
+    let prefix = format!("{}\u{b7}", p.descriptor().label_prefix);
+    let frames: Vec<&str> = scene
+        .lines()
+        .filter_map(|l| l.split_once("agents=[").map(|(_, agents)| agents))
+        .collect();
+    let shows = |frame: &str, active: bool| {
+        frame
+            .split(", ")
+            .any(|a| a.starts_with(&prefix) && (!active || a.contains(":active")))
+    };
+    if !frames.iter().any(|f| shows(f, true)) {
         findings.push((
             Label::Fail,
-            format!("the scene never showed a {prefix}\u{b7} agent active"),
+            format!("the scene never showed a {prefix} agent active"),
+        ));
+    }
+    if frames.last().is_some_and(|last| shows(last, false)) {
+        findings.push((
+            Label::Fail,
+            format!("the {prefix} agent was still in the scene after the CLI exited"),
         ));
     }
     for line in scene.lines().filter(|l| l.contains(BREADCRUMB_TARGET)) {
@@ -238,20 +410,6 @@ fn hook_lines(dir: &Path) -> std::io::Result<Vec<String>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(e) => Err(e),
     }
-}
-
-/// Every `.jsonl` under the run that is not the hook file: the transcripts the
-/// recorder harvested.
-fn transcripts(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let capture = crate::harness::Capture {
-        dir: dir.to_path_buf(),
-        source: String::new(),
-    };
-    Ok(capture
-        .jsonl_files()
-        .into_iter()
-        .filter(|f| f.file_name().and_then(|n| n.to_str()) != Some(HOOK_PAYLOADS))
-        .collect())
 }
 
 /// macOS's `/tmp` is `/private/tmp`: a CLI may report either.
@@ -274,12 +432,7 @@ mod tests {
             .join("tests/sources/fixtures")
             .join(source)
             .join(scenario_dir);
-        for f in (crate::harness::Capture {
-            dir: src.clone(),
-            source: source.into(),
-        })
-        .jsonl_files()
-        {
+        for f in jsonl_files_under(&src) {
             let to = d.path().join(f.strip_prefix(&src).expect("under"));
             std::fs::create_dir_all(to.parent().expect("parent")).expect("mkdir");
             std::fs::copy(&f, &to).expect("copy");
@@ -308,23 +461,36 @@ mod tests {
             .expect("write");
     }
 
-    fn edit_hooks(dir: &Path, mut f: impl FnMut(&mut serde_json::Value)) {
+    /// Rewrite every hook line; `None` drops it.
+    fn edit_hooks(dir: &Path, mut f: impl FnMut(Value) -> Option<Value>) {
         let path = dir.join(HOOK_PAYLOADS);
         let text = std::fs::read_to_string(&path).expect("read");
         let out: Vec<String> = text
             .lines()
-            .map(|l| {
-                let mut v: serde_json::Value = serde_json::from_str(l).expect("json");
-                f(&mut v);
-                v.to_string()
-            })
+            .filter_map(|l| f(serde_json::from_str(l).expect("json")))
+            .map(|v| v.to_string())
             .collect();
         std::fs::write(&path, out.join("\n") + "\n").expect("write");
     }
 
-    const CX_SCENE: &str =
-        "agents=[cx\u{b7}proj@0:active(Bash: cat NOTE.txt)]\nagents=[cx\u{b7}proj@0:idle]\n";
-    const CC_SCENE: &str = "agents=[cc\u{b7}proj@0:active(Read: NOTE.txt)]\n";
+    fn blank_transcripts(dir: &Path) {
+        for t in jsonl_files_under(dir)
+            .into_iter()
+            .filter(|f| !is_hook_envelope(f))
+        {
+            std::fs::write(&t, "").expect("blank");
+        }
+    }
+
+    fn has(v: &Verdict, label: Label, text: &str) -> bool {
+        v.findings
+            .iter()
+            .any(|f| f.0 == label && f.1.contains(text))
+    }
+
+    const CX_SCENE: &str = "agents=[cx\u{b7}proj@0:active(Bash: cat NOTE.txt)]\n\
+                            agents=[cx\u{b7}proj@0:idle]\nagents=[] daemons=[]\n";
+    const CC_SCENE: &str = "agents=[cc\u{b7}proj@0:active(Read: NOTE.txt)]\nagents=[] daemons=[]\n";
 
     #[test]
     fn a_recorded_codex_tool_run_passes() {
@@ -344,18 +510,17 @@ mod tests {
     fn a_session_id_that_splits_the_run_into_two_agents_fails() {
         let d = run_from("codex", "tool-run-recorded", CX_SCENE);
         let mut first = true;
-        edit_hooks(d.path(), |v| {
+        edit_hooks(d.path(), |mut v| {
             if std::mem::take(&mut first) {
                 v["session_id"] = "another-session".into();
             }
+            Some(v)
         });
-        let v = verify(d.path()).expect("verify");
-        assert_eq!(v.label, Label::Fail);
-        assert!(
-            v.findings.iter().any(|f| f.1.contains("ONE agent")),
-            "{:?}",
-            v.findings
-        );
+        assert!(has(
+            &verify(d.path()).expect("verify"),
+            Label::Fail,
+            "ONE agent"
+        ));
     }
 
     #[test]
@@ -366,31 +531,87 @@ mod tests {
         });
         let v = verify(d.path()).expect("verify");
         assert!(
-            v.findings
-                .iter()
-                .any(|f| f.1.contains("is not the workspace")),
+            has(&v, Label::Fail, "is not the workspace"),
             "{:?}",
             v.findings
         );
     }
 
     #[test]
-    fn a_tool_start_with_no_name_fails() {
+    fn a_run_with_no_session_start_fails() {
+        // Not codex: its UserPromptSubmit decodes to a SessionStart too.
+        let d = run_from("claude-code", "tool-run-recorded", CC_SCENE);
+        edit_hooks(d.path(), |v| {
+            (v["hook_event_name"] != "SessionStart").then_some(v)
+        });
+        blank_transcripts(d.path());
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "no SessionStart decoded"),
+            "{:?}",
+            v.findings
+        );
+    }
+
+    #[test]
+    fn a_tool_that_never_ends_fails() {
+        // Not codex: its Stop ends the activity too.
+        let d = run_from("claude-code", "tool-run-recorded", CC_SCENE);
+        edit_hooks(d.path(), |v| {
+            (v["hook_event_name"] != "PostToolUse").then_some(v)
+        });
+        blank_transcripts(d.path());
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "the tool never ended"),
+            "{:?}",
+            v.findings
+        );
+    }
+
+    #[test]
+    fn a_tool_start_with_no_name_fails_and_a_slot_with_no_tool_never_goes_active() {
         let d = run_from("claude-code", "tool-run-recorded", CC_SCENE);
         // Both transports name the tool, so both lose it.
-        edit_hooks(d.path(), |v| {
+        edit_hooks(d.path(), |mut v| {
             if v.get("tool_name").is_some() {
                 v["tool_name"] = "".into();
             }
+            Some(v)
         });
-        for t in transcripts(d.path()).expect("walk") {
-            std::fs::write(&t, "").expect("blank");
-        }
+        blank_transcripts(d.path());
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "detail naming the tool"),
+            "{:?}",
+            v.findings
+        );
+
+        edit_hooks(d.path(), |v| {
+            (v["hook_event_name"] != "PreToolUse").then_some(v)
+        });
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "never went Active"),
+            "{:?}",
+            v.findings
+        );
+    }
+
+    #[test]
+    fn a_line_the_decoder_rejects_fails() {
+        let d = run_from("codex", "tool-run-recorded", CX_SCENE);
+        edit_hooks(d.path(), |mut v| {
+            if v["hook_event_name"] == "PreToolUse" {
+                v["session_id"] = Value::Null;
+            }
+            Some(v)
+        });
         let v = verify(d.path()).expect("verify");
         assert!(
             v.findings
                 .iter()
-                .any(|f| f.1.contains("detail naming the tool")),
+                .any(|f| f.0 == Label::Fail && f.1.starts_with(HOOK_PAYLOADS)),
             "{:?}",
             v.findings
         );
@@ -399,20 +620,9 @@ mod tests {
     #[test]
     fn a_hook_the_scenario_expects_but_never_fired_fails() {
         let d = run_from("codex", "tool-run-recorded", CX_SCENE);
-        let path = d.path().join(HOOK_PAYLOADS);
-        let kept: Vec<String> = std::fs::read_to_string(&path)
-            .expect("read")
-            .lines()
-            .filter(|l| !l.contains("\"Stop\""))
-            .map(str::to_owned)
-            .collect();
-        std::fs::write(&path, kept.join("\n") + "\n").expect("write");
+        edit_hooks(d.path(), |v| (v["hook_event_name"] != "Stop").then_some(v));
         let v = verify(d.path()).expect("verify");
-        assert!(
-            v.findings.iter().any(|f| f.1.contains("must fire Stop")),
-            "{:?}",
-            v.findings
-        );
+        assert!(has(&v, Label::Fail, "must fire Stop"), "{:?}", v.findings);
     }
 
     #[test]
@@ -431,49 +641,98 @@ mod tests {
         let d = run_from(
             "codex",
             "tool-run-recorded",
-            "agents=[cx\u{b7}proj@0:idle]\n",
+            "agents=[cx\u{b7}proj@0:idle]\nagents=[]\n",
         );
         let v = verify(d.path()).expect("verify");
+        assert!(has(&v, Label::Fail, "never showed"), "{:?}", v.findings);
+    }
+
+    #[test]
+    fn an_agent_still_in_the_scene_after_the_cli_exited_fails() {
+        let scene =
+            "agents=[cx\u{b7}proj@0:active(Bash: cat NOTE.txt)]\nagents=[cx\u{b7}proj@0:idle]\n";
+        let d = run_from("codex", "tool-run-recorded", scene);
+        let v = verify(d.path()).expect("verify");
         assert!(
-            v.findings.iter().any(|f| f.1.contains("never showed")),
+            has(&v, Label::Fail, "after the CLI exited"),
             "{:?}",
             v.findings
         );
     }
 
     #[test]
-    fn a_drift_breadcrumb_in_the_scene_log_fails() {
-        let scene = format!(
-            "{CX_SCENE}WARN {BREADCRUMB_TARGET}: a field went missing source=codex kind=missing_field\n"
+    fn a_real_drift_breadcrumb_in_the_scene_log_fails() {
+        let breadcrumb = crate::test_capture::capture_logs(|| {
+            crate::source::drift::missing_field("codex", "PreToolUse", "tool_name");
+        });
+        let d = run_from(
+            "codex",
+            "tool-run-recorded",
+            &format!("{breadcrumb}{CX_SCENE}"),
         );
-        let d = run_from("codex", "tool-run-recorded", &scene);
         let v = verify(d.path()).expect("verify");
-        assert!(
-            v.findings
-                .iter()
-                .any(|f| f.1.starts_with("drift breadcrumb")),
-            "{:?}",
-            v.findings
-        );
+        assert!(has(&v, Label::Fail, "drift breadcrumb"), "{:?}", v.findings);
     }
 
     #[test]
-    fn a_not_yet_hook_that_fires_is_stale_not_fail() {
+    fn a_not_yet_hook_any_run_fires_is_stale() {
         let d = run_from("codex", "tool-run-recorded", CX_SCENE);
-        let path = d.path().join(HOOK_PAYLOADS);
-        let mut text = std::fs::read_to_string(&path).expect("read");
-        let first = text.lines().next().expect("a line").to_string();
-        let mut extra: serde_json::Value = serde_json::from_str(&first).expect("json");
-        extra["hook_event_name"] = "SubagentStart".into();
-        text.push_str(&format!("{extra}\n"));
-        std::fs::write(&path, text).expect("write");
-        let v = verify(d.path()).expect("verify");
+        let mut first = true;
+        edit_hooks(d.path(), |mut v| {
+            if std::mem::take(&mut first) {
+                v["hook_event_name"] = "SubagentStart".into();
+            }
+            Some(v)
+        });
+        let v = verify_source("codex", &[d.path().to_path_buf()]).expect("verify");
+        assert!(has(&v, Label::Stale, "SubagentStart"), "{:?}", v.findings);
+    }
+
+    #[test]
+    fn a_read_field_no_run_carries_fails_the_census() {
+        let d = run_from("claude-code", "tool-run-recorded", CC_SCENE);
+        edit_hooks(d.path(), |mut v| {
+            if let Some(name) = v.as_object_mut().and_then(|o| o.remove("tool_name")) {
+                v["toolName"] = name;
+            }
+            Some(v)
+        });
+        let v = verify_source("claude-code", &[d.path().to_path_buf()]).expect("verify");
         assert!(
-            v.findings
-                .iter()
-                .any(|f| f.0 == Label::Stale && f.1.contains("SubagentStart")),
+            has(&v, Label::Fail, "hook:PreToolUse /tool_name"),
             "{:?}",
             v.findings
         );
+    }
+
+    #[test]
+    fn a_not_yet_field_a_run_carries_is_stale() {
+        let d = run_from("claude-code", "tool-run-recorded", CC_SCENE);
+        edit_hooks(d.path(), |mut v| {
+            if v["hook_event_name"] == "SessionStart" {
+                v["model"] = "claude-test".into();
+            }
+            Some(v)
+        });
+        let v = verify_source("claude-code", &[d.path().to_path_buf()]).expect("verify");
+        assert!(
+            has(&v, Label::Stale, "hook:SessionStart /model"),
+            "{:?}",
+            v.findings
+        );
+    }
+
+    #[test]
+    fn a_leaf_is_blank_exactly_where_the_probe_neutralizes() {
+        let v = serde_json::json!({
+            "a": "", "b": 0, "c": false, "d": null, "e": [], "f": {},
+            "g": "x", "h": 1, "i": true, "j": [{"k": "y"}], "l/m": "z"
+        });
+        let got: BTreeSet<String> = leaves(&v).into_iter().collect();
+        let want: BTreeSet<String> = ["/g", "/h", "/i", "/j/*/k", "/l~1m"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(got, want);
     }
 }

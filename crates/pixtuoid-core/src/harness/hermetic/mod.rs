@@ -87,6 +87,10 @@ pub struct Profile {
     pub not_yet: &'static [&'static str],
     /// The hook event a captured payload is, in `registers()` terms.
     pub(crate) event_name: fn(&Value) -> Option<&str>,
+    /// Fields a decoder reads in a committed capture that no scenario carries
+    /// yet, as `(kind, path)` the field census names them. Shrink-only: a run
+    /// that carries one is Stale.
+    pub(crate) not_yet_fields: &'static [(&'static str, &'static str)],
 }
 
 impl Profile {
@@ -167,6 +171,18 @@ pub const PROFILES: &[Profile] = &[
             "SubagentStop",
         ],
         event_name: hook_event_name,
+        not_yet_fields: &[
+            // A Bash call's; the scripted turn reads a file.
+            ("hook:PreToolUse", "/tool_input/command"),
+            ("tx:assistant", "/message/content/*/input/command"),
+            // `claude -p` sends no model; the interactive TUI does
+            // (fixtures/claude-code/permission-recorded).
+            ("hook:SessionStart", "/model"),
+            // A subagent transcript's (fixtures/claude-code/subagent-recorded).
+            ("tx:assistant", "/attributionAgent"),
+            // aimock scripts only input and output tokens for Anthropic.
+            ("tx:assistant", "/message/usage/cache_creation_input_tokens"),
+        ],
     },
     Profile {
         source: "codex",
@@ -188,6 +204,7 @@ pub const PROFILES: &[Profile] = &[
             path: "config.toml",
             template: r#"model = "gpt-5.5"
 model_provider = "aimock"
+model_reasoning_effort = "high"
 
 [model_providers.aimock]
 name = "aimock"
@@ -209,14 +226,33 @@ wire_api = "responses"
         }],
         not_yet: &["SubagentStart", "SubagentStop", "PermissionRequest"],
         event_name: hook_event_name,
+        // aimock scripts only input and output tokens for the Responses API.
+        not_yet_fields: &[
+            (
+                "tx:event_msg",
+                "/payload/info/last_token_usage/cached_input_tokens",
+            ),
+            (
+                "tx:event_msg",
+                "/payload/info/last_token_usage/reasoning_output_tokens",
+            ),
+        ],
     },
     Profile {
         source: "opencode",
         package: Package::Npm("@opencode/cli"),
         // A plain `run` attaches to the background service, whose env never
         // carries the run's PIXTUOID_SOCKET; a private server inherits it
-        // (`packages/cli/src/services/standalone.ts:24-25`).
-        invocation: &["opencode", "run", "--standalone", "{prompt}"],
+        // (`packages/cli/src/services/standalone.ts:24-25`). Only an explicit
+        // `--model` reaches the session's events (`packages/cli/src/run/run.ts:91`).
+        invocation: &[
+            "opencode",
+            "run",
+            "--standalone",
+            "--model",
+            "openai/gpt-5.2",
+            "{prompt}",
+        ],
         env: &[],
         homes: &["OPENCODE_CONFIG_DIR"],
         config: &[ConfigFile {
@@ -251,6 +287,11 @@ wire_api = "responses"
             "permission.asked",
         ],
         event_name: type_field,
+        // A child session's (tests/sources/opencode/fixtures).
+        not_yet_fields: &[
+            ("hook:session.created", "/data/parentID"),
+            ("hook:session.execution.started", "/data/parentID"),
+        ],
     },
 ];
 
@@ -381,6 +422,20 @@ mod tests {
         };
         let p = profile("opencode").expect("profiled");
         assert_eq!(p.package, Package::Npm(package));
+    }
+
+    #[test]
+    fn every_not_yet_field_is_one_a_decoder_reads() {
+        for p in PROFILES {
+            let reads = verify::committed_reads(p).expect("the committed corpus reads");
+            for (kind, path) in p.not_yet_fields {
+                assert!(
+                    reads.get(*kind).is_some_and(|r| r.contains(*path)),
+                    "{}: no committed capture shows a decoder reading {kind} {path}",
+                    p.source
+                );
+            }
+        }
     }
 
     #[test]
