@@ -210,6 +210,9 @@ mod run {
         Ok(all_ran)
     }
 
+    /// The placeholder a `system_config` path takes the operator's user name in.
+    const USER_PLACEHOLDER: &str = "{user}";
+
     /// Where installs and runs live: `hermetic/` in the target dir this example
     /// was built into, which holds `<profile>/examples/hermetic`.
     fn tier_dir() -> std::io::Result<PathBuf> {
@@ -353,8 +356,6 @@ mod run {
     struct Sandbox {
         dir: tempfile::TempDir,
         env: Vec<(String, OsString)>,
-        /// The profile's env again, as `--env` pairs the recorder sets on the CLI.
-        cli_env: Vec<String>,
         sock: PathBuf,
     }
 
@@ -403,20 +404,14 @@ mod run {
                     .replace("{key}", DUMMY_KEY)
             };
             // Every child gets the profile's env, `connect`'s spawned CLI included;
-            // the CLI under test also gets it as `--env` (`cli_env`).
+            // the CLI under test also gets it as `--env` (`Sandbox::cli_env`).
             for (k, v) in p.env {
                 env.push(((*k).to_string(), expand(v).into()));
             }
-            let cli_env = p
-                .env
-                .iter()
-                .map(|(k, v)| format!("{k}={}", expand(v)))
-                .collect();
             let sandbox = Self {
                 sock: dir.path().join("pix.sock"),
                 dir,
                 env,
-                cli_env,
             };
             for c in p.config {
                 let home = sandbox.var(c.home).ok_or_else(|| {
@@ -432,6 +427,18 @@ mod run {
                 std::fs::write(&file, expand(c.template))?;
             }
             Ok(sandbox)
+        }
+
+        /// The profile's pairs as this sandbox holds them, for the recorder to
+        /// set on the CLI as `--env`.
+        fn cli_env(&self, p: &Profile) -> Vec<String> {
+            p.env
+                .iter()
+                .filter_map(|(k, _)| {
+                    self.var_os(k)
+                        .map(|v| format!("{k}={}", v.to_string_lossy()))
+                })
+                .collect()
         }
 
         fn var(&self, key: &str) -> Option<PathBuf> {
@@ -492,6 +499,9 @@ mod run {
             p.system_config,
             p.ancestor_config,
             Path::new(CAPTURE_WORKSPACE),
+            std::env::var_os("USER")
+                .as_deref()
+                .and_then(std::ffi::OsStr::to_str),
         ) {
             return Err(std::io::Error::other(format!(
                 "{} configures {} from outside the sandbox",
@@ -548,7 +558,7 @@ mod run {
                 dir,
                 &sandbox.sock,
                 sandbox.dir.path(),
-                &sandbox.cli_env,
+                &sandbox.cli_env(p),
                 p,
                 scenario,
             ))
@@ -594,14 +604,15 @@ mod run {
     }
 
     /// Config a CLI would read that no sandbox home redirects: one of
-    /// `system_config`'s paths, or one of `ancestor_config` in an ancestor of
-    /// `workspace`, which need not exist yet. An ancestor may be a symlink
-    /// (macOS's `/tmp`), so the ancestors of the nearest existing one's target
-    /// count too.
+    /// `system_config`'s paths, its `{user}` the operator's (unchecked with
+    /// none), or one of `ancestor_config` in an ancestor of `workspace`, which
+    /// need not exist yet. An ancestor may be a symlink (macOS's `/tmp`), so
+    /// the ancestors of the nearest existing one's target count too.
     fn outside_config(
         system_config: &[&str],
         ancestor_config: &[&str],
         workspace: &Path,
+        user: Option<&str>,
     ) -> Option<PathBuf> {
         let lexical = workspace.ancestors().skip(1);
         let real = lexical
@@ -613,11 +624,12 @@ mod run {
         let inherited = ancestors
             .iter()
             .flat_map(|dir| ancestor_config.iter().map(move |name| dir.join(name)));
-        system_config
-            .iter()
-            .map(PathBuf::from)
-            .chain(inherited)
-            .find(|path| path.exists())
+        let system = system_config.iter().filter_map(|path| match user {
+            _ if !path.contains(USER_PLACEHOLDER) => Some(PathBuf::from(path)),
+            Some(name) => Some(PathBuf::from(path.replace(USER_PLACEHOLDER, name))),
+            None => None,
+        });
+        system.chain(inherited).find(|path| path.exists())
     }
 
     /// The recorder's command line for one run: the raw capture into `dir`,
@@ -735,10 +747,10 @@ mod run {
             // The workspace and its parent don't exist yet, as on a clean runner.
             let workspace = d.path().join("alias/capture/proj");
             let names = &["hermetic-probe.md"];
-            assert_eq!(outside_config(&[], names, &workspace), None);
+            assert_eq!(outside_config(&[], names, &workspace, None), None);
             let planted = d.path().join("real/hermetic-probe.md");
             std::fs::write(&planted, "").expect("plant");
-            let found = outside_config(&[], names, &workspace).expect("found");
+            let found = outside_config(&[], names, &workspace, None).expect("found");
             assert_eq!(
                 std::fs::canonicalize(found).ok(),
                 std::fs::canonicalize(&planted).ok()
@@ -746,14 +758,33 @@ mod run {
             let system = d.path().join("etc-cli");
             let listed = system.to_str().expect("utf-8");
             assert_eq!(
-                outside_config(&[listed], &[], &workspace),
+                outside_config(&[listed], &[], &workspace, None),
                 None,
                 "listed but absent"
             );
             std::fs::create_dir(&system).expect("mkdir");
             assert_eq!(
-                outside_config(&[listed], &[], &workspace),
+                outside_config(&[listed], &[], &workspace, None),
                 Some(PathBuf::from(listed))
+            );
+            // A per-user path, as the operator's name fills it.
+            let per_user = d.path().join("prefs/alice/managed.plist");
+            std::fs::create_dir_all(per_user.parent().expect("parent")).expect("mkdir");
+            std::fs::write(&per_user, "").expect("plant");
+            let pattern = d.path().join("prefs/{user}/managed.plist");
+            let pattern = pattern.to_str().expect("utf-8");
+            assert_eq!(
+                outside_config(&[pattern], &[], &workspace, Some("alice")),
+                Some(per_user)
+            );
+            assert_eq!(
+                outside_config(&[pattern], &[], &workspace, Some("bob")),
+                None
+            );
+            assert_eq!(
+                outside_config(&[pattern], &[], &workspace, None),
+                None,
+                "no user: unchecked"
             );
         }
 
@@ -806,11 +837,6 @@ mod run {
                         sandbox.var_os(k),
                         Some(&OsString::from(&want)),
                         "{}: {k} misses `connect`'s children",
-                        p.source
-                    );
-                    assert!(
-                        sandbox.cli_env.contains(&format!("{k}={want}")),
-                        "{}: {k}",
                         p.source
                     );
                 }

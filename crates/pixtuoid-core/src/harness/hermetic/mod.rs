@@ -76,8 +76,9 @@ pub struct Profile {
     /// Homes the registry row does not name, each pointed into the sandbox.
     pub homes: &'static [&'static str],
     /// Fixed system paths the CLI reads policy or config from, which no home
-    /// redirects: a run on a machine that has one is not hermetic. A macOS MDM
-    /// managed-preferences domain is not checked: its docs give no path.
+    /// redirects: a run on a machine that has one is not hermetic. `{user}`
+    /// is the operator's user name. A macOS managed-preferences domain whose
+    /// plist path upstream does not fix is not checked.
     pub system_config: &'static [&'static str],
     /// Names the CLI reads from the workspace's ancestor directories, which
     /// sit outside the sandbox: a run under one that has any is not hermetic.
@@ -234,7 +235,14 @@ wire_api = "responses"
             ("OPENCODE_DISABLE_AUTOUPDATE", "1"),
         ],
         homes: &["OPENCODE_CONFIG_DIR"],
-        system_config: &[],
+        // System config and managed preferences, read from v2.0.28
+        // (`packages/core/src/config/discovery.ts:27-38`).
+        system_config: &[
+            "/Library/Application Support/opencode",
+            "/etc/opencode",
+            "/Library/Managed Preferences/ai.opencode.managed.plist",
+            "/Library/Managed Preferences/{user}/ai.opencode.managed.plist",
+        ],
         // Project config up to `/` (`packages/core/src/config/discovery.ts:10`,
         // `:36`); its AGENTS.md walk stops at the git worktree
         // (`config/plugin/instruction.ts:37`), the workspace the recorder inits.
