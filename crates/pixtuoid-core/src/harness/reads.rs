@@ -145,7 +145,7 @@ pub fn strip_corpus(root: &Path, mut report: impl FnMut(&Capture, &Strip)) -> st
     for capture in captures(root) {
         let prov = capture.dir.join(crate::harness::PROVENANCE);
         let mut record: Value = serde_json::from_str(&std::fs::read_to_string(&prov)?)?;
-        if record["origin"] != "recorded" || record["deidentified"]["method"] == "none" {
+        if !strips(&record) {
             continue;
         }
         let files = capture.jsonl_files();
@@ -240,6 +240,36 @@ fn events_of(source: &str, drive: &Drive, lines: &[Value]) -> Decoded {
     )
 }
 
+/// Whether the strip applies to a capture with this provenance: a recording
+/// not declared exempt, whose committed bytes then hold only what a decoder
+/// reads.
+pub(crate) fn strips(record: &Value) -> bool {
+    record["origin"] == "recorded" && record["deidentified"]["method"] != "none"
+}
+
+/// What blanking writes over `node`: its type's empty value, `None` for a
+/// null, which has none.
+pub(crate) fn neutral_of(node: &Value) -> Option<Value> {
+    Some(match node {
+        Value::Null => return None,
+        Value::Bool(_) => Value::Bool(false),
+        Value::Number(_) => Value::from(0),
+        Value::String(_) => Value::String(String::new()),
+        Value::Array(_) => Value::Array(Vec::new()),
+        Value::Object(_) => Value::Object(serde_json::Map::new()),
+    })
+}
+
+/// Whether blanking would leave `node` as it is.
+pub(crate) fn is_blank(node: &Value) -> bool {
+    neutral_of(node).is_none_or(|n| n == *node)
+}
+
+/// The JSON pointer to `key` under `at`, escaped (RFC 6901).
+pub(crate) fn child_pointer(at: &str, key: &str) -> String {
+    format!("{at}/{}", key.replace('~', "~0").replace('/', "~1"))
+}
+
 /// A hook envelope's top-level `_` keys are the shim's stamps, kept by namespace:
 /// `_shim_ts_ms` is read by no decoder, only by `tests/sources/captures.rs`,
 /// which dates a capture by it.
@@ -255,17 +285,12 @@ fn probe(
     let Some(node) = lines[i].pointer(at) else {
         return 0;
     };
-    let neutral = match node {
-        Value::Null => return 0,
-        Value::Bool(_) => Value::Bool(false),
-        Value::Number(_) => Value::from(0),
-        Value::String(_) => Value::String(String::new()),
-        Value::Array(_) => Value::Array(Vec::new()),
-        Value::Object(_) => Value::Object(serde_json::Map::new()),
-    };
-    if *node == neutral {
+    if is_blank(node) {
         return 0;
     }
+    let Some(neutral) = neutral_of(node) else {
+        return 0;
+    };
     let Some(slot) = lines[i].pointer_mut(at) else {
         return 0;
     };
@@ -278,7 +303,7 @@ fn probe(
         Value::Object(m) => m
             .keys()
             .filter(|k| !(stamped && at.is_empty() && k.starts_with('_')))
-            .map(|k| format!("{at}/{}", k.replace('~', "~0").replace('/', "~1")))
+            .map(|k| child_pointer(at, k))
             .collect(),
         _ => Vec::new(),
     };

@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::{MANIFEST, Manifest, Profile, SCENE_LOG, Scenario, Shape, profile};
 use crate::AgentEvent;
 use crate::harness::captures::jsonl_files_under;
-use crate::harness::reads::is_hook_envelope;
+use crate::harness::reads::{child_pointer, is_blank, is_hook_envelope, strips};
 use crate::harness::{Drive, Driven, HOOK_PAYLOADS, PROVENANCE, Reach, captures};
 
 /// The tracing target every drift breadcrumb rides (`source::drift::TARGET`).
@@ -169,8 +169,7 @@ pub(crate) fn committed_reads(p: &Profile) -> std::io::Result<Fields> {
         }
         let record: Value =
             serde_json::from_str(&std::fs::read_to_string(capture.dir.join(PROVENANCE))?)?;
-        if record["origin"] != "recorded" || record["deidentified"]["method"] != "decoder-allowlist"
-        {
+        if !strips(&record) {
             continue;
         }
         for file in capture.jsonl_files() {
@@ -195,17 +194,17 @@ fn kind_of(p: &Profile, file: &Path, line: &Value) -> String {
     }
 }
 
-/// Every leaf of `v` the probe would not call blank, by its pointer.
+/// Every leaf of `v` the strip would not blank (`reads::is_blank`), by its
+/// pointer with `*` for an array index.
 fn leaves(v: &Value) -> Vec<String> {
     fn walk(v: &Value, at: &str, out: &mut Vec<String>) {
+        if is_blank(v) {
+            return;
+        }
         match v {
             Value::Object(m) => {
                 for (k, x) in m {
-                    walk(
-                        x,
-                        &format!("{at}/{}", k.replace('~', "~0").replace('/', "~1")),
-                        out,
-                    );
+                    walk(x, &child_pointer(at, k), out);
                 }
             }
             Value::Array(a) => {
@@ -213,9 +212,6 @@ fn leaves(v: &Value) -> Vec<String> {
                     walk(x, &format!("{at}/*"), out);
                 }
             }
-            Value::Null | Value::Bool(false) => {}
-            Value::String(s) if s.is_empty() => {}
-            Value::Number(n) if n.as_f64() == Some(0.0) => {}
             _ => out.push(at.to_owned()),
         }
     }
@@ -743,14 +739,19 @@ mod tests {
     #[test]
     fn a_leaf_is_blank_exactly_where_the_probe_neutralizes() {
         let v = serde_json::json!({
-            "a": "", "b": 0, "c": false, "d": null, "e": [], "f": {},
-            "g": "x", "h": 1, "i": true, "j": [{"k": "y"}], "l/m": "z"
+            "s": "x", "n": 1, "f": 0.0, "b": true, "a": [{"k": "y"}], "l/m": "z", "z": null
         });
         let got: BTreeSet<String> = leaves(&v).into_iter().collect();
-        let want: BTreeSet<String> = ["/g", "/h", "/i", "/j/*/k", "/l~1m"]
+        let want: BTreeSet<String> = ["/s", "/n", "/f", "/b", "/a/*/k", "/l~1m"]
             .into_iter()
             .map(String::from)
             .collect();
-        assert_eq!(got, want);
+        assert_eq!(got, want, "0.0 is a value: the probe neutralizes it to 0");
+        // What the probe writes over each leaf is blank to the census.
+        for (_, x) in v.as_object().expect("an object") {
+            if let Some(neutral) = crate::harness::reads::neutral_of(x) {
+                assert!(leaves(&neutral).is_empty(), "{neutral}");
+            }
+        }
     }
 }
