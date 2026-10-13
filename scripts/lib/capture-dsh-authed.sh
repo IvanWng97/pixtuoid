@@ -7,6 +7,9 @@
 # DSH_HOME stays the fixed generic dir so every captured path ships unredacted.
 set -uo pipefail
 
+# The CLI the recorder asks its version (`CLI_ENV`, capture_fixture.rs).
+[[ -z ${PIXTUOID_CAPTURE_CLI:-} ]] || echo dsh >"$PIXTUOID_CAPTURE_CLI"
+
 if [[ -z ${DEEPSEEK_API_KEY:-} ]]; then
     echo "capture-dsh-authed: export DEEPSEEK_API_KEY first (a real, billed turn)" >&2
     exit 1

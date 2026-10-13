@@ -40,13 +40,8 @@ if [[ ! -x $bin_dir/package/bin/opencode ]]; then
 fi
 oc() { "$bin_dir/package/bin/opencode" "$@"; }
 
-# The recorder probes `<driver> --version` for provenance, from its own cwd:
-# answer with the driven CLI's before any side effect, or the probe reruns the
-# whole session there.
-if [[ ${1:-} == --version ]]; then
-    oc --version
-    exit
-fi
+# The CLI the recorder asks its version (`CLI_ENV`, capture_fixture.rs).
+[[ -z ${PIXTUOID_CAPTURE_CLI:-} ]] || echo "$bin_dir/package/bin/opencode" >"$PIXTUOID_CAPTURE_CLI"
 
 # The plugin loads from a private config dir, so the operator's own opencode
 # config and plugin stay untouched.

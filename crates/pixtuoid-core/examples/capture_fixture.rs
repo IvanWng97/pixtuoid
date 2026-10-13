@@ -48,6 +48,10 @@ mod recorder {
     /// already generic is what keeps a per-run path out of the bytes.
     const WORKSPACE: &str = "/tmp/pixtuoid-capture/proj";
 
+    /// Where a driver names the CLI it drives, a command or the path to its
+    /// binary, for the recorder to ask its `--version`.
+    const CLI_ENV: &str = "PIXTUOID_CAPTURE_CLI";
+
     /// A hook can still be in flight when the CLI's own process exits, so the wait
     /// is measured from the LAST PAYLOAD rather than from that exit.
     const SETTLE: Duration = Duration::from_millis(500);
@@ -127,9 +131,11 @@ mod recorder {
             Some(why) => Deidentified::Exempt(why),
             None => Deidentified::Stripped(strip_unread(&source, &wrote)?),
         };
+        let named = std::fs::read_to_string(named_cli(&sock)).ok();
+        let (cli, version) = identity(&cmd[0], named.as_deref(), probe_version);
         write_provenance(
             &dest,
-            &cmd,
+            (&cli, &version),
             &args[2..],
             &deidentified,
             &[
@@ -355,6 +361,7 @@ mod recorder {
         if let Some(dir) = sock.parent() {
             c.env("TUIDRIVE_LOG", dir.join("tuidrive.log"));
         }
+        c.env(CLI_ENV, named_cli(sock));
         for k in agent_env_names(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok())) {
             c.env_remove(k);
         }
@@ -373,29 +380,55 @@ mod recorder {
         Ok(out)
     }
 
-    fn write_provenance(
-        dest: &Path,
-        cmd: &[String],
-        raw: &[String],
-        deidentified: &Deidentified,
-        overrides: &[(&str, Option<String>)],
-    ) -> std::io::Result<()> {
-        let cli = Path::new(&cmd[0])
+    /// Beside the socket, in this run's private sandbox.
+    fn named_cli(sock: &Path) -> PathBuf {
+        sock.with_file_name("cli")
+    }
+
+    /// The CLI a capture ran, and its version, asked of that CLI alone: a
+    /// command named by a path is a driver, which `--version` would run whole,
+    /// billed and outside the sandbox, so only the CLI it names at [`CLI_ENV`]
+    /// is asked.
+    fn identity(
+        cmd0: &str,
+        named: Option<&str>,
+        probe: impl FnOnce(&str) -> Option<String>,
+    ) -> (String, String) {
+        let cli = named
+            .and_then(|n| n.lines().next())
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .or_else(|| (!cmd0.contains('/')).then_some(cmd0));
+        let name = Path::new(cli.unwrap_or(cmd0))
             .file_name()
             .and_then(|s| s.to_str())
-            .unwrap_or("unknown");
-        let version = std::process::Command::new(&cmd[0])
+            .unwrap_or("unknown")
+            .to_owned();
+        let version = cli.and_then(probe).unwrap_or_else(|| "unknown".into());
+        (name, version)
+    }
+
+    fn probe_version(cli: &str) -> Option<String> {
+        std::process::Command::new(cli)
             .arg("--version")
             .output()
             .ok()
             .filter(|o| o.status.success())
             .and_then(|o| String::from_utf8(o.stdout).ok())
-            .and_then(|s| s.lines().next().map(str::to_string))
-            .unwrap_or_else(|| "unknown".into());
+            .and_then(|s| s.lines().next().map(|l| l.trim().to_owned()))
+    }
+
+    fn write_provenance(
+        dest: &Path,
+        (cli, version): (&str, &str),
+        raw: &[String],
+        deidentified: &Deidentified,
+        overrides: &[(&str, Option<String>)],
+    ) -> std::io::Result<()> {
         let mut prov = serde_json::json!({
             "origin": "recorded",
             "cli": cli,
-            "version": version.trim(),
+            "version": version,
             "captured": today(),
             "command": raw.join(" "),
             "deidentified": deidentified.record(),
@@ -411,13 +444,12 @@ mod recorder {
         }
         let out = no_clobber(dest.join("provenance.json"));
         std::fs::write(&out, format!("{}\n", serde_json::to_string_pretty(&prov)?))?;
-        // Keyed on the probe's outcome, not the name: a pty driver is `python3` and
-        // passes a name test. Loud, because the record just written is unusable.
-        if version.trim() == "unknown" {
+        // Loud, because the record just written is unusable.
+        if version == "unknown" {
             eprintln!(
                 "WARNING: {} records version \"unknown\" — `{cli} --version` did not \
-                 answer (a driver script cannot probe the CLI it drives). Fix `cli` and \
-                 `version` by hand before committing, or the anchor gate skips this source.",
+                 answer, or a driver named no CLI at ${CLI_ENV}. Fix `cli` and `version` \
+                 by hand before committing, or the anchor gate skips this source.",
                 out.display()
             );
         }
@@ -1439,7 +1471,7 @@ mod recorder {
             let bare = tempfile::tempdir().expect("tempdir");
             write_provenance(
                 bare.path(),
-                &argv,
+                ("true", "1.0"),
                 &argv,
                 &Deidentified::Stripped(0),
                 &[("prompt", None)],
@@ -1450,7 +1482,7 @@ mod recorder {
             let set = tempfile::tempdir().expect("tempdir");
             write_provenance(
                 set.path(),
-                &argv,
+                ("true", "1.0"),
                 &argv,
                 &Deidentified::Stripped(0),
                 &[("prompt", Some("read NOTE.txt".into()))],
@@ -1471,6 +1503,64 @@ mod recorder {
 
             assert!(dst.path().join(".claude/settings.json").is_file());
             assert!(dst.path().join("opencode.json").is_file());
+        }
+
+        /// A driver is never run for a version: `--version` would run the whole
+        /// capture again. The CLI it names is asked instead, and a bare command
+        /// is the CLI itself.
+        #[test]
+        fn only_the_cli_is_asked_its_version_never_its_driver() {
+            let asked = std::cell::RefCell::new(Vec::new());
+            let probe = |c: &str| {
+                asked.borrow_mut().push(c.to_owned());
+                Some(format!("{c} 1.0"))
+            };
+            let driver = "scripts/lib/capture-x.sh";
+            assert_eq!(
+                identity(driver, Some("dsh\n"), probe),
+                ("dsh".into(), "dsh 1.0".into())
+            );
+            assert_eq!(
+                identity(driver, Some("/tmp/oc/package/bin/opencode\n"), probe),
+                ("opencode".into(), "/tmp/oc/package/bin/opencode 1.0".into())
+            );
+            assert_eq!(
+                identity(driver, None, probe),
+                ("capture-x.sh".into(), "unknown".into())
+            );
+            assert_eq!(
+                identity("claude", None, probe),
+                ("claude".into(), "claude 1.0".into())
+            );
+            assert_eq!(
+                identity("grok", None, |_| None),
+                ("grok".into(), "unknown".into())
+            );
+            assert_eq!(
+                *asked.borrow(),
+                ["dsh", "/tmp/oc/package/bin/opencode", "claude"]
+            );
+        }
+
+        /// The recorder's env name crosses into every driver, each a copy a rename
+        /// would strand: its capture would then record version "unknown".
+        #[test]
+        fn every_driver_names_its_cli_where_the_recorder_reads_it() {
+            let lib = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/lib");
+            let mut drivers = 0;
+            for entry in std::fs::read_dir(&lib).expect("scripts/lib") {
+                let path = entry.expect("an entry").path();
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default();
+                if name.starts_with("capture-") || name == "tuidrive.py" {
+                    drivers += 1;
+                    let text = std::fs::read_to_string(&path).expect("a driver");
+                    assert!(text.contains(CLI_ENV), "{name} names no CLI at ${CLI_ENV}");
+                }
+            }
+            assert!(drivers > 0, "scripts/lib holds the drivers");
         }
 
         #[test]

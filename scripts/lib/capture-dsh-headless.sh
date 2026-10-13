@@ -9,6 +9,9 @@
 # the release shim baked (the shim honors the recorder's PIXTUOID_SOCKET).
 set -uo pipefail
 
+# The CLI the recorder asks its version (`CLI_ENV`, capture_fixture.rs).
+[[ -z ${PIXTUOID_CAPTURE_CLI:-} ]] || echo dsh >"$PIXTUOID_CAPTURE_CLI"
+
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 export DSH_HOME=/tmp/pixtuoid-capture/dsh-home
 rm -rf "$DSH_HOME"

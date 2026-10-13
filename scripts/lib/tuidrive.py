@@ -163,6 +163,10 @@ def main() -> int:
     if len(sys.argv) < 3:
         sys.exit('usage: tuidrive.py "<prompt>" <cmd> [args...]  |  --selftest')
     prompt, cmd = sys.argv[1], sys.argv[2:]
+    # The CLI the recorder asks its version (`CLI_ENV`, capture_fixture.rs).
+    if os.environ.get("PIXTUOID_CAPTURE_CLI"):
+        with open(os.environ["PIXTUOID_CAPTURE_CLI"], "w") as f:
+            f.write(cmd[0] + "\n")
     deny_from = int(os.environ["DENY_FROM"]) if os.environ.get("DENY_FROM") else None
     # The recorder points this into its private 0700 dir; a fixed shared-temp
     # name is both clobberable and symlink-followable.
