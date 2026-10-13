@@ -758,6 +758,15 @@ live-sources *ids:
 replay fixture delay="3":
     scripts/lib/tier-replay.sh "$@"
 
+# Two builds: one would unify the examples' `harness` feature into the binary
+# under test.
+[doc('Run each profiled agent CLI against a scripted model (aimock) and judge what pixtuoid made of it')]
+[group('rust')]
+hermetic *args:
+    cargo build --release -q -p pixtuoid -p pixtuoid-hook
+    cargo build --release -q -p pixtuoid-core --example hermetic --example capture_fixture
+    target/release/examples/hermetic "$@"
+
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug
 #   just build --release                      # release

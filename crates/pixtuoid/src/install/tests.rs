@@ -37,7 +37,6 @@ static FAKE: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
-    #[cfg(feature = "upstream")]
     registers: Vec::new,
 };
 
@@ -81,7 +80,6 @@ static FAKE2: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
-    #[cfg(feature = "upstream")]
     registers: Vec::new,
 };
 
@@ -114,7 +112,6 @@ static FAKE_DIR: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
-    #[cfg(feature = "upstream")]
     registers: Vec::new,
 };
 
@@ -147,7 +144,6 @@ static FAKE_NO_HOME: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
-    #[cfg(feature = "upstream")]
     registers: Vec::new,
 };
 

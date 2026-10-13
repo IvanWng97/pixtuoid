@@ -1,0 +1,57 @@
+name: hermetic-nightly
+
+# The drift watch: each profiled CLI's latest release against the scripted
+# model, where a CLI that renamed or reshaped what pixtuoid reads turns a
+# verdict red before a user upgrades into it.
+
+on:
+  schedule:
+    - cron: "23 7 * * *" # daily 07:23 UTC
+  workflow_dispatch:
+permissions: {}
+
+jobs:
+  drift:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/hermetic.yml
+    with:
+      full: true
+      cli: latest
+
+  file:
+    name: file the hermetic report
+    needs: drift
+    if: ${{ always() && needs.drift.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: hermetic-runs-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Open or update tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh label create hermetic --color FBCA04 \
+            --description "A hermetic run's verdict on an agent CLI's latest release" 2>/dev/null || true
+          # The orchestrator owns the title, as the report's H1, and it carries
+          # the disposition: retitle on the dedup path too. No report.md means
+          # the tier itself could not run: red, with no verdict to file.
+          title=$(head -1 report.md | sed 's/^# //')
+          num=$(gh issue list --label hermetic --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh issue edit "$num" --title "$title"
+            gh issue comment "$num" --body-file report.md
+          else
+            gh issue create --title "$title" --label hermetic --body-file report.md
+          fi
+
+      - name: Fail the run on any finding
+        run: exit 1
