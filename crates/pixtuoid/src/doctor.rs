@@ -360,7 +360,10 @@ pub(crate) fn version_cmp(
 /// The version a skew verdict compared — for the `versions` category, where
 /// showing the two COMPARED values beats echoing a raw banner.
 fn parsed_version_display(s: &str, hyphen: Hyphen) -> Option<String> {
-    registry::parse_version(s, hyphen).map(|v| v.to_string())
+    registry::parse_version(s, hyphen).map(|mut v| {
+        v.build = semver::BuildMetadata::EMPTY;
+        v.to_string()
+    })
 }
 
 /// How the row's CLI writes a `-` in its version.
@@ -2524,6 +2527,19 @@ mod tests {
             cmp(Some("0.2.0-rc.2"), "0.2.0"),
             Some(Ordering::Less),
             "a prerelease runs below its release"
+        );
+    }
+
+    #[test]
+    fn the_versions_row_shows_only_what_was_compared() {
+        assert_eq!(
+            parsed_version_display("2026.10.02-abc1234", Hyphen::Build).as_deref(),
+            Some("2026.10.2"),
+            "a build id no comparison reads is not shown"
+        );
+        assert_eq!(
+            parsed_version_display("0.2.0-rc.3", Hyphen::Prerelease).as_deref(),
+            Some("0.2.0-rc.3")
         );
     }
 
