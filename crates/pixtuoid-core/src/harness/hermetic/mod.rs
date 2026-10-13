@@ -411,8 +411,10 @@ mod tests {
     #[test]
     fn an_unsandboxed_path_is_absolute_and_an_ancestor_name_is_one_component() {
         for p in PROFILES {
+            // Unix paths, as the tier runs only on Unix: `Path::is_absolute`
+            // would want a drive on Windows.
             for path in p.unsandboxed {
-                assert!(Path::new(path).is_absolute(), "{}: {path}", p.source);
+                assert!(path.starts_with('/'), "{}: {path}", p.source);
             }
             for name in p.ancestor_config {
                 assert_eq!(
