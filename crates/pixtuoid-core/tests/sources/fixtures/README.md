@@ -84,8 +84,7 @@ beside it for the `.new` no-clobber rule to protect.
 **Re-recording an existing scenario needs a hand.** The recorder never
 overwrites committed bytes — it writes `<name>.new` beside them, so a re-record
 can be diffed rather than trusted. Nothing READS a `.new`: `conformance.rs` walks
-`*.jsonl` and opens `provenance.json` by exact name, and `fixture-age.py`
-rglobs the same. So a re-record that you do not promote costs a billed turn and
+`*.jsonl` and opens `provenance.json` by exact name. So a re-record that you do not promote costs a billed turn and
 changes nothing while the suite stays green. Diff the pair, then `mv` the `.new`
 over the old one or delete it.
 
