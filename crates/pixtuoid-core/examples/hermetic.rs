@@ -839,6 +839,12 @@ mod run {
                         "{}: {k} misses `connect`'s children",
                         p.source
                     );
+                    // The only path past the recorder's `CLAUDE_CODE_*` scrub.
+                    assert!(
+                        sandbox.cli_env(p).contains(&format!("{k}={want}")),
+                        "{}: {k} misses the CLI's `--env`",
+                        p.source
+                    );
                 }
             }
         }
