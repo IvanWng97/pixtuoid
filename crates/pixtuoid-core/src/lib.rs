@@ -79,3 +79,5 @@ pub use walkable::{OccupancyOverlay, WalkableMask};
 
 #[cfg(test)]
 pub(crate) mod test_capture;
+#[cfg(test)]
+pub(crate) mod test_child;

@@ -85,9 +85,9 @@ beside it for the `.new` no-clobber rule to protect.
 `just hermetic --record` replaces a fixture's bytes whole, and git holds the diff.
 `just capture-fixture` never overwrites committed bytes — it writes `<name>.new`
 beside them, so a re-record can be diffed rather than trusted. Nothing READS a
-`.new` (`conformance.rs` and `fixture-age.py` read only `*.jsonl` and
-`provenance.json`), so one you do not promote costs a billed turn and changes
-nothing. Diff the pair, then `mv` the `.new` over the old one or delete it.
+`.new` (`conformance.rs` reads only `*.jsonl` and `provenance.json`), so one you
+do not promote costs a billed turn and changes nothing. Diff the pair, then `mv`
+the `.new` over the old one or delete it.
 
 **A capture can only be recorded on Unix.** The recorder listens on a
 `UnixListener`; the Windows shim speaks a named pipe, so there is no Windows arm

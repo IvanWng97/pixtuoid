@@ -71,7 +71,7 @@ pulldown-cmark     = { workspace = true, optional = true }
 # clock feature gives us Local::now() w/ system timezone for the wall clock.
 chrono             = { workspace = true, features = ["clock"] }
 open               = "5"
-semver             = "1"
+semver             = { workspace = true }
 # The version popup's notices, wrapped by display width. No line-break or
 # optimal-fit tables: first-fit at spaces is all a short notice needs.
 textwrap           = { version = "0.16", default-features = false, features = ["std", "unicode-width"] }

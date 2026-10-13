@@ -11,8 +11,8 @@
 //! transcripts register, how many render, and the provenance spread.
 //!
 //! Usage: `corpus_check <source> [root] [--json]`, plus `--roster` — the
-//! id/prefix/kind/home-env/version-probe rows, read by the shells and by
-//! `fixture-age.py` instead of keeping a second copy of the roster.
+//! id/prefix/kind/home-env/version-probe rows, read by the shells instead of
+//! keeping a second copy of the roster.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -149,10 +149,8 @@ fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
 
 /// One `--roster` row: `id \t prefix \t kind \t home_env \t probe`.
 ///
-/// `fixture-age.py`, `scripts/lib/tier-live-sources.sh` and `just corpus-all`
-/// index these columns POSITIONALLY, so inserting a column shifts every one of
-/// them at once and the degradation is quiet — `fixture-age`'s probe map empties
-/// and its report reads "nothing stale" from having compared nothing.
+/// `scripts/lib/tier-live-sources.sh` and `just corpus-all` index these columns
+/// POSITIONALLY, so inserting a column shifts both at once, quietly.
 /// `the_whole_roster_is_pinned_row_by_row` is the pin AGENTS.md's magic-number
 /// rule asks for at a cross-language boundary.
 fn roster_row(name: &str, d: &registry::SourceDescriptor, kind: &str) -> String {
@@ -359,7 +357,7 @@ mod tests {
                 "grok\tgk\ttranscript\tGROK_HOME\tgrok --version",
                 "kimi\tkm\thook\t-\tkimi --version",
             ],
-            "the --roster columns are indexed POSITIONALLY by fixture-age.py, \
+            "the --roster columns are indexed POSITIONALLY by \
              tier-live-sources.sh and `just corpus-all`. Update every consumer in \
              the same change, then this pin."
         );

@@ -579,114 +579,6 @@ fn a_recorded_capture_that_was_edited_says_so() {
     );
 }
 
-/// A dotted-run major at or above this reads as a YEAR/date token rather than a
-/// semver major. MIRRORS `doctor::parse_version`'s const of the same name; the
-/// pair is pinned by `banner_version_matches_doctors_documented_cases`.
-const IMPLAUSIBLE_MAJOR: u64 = 1000;
-
-/// THE version in a `--version` banner, by `doctor::parse_version`'s rule:
-/// prefer a `v`-prefixed run, else the first with a plausible major, else the
-/// first. One token, not a set — a token SET let a registry pin the build date
-/// (`2026.8.13`), a git sha (`e8db854`), or the word `Agent`.
-fn banner_version(line: &str) -> Option<&str> {
-    let mut runs: Vec<(bool, u64, &str)> = Vec::new();
-    let bytes = line.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if !bytes[i].is_ascii_digit() {
-            i += 1;
-            continue;
-        }
-        let start = i;
-        while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
-            i += 1;
-        }
-        // RAW run for `contains('.')`, empty parts filtered AFTER — exactly as
-        // `doctor::parse_version`; trimming trailing dots first disagreed on `"2. "`.
-        let run = &line[start..i];
-        if !run.contains('.') {
-            continue;
-        }
-        let Some(Ok(major)) = run
-            .split('.')
-            .find(|p| !p.is_empty())
-            .map(str::parse::<u64>)
-        else {
-            continue;
-        };
-        runs.push((
-            start > 0 && matches!(bytes[start - 1], b'v' | b'V'),
-            major,
-            run,
-        ));
-    }
-    runs.iter()
-        .find(|(vp, ..)| *vp)
-        .or_else(|| runs.iter().find(|(_, maj, _)| *maj < IMPLAUSIBLE_MAJOR))
-        .or_else(|| runs.first())
-        .map(|(.., run)| *run)
-}
-
-/// Cases the mirror must agree with `doctor::parse_version` on: the first two
-/// from that fn's own doc, the rest real `--version` banners this tree holds
-/// captures of. Only the const is PINNED mechanically (the grep below fails if
-/// `doctor.rs`'s `IMPLAUSIBLE_MAJOR` moves); the ALGORITHM cannot be — it is
-/// `pub(crate)` in the binary crate — so it is mirrored statement for statement.
-#[test]
-fn banner_version_matches_doctors_documented_cases() {
-    let cases = [
-        ("Built 2026.06.04 — v1.2.3", Some("1.2.3")),
-        ("2026.06.04", Some("2026.06.04")),
-        ("codex-cli 0.153.4", Some("0.153.4")),
-        ("Hermes Agent v0.21.0 (2026.8.31)", Some("0.21.0")),
-        ("grok 1.0.25 (f7e67d6988e2) [stable]", Some("1.0.25")),
-        ("2026.08.11-e8db854", Some("2026.08.11")),
-        ("omp/18.0.11", Some("18.0.11")),
-        ("no version here", None),
-        // The shape that caught the mirror drifting: doctor keeps a trailing-dot
-        // run and filters empty parts after, so this is a version to both.
-        ("2. ", Some("2.")),
-        // A major no `u64` holds: doctor's `parse::<u64>()` fails and SKIPS the
-        // run, so a banner offering only that one has no version at all.
-        ("tool 99999999999999999999.1.0", None),
-    ];
-    for (banner, want) in cases {
-        assert_eq!(banner_version(banner), want, "{banner:?}");
-    }
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let body = std::fs::read_to_string(root.join("crates/pixtuoid/src/doctor.rs")).expect("doctor");
-    assert!(
-        body.contains(&format!("IMPLAUSIBLE_MAJOR: u64 = {IMPLAUSIBLE_MAJOR};")),
-        "doctor.rs's IMPLAUSIBLE_MAJOR drifted from this mirror"
-    );
-    // The Python mirror can't be EXECUTED here (a cross-runtime spawn reddened the
-    // Windows jobs); pin the PAIR — a banner-only check misses a drifted EXPECTATION.
-    let py = std::fs::read_to_string(root.join("scripts/fixture-age.py")).expect("fixture-age.py");
-    for (banner, want) in cases {
-        let want_py = want.map_or_else(|| "None".to_string(), |v| format!("{v:?}"));
-        assert!(
-            py.contains(&format!("({banner:?}, {want_py})")),
-            "fixture-age.py's selftest does not carry this mirror's case \
-             ({banner:?}, {want_py}) — a row that is missing OR expects something else"
-        );
-    }
-}
-
-/// A banner's version as a comparable list. ALL parts, not a 3-tuple: truncating
-/// tied `2.1.233.4` with `2.1.233.10`, and a tie is decided by capture-dir
-/// iteration order, so adding a scenario could flip which version the gate
-/// demands. A banner with no version sorts below every real one rather than
-/// winning a `max`.
-fn semver_order(banner: &str) -> Vec<u64> {
-    let Some(run) = banner_version(banner) else {
-        return Vec::new();
-    };
-    run.split('.')
-        .filter(|p| !p.is_empty())
-        .map(|p| p.parse::<u64>().unwrap_or(0))
-        .collect()
-}
-
 /// `verified_version` means "the version whose wire we have SEEN". A recorded
 /// scenario IS that sighting, so the two must not disagree — `doctor`'s "newer
 /// than verified" warning is structurally silent at `unknown` and would
@@ -736,23 +628,29 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
              source that loses it must fail loudly rather than weaken the rule"
         );
         // Version first, `captured` only as TIE-BREAK: without it two captures of one
-        // version resolve by dir iteration order (`1.2.3-rc.1` vs `1.2.3` parse alike).
+        // version resolve by dir iteration order.
+        let version = |s: &str| registry::parse_version(s, d.version_hyphen);
         let highest = &dated
             .iter()
             .max_by(|a, b| {
-                semver_order(&a.1)
-                    .cmp(&semver_order(&b.1))
-                    .then_with(|| a.0.cmp(&b.0))
+                let precedence = match (version(&a.1), version(&b.1)) {
+                    (Some(a), Some(b)) => a.cmp_precedence(&b),
+                    (a, b) => a.is_some().cmp(&b.is_some()),
+                };
+                precedence.then_with(|| a.0.cmp(&b.0))
             })
             .expect("non-empty")
             .1;
-        // Doctor's rule on both sides: a prerelease pin keeps its dotted run.
+        let pinned = version(highest);
         assert!(
-            banner_version(highest) == banner_version(d.verified_version),
+            pinned
+                .as_ref()
+                .zip(version(d.verified_version))
+                .is_some_and(|(p, v)| p.cmp_precedence(&v).is_eq()),
             "{source}: `verified_version` is {:?}, but the highest recorded capture \
              ({highest:?}) pins {:?} — the newest wire we hold is the one that counts",
             d.verified_version,
-            banner_version(highest).unwrap_or("nothing")
+            pinned.map_or_else(|| "nothing".to_owned(), |v| v.to_string())
         );
     }
 }

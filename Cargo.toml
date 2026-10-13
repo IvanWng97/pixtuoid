@@ -148,6 +148,7 @@ strum              = { version = "0.28", default-features = false, features = ["
 enum-map           = "3.1"
 # A Vec of at least one element: an animation's frames.
 vec1               = "1.12"
+semver             = "1"
 # 0.61 to match the major tokio already pulls (via mio) on Windows — a second
 # windows-sys major would double-compile the bindings.
 windows-sys        = "0.61"

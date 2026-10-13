@@ -5,6 +5,7 @@
 //! hooks stays the Sources panel's job) and never spawns the TUI.
 //! The PROBED CLI is not read-only about its own state — see `may_probe_version`.
 
+use pixtuoid_core::source::registry::Hyphen;
 use pixtuoid_core::source::{drift, registry};
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -341,63 +342,33 @@ pub(crate) struct DoctorSourceRow {
     pub diag: SourceDiagnostics,
 }
 
-/// A dotted-run major at or above this looks like a YEAR/date token, not a semver
-/// major — used to skip a date prefix in favor of a real version.
-const IMPLAUSIBLE_MAJOR: u64 = 1000;
-
-/// Extract a `MAJOR.MINOR[.PATCH]` tuple from a `--version` banner. Tolerant:
-/// no dotted run = None, so a skew check silently no-ops rather than alarming on
-/// garbage. Banner-order robust — a banner can print a dotted DATE/build token
-/// BEFORE the semver (`Built 2026.06.04 — v1.2.3`) — while still parsing a
-/// genuine CalVer (`2026.06.04`, e.g. cursor) rather than letting it vanish.
-pub(crate) fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
-    let bytes = s.as_bytes();
-    let mut runs: Vec<(bool, (u64, u64, u64))> = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        if !bytes[i].is_ascii_digit() {
-            i += 1;
-            continue;
-        }
-        let start = i;
-        while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
-            i += 1;
-        }
-        let run = &s[start..i];
-        if !run.contains('.') {
-            continue;
-        }
-        let mut parts = run.split('.').filter(|p| !p.is_empty());
-        if let Some(major) = parts.next().and_then(|p| p.parse().ok()) {
-            let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-            let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-            let v_prefixed = start > 0 && matches!(bytes[start - 1], b'v' | b'V');
-            runs.push((v_prefixed, (major, minor, patch)));
-        }
-    }
-    runs.iter()
-        .find(|(vp, _)| *vp)
-        .or_else(|| runs.iter().find(|(_, (maj, ..))| *maj < IMPLAUSIBLE_MAJOR))
-        .or_else(|| runs.first())
-        .map(|(_, v)| *v)
-}
+/// A major at or above this is a CalVer year (openclaw, cursor), and a new
+/// year is no breaking major.
+const CALVER_MIN_MAJOR: u64 = 1000;
 
 /// Installed-vs-verified comparison, `None` when either side can't parse or
 /// there is no anchor.
-pub(crate) fn version_cmp(installed: Option<&str>, verified: &str) -> Option<std::cmp::Ordering> {
-    if verified == "unknown" {
-        return None;
-    }
-    match (installed.and_then(parse_version), parse_version(verified)) {
-        (Some(i), Some(v)) => Some(i.cmp(&v)),
-        _ => None,
-    }
+pub(crate) fn version_cmp(
+    installed: Option<&str>,
+    verified: &str,
+    hyphen: Hyphen,
+) -> Option<std::cmp::Ordering> {
+    let installed = installed.and_then(|s| registry::parse_version(s, hyphen))?;
+    Some(installed.cmp_precedence(&registry::parse_version(verified, hyphen)?))
 }
 
-/// The parsed `MAJOR.MINOR.PATCH` a skew verdict compared — for the `versions`
-/// category, where showing the two COMPARED values beats echoing a raw banner.
-fn parsed_version_display(s: &str) -> Option<String> {
-    parse_version(s).map(|(major, minor, patch)| format!("{major}.{minor}.{patch}"))
+/// The version a skew verdict compared — for the `versions` category, where
+/// showing the two COMPARED values beats echoing a raw banner.
+fn parsed_version_display(s: &str, hyphen: Hyphen) -> Option<String> {
+    registry::parse_version(s, hyphen).map(|mut v| {
+        v.build = semver::BuildMetadata::EMPTY;
+        v.to_string()
+    })
+}
+
+/// How the row's CLI writes a `-` in its version.
+fn hyphen_of(r: &DoctorSourceRow) -> Hyphen {
+    registry::descriptor_for(r.source_id).map_or(Hyphen::Prerelease, |d| d.version_hyphen)
 }
 
 /// A broken install outranks drift (✗ vs !); the two quiet
@@ -1043,9 +1014,12 @@ fn sources_category(rows: &[DoctorSourceRow], ink: &Ink) -> Category {
 /// Whether the installed MAJOR is below the verified one: only the latest
 /// release is supported, and a new major is where a wire breaks. A CalVer
 /// year is no major.
-fn below_verified_major(installed: Option<&str>, verified: &str) -> bool {
-    match (installed.and_then(parse_version), parse_version(verified)) {
-        (Some((i, ..)), Some((v, ..))) => i < v && v < IMPLAUSIBLE_MAJOR,
+fn below_verified_major(installed: Option<&str>, verified: &str, hyphen: Hyphen) -> bool {
+    match (
+        installed.and_then(|s| registry::parse_version(s, hyphen)),
+        registry::parse_version(verified, hyphen),
+    ) {
+        (Some(i), Some(v)) => i.major < v.major && v.major < CALVER_MIN_MAJOR,
         _ => false,
     }
 }
@@ -1057,13 +1031,22 @@ fn below_verified_major(installed: Option<&str>, verified: &str) -> bool {
 fn versions_category(rows: &[DoctorSourceRow]) -> Category {
     let older: Vec<&DoctorSourceRow> = rows
         .iter()
-        .filter(|r| below_verified_major(r.installed_version.as_deref(), r.verified_version))
+        .filter(|r| {
+            below_verified_major(
+                r.installed_version.as_deref(),
+                r.verified_version,
+                hyphen_of(r),
+            )
+        })
         .collect();
     let newer: Vec<&DoctorSourceRow> = rows
         .iter()
         .filter(|r| {
-            version_cmp(r.installed_version.as_deref(), r.verified_version)
-                == Some(std::cmp::Ordering::Greater)
+            version_cmp(
+                r.installed_version.as_deref(),
+                r.verified_version,
+                hyphen_of(r),
+            ) == Some(std::cmp::Ordering::Greater)
         })
         .collect();
     if older.is_empty() && newer.is_empty() {
@@ -1079,7 +1062,7 @@ fn versions_category(rows: &[DoctorSourceRow]) -> Category {
         let inst = r
             .installed_version
             .as_deref()
-            .and_then(parsed_version_display)
+            .and_then(|s| parsed_version_display(s, hyphen_of(r)))
             .unwrap_or_else(|| "unknown".to_string());
         format!(
             "{DETAIL_INDENT}{:<15} {inst} installed \u{b7} {} verified{tail}",
@@ -2526,39 +2509,59 @@ mod tests {
     }
 
     #[test]
-    fn parse_version_extracts_the_dotted_run() {
-        assert_eq!(parse_version("1.0.62"), Some((1, 0, 62)));
-        assert_eq!(
-            parse_version("GitHub Copilot CLI 1.0.62."),
-            Some((1, 0, 62))
-        );
-        assert_eq!(parse_version("v2.1"), Some((2, 1, 0)));
-        assert_eq!(parse_version("codex 0.41.0 (abc)"), Some((0, 41, 0)));
-        assert_eq!(parse_version("no version here"), None);
-        assert_eq!(parse_version("2026"), None);
-    }
-
-    #[test]
-    fn parse_version_is_banner_order_robust() {
-        assert_eq!(parse_version("Built 2026.06.04 — v1.2.3"), Some((1, 2, 3)));
-        assert_eq!(parse_version("Built 2026.06.04 — 1.2.3"), Some((1, 2, 3)));
-        // A genuine CalVer with NO semver must fall back, not vanish.
-        assert_eq!(parse_version("2026.06.04-5fd875e"), Some((2026, 6, 4)));
-        assert_eq!(parse_version("GitHub Copilot CLI 1.0.62"), Some((1, 0, 62)));
-    }
-
-    #[test]
     fn version_cmp_compares_only_with_a_known_anchor() {
         use std::cmp::Ordering;
-        assert_eq!(version_cmp(Some("3.4.5"), "unknown"), None);
+        let cmp = |installed, verified| version_cmp(installed, verified, Hyphen::Prerelease);
+        assert_eq!(cmp(Some("3.4.5"), "unknown"), None);
+        assert_eq!(cmp(Some("1.1.0"), "1.0.62"), Some(Ordering::Greater));
+        assert_eq!(cmp(Some("1.0.0"), "1.0.62"), Some(Ordering::Less));
+        assert_eq!(cmp(Some("1.0.62"), "1.0.62"), Some(Ordering::Equal));
+        assert_eq!(cmp(None, "1.0.62"), None);
+        assert_eq!(cmp(Some("garbage"), "1.0.62"), None);
         assert_eq!(
-            version_cmp(Some("1.1.0"), "1.0.62"),
-            Some(Ordering::Greater)
+            cmp(Some("0.2.0-rc.3"), "0.2.0-rc.2"),
+            Some(Ordering::Greater),
+            "a prerelease past the pin runs ahead of it"
         );
-        assert_eq!(version_cmp(Some("1.0.0"), "1.0.62"), Some(Ordering::Less));
-        assert_eq!(version_cmp(Some("1.0.62"), "1.0.62"), Some(Ordering::Equal));
-        assert_eq!(version_cmp(None, "1.0.62"), None);
-        assert_eq!(version_cmp(Some("garbage"), "1.0.62"), None);
+        assert_eq!(
+            cmp(Some("0.2.0-rc.2"), "0.2.0"),
+            Some(Ordering::Less),
+            "a prerelease runs below its release"
+        );
+    }
+
+    #[test]
+    fn the_versions_row_shows_only_what_was_compared() {
+        assert_eq!(
+            parsed_version_display("2026.10.02-abc1234", Hyphen::Build).as_deref(),
+            Some("2026.10.2"),
+            "a build id no comparison reads is not shown"
+        );
+        assert_eq!(
+            parsed_version_display("0.2.0-rc.3", Hyphen::Prerelease).as_deref(),
+            Some("0.2.0-rc.3")
+        );
+    }
+
+    #[test]
+    fn a_same_day_build_of_a_build_hyphen_cli_is_its_pin() {
+        use std::cmp::Ordering;
+        for installed in [
+            "2026.09.18-abc1234",
+            "2026.09.18-1234567",
+            "2026.09.18-0123456",
+        ] {
+            assert_eq!(
+                version_cmp(Some(installed), "2026.09.18", Hyphen::Build),
+                Some(Ordering::Equal),
+                "{installed}"
+            );
+        }
+        assert_eq!(
+            registry::descriptor_for("cursor").map(|d| d.version_hyphen),
+            Some(Hyphen::Build),
+            "cursor-agent prints its build id after a `-`"
+        );
     }
 
     /// The footer's drift is this run's breadcrumbs alone, each source once,
@@ -2644,16 +2647,6 @@ mod tests {
             r.last_ts.is_none(),
             "an ignored kind must not stamp last_ts"
         );
-    }
-
-    #[test]
-    fn parse_version_skips_a_run_with_an_overflowing_major() {
-        // The 23-digit major overflows u64, so that run is dropped.
-        assert_eq!(
-            parse_version("99999999999999999999999.0 v1.2.3"),
-            Some((1, 2, 3))
-        );
-        assert_eq!(parse_version("99999999999999999999999.0"), None);
     }
 
     #[test]

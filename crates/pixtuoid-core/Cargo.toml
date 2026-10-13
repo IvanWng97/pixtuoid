@@ -64,6 +64,8 @@ palette     = { workspace = true }
 strum       = { workspace = true }
 enum-map    = { workspace = true }
 vec1        = { workspace = true }
+# A CLI's version and its ordering, prerelease included: `registry::parse_version`.
+semver      = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
@@ -76,8 +78,9 @@ rustix = { workspace = true, features = ["event", "process", "pipe"] }
 
 [target.'cfg(windows)'.dependencies]
 # Win32_System_Threading: OpenProcess + GetProcessTimes, the `proc_start`
-# creation-FILETIME marker (the Windows half of the pid-recycle guard).
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
+# creation-FILETIME marker (the Windows half of the pid-recycle guard), and
+# `exit_watch`'s handle wait, whose cap is SystemServices' MAXIMUM_WAIT_OBJECTS.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_SystemServices", "Win32_System_Threading"] }
 
 [dev-dependencies]
 # Depending on ourselves BY PATH is how a crate turns its own non-default

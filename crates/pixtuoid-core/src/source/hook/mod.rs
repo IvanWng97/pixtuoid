@@ -292,10 +292,10 @@ pub(crate) async fn handle_conn(
                     continue;
                 }
                 // Peek the shim-supplied CLI pid BEFORE `v` is consumed by
-                // decode. Deliberately NOT gated on `pid_watch`: the exit-watch
-                // backend failing to init (pre-5.3 Linux kernel, Windows) must
-                // not take the focus-jump pid cache down with it — only the
-                // BIND below needs the watch.
+                // decode. Deliberately NOT gated on `pid_watch`: a platform with
+                // no exit-watch backend, or one that failed to init, must not
+                // take the focus-jump pid cache down with it — only the BIND
+                // below needs the watch.
                 let pid = v
                     .get("_pid")
                     .and_then(serde_json::Value::as_i64)
@@ -776,10 +776,7 @@ mod tests {
         let Some(watch) = HookPidWatch::spawn(tx.clone()) else {
             return; // no exit-watch backend on this platform — nothing to assert
         };
-        let mut child = std::process::Command::new("sleep")
-            .arg("60")
-            .spawn()
-            .expect("spawn a child to watch");
+        let mut child = crate::test_child::sleeper();
         let pid = child.id();
 
         let (mut client, server) = tokio::io::duplex(4096);
@@ -833,10 +830,7 @@ mod tests {
         let Some(watch) = HookPidWatch::spawn(tx.clone()) else {
             return; // no exit-watch backend on this platform — nothing to assert
         };
-        let mut wrapper = std::process::Command::new("sleep")
-            .arg("60")
-            .spawn()
-            .expect("spawn a stand-in wrapper shell");
+        let mut wrapper = crate::test_child::sleeper();
         let pid = wrapper.id();
 
         let (mut client, server) = tokio::io::duplex(4096);
