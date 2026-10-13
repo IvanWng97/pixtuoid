@@ -666,9 +666,9 @@ mod run {
     }
 
     /// Config a CLI would read that no sandbox home redirects: one of
-    /// `system_config`'s paths, its `{user}` the operator's (unchecked with
-    /// none), or one of `ancestor_config` in an ancestor of `workspace`, which
-    /// need not exist yet. An ancestor may be a symlink (macOS's `/tmp`), so
+    /// `system_config`'s paths, its [`USER_PLACEHOLDER`] the operator's
+    /// (unchecked with none), or one of `ancestor_config` in an ancestor of
+    /// `workspace`, which need not exist yet. An ancestor may be a symlink (macOS's `/tmp`), so
     /// the ancestors of the nearest existing one's target count too.
     fn outside_config(
         system_config: &[&str],
