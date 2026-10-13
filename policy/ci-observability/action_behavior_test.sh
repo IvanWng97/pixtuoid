@@ -264,4 +264,5 @@ fi
 [[ "$(changed "$repo" push other)" == false ]] || fail "path-changed judged a push as a PR"
 git init -q "$test_dir/no-parent" && echo a >"$test_dir/no-parent/lock" && git -C "$test_dir/no-parent" add lock &&
     git -C "$test_dir/no-parent" -c user.email=t@t -c user.name=t commit -q -m only
-[[ "$(changed "$test_dir/no-parent" pull_request lock)" == true ]] || fail "path-changed passed a diff it could not run"
+[[ "$(changed "$test_dir/no-parent" pull_request lock 2>"$test_dir/no-parent.err")" == true ]] || fail "path-changed passed a diff it could not run"
+grep -q 'bad revision' "$test_dir/no-parent.err" || fail "the parentless repo's diff ran after all"
