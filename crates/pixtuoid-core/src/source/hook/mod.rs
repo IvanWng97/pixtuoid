@@ -776,10 +776,7 @@ mod tests {
         let Some(watch) = HookPidWatch::spawn(tx.clone()) else {
             return; // no exit-watch backend on this platform — nothing to assert
         };
-        let mut child = std::process::Command::new("sleep")
-            .arg("60")
-            .spawn()
-            .expect("spawn a child to watch");
+        let mut child = crate::test_child::sleeper();
         let pid = child.id();
 
         let (mut client, server) = tokio::io::duplex(4096);
@@ -833,10 +830,7 @@ mod tests {
         let Some(watch) = HookPidWatch::spawn(tx.clone()) else {
             return; // no exit-watch backend on this platform — nothing to assert
         };
-        let mut wrapper = std::process::Command::new("sleep")
-            .arg("60")
-            .spawn()
-            .expect("spawn a stand-in wrapper shell");
+        let mut wrapper = crate::test_child::sleeper();
         let pid = wrapper.id();
 
         let (mut client, server) = tokio::io::duplex(4096);

@@ -4,7 +4,8 @@
 //!
 //! One `ExitWatch` = one kernel wait primitive + ONE detached `std::thread`
 //! blocked on it (macOS: a `kqueue` with `EVFILT_PROC NOTE_EXIT` knotes;
-//! Linux: `poll` over `pidfd_open` descriptors plus a self-pipe). NOT
+//! Linux: `poll` over `pidfd_open` descriptors plus a self-pipe; Windows:
+//! `WaitForMultipleObjects` over process handles plus a wake event). NOT
 //! `tokio::spawn_blocking` — a forever-loop would pin a blocking-pool slot for
 //! the process lifetime. The primitive's fds live in the shared `Arc` state, so
 //! the waker side can never touch a recycled fd after the thread closes up, and
@@ -47,7 +48,7 @@ fn lock_pending(shared: &Shared) -> std::sync::MutexGuard<'_, Vec<i32>> {
 /// load-bearing for the AlreadyDead path: a duplicate `watch()` of a pid that
 /// died before the drain would otherwise register → ESRCH → send, then
 /// re-register the batch's second copy and synthesize a SECOND exit.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 fn drain_pending(shared: &Shared) -> Vec<i32> {
     let mut batch = std::mem::take(&mut *lock_pending(shared));
     batch.sort_unstable();
@@ -500,7 +501,160 @@ mod imp {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(windows)]
+mod imp {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use std::sync::atomic::Ordering;
+
+    use tokio::sync::mpsc::UnboundedSender;
+    use windows_sys::Win32::Foundation::{
+        ERROR_INVALID_PARAMETER, FALSE, WAIT_FAILED, WAIT_OBJECT_0,
+    };
+    use windows_sys::Win32::System::SystemServices::MAXIMUM_WAIT_OBJECTS;
+    use windows_sys::Win32::System::Threading::{
+        CreateEventW, INFINITE, OpenProcess, PROCESS_SYNCHRONIZE, SetEvent, WaitForMultipleObjects,
+    };
+
+    use super::{Shared, drain_pending};
+
+    #[derive(Debug)]
+    pub(super) struct Backend {
+        /// Auto-reset: a `wake()` that lands while the thread isn't waiting
+        /// stays set until its next wait consumes it, so unlike a drained
+        /// self-pipe no wake is ever lost.
+        wake: OwnedHandle,
+    }
+
+    impl Backend {
+        pub(super) fn init() -> Option<Self> {
+            // SAFETY: null attributes and name, by-value flags; the null check
+            // screens the handle.
+            let event = unsafe { CreateEventW(std::ptr::null(), FALSE, FALSE, std::ptr::null()) };
+            if event.is_null() {
+                tracing::debug!(
+                    error = %std::io::Error::last_os_error(),
+                    "CreateEventW failed; instant exit off (backstops cover)"
+                );
+                return None;
+            }
+            // SAFETY: a fresh handle nothing else owns.
+            let wake = unsafe { OwnedHandle::from_raw_handle(event) };
+            Some(Self { wake })
+        }
+
+        pub(super) fn wake(&self) {
+            // SAFETY: the event lives as long as `self`.
+            unsafe { SetEvent(self.wake.as_raw_handle()) };
+        }
+    }
+
+    enum Opened {
+        Handle(OwnedHandle),
+        /// No process holds the pid any more; the caller synthesizes the exit.
+        /// A pid that exited while something still holds its handle opens fine
+        /// and is waited on as already signaled.
+        AlreadyDead,
+        /// Anything else, such as access denied: dropped (logged); backstops cover.
+        Failed,
+    }
+
+    fn open(pid: i32) -> Opened {
+        let Ok(id) = u32::try_from(pid) else {
+            return Opened::Failed;
+        };
+        // SAFETY: by-value arguments; the null check screens the handle.
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, FALSE, id) };
+        if !handle.is_null() {
+            // SAFETY: a fresh handle nothing else owns.
+            return Opened::Handle(unsafe { OwnedHandle::from_raw_handle(handle) });
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == i32::try_from(ERROR_INVALID_PARAMETER).ok() {
+            return Opened::AlreadyDead;
+        }
+        tracing::debug!(pid, error = %error, "OpenProcess failed; dropped (backstops cover)");
+        Opened::Failed
+    }
+
+    pub(super) fn run(shared: &Shared, exit_tx: &UnboundedSender<i32>) {
+        // One wait holds the wake event and at most this many processes; a pid
+        // past it is dropped (logged) to the backstops.
+        let cap = MAXIMUM_WAIT_OBJECTS as usize - 1;
+        let wake = shared.backend.wake.as_raw_handle();
+        // pid → its process handle; the wait's handle `i + 1` is `watched[i]`.
+        let mut watched: Vec<(i32, OwnedHandle)> = Vec::new();
+        loop {
+            if shared.closed.load(Ordering::SeqCst) {
+                return;
+            }
+            let handles: Vec<_> = std::iter::once(wake)
+                .chain(watched.iter().map(|(_, h)| h.as_raw_handle()))
+                .collect();
+            let Ok(count) = u32::try_from(handles.len()) else {
+                return;
+            };
+            // SAFETY: every handle is live through the wait: the event for
+            // `shared`'s life, each process handle while `watched` owns it.
+            let signaled =
+                unsafe { WaitForMultipleObjects(count, handles.as_ptr(), FALSE, INFINITE) };
+            if signaled == WAIT_FAILED {
+                tracing::debug!(
+                    error = %std::io::Error::last_os_error(),
+                    "exit-watch wait failed; thread exiting (backstops cover)"
+                );
+                return;
+            }
+            if shared.closed.load(Ordering::SeqCst) {
+                return;
+            }
+            // The wait reports the LOWEST signaled index, so the wake (index 0)
+            // drains pending before any exit is sent: a duplicate watch() of a
+            // pid whose exit is also signaled dedups against the still-watched
+            // entry, and that handle stays signaled for the next turn.
+            match usize::try_from(signaled.wrapping_sub(WAIT_OBJECT_0)) {
+                Ok(0) => {
+                    for pid in drain_pending(shared) {
+                        if watched.iter().any(|(p, _)| *p == pid) {
+                            continue; // idempotent: already watched
+                        }
+                        if watched.len() == cap {
+                            tracing::debug!(
+                                pid,
+                                "exit-watch wait is full; dropped (backstops cover)"
+                            );
+                            continue;
+                        }
+                        match open(pid) {
+                            Opened::Handle(handle) => watched.push((pid, handle)),
+                            Opened::AlreadyDead => {
+                                if exit_tx.send(pid).is_err() {
+                                    return; // receiver gone — the watcher task ended
+                                }
+                            }
+                            Opened::Failed => {}
+                        }
+                    }
+                }
+                Ok(i) if i <= watched.len() => {
+                    // The pid leaves the set so it can be re-watched if recycled.
+                    let (pid, _) = watched.remove(i - 1);
+                    if exit_tx.send(pid).is_err() {
+                        return;
+                    }
+                }
+                _ => {
+                    tracing::debug!(
+                        signaled,
+                        "exit-watch wait returned no handle; thread exiting (backstops cover)"
+                    );
+                    return;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 mod imp {
     use tokio::sync::mpsc::UnboundedSender;
 
@@ -528,29 +682,26 @@ mod imp {
 mod tests {
     use super::ExitWatch;
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     #[test]
     fn spawn_is_none_on_unsupported_platforms() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         assert!(ExitWatch::spawn(tx).is_none());
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     mod live {
-        use std::process::{Child, Command};
+        use std::process::Child;
         use std::time::Duration;
 
         use super::ExitWatch;
+        use crate::test_child::sleeper;
 
         /// Liveness ceiling for the real-process `live::` tests — wide enough
         /// to absorb `cargo llvm-cov` instrumentation and CI scheduling jitter
         /// (3s flaked `drop_stops_cleanly`). A liveness bound, NOT a latency
         /// assertion: a true hang is still failed by nextest's slow-timeout.
         const LIVE_PID_DEADLINE: Duration = Duration::from_secs(10);
-
-        fn sleeper() -> Child {
-            Command::new("sleep").arg("30").spawn().unwrap()
-        }
 
         fn kill_and_reap(child: &mut Child) {
             let _ = child.kill();
@@ -593,7 +744,8 @@ mod tests {
         #[tokio::test]
         async fn exit_watch_reports_a_killed_child() {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let watch = ExitWatch::spawn(tx).expect("backend must init on macOS/Linux");
+            let watch =
+                ExitWatch::spawn(tx).expect("the backend inits on every supported platform");
             let mut child = sleeper();
             let pid = child.id() as i32;
             watch.watch(pid);
@@ -604,16 +756,20 @@ mod tests {
             );
         }
 
-        /// A pid recycle between reap and watch would make this flake; the
-        /// window is microseconds and both kernels allocate pids sequentially.
+        /// Dropping `child` closes its handle, so on Windows the pid no longer
+        /// opens: OpenProcess documents ERROR_INVALID_PARAMETER only for pid 0,
+        /// and this pins the same code for a pid no process holds. A pid
+        /// recycle in the microseconds between would make this flake.
         #[tokio::test]
         async fn exit_watch_already_dead_pid_fires_immediately() {
             let mut child = sleeper();
             let pid = child.id() as i32;
             kill_and_reap(&mut child);
+            drop(child);
 
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let watch = ExitWatch::spawn(tx).expect("backend must init on macOS/Linux");
+            let watch =
+                ExitWatch::spawn(tx).expect("the backend inits on every supported platform");
             watch.watch(pid);
             assert!(
                 wait_for_pid(&mut rx, pid, LIVE_PID_DEADLINE).await,
@@ -624,7 +780,8 @@ mod tests {
         #[tokio::test]
         async fn watch_is_idempotent() {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let watch = ExitWatch::spawn(tx).expect("backend must init on macOS/Linux");
+            let watch =
+                ExitWatch::spawn(tx).expect("the backend inits on every supported platform");
             let mut child = sleeper();
             let pid = child.id() as i32;
             watch.watch(pid);
@@ -649,7 +806,8 @@ mod tests {
         #[tokio::test]
         async fn watch_bogus_pid_does_not_panic() {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let watch = ExitWatch::spawn(tx).expect("backend must init on macOS/Linux");
+            let watch =
+                ExitWatch::spawn(tx).expect("the backend inits on every supported platform");
             watch.watch(999_999_999);
             let mut child = sleeper();
             let pid = child.id() as i32;
@@ -667,7 +825,8 @@ mod tests {
         async fn watch_after_thread_death_stops_queueing() {
             use std::sync::atomic::Ordering;
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            let watch = ExitWatch::spawn(tx).expect("backend must init on macOS/Linux");
+            let watch =
+                ExitWatch::spawn(tx).expect("the backend inits on every supported platform");
             drop(rx);
             // An already-dead pid synthesizes an exit whose send fails
             // (receiver dropped) → run() returns → the death hook must fire.
@@ -702,7 +861,8 @@ mod tests {
         async fn drop_stops_cleanly() {
             for _ in 0..50 {
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                let watch = ExitWatch::spawn(tx).expect("backend must init on macOS/Linux");
+                let watch =
+                    ExitWatch::spawn(tx).expect("the backend inits on every supported platform");
                 let mut child = sleeper();
                 watch.watch(child.id() as i32);
                 drop(watch);

@@ -27,11 +27,9 @@
 //!   Active until the user approves. No signal exists to do better.
 //!
 //! - **Exit profile.** `session_end` fires on a clean quit, so
-//!   `has_exit_signal: true`. An ABRUPT exit fires none — on Unix the shim
-//!   resolves CodeWhale's pid by walking past the runner's shell and
-//!   `hook::HookPidWatch` ends the sprite when that pid dies; on Windows it
-//!   falls to the stale-sweep — the walk resolves a pid there (#528), but no
-//!   `ExitWatch` backend exists to watch it.
+//!   `has_exit_signal: true`. An ABRUPT exit fires none — the shim resolves
+//!   CodeWhale's pid by walking past the runner's shell (on Windows too, #528)
+//!   and `hook::HookPidWatch` ends the sprite when that pid dies.
 
 use crate::source::decoder::{DecodeError, DecodeResult as Result};
 use serde_json::Value;
