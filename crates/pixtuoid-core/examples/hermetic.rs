@@ -127,9 +127,6 @@ mod run {
                 Some(sc) if !p.scenarios.iter().any(|s| s.shape.name() == sc) => {
                     Err(format!("{source} has no scenario {sc}"))
                 }
-                _ if self.record && p.scenarios.iter().all(|s| s.fixture.is_none()) => {
-                    Err(format!("{source} records no fixture"))
-                }
                 _ => Ok(()),
             }
         }
@@ -244,10 +241,10 @@ mod run {
         runs.join(p.source).join(scenario.shape.name())
     }
 
-    /// Each of `p`'s runs under `runs` whose scenario names a fixture, written
-    /// into it by the recorder: called once every run and the census passed.
+    /// Each of `p`'s runs under `runs`, written into its scenario's fixture by
+    /// the recorder: called once every run and the census passed.
     fn record(ctx: &Ctx, p: &Profile, runs: &Path) -> std::io::Result<()> {
-        for scenario in p.scenarios.iter().filter(|s| s.fixture.is_some()) {
+        for scenario in p.scenarios {
             let status = Command::new(&ctx.built.recorder)
                 .arg(recorder_flag::PROMOTE)
                 .arg(run_dir(runs, p, scenario))
@@ -1063,10 +1060,6 @@ mod run {
             assert!(
                 check(&["--record", "dsh", "tool-run"]).is_err(),
                 "the census needs all"
-            );
-            assert!(
-                check(&["--record", "codex"]).is_err(),
-                "codex records no fixture"
             );
             assert!(!parse(&args(&["dsh"])).expect("parse").record);
         }

@@ -61,9 +61,9 @@ pub struct Scenario {
     pub shape: Shape,
     /// The hook events this run must fire, as `Profile::event_name` reads them.
     pub expects: &'static [&'static str],
-    /// The committed recording `--record` rewrites, under `tests/sources`. Only
-    /// a profile that owes no field has one: its recording would lose the field.
-    pub fixture: Option<&'static str>,
+    /// The committed recording `--record` rewrites, under `tests/sources`: the
+    /// tier's own, beside any capture still carrying a field the profile owes.
+    pub fixture: &'static str,
 }
 
 /// A config file the tier writes into a sandbox home BEFORE `pixtuoid connect`,
@@ -130,6 +130,9 @@ impl Profile {
 pub const MANIFEST: &str = "run.json";
 /// The headless pixtuoid's output (scene lines and its log) for a run.
 pub const SCENE_LOG: &str = "scene.log";
+/// The provenance key naming the aimock a recording ran against, which only
+/// the tier's own recordings carry.
+pub const PROVENANCE_AIMOCK: &str = "aimock";
 
 /// What one run was, written by the orchestrator beside the run's raw capture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,7 +212,7 @@ pub const PROFILES: &[Profile] = &[
         scenarios: &[Scenario {
             shape: Shape::ToolRun,
             expects: &["SessionStart", "PreToolUse", "PostToolUse", "SessionEnd"],
-            fixture: None,
+            fixture: "fixtures/claude-code/tool-run-hermetic",
         }],
         not_yet: &[
             "Notification",
@@ -280,7 +283,7 @@ wire_api = "responses"
                 "Stop",
                 "SessionEnd",
             ],
-            fixture: None,
+            fixture: "fixtures/codex/tool-run-hermetic",
         }],
         not_yet: &["SubagentStart", "SubagentStop", "PermissionRequest"],
         event_name: hook_event_name,
@@ -361,7 +364,7 @@ wire_api = "responses"
                 "session.tool.success",
                 "session.execution.succeeded",
             ],
-            fixture: None,
+            fixture: "fixtures/opencode/tool-run-hermetic",
         }],
         not_yet: &[
             "session.deleted",
@@ -409,7 +412,7 @@ wire_api = "responses"
                     "tool/result",
                     "agent/disposed",
                 ],
-                fixture: Some("fixtures/dsh/tool-run-recorded"),
+                fixture: "fixtures/dsh/tool-run-recorded",
             },
             Scenario {
                 shape: Shape::Permission,
@@ -423,7 +426,7 @@ wire_api = "responses"
                     "tool/result",
                     "agent/disposed",
                 ],
-                fixture: Some("fixtures/dsh/permission-recorded"),
+                fixture: "fixtures/dsh/permission-recorded",
             },
             Scenario {
                 shape: Shape::Subagent,
@@ -435,7 +438,7 @@ wire_api = "responses"
                     "tool/result",
                     "agent/disposed",
                 ],
-                fixture: Some("delegation/fixtures/dsh"),
+                fixture: "delegation/fixtures/dsh",
             },
         ],
         not_yet: &[],
@@ -579,22 +582,25 @@ mod tests {
     }
 
     #[test]
-    fn a_scenario_records_only_for_a_profile_that_owes_no_field() {
+    fn every_scenario_records_into_a_fixture_of_its_own() {
         let mut fixtures = BTreeSet::new();
         for p in PROFILES {
             for s in p.scenarios {
-                let Some(fixture) = s.fixture else { continue };
-                assert!(
-                    p.not_yet_fields.is_empty(),
-                    "{}: owes {:?}, which a recording would lose",
-                    p.source,
-                    p.not_yet_fields
-                );
-                assert!(fixtures.insert(fixture), "{fixture} recorded twice");
+                assert!(fixtures.insert(s.fixture), "{} recorded twice", s.fixture);
                 let prov = crate::harness::sources_root()
-                    .join(fixture)
+                    .join(s.fixture)
                     .join(crate::harness::PROVENANCE);
-                assert!(prov.is_file(), "{}: no {}", p.source, prov.display());
+                let prov: serde_json::Value = serde_json::from_str(
+                    &std::fs::read_to_string(&prov)
+                        .unwrap_or_else(|e| panic!("{}: {}: {e}", p.source, prov.display())),
+                )
+                .expect("provenance is json");
+                assert!(
+                    prov.get(PROVENANCE_AIMOCK).is_some(),
+                    "{0}: {1} holds no recording of the tier; `just hermetic --record {0}` writes one",
+                    p.source,
+                    s.fixture
+                );
             }
         }
     }

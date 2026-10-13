@@ -1,0 +1,72 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- ActivityStart:
+    agent_id: 104573530619441932
+    tool_use_id: ~
+    detail: ~
+- ModelInfo:
+    agent_id: 104573530619441932
+    model: gpt-5.5
+    effort: high
+- ActivityStart:
+    agent_id: 104573530619441932
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: exec_command
+- ActivityStart:
+    agent_id: 104573530619441932
+    tool_use_id: ~
+    detail: ~
+- Usage:
+    agent_id: 104573530619441932
+    fresh_tokens: 19
+- Usage:
+    agent_id: 104573530619441932
+    fresh_tokens: 19
+- ActivityEnd:
+    agent_id: 104573530619441932
+    tool_use_id: ~
+- SessionStart:
+    agent_id: 104573530619441932
+    source: codex
+    session_id: 01a1370a-3d17-72f3-b93a-cd55db4f8c25
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- ModelInfo:
+    agent_id: 104573530619441932
+    model: gpt-5.5
+    effort: ~
+- SessionStart:
+    agent_id: 104573530619441932
+    source: codex
+    session_id: 01a1370a-3d17-72f3-b93a-cd55db4f8c25
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- Identity:
+    agent_id: 104573530619441932
+    source: codex
+    session_id: 01a1370a-3d17-72f3-b93a-cd55db4f8c25
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 104573530619441932
+    tool_use_id: call_LyQw3QvHLugvnWrq
+    detail:
+      Generic:
+        display: "Bash: cat NOTE.txt"
+- Identity:
+    agent_id: 104573530619441932
+    source: codex
+    session_id: 01a1370a-3d17-72f3-b93a-cd55db4f8c25
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 104573530619441932
+    tool_use_id: call_LyQw3QvHLugvnWrq
+- ActivityEnd:
+    agent_id: 104573530619441932
+    tool_use_id: ~
+- SessionEnd:
+    agent_id: 104573530619441932
+    as_child: false

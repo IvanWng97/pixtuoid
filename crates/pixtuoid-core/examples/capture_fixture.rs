@@ -305,10 +305,7 @@ mod recorder {
                     .find(|s| s.shape.name() == manifest.scenario)
             })
             .ok_or_else(|| std::io::Error::other(format!("{named}: no profiled scenario")))?;
-        let fixture = scenario
-            .fixture
-            .ok_or_else(|| std::io::Error::other(format!("{named}: records no fixture")))?;
-        let dest = root.join(fixture);
+        let dest = root.join(scenario.fixture);
         let exempt = reads::exemption(&dest.join(PROVENANCE));
         for old in jsonl_files_under(&dest)
             .into_iter()
@@ -342,7 +339,7 @@ mod recorder {
             &command,
             &deidentified,
             &[
-                ("aimock", Some(manifest.aimock.clone())),
+                (hermetic::PROVENANCE_AIMOCK, Some(manifest.aimock.clone())),
                 ("script", Some(script)),
             ],
         )?;
@@ -895,8 +892,8 @@ mod recorder {
             let (run, root) = (d.path().join("run"), d.path().join("sources"));
             let fixture = hermetic::profile("dsh")
                 .and_then(|p| p.scenarios.iter().find(|s| s.shape.name() == "tool-run"))
-                .and_then(|s| s.fixture)
-                .expect("dsh's tool-run records");
+                .map(|s| s.fixture)
+                .expect("dsh's tool-run");
             let committed =
                 std::fs::read_to_string(sources_root().join(fixture).join(HOOK_PAYLOADS))
                     .expect("the committed recording");
@@ -968,7 +965,7 @@ mod recorder {
                     .as_u64()
                     .is_some_and(|n| n > 0)
             );
-            assert_eq!(record["aimock"], "1.43.0");
+            assert_eq!(record[hermetic::PROVENANCE_AIMOCK], "1.43.0");
             assert_eq!(record["script"], "tests/sources/hermetic/dsh/tool-run.json");
             assert_eq!(record["version"], "0.2.0-rc.2");
             assert!(

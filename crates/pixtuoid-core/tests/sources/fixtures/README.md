@@ -3,8 +3,8 @@
 Golden fixtures for the per-CLI decode + hook↔JSONL **coalescing** contract,
 driven by `tests/sources/conformance.rs`.
 
-**Record these; do not compose them.** `just hermetic --record <source>` records a CLI
-whose scenarios name a fixture; `just capture-fixture <source> <scenario> <cmd...>` the rest.
+**Record these; do not compose them.** `just hermetic --record <source>` records a profiled
+CLI; `just capture-fixture <source> <scenario> <cmd...>` the rest.
 
 ```text
 just capture-fixture kimi tool-run kimi -p '{prompt}'
