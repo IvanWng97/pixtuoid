@@ -111,13 +111,13 @@ pub fn verify_source(source: &str, dirs: &[PathBuf]) -> std::io::Result<Verdict>
     let mut carried = Fields::default();
     for dir in dirs {
         for file in jsonl_files_under(dir) {
-            for (i, line) in json_lines(&file)?.iter().enumerate() {
+            for line in json_lines(&file)? {
                 if is_hook_envelope(&file)
-                    && let Some(event) = (p.event_name)(line)
+                    && let Some(event) = (p.event_name)(&line)
                 {
                     fired.insert(event.to_owned());
                 }
-                carried.add(p, &file, i, line, true);
+                carried.add(p, &file, &line, true);
             }
         }
     }
@@ -135,9 +135,10 @@ pub fn verify_source(source: &str, dirs: &[PathBuf]) -> std::io::Result<Verdict>
 
 /// The field census proper: each read field of a kind the runs produced must
 /// be carried, unless `owed`, and an owed one carried is Stale. A committed
-/// transcript line the strip left untyped has no kind to match: a head is
-/// matched as the head ([`HEAD`]), and any other line needs some run's
-/// transcript line to carry all of its read fields together.
+/// transcript line the strip left untyped has no kind to match: some run's
+/// transcript line must carry all of its read fields together, as a reader
+/// that keys on those fields alone takes any line that has them (a head
+/// scan's `cwd_extractor`).
 fn census(
     reads: &Fields,
     carried: &Fields,
@@ -197,22 +198,15 @@ pub(crate) struct Fields {
 }
 
 impl Fields {
-    /// Add line `index` of `file`. A committed (`run == false`) transcript
-    /// line the strip left untyped has no kind a run's line could have: a head
-    /// goes to [`HEAD`], any other line to `lines`. A run's head goes to both
-    /// its kind and [`HEAD`].
-    fn add(&mut self, p: &Profile, file: &Path, index: usize, line: &Value, run: bool) {
+    /// Add `line` of `file`. A committed (`run == false`) transcript line the
+    /// strip left untyped goes to `lines` alone, since its blank `type` is no
+    /// kind a run's line could have.
+    fn add(&mut self, p: &Profile, file: &Path, line: &Value, run: bool) {
         let stamped = is_hook_envelope(file);
         let leaves: BTreeSet<String> = leaves(line, stamped).into_iter().collect();
         let kind = kind_of(p, file, line);
         let untyped = !stamped && kind == TX;
-        if !stamped && index == 0 && (run || untyped) {
-            self.by_kind
-                .entry(HEAD.to_owned())
-                .or_default()
-                .extend(leaves.iter().cloned());
-        }
-        if run && !stamped || untyped && index > 0 {
+        if run && !stamped || untyped {
             self.lines.insert(leaves.clone());
         }
         if run || !untyped {
@@ -232,10 +226,6 @@ impl Fields {
 /// A transcript line's kind prefix, and the whole kind of one whose `type`
 /// is blank.
 const TX: &str = "tx:";
-/// The kind of a transcript's first line, read by position where its `type`
-/// is not (codex's head carries the cwd a watcher registers by:
-/// `registry::cwd_extractor_for`).
-const HEAD: &str = "tx:#head";
 
 /// The fields a decoder reads in `p`'s committed captures: the recorder
 /// blanks every subtree no decoder reads (`reads::strip_unread`), so a
@@ -254,8 +244,8 @@ pub(crate) fn committed_reads(p: &Profile) -> std::io::Result<Fields> {
             continue;
         }
         for file in capture.jsonl_files() {
-            for (i, line) in json_lines(&file)?.iter().enumerate() {
-                reads.add(p, &file, i, line, false);
+            for line in json_lines(&file)? {
+                reads.add(p, &file, &line, false);
             }
         }
     }
@@ -904,26 +894,29 @@ mod tests {
     }
 
     #[test]
-    fn a_rollout_head_that_loses_its_cwd_fails_the_census() {
+    fn a_rollout_that_loses_its_cwd_fails_the_census() {
+        // Every line: codex's head scan takes the first `payload.cwd` it finds.
         let d = run_from("codex", "tool-run-recorded", CX_SCENE);
         for t in jsonl_files_under(d.path())
             .into_iter()
             .filter(|f| !is_hook_envelope(f))
         {
             let text = std::fs::read_to_string(&t).expect("read");
-            let mut lines: Vec<Value> = text
+            let out: Vec<String> = text
                 .lines()
-                .map(|l| serde_json::from_str(l).expect("json"))
+                .map(|l| {
+                    let mut v: Value = serde_json::from_str(l).expect("json");
+                    if let Some(payload) = v["payload"].as_object_mut() {
+                        payload.remove("cwd");
+                    }
+                    v.to_string()
+                })
                 .collect();
-            if let Some(head) = lines.first_mut().and_then(|h| h["payload"].as_object_mut()) {
-                head.remove("cwd");
-            }
-            let out: Vec<String> = lines.iter().map(Value::to_string).collect();
             std::fs::write(&t, out.join("\n") + "\n").expect("write");
         }
         let v = verify_source("codex", &[d.path().to_path_buf()]).expect("verify");
         assert!(
-            has(&v, Label::Fail, "tx:#head /payload/cwd"),
+            has(&v, Label::Fail, "with no type reads"),
             "{:?}",
             v.findings()
         );
