@@ -22,8 +22,8 @@ pub enum Package {
     Npm(&'static str),
 }
 
-/// What a scenario's run must look like to the decoder and the scene. Shared by
-/// every CLI, so one CLI cannot pass on a weaker bar than another.
+/// What a scenario's script drives a CLI through. Shared by every CLI, so one CLI
+/// cannot be held to a weaker bar than another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shape {
     /// A turn that reads a file: the session registers in the workspace, a tool
@@ -75,12 +75,18 @@ pub struct Profile {
     pub env: &'static [(&'static str, &'static str)],
     /// Homes the registry row does not name, each pointed into the sandbox.
     pub homes: &'static [&'static str],
+    /// Fixed system paths the CLI reads policy or config from, which no home
+    /// redirects: a run on a machine that has one is not hermetic.
+    pub unsandboxed: &'static [&'static str],
+    /// Names the CLI reads from the workspace's ancestor directories, which
+    /// sit outside the sandbox: a run under one that has any is not hermetic.
+    pub ancestor_config: &'static [&'static str],
     /// Config written before `connect`.
     pub config: &'static [ConfigFile],
     /// The scripted turns.
     pub scenarios: &'static [Scenario],
-    /// Registered hooks no scenario fires yet. Shrink-only: recording one forces
-    /// it out (the `NO_WIRE_EVIDENCE_YET` pattern).
+    /// Registered hooks no scenario expects yet; moving one into `expects`
+    /// forces it out (`a_hook_both_expected_and_not_yet_is_a_stale_entry`).
     pub not_yet: &'static [&'static str],
 }
 
@@ -100,7 +106,7 @@ pub const MANIFEST: &str = "run.json";
 /// The headless pixtuoid's output (scene lines and its log) for a run.
 pub const SCENE_LOG: &str = "scene.log";
 
-/// What one run was, written by the orchestrator and read by everything after.
+/// What one run was, written by the orchestrator beside the run's raw capture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     /// The registered source id.
@@ -142,6 +148,15 @@ pub const PROFILES: &[Profile] = &[
             ("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "1"),
         ],
         homes: &[],
+        // Managed settings, managed MCP servers and a managed CLAUDE.md, on
+        // macOS and Linux (code.claude.com/docs/en/managed-settings).
+        unsandboxed: &[
+            "/Library/Application Support/ClaudeCode",
+            "/etc/claude-code",
+        ],
+        // Memory files up to `/`, and AGENTS.md where none is found
+        // (code.claude.com/docs/en/memory).
+        ancestor_config: &["CLAUDE.md", "CLAUDE.local.md", ".claude", "AGENTS.md"],
         config: &[],
         scenarios: &[Scenario {
             shape: Shape::ToolRun,
@@ -157,10 +172,11 @@ pub const PROFILES: &[Profile] = &[
     Profile {
         source: "codex",
         package: Package::Npm("@openai/codex"),
-        // Hooks run only once trusted, and codex persists trust only through its
-        // TUI review (codex-rs/hooks/src/config_rules.rs); this flag is upstream's
-        // path for "automation that already vets hook sources"
-        // (codex-rs/utils/cli/src/shared_options.rs).
+        // A hook runs only once trusted, and trust is a hash of codex's own
+        // normalized hook identity (`codex-rs/hooks/src/engine/discovery.rs:775`)
+        // that seeding would have to re-implement; this flag is upstream's path
+        // for "automation that already vets hook sources"
+        // (`codex-rs/utils/cli/src/shared_options.rs:62-64`).
         invocation: &[
             "codex",
             "exec",
@@ -169,6 +185,14 @@ pub const PROFILES: &[Profile] = &[
         ],
         env: &[("HERMETIC_API_KEY", "{key}")],
         homes: &[],
+        // System config, requirements and managed config; `CODEX_HOME` never
+        // reaches them (`codex-rs/config/src/loader/mod.rs:69`, `:102-107`,
+        // `layer_io.rs:222-227`).
+        unsandboxed: &["/etc/codex"],
+        // Project config and AGENTS.md up to the project root
+        // (`codex-rs/config/src/loader/mod.rs:112-126`, `core/src/agents_md.rs:1-13`);
+        // with no `.git` above the workspace, every ancestor is checked.
+        ancestor_config: &[".codex", "AGENTS.md", "AGENTS.override.md"],
         config: &[ConfigFile {
             home: "CODEX_HOME",
             path: "config.toml",
@@ -202,8 +226,24 @@ wire_api = "responses"
         // carries the run's PIXTUOID_SOCKET; a private server inherits it
         // (`packages/cli/src/services/standalone.ts:24-25`).
         invocation: &["opencode", "run", "--standalone", "{prompt}"],
-        env: &[],
+        // The models.dev fetch and the update check
+        // (`packages/cli/src/server-process.ts:113`, `services/updater.ts:459`).
+        env: &[
+            ("OPENCODE_DISABLE_MODELS_FETCH", "1"),
+            ("OPENCODE_DISABLE_AUTOUPDATE", "1"),
+        ],
         homes: &["OPENCODE_CONFIG_DIR"],
+        unsandboxed: &[],
+        // Project config up to `/` (`packages/core/src/config/discovery.ts:10`,
+        // `:36`), and AGENTS.md (`config/plugin/instruction.ts:72`).
+        ancestor_config: &[
+            ".claude",
+            ".agents",
+            ".opencode",
+            "opencode.jsonc",
+            "opencode.json",
+            "AGENTS.md",
+        ],
         config: &[ConfigFile {
             home: "OPENCODE_CONFIG_DIR",
             path: "opencode.jsonc",
@@ -365,6 +405,23 @@ mod tests {
         };
         let p = profile("opencode").expect("profiled");
         assert_eq!(p.package, Package::Npm(package));
+    }
+
+    #[test]
+    fn an_unsandboxed_path_is_absolute_and_an_ancestor_name_is_one_component() {
+        for p in PROFILES {
+            for path in p.unsandboxed {
+                assert!(Path::new(path).is_absolute(), "{}: {path}", p.source);
+            }
+            for name in p.ancestor_config {
+                assert_eq!(
+                    Path::new(name).components().count(),
+                    1,
+                    "{}: {name}",
+                    p.source
+                );
+            }
+        }
     }
 
     #[test]

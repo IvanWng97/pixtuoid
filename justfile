@@ -760,7 +760,7 @@ replay fixture delay="3":
 
 # Two builds: one would unify the examples' `harness` feature into the binary
 # under test.
-[doc('Run each profiled agent CLI against a scripted model (aimock) and judge what pixtuoid made of it')]
+[doc('Run each profiled agent CLI against a scripted model (aimock) and record what pixtuoid saw')]
 [group('rust')]
 hermetic *args:
     cargo build --release -q -p pixtuoid -p pixtuoid-hook

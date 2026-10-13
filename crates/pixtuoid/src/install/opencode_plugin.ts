@@ -2,12 +2,10 @@
 //
 // opencode has no config-level shell hook, so pixtuoid integrates as a tiny plugin
 // (auto-discovered from `<config>/plugins/*.ts`) that pipes the session lifecycle /
-// tool / permission events into the `pixtuoid-hook` shim on stdin. It NEVER blocks
-// or breaks opencode (the shim is best-effort, bounded by its own write-timeout
-// watchdog, `transport::WRITE_TIMEOUT`, and every error here is swallowed —
-// invariant #5).
-//
-// On unload it waits at most DRAIN_MS for the events already in hand.
+// tool / permission events into the `pixtuoid-hook` shim on stdin. It never breaks
+// opencode, and its only wait is bounded: each send by the shim's write-timeout
+// watchdog (`transport::WRITE_TIMEOUT`, invariant #5), and unload by DRAIN_MS.
+// Every error here is swallowed.
 //
 // HOOK_PATH is baked in at install time (a JSON-encoded absolute path). Safe to
 // delete — disconnecting opencode in pixtuoid's Sources panel replaces this
