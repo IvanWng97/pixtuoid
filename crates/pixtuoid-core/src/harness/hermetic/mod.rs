@@ -20,6 +20,8 @@ pub const DUMMY_KEY: &str = "hermetic-dummy-key";
 
 /// What a `system_config` path spells the operator's user name as.
 pub const USER_PLACEHOLDER: &str = "{user}";
+/// What a script spells [`CAPTURE_NOTE`](crate::harness::CAPTURE_NOTE) as.
+pub const NOTE_PLACEHOLDER: &str = "{note}";
 
 /// How users install the CLI, so the tier runs the artifact they run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -677,6 +679,32 @@ mod tests {
                 assert!(
                     !expected.contains(n),
                     "{}: {n} is fired by a scenario, so it leaves not_yet",
+                    p.source
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_tool_run_replies_only_to_the_note_it_read() {
+        // A reply to any tool result lets a run whose read failed pass.
+        for p in PROFILES {
+            for s in p.scenarios.iter().filter(|s| s.shape == Shape::ToolRun) {
+                let script: serde_json::Value = serde_json::from_str(
+                    &std::fs::read_to_string(s.script(p.source)).expect("the script"),
+                )
+                .expect("json");
+                let replies = script["fixtures"].as_array().expect("fixtures");
+                assert!(
+                    replies
+                        .iter()
+                        .any(|f| f["match"]["toolResultContains"] == NOTE_PLACEHOLDER),
+                    "{}: no reply waits for {NOTE_PLACEHOLDER}",
+                    p.source
+                );
+                assert!(
+                    !replies.iter().any(|f| f["match"]["hasToolResult"] == true),
+                    "{}: a reply takes any tool result",
                     p.source
                 );
             }

@@ -37,8 +37,8 @@ pub mod hermetic;
 pub mod reads;
 
 pub use captures::{
-    CAPTURE_RECORD, CAPTURE_WORKSPACE, Capture, CaptureRecord, HOOK_PAYLOADS, PROVENANCE, captures,
-    jsonl_files_under, recorder_flag, transcripts_under,
+    CAPTURE_NOTE, CAPTURE_RECORD, CAPTURE_WORKSPACE, Capture, CaptureRecord, HOOK_PAYLOADS,
+    PROVENANCE, captures, jsonl_files_under, recorder_flag, transcripts_under,
 };
 
 /// The committed corpus: every recorded capture, fixture and hermetic script.

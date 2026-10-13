@@ -43,6 +43,9 @@ pub fn transcripts_under(source: &str, root: &Path) -> Vec<PathBuf> {
 /// capturing somewhere already generic is what keeps a per-run path out of the
 /// bytes. The recorder prepares it; a hermetic script names files under it.
 pub const CAPTURE_WORKSPACE: &str = "/tmp/pixtuoid-capture/proj";
+/// The `NOTE.txt` the recorder writes into the workspace: what every scripted
+/// turn reads, and what a script waits for before it replies.
+pub const CAPTURE_NOTE: &str = "pong";
 
 /// A capture's hook payloads, one per line as the shim sent them.
 pub const HOOK_PAYLOADS: &str = "hook-payloads.jsonl";
