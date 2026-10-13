@@ -105,9 +105,10 @@ pub struct Target {
     /// The upstream declarations the artifacts this target installs depend on.
     #[cfg(feature = "upstream")]
     pub upstream: &'static [pixtuoid_core::source::upstream::Watch],
-    /// The hook names the installed artifact subscribes to, each of which a
-    /// vanish watch must carry (`every_registered_hook_is_watched`).
-    #[cfg(all(test, feature = "upstream"))]
+    /// The hook names the installed artifact subscribes to: a vanish watch
+    /// carries each (`every_registered_hook_is_watched`), and a profiled CLI's
+    /// hermetic scenarios fire or owe each (`every_hook_a_profiled_cli_registers_is_fired_or_owed`).
+    #[cfg(test)]
     pub(crate) registers: fn() -> Vec<&'static str>,
 }
 
@@ -283,7 +284,7 @@ pub(crate) const CLAUDE: Target = Target {
     host: Some(&crate::install::claude::HOST),
     #[cfg(feature = "upstream")]
     upstream: crate::install::claude::UPSTREAM,
-    #[cfg(all(test, feature = "upstream"))]
+    #[cfg(test)]
     registers: || crate::install::claude::EVENTS.to_vec(),
 };
 
@@ -311,7 +312,7 @@ pub(crate) const CODEX: Target = Target {
     host: Some(&crate::install::codex::HOST),
     #[cfg(feature = "upstream")]
     upstream: crate::install::codex::UPSTREAM,
-    #[cfg(all(test, feature = "upstream"))]
+    #[cfg(test)]
     registers: || crate::install::codex::CODEX_EVENTS.to_vec(),
 };
 
@@ -335,7 +336,7 @@ pub(crate) const REASONIX: Target = Target {
     host: Some(&crate::install::reasonix::HOST),
     #[cfg(feature = "upstream")]
     upstream: crate::install::reasonix::UPSTREAM,
-    #[cfg(all(test, feature = "upstream"))]
+    #[cfg(test)]
     registers: || crate::install::reasonix::REASONIX_EVENTS.to_vec(),
 };
 
@@ -357,7 +358,7 @@ pub(crate) const CODEWHALE: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::codewhale::UPSTREAM,
-    #[cfg(all(test, feature = "upstream"))]
+    #[cfg(test)]
     registers: || {
         crate::install::codewhale::CODEWHALE_EVENTS
             .iter()
@@ -392,7 +393,7 @@ pub(crate) const OPENCODE: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: &[],
-    #[cfg(all(test, feature = "upstream"))]
+    #[cfg(test)]
     registers: crate::install::opencode::plugin_events,
 };
 
@@ -414,7 +415,7 @@ pub(crate) const GROK: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::grok::UPSTREAM,
-    #[cfg(all(test, feature = "upstream"))]
+    #[cfg(test)]
     registers: || crate::install::grok::GROK_EVENTS.to_vec(),
 };
 
@@ -436,7 +437,7 @@ pub(crate) const CURSOR: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::cursor::UPSTREAM,
-    #[cfg(all(test, feature = "upstream"))]
+    #[cfg(test)]
     registers: || crate::install::cursor::CURSOR_EVENTS.to_vec(),
 };
 
@@ -459,7 +460,7 @@ pub(crate) const HERMES: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::hermes::UPSTREAM,
-    #[cfg(all(test, feature = "upstream"))]
+    #[cfg(test)]
     registers: || crate::install::hermes::HERMES_EVENTS.to_vec(),
 };
 
@@ -485,7 +486,7 @@ pub(crate) const OPENCLAW: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::openclaw::UPSTREAM,
-    #[cfg(all(test, feature = "upstream"))]
+    #[cfg(test)]
     registers: || {
         [
             crate::install::openclaw::OPENCLAW_EVENTS,
@@ -515,7 +516,7 @@ pub(crate) const KIMI: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::kimi::UPSTREAM,
-    #[cfg(all(test, feature = "upstream"))]
+    #[cfg(test)]
     registers: || crate::install::kimi::KIMI_EVENTS.to_vec(),
 };
 
@@ -542,7 +543,7 @@ pub(crate) const DSH: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::dsh::UPSTREAM,
-    #[cfg(all(test, feature = "upstream"))]
+    #[cfg(test)]
     registers: crate::install::dsh::plugin_events,
 };
 
@@ -569,7 +570,7 @@ pub(crate) const OMP: Target = Target {
     host: None,
     #[cfg(feature = "upstream")]
     upstream: crate::install::omp::UPSTREAM,
-    #[cfg(all(test, feature = "upstream"))]
+    #[cfg(test)]
     registers: || {
         crate::install::forward_set(crate::install::omp::EXTENSION_TEMPLATE)
             .into_iter()
@@ -664,6 +665,27 @@ mod tests {
                      install, so its sprite never appears. Add a Target in install/target.rs."
                 );
             }
+        }
+    }
+
+    #[test]
+    fn every_hook_a_profiled_cli_registers_is_fired_or_owed() {
+        use std::collections::BTreeSet;
+        for p in pixtuoid_core::harness::hermetic::PROFILES {
+            let t = by_source(p.source).expect("a profiled CLI has an install target");
+            let registered: BTreeSet<&str> = (t.registers)().into_iter().collect();
+            let accounted: BTreeSet<&str> = p
+                .scenarios
+                .iter()
+                .flat_map(|s| s.expects.iter().copied())
+                .chain(p.not_yet.iter().copied())
+                .collect();
+            assert_eq!(
+                registered, accounted,
+                "{}: a registered hook no scenario fires belongs in not_yet; \
+                 an expected or not_yet hook the install never registers is stale",
+                p.source
+            );
         }
     }
 

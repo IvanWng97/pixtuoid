@@ -44,14 +44,16 @@ mod recorder {
     const DEFAULT_PROMPT: &str =
         "Read NOTE.txt, then list this directory, then read NOTE.txt again.";
 
-    /// The workspace path is FIXED and generic on purpose: every payload embeds its
-    /// own cwd, the decoders read it, so the strip keeps it — capturing somewhere
-    /// already generic is what keeps a per-run path out of the bytes.
-    const WORKSPACE: &str = "/tmp/pixtuoid-capture/proj";
+    use pixtuoid_core::harness::CAPTURE_WORKSPACE as WORKSPACE;
+    use pixtuoid_core::harness::{CAPTURE_RECORD, CaptureRecord, HOOK_PAYLOADS, PROVENANCE};
 
     /// Where a driver names the CLI it drives, a command or the path to its
     /// binary, for the recorder to ask its `--version`.
     const CLI_ENV: &str = "PIXTUOID_CAPTURE_CLI";
+
+    /// Where the recorder names the source's registry `verified_version`, for a
+    /// driver that installs its CLI: a capture must anchor that version.
+    const VERSION_ENV: &str = "PIXTUOID_CAPTURE_VERSION";
 
     /// A hook can still be in flight when the CLI's own process exits, so the wait
     /// is measured from the LAST PAYLOAD rather than from that exit.
@@ -59,14 +61,53 @@ mod recorder {
     const QUIET_ROUNDS: u32 = 4;
     const MAX_ROUNDS: u32 = 40;
 
+    /// Where a hermetic run sends the capture instead of the committed tree.
+    #[derive(Debug, Default, PartialEq)]
+    struct Options {
+        /// Write the RAW capture here: not stripped, no provenance, no PII scan.
+        /// The strip blanks what the decoder under test does not read, which is
+        /// exactly where a renamed upstream field lands, so drift evidence must
+        /// keep it; these bytes are never committed.
+        out: Option<PathBuf>,
+        /// Forward each payload, as received, to this socket: a headless pixtuoid
+        /// renders the same run the recorder records.
+        tee: Option<PathBuf>,
+    }
+
+    /// Leading `--out <dir>` / `--tee <socket>` pairs, then the positionals.
+    fn parse_options(mut args: Vec<String>) -> Result<(Options, Vec<String>), String> {
+        let mut options = Options::default();
+        while let Some(flag) = args.first().cloned() {
+            let slot = match flag.as_str() {
+                "--out" => &mut options.out,
+                "--tee" => &mut options.tee,
+                _ => break,
+            };
+            if args.len() < 2 {
+                return Err(format!("{flag} takes a path"));
+            }
+            *slot = Some(PathBuf::from(args.remove(1)));
+            args.remove(0);
+        }
+        Ok((options, args))
+    }
+
     pub(crate) fn main() -> std::io::Result<()> {
         let args: Vec<String> = std::env::args().skip(1).collect();
         if args.first().map(String::as_str) == Some("--strip-corpus") {
             return strip_corpus(&sources_root());
         }
+        let (options, args) = match parse_options(args) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
+        };
         if args.len() < 3 {
             eprintln!(
-                "usage: capture_fixture <source-id> <scenario> <cmd...>   ('{{prompt}}' expands)\n       \
+                "usage: capture_fixture [--out <dir>] [--tee <socket>] <source-id> <scenario> <cmd...>   \
+                 ('{{prompt}}' expands)\n       \
                  capture_fixture --strip-corpus   (strip every committed capture in place)"
             );
             std::process::exit(2);
@@ -80,55 +121,74 @@ mod recorder {
             .map(|a| a.replace("{prompt}", &prompt))
             .collect();
 
-        if registry::descriptor_for(&source).is_none() {
+        let Some(descriptor) = registry::descriptor_for(&source) else {
             let known: Vec<&str> = registry::registered_source_names().collect();
             eprintln!("no source {source:?} — registered: {}", known.join(", "));
             std::process::exit(2);
-        }
+        };
 
-        let dest = scenario_dest(&sources_root(), &source, &scenario);
+        let dest = options
+            .out
+            .clone()
+            .unwrap_or_else(|| scenario_dest(&sources_root(), &source, &scenario));
         let root = resolved_source_root(&source);
 
         let workspace = prepare_workspace()?;
         let sandbox = tempfile::tempdir()?;
         let sock = sandbox.path().join("capture.sock");
-        let listener = Listener::bind(&sock)?;
+        let listener = Listener::bind(&sock, options.tee.clone())?;
 
         println!("capturing {source}/{scenario} — one real model turn");
         let started = SystemTime::now();
-        let status = run_cli(&cmd, &workspace, &sock)?;
+        let status = run_cli(&cmd, &workspace, &sock, descriptor.verified_version)?;
         listener.settle();
         let payloads = listener.take();
 
         std::fs::create_dir_all(&dest)?;
         let mut wrote: Vec<PathBuf> = Vec::new();
 
+        // A source can be BOTH: CC's tool run is in the transcript while its
+        // permission gate is a hook event, so the two are harvested together.
         if let Some(root) = root.as_deref() {
-            // A source can be BOTH: CC's tool run is in the transcript while its
-            // permission gate is a hook event, so the two are harvested together.
             let candidates = pixtuoid_core::harness::transcripts_under(&source, root);
-            match newest_born_after(&candidates, started) {
-                Some(fresh) => wrote.push(place_transcript(&fresh, &candidates, &dest)?),
-                None if payloads.is_empty() => {
-                    eprintln!(
-                        "captured nothing — no transcript created under {} and no hook fired; \
-                         did the turn run?",
-                        root.display()
-                    );
-                    std::process::exit(1);
-                }
-                None => {}
+            if let Some(fresh) = newest_born_after(&candidates, started) {
+                wrote.push(place_transcript(&fresh, &candidates, &dest)?);
             }
         }
         if !payloads.is_empty() {
             wrote.push(write_payloads(&payloads, &dest)?);
         }
+
+        let named = std::fs::read_to_string(named_cli(&sock)).ok();
+        let (cli, version) = identity(&cmd[0], named.as_deref(), probe_version);
+        if options.out.is_some() {
+            // An empty raw capture is still evidence: the judge reads a hook
+            // that never fired as pixtuoid's failure, not as a run that never was.
+            let record = CaptureRecord {
+                workspace: std::fs::canonicalize(&workspace).unwrap_or(workspace),
+                cli,
+                version,
+                exit_code: status.code(),
+            };
+            std::fs::write(
+                dest.join(CAPTURE_RECORD),
+                format!("{}\n", serde_json::to_string_pretty(&record)?),
+            )?;
+            for p in &wrote {
+                println!("wrote raw {} ({} lines)", p.display(), count_lines(p));
+            }
+            return Ok(());
+        }
         if wrote.is_empty() {
-            eprintln!("captured nothing — the CLI fired no hook and wrote no transcript");
+            eprintln!(
+                "captured nothing — no hook fired and no transcript was created{}; did the turn run?",
+                root.map(|r| format!(" under {}", r.display()))
+                    .unwrap_or_default()
+            );
             std::process::exit(1);
         }
 
-        let deidentified = match reads::exemption(&dest.join("provenance.json")) {
+        let deidentified = match reads::exemption(&dest.join(PROVENANCE)) {
             Some(why) => Deidentified::Exempt(why),
             None => {
                 let strip = reads::strip_unread(&source, &wrote)?;
@@ -136,8 +196,6 @@ mod recorder {
                 Deidentified::Stripped(strip.blanked)
             }
         };
-        let named = std::fs::read_to_string(named_cli(&sock)).ok();
-        let (cli, version) = identity(&cmd[0], named.as_deref(), probe_version);
         write_provenance(
             &dest,
             (&cli, &version),
@@ -246,17 +304,22 @@ mod recorder {
     }
 
     impl Listener {
-        fn bind(sock: &Path) -> std::io::Result<Self> {
+        fn bind(sock: &Path, tee: Option<PathBuf>) -> std::io::Result<Self> {
             let listener = UnixListener::bind(sock)?;
             let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
             let sink = Arc::clone(&lines);
+            let tee = Arc::new(tee);
             std::thread::spawn(move || {
                 for stream in listener.incoming() {
                     let Ok(mut stream) = stream else { continue };
                     let sink = Arc::clone(&sink);
+                    let tee = Arc::clone(&tee);
                     std::thread::spawn(move || {
                         let mut buf = String::new();
                         if stream.read_to_string(&mut buf).is_ok() && !buf.trim().is_empty() {
+                            if let Some(to) = tee.as_deref() {
+                                forward(to, &buf);
+                            }
                             sink.lock().expect("listener sink").push(buf);
                         }
                     });
@@ -282,6 +345,15 @@ mod recorder {
 
         fn take(&self) -> Vec<String> {
             self.lines.lock().expect("listener sink").clone()
+        }
+    }
+
+    /// One connection per payload, as the shim itself sends. A tee that cannot
+    /// connect is the headless renderer's failure, which the scene check reports;
+    /// the recording goes on.
+    fn forward(to: &Path, payload: &str) {
+        if let Ok(mut s) = std::os::unix::net::UnixStream::connect(to) {
+            let _ = s.write_all(payload.as_bytes());
         }
     }
 
@@ -356,6 +428,7 @@ mod recorder {
         cmd: &[String],
         ws: &Path,
         sock: &Path,
+        verified: &str,
     ) -> std::io::Result<std::process::ExitStatus> {
         let mut c = std::process::Command::new(&cmd[0]);
         c.args(&cmd[1..])
@@ -366,7 +439,7 @@ mod recorder {
         if let Some(dir) = sock.parent() {
             c.env("TUIDRIVE_LOG", dir.join("tuidrive.log"));
         }
-        c.env(CLI_ENV, named_cli(sock));
+        c.env(CLI_ENV, named_cli(sock)).env(VERSION_ENV, verified);
         for k in agent_env_names(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok())) {
             c.env_remove(k);
         }
@@ -374,7 +447,7 @@ mod recorder {
     }
 
     fn write_payloads(payloads: &[String], dest: &Path) -> std::io::Result<PathBuf> {
-        let out = no_clobber(dest.join("hook-payloads.jsonl"));
+        let out = no_clobber(dest.join(HOOK_PAYLOADS));
         let mut f = std::fs::File::create(&out)?;
         for p in payloads {
             // The shim already stamped `_pixtuoid_source`.
@@ -447,7 +520,7 @@ mod recorder {
                 }
             }
         }
-        let out = no_clobber(dest.join("provenance.json"));
+        let out = no_clobber(dest.join(PROVENANCE));
         std::fs::write(&out, format!("{}\n", serde_json::to_string_pretty(&prov)?))?;
         // Loud, because the record just written is unusable.
         if version == "unknown" {
@@ -635,7 +708,7 @@ mod recorder {
     /// scenario subdirectory, so it cannot reach here.
     fn scenario_dest(sources: &Path, source: &str, scenario: &str) -> PathBuf {
         let owned = sources.join(source).join("fixtures").join(scenario);
-        if owned.join("provenance.json").is_file() {
+        if owned.join(PROVENANCE).is_file() {
             return owned;
         }
         sources.join("fixtures").join(source).join(scenario)
@@ -644,6 +717,53 @@ mod recorder {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn leading_out_and_tee_pairs_are_options_and_the_rest_is_positional() {
+            let args = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+            let (o, rest) = parse_options(args(&[
+                "--tee", "/s", "--out", "/o", "codex", "tool-run", "codex",
+            ]))
+            .expect("parse");
+            assert_eq!(o.out, Some(PathBuf::from("/o")));
+            assert_eq!(o.tee, Some(PathBuf::from("/s")));
+            assert_eq!(rest, args(&["codex", "tool-run", "codex"]));
+            let (o, rest) = parse_options(args(&["codex", "tool-run", "--out"])).expect("parse");
+            assert_eq!(
+                o,
+                Options::default(),
+                "a flag after the positionals is the CLI's"
+            );
+            assert_eq!(rest.len(), 3);
+            assert!(
+                parse_options(args(&["--out"])).is_err(),
+                "a flag without its path"
+            );
+        }
+
+        #[test]
+        fn the_listener_forwards_each_payload_to_the_tee_as_received() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let tee = d.path().join("tee.sock");
+            let downstream = UnixListener::bind(&tee).expect("bind tee");
+            let sock = d.path().join("capture.sock");
+            let listener = Listener::bind(&sock, Some(tee)).expect("bind");
+            let payload = "{\"hook_event_name\":\"SessionStart\"}\n";
+            std::os::unix::net::UnixStream::connect(&sock)
+                .expect("connect")
+                .write_all(payload.as_bytes())
+                .expect("send");
+            let (mut got, _) = downstream.accept().expect("forwarded");
+            let mut buf = String::new();
+            got.read_to_string(&mut buf).expect("read");
+            assert_eq!(buf, payload);
+            listener.settle();
+            assert_eq!(
+                listener.take(),
+                vec![payload.to_string()],
+                "recorded as well"
+            );
+        }
 
         #[test]
         fn the_not_json_notice_names_the_file_and_the_parse_error() {
@@ -922,12 +1042,17 @@ mod recorder {
         }
 
         #[test]
-        fn a_driver_names_its_cli_where_the_recorder_reads_it() {
+        fn a_driver_reads_the_verified_version_and_names_its_cli_where_the_recorder_reads_it() {
             let sandbox = tempfile::tempdir().expect("sandbox");
             let ws = tempfile::tempdir().expect("workspace");
             let sock = sandbox.path().join("capture.sock");
-            let cmd = ["sh", "-c", &format!(r#"echo dsh >"${CLI_ENV}""#)].map(String::from);
-            assert!(run_cli(&cmd, ws.path(), &sock).expect("runs").success());
+            let script = format!(r#"test "${VERSION_ENV}" = 1.0.0 && echo dsh >"${CLI_ENV}""#);
+            let cmd = ["sh", "-c", &script].map(String::from);
+            assert!(
+                run_cli(&cmd, ws.path(), &sock, "1.0.0")
+                    .expect("runs")
+                    .success()
+            );
             assert_eq!(
                 std::fs::read_to_string(named_cli(&sock)).ok().as_deref(),
                 Some("dsh\n")

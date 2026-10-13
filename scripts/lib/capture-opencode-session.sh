@@ -7,9 +7,9 @@
 # server, so the deletion rides the same server the turn did.
 set -uo pipefail
 
-# The release the capture records, through npx rather than whatever opencode is
-# on PATH.
-OC_VERSION="${OC_VERSION:-2.0.27}"
+# The release the capture records, the registry's verified_version as the
+# recorder names it, rather than whatever opencode is on PATH.
+OC_VERSION="${PIXTUOID_CAPTURE_VERSION:?run through just capture-fixture, which names the version}"
 PORT="${OC_PORT:-4103}"
 BASE="http://127.0.0.1:$PORT"
 # See the sibling scripts: a fixed shared-temp log is the class the recorder's

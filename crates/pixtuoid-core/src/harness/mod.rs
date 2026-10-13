@@ -33,9 +33,13 @@ use crate::state::{ActivityState, SceneState, ToolKind};
 use crate::{AgentEvent, AgentId, Reducer, Transport};
 
 mod captures;
+pub mod hermetic;
 pub mod reads;
 
-pub use captures::{Capture, captures, transcripts_under};
+pub use captures::{
+    CAPTURE_RECORD, CAPTURE_WORKSPACE, Capture, CaptureRecord, HOOK_PAYLOADS, PROVENANCE, captures,
+    transcripts_under,
+};
 
 /// A lifecycle CLASS a driven wire pushed the slot through — asserted as
 /// reached-at-some-point, never as the terminal state.
