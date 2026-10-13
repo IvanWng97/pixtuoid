@@ -13,6 +13,9 @@
 # shutdown is what closes the session.
 set -uo pipefail
 
+# The CLI the recorder asks its version (`CLI_ENV`, capture_fixture.rs).
+[[ -z ${PIXTUOID_CAPTURE_CLI:-} ]] || echo openclaw >"$PIXTUOID_CAPTURE_CLI"
+
 PROMPT="${1:?prompt}"
 PORT="${OC_PORT:-19099}"
 SESSION="${OC_SESSION:-pixcap-$(date +%s)}"

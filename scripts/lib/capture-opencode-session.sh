@@ -28,7 +28,8 @@ fi
 # The platform package's binary, unpacked: `@opencode/cli` itself only links it
 # from a postinstall script, which `npx` does not run.
 bin_dir="/tmp/pixtuoid-capture/opencode-$OC_VERSION"
-if [[ ! -x $bin_dir/package/bin/opencode ]]; then
+oc_bin="$bin_dir/package/bin/opencode"
+if [[ ! -x $oc_bin ]]; then
     platform="$(node -p 'process.platform + "-" + process.arch')"
     rm -rf "$bin_dir"
     mkdir -p "$bin_dir"
@@ -38,15 +39,10 @@ if [[ ! -x $bin_dir/package/bin/opencode ]]; then
         exit 1
     fi
 fi
-oc() { "$bin_dir/package/bin/opencode" "$@"; }
+oc() { "$oc_bin" "$@"; }
 
-# The recorder probes `<driver> --version` for provenance, from its own cwd:
-# answer with the driven CLI's before any side effect, or the probe reruns the
-# whole session there.
-if [[ ${1:-} == --version ]]; then
-    oc --version
-    exit
-fi
+# The CLI the recorder asks its version (`CLI_ENV`, capture_fixture.rs).
+[[ -z ${PIXTUOID_CAPTURE_CLI:-} ]] || echo "$oc_bin" >"$PIXTUOID_CAPTURE_CLI"
 
 # The plugin loads from a private config dir, so the operator's own opencode
 # config and plugin stay untouched.
@@ -81,7 +77,7 @@ OPENCODE_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24)
 export OPENCODE_PASSWORD
 
 # The binary itself, not `oc`: `$!` must be the server, not a function's subshell.
-"$bin_dir/package/bin/opencode" serve --port "$PORT" >"$LOGS/opencode-serve.log" 2>&1 &
+"$oc_bin" serve --port "$PORT" >"$LOGS/opencode-serve.log" 2>&1 &
 srv=$!
 trap 'kill -TERM "$srv" 2>/dev/null' EXIT
 

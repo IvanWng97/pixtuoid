@@ -20,6 +20,11 @@ import select
 import sys
 import time
 
+# The CLI the recorder asks its version (`CLI_ENV`, capture_fixture.rs).
+if os.environ.get("PIXTUOID_CAPTURE_CLI"):
+    with open(os.environ["PIXTUOID_CAPTURE_CLI"], "w") as f:
+        f.write("omp\n")
+
 mode = sys.argv[1]
 prompt = " ".join(sys.argv[2:])
 RESPONSE = {"approve": b"\r", "deny": b"\x1b[B\r"}.get(mode)
