@@ -135,25 +135,19 @@ mod tests {
         );
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    #[tokio::test]
-    async fn spawning_the_presence_exit_watch_is_none_without_a_backend() {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        assert!(spawn_presence_exit_watch(tx).is_none());
-    }
-
     // Watches our OWN pid on purpose: the binding is observable immediately and
     // no process has to die, keeping this off the wall-clock/OS-timing flake
     // class. The death→PidExited half is e2e-covered.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[tokio::test]
     async fn watch_records_the_binding_that_routes_a_death_to_its_instance() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        // ASSERTED, not `let else`-skipped: a graceful skip is indistinguishable
-        // from `spawn_presence_exit_watch` returning None outright, which would
+        let watch = spawn_presence_exit_watch(tx);
+        // ASSERTED before the skip: a `None` where a backend exists would
         // silently disarm the whole instant-down rung.
-        let watch = spawn_presence_exit_watch(tx)
-            .expect("macOS/Linux have an exit-watch backend (kqueue / pidfd)");
+        assert_eq!(watch.is_some(), crate::source::exit_watch::HAS_BACKEND);
+        let Some(watch) = watch else {
+            return;
+        };
         let me = std::process::id() as i32;
         let key = k("openclaw", "18789");
         watch.watch(&key, me);

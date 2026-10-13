@@ -23,6 +23,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::mpsc::UnboundedSender;
 
+/// Whether this platform compiled a backend, so `ExitWatch::spawn` returns
+/// `Some` barring an init failure. Tests assert against it rather than
+/// restating the platform list the `imp` arms own.
+#[cfg(test)]
+pub(crate) const HAS_BACKEND: bool = imp::AVAILABLE;
+
 #[derive(Debug)]
 pub(crate) struct ExitWatch {
     shared: Arc<Shared>,
@@ -144,6 +150,9 @@ mod imp {
             user_flags: UserDefinedFlags::new(0),
         }
     }
+
+    #[cfg(test)]
+    pub(super) const AVAILABLE: bool = true;
 
     #[derive(Debug)]
     pub(super) struct Backend {
@@ -343,6 +352,9 @@ mod imp {
 
     use super::{Shared, drain_pending};
 
+    #[cfg(test)]
+    pub(super) const AVAILABLE: bool = true;
+
     #[derive(Debug)]
     pub(super) struct Backend {
         /// Self-pipe: `wake()` writes a byte; the thread keeps the read end in
@@ -517,6 +529,9 @@ mod imp {
 
     use super::{Shared, drain_pending};
 
+    #[cfg(test)]
+    pub(super) const AVAILABLE: bool = true;
+
     #[derive(Debug)]
     pub(super) struct Backend {
         /// Auto-reset: a `wake()` that lands while the thread isn't waiting
@@ -660,6 +675,9 @@ mod imp {
 
     use super::Shared;
 
+    #[cfg(test)]
+    pub(super) const AVAILABLE: bool = false;
+
     /// No validated exit-watch primitive on this platform. `init` returning
     /// `None` makes `ExitWatch::spawn` return `None`, so the watcher keeps the
     /// negative-vouch + TTL backstops only — instant exit is an additive fast
@@ -680,16 +698,16 @@ mod imp {
 
 #[cfg(test)]
 mod tests {
-    use super::ExitWatch;
+    use super::{ExitWatch, HAS_BACKEND};
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
-    #[test]
-    fn spawn_is_none_on_unsupported_platforms() {
+    #[tokio::test]
+    async fn spawn_returns_a_watch_exactly_where_a_backend_exists() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        assert!(ExitWatch::spawn(tx).is_none());
+        assert_eq!(ExitWatch::spawn(tx).is_some(), HAS_BACKEND);
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
+    /// Each test returns early where no backend exists;
+    /// `spawn_returns_a_watch_exactly_where_a_backend_exists` holds where one must.
     mod live {
         use std::process::Child;
         use std::time::Duration;
@@ -744,8 +762,9 @@ mod tests {
         #[tokio::test]
         async fn exit_watch_reports_a_killed_child() {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let watch =
-                ExitWatch::spawn(tx).expect("the backend inits on every supported platform");
+            let Some(watch) = ExitWatch::spawn(tx) else {
+                return;
+            };
             let mut child = sleeper();
             let pid = child.id() as i32;
             watch.watch(pid);
@@ -768,8 +787,9 @@ mod tests {
             drop(child);
 
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let watch =
-                ExitWatch::spawn(tx).expect("the backend inits on every supported platform");
+            let Some(watch) = ExitWatch::spawn(tx) else {
+                return;
+            };
             watch.watch(pid);
             assert!(
                 wait_for_pid(&mut rx, pid, LIVE_PID_DEADLINE).await,
@@ -780,8 +800,9 @@ mod tests {
         #[tokio::test]
         async fn watch_is_idempotent() {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let watch =
-                ExitWatch::spawn(tx).expect("the backend inits on every supported platform");
+            let Some(watch) = ExitWatch::spawn(tx) else {
+                return;
+            };
             let mut child = sleeper();
             let pid = child.id() as i32;
             watch.watch(pid);
@@ -806,8 +827,9 @@ mod tests {
         #[tokio::test]
         async fn watch_bogus_pid_does_not_panic() {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let watch =
-                ExitWatch::spawn(tx).expect("the backend inits on every supported platform");
+            let Some(watch) = ExitWatch::spawn(tx) else {
+                return;
+            };
             watch.watch(999_999_999);
             let mut child = sleeper();
             let pid = child.id() as i32;
@@ -825,8 +847,9 @@ mod tests {
         async fn watch_after_thread_death_stops_queueing() {
             use std::sync::atomic::Ordering;
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            let watch =
-                ExitWatch::spawn(tx).expect("the backend inits on every supported platform");
+            let Some(watch) = ExitWatch::spawn(tx) else {
+                return;
+            };
             drop(rx);
             // An already-dead pid synthesizes an exit whose send fails
             // (receiver dropped) → run() returns → the death hook must fire.
@@ -861,8 +884,9 @@ mod tests {
         async fn drop_stops_cleanly() {
             for _ in 0..50 {
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                let watch =
-                    ExitWatch::spawn(tx).expect("the backend inits on every supported platform");
+                let Some(watch) = ExitWatch::spawn(tx) else {
+                    return;
+                };
                 let mut child = sleeper();
                 watch.watch(child.id() as i32);
                 drop(watch);

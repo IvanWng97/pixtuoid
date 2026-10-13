@@ -148,11 +148,13 @@ impl Bindings {
 mod tests {
     use super::*;
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[tokio::test]
-    async fn spawn_returns_a_watch_on_first_class_platforms() {
+    async fn spawn_returns_a_watch_exactly_where_a_backend_exists() {
         let (tx, _rx) = tokio::sync::mpsc::channel(4);
-        assert!(HookPidWatch::spawn(tx).is_some());
+        assert_eq!(
+            HookPidWatch::spawn(tx).is_some(),
+            crate::source::exit_watch::HAS_BACKEND
+        );
     }
 
     const GUESS: bool = true;
