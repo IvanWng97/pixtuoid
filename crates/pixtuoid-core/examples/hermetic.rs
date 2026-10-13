@@ -44,8 +44,12 @@ mod run {
     };
     use pixtuoid_core::harness::{CAPTURE_RECORD, CAPTURE_WORKSPACE, CaptureRecord};
 
-    /// How long a server gets to come up before the run is BLOCKED.
+    /// How long a server gets to come up before the run gives up.
     const BOOT: Duration = Duration::from_secs(60);
+    /// How often a server that is coming up is asked whether it is ready.
+    const POLL: Duration = Duration::from_millis(200);
+    /// How long one read from aimock may hang.
+    const HTTP_READ_TIMEOUT: Duration = Duration::from_secs(5);
     /// How long the headless scene runs on after the recorder returns, to
     /// decode the last payloads and log any breadcrumb they provoke.
     const SCENE_SETTLE: Duration = Duration::from_secs(4);
@@ -55,6 +59,37 @@ mod run {
     const INHERITED: &[&str] = &[
         "PATH", "LANG", "LC_ALL", "TERM", "TMPDIR", "SHELL", "USER", "LOGNAME",
     ];
+    /// What npm and aimock inherit beyond [`INHERITED`]: npm's own config, cache
+    /// and network settings. A CLI's install scripts and the npm-installed aimock
+    /// are untrusted code, so no provider key reaches them either.
+    const TOOL_INHERITED: &[&str] = &[
+        "HOME",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "NODE_EXTRA_CA_CERTS",
+    ];
+
+    /// `program` with the host env cleared to [`INHERITED`], [`TOOL_INHERITED`]
+    /// and npm's `npm_config_*` settings.
+    fn tool(program: impl AsRef<std::ffi::OsStr>) -> Command {
+        let mut c = Command::new(program);
+        c.env_clear().stdin(Stdio::null());
+        for (k, v) in std::env::vars_os() {
+            let keep = k.to_str().is_some_and(|k| {
+                INHERITED.contains(&k)
+                    || TOOL_INHERITED.contains(&k)
+                    || k.to_ascii_lowercase().starts_with("npm_config_")
+            });
+            if keep {
+                c.env(k, v);
+            }
+        }
+        c
+    }
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     enum Versions {
@@ -293,8 +328,7 @@ mod run {
                 .as_str()
                 .ok_or_else(|| std::io::Error::other("the aimock lockfile pins no aimock"))?
                 .to_string();
-            // `npm ci` every run: it installs exactly the lock, and aimock alone
-            // installs in well under a second.
+            // `npm ci` every run: it installs exactly the lock.
             let dir = tier.join("aimock");
             std::fs::create_dir_all(&dir)?;
             for f in ["package.json", "package-lock.json"] {
@@ -314,7 +348,7 @@ mod run {
     /// `install` into a fresh `dir` unless an earlier one finished there: an
     /// interrupted install, or one whose scripts npm blocked, leaves a binary
     /// stub behind, so the binary's presence proves nothing.
-    fn installed(
+    fn install_once(
         dir: &Path,
         install: impl FnOnce(&Path) -> std::io::Result<()>,
     ) -> std::io::Result<()> {
@@ -331,7 +365,7 @@ mod run {
     }
 
     fn npm(dir: &Path, args: &[&str]) -> std::io::Result<()> {
-        let status = Command::new("npm")
+        let status = tool("npm")
             .args(args)
             .args(["--no-audit", "--no-fund"])
             .current_dir(dir)
@@ -354,9 +388,7 @@ mod run {
         let version = match versions {
             Versions::Pinned => p.descriptor().verified_version.to_string(),
             Versions::Latest => {
-                let out = Command::new("npm")
-                    .args(["view", package, "version"])
-                    .output()?;
+                let out = tool("npm").args(["view", package, "version"]).output()?;
                 if !out.status.success() {
                     return Err(std::io::Error::other(format!("npm view {package} failed")));
                 }
@@ -365,7 +397,7 @@ mod run {
         };
         let prefix = tier.join("cli").join(format!("{}-{version}", p.source));
         let pinned = format!("{package}@{version}");
-        installed(&prefix, |dir| {
+        install_once(&prefix, |dir| {
             let project = serde_json::json!({
                 "private": true,
                 "allowScripts": { &pinned: true },
@@ -381,6 +413,9 @@ mod run {
     struct Sandbox {
         dir: tempfile::TempDir,
         env: Vec<(String, OsString)>,
+        /// The profile's env for the CLI alone, handed to the recorder as
+        /// `--env` pairs it sets after its agent-env scrub.
+        cli_env: Vec<String>,
         sock: PathBuf,
     }
 
@@ -428,13 +463,16 @@ mod run {
                 t.replace("{port}", &port.to_string())
                     .replace("{key}", DUMMY_KEY)
             };
-            for (k, v) in p.env {
-                env.push(((*k).to_string(), expand(v).into()));
-            }
+            let cli_env = p
+                .env
+                .iter()
+                .map(|(k, v)| format!("{k}={}", expand(v)))
+                .collect();
             let sandbox = Self {
                 sock: dir.path().join("pix.sock"),
                 dir,
                 env,
+                cli_env,
             };
             for c in p.config {
                 let home = sandbox.var(c.home).ok_or_else(|| {
@@ -502,6 +540,13 @@ mod run {
             aimock,
             versions,
         } = ctx;
+        if let Some(found) = outside_config(p) {
+            return Err(std::io::Error::other(format!(
+                "{} configures {} from outside the sandbox",
+                found.display(),
+                p.source
+            )));
+        }
         let cli_bin = install_cli(tier, p, *versions)?;
         let port = free_port()?;
         let sandbox = Sandbox::new(p, built, &cli_bin, port)?;
@@ -523,8 +568,7 @@ mod run {
 
         let script = render_script(p, scenario, sandbox.dir.path())?;
         let model = Reaped(
-            Command::new(&aimock.bin)
-                .stdin(Stdio::null())
+            tool(&aimock.bin)
                 .args(["-p", &port.to_string(), "-f"])
                 .arg(&script)
                 .stdout(log(dir, "aimock.log")?)
@@ -538,7 +582,7 @@ mod run {
                 .command(&built.pixtuoid)
                 .args(["run", "--headless", "--log-level", "warn", "--socket"])
                 .arg(&sandbox.sock)
-                // Its log colors a file too; the report quotes its lines.
+                // Its log colors a file too, and the scene log is read as text.
                 .env("NO_COLOR", "1")
                 .stdout(log(dir, SCENE_LOG)?)
                 .stderr(log(dir, SCENE_LOG)?)
@@ -552,6 +596,9 @@ mod run {
             .arg(dir)
             .arg("--tee")
             .arg(&sandbox.sock)
+            .arg("--within")
+            .arg(sandbox.dir.path())
+            .args(sandbox.cli_env.iter().flat_map(|kv| ["--env", kv]))
             .args([p.source, scenario.shape.name()])
             .args(p.invocation)
             .stdout(log(dir, "recorder.log")?)
@@ -595,6 +642,29 @@ mod run {
         Ok(manifest)
     }
 
+    /// Config `p`'s CLI would read that no sandbox home redirects: a system
+    /// path, or one of its names in an ancestor of the workspace. `/tmp` is a
+    /// symlink on macOS, so the ancestors of its target count too.
+    fn outside_config(p: &Profile) -> Option<PathBuf> {
+        let workspace = Path::new(CAPTURE_WORKSPACE);
+        let mut ancestors: Vec<PathBuf> = workspace
+            .ancestors()
+            .skip(1)
+            .map(Path::to_path_buf)
+            .collect();
+        if let Some(real) = workspace
+            .parent()
+            .and_then(|d| std::fs::canonicalize(d).ok())
+        {
+            ancestors.extend(real.ancestors().map(Path::to_path_buf));
+        }
+        let system = p.unsandboxed.iter().map(PathBuf::from);
+        let inherited = ancestors
+            .iter()
+            .flat_map(|dir| p.ancestor_config.iter().map(move |name| dir.join(name)));
+        system.chain(inherited).find(|path| path.exists())
+    }
+
     /// The scenario's script with `{workspace}` expanded: a CLI that takes an
     /// absolute path gets the one the recorder runs it in.
     fn render_script(p: &Profile, scenario: &Scenario, into: &Path) -> std::io::Result<PathBuf> {
@@ -628,7 +698,7 @@ mod run {
             if ready() {
                 return Ok(());
             }
-            std::thread::sleep(Duration::from_millis(200));
+            std::thread::sleep(POLL);
         }
         Err(std::io::Error::other(format!("{what} never came up")))
     }
@@ -637,7 +707,7 @@ mod run {
     /// HTTP client, and this is the whole of the protocol the tier needs.
     fn http_get(port: u16, path: &str) -> std::io::Result<String> {
         let mut s = TcpStream::connect(("127.0.0.1", port))?;
-        s.set_read_timeout(Some(Duration::from_secs(5)))?;
+        s.set_read_timeout(Some(HTTP_READ_TIMEOUT))?;
         write!(s, "GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")?;
         let mut raw = String::new();
         s.read_to_string(&mut raw)?;
@@ -667,7 +737,7 @@ mod run {
             assert!(!a.selects("codex", "other"));
             assert!(!a.selects("opencode", "tool-run"));
             let a = parse(&[]).expect("parse");
-            assert_eq!(a.versions, Versions::Pinned, "the merge gate's default");
+            assert_eq!(a.versions, Versions::Pinned);
             assert!(a.selects("anything", "at-all"));
             assert!(parse(&args(&["--cli"])).is_err());
             assert!(parse(&args(&["--cli", "newest"])).is_err());
@@ -698,6 +768,26 @@ mod run {
             assert_eq!(
                 r.lines().next(),
                 Some("# hermetic, verified CLIs: NOTHING RAN")
+            );
+        }
+
+        #[test]
+        fn npm_and_aimock_keep_npm_config_and_lose_provider_keys() {
+            temp_env::with_vars(
+                [
+                    ("ANTHROPIC_API_KEY", Some("sk-host")),
+                    ("npm_config_cache", Some("/npm-cache")),
+                ],
+                || {
+                    let ok = tool("sh")
+                        .args([
+                            "-c",
+                            r#"test -z "$ANTHROPIC_API_KEY" && test "$npm_config_cache" = /npm-cache"#,
+                        ])
+                        .status()
+                        .expect("sh runs");
+                    assert!(ok.success());
+                },
             );
         }
 

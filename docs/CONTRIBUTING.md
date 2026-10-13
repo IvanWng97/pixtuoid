@@ -153,10 +153,10 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    a line on the narrowest rule it amends — never an agent's private memory,
    which nobody reviews and nothing executes.
 
-`just hermetic [source]` runs each profiled CLI for real against a scripted
-model (aimock), a headless pixtuoid on the same run; the full tier gates on it
-at each `verified_version`, and `hermetic-nightly.yml` runs it at latest. The
-older tiers under `scripts/lib/` run in no CI: `just openclaw-e2e` ·
+`just hermetic [--cli pinned|latest] [source]` runs each profiled CLI for real
+against a scripted model (aimock), a headless pixtuoid on the same run; the full
+tier gates on it at each `verified_version`, and `hermetic-nightly.yml` runs it
+at latest. The tiers under `scripts/lib/` run in no CI: `just openclaw-e2e` ·
 `just replay <fixture>` · `just openclaw-multi-e2e` · `just openclaw-backend-e2e`
 (BILLED) · `just live-sources [id ...]` (BILLED per installed CLI).
 
@@ -288,8 +288,8 @@ step 10 by the theme guards; steps 1–3, 11 and step 12's `#[test]` are on you.
    capability flags, `verified_version` + `version_probe`. Lifecycle policy
    derives from the flags; you do **not** edit the reducer.
 5. The descriptor's `name` **is the roster** — `registered_source_names()`
-   projects `REGISTRY`; the conformance suite then requires a fixture, and the
-   hermetic tier a `PROFILES` row or a `NOT_HERMETIC` reason. The
+   projects `REGISTRY`; the conformance suite then requires a fixture, and
+   `harness/hermetic/mod.rs` a `PROFILES` row or a `NOT_HERMETIC` reason. The
    `sources --json` golden (`crates/pixtuoid/tests/snapshots/cli/sources.json`)
    must list it: `SNAPSHOTS=overwrite just test -p pixtuoid --test cli_json`.
 6. **Record the fixture** — the test steps in
