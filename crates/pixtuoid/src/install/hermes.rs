@@ -25,7 +25,9 @@ use crate::install::io;
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
 #[cfg(feature = "upstream")]
-use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
+use pixtuoid_core::source::hermes::REPO;
+#[cfg(feature = "upstream")]
+use pixtuoid_core::source::upstream::{Finding, Read, Watch, When};
 
 const PRE_APPROVAL_REQUEST: &str = "pre_approval_request";
 
@@ -55,15 +57,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "hermes.hook_events",
         ours: || HERMES_EVENTS.to_vec(),
-        docs: &[Doc {
-            at: At::Path {
-                repo: "NousResearch/hermes-agent",
-                branch: "main",
-                path: "hermes_cli/plugins.py",
-            },
-            anchor: r"VALID_HOOKS\s*:",
-            owns: "`VALID_HOOKS`",
-        }],
+        docs: &[REPO.doc("hermes_cli/plugins.py", r"VALID_HOOKS\s*:", "`VALID_HOOKS`")],
         read: Read::PySet {
             decl: r"VALID_HOOKS\s*:\s*set\[str\]\s*=",
         },
@@ -76,15 +70,11 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "hermes.shell_unsupported",
         ours: || HERMES_EVENTS.to_vec(),
-        docs: &[Doc {
-            at: At::Path {
-                repo: "NousResearch/hermes-agent",
-                branch: "main",
-                path: "hermes_cli/plugins.py",
-            },
-            anchor: r"SHELL_UNSUPPORTED_HOOKS\s*:",
-            owns: "`SHELL_UNSUPPORTED_HOOKS`",
-        }],
+        docs: &[REPO.doc(
+            "hermes_cli/plugins.py",
+            r"SHELL_UNSUPPORTED_HOOKS\s*:",
+            "`SHELL_UNSUPPORTED_HOOKS`",
+        )],
         read: Read::PySet {
             decl: r"SHELL_UNSUPPORTED_HOOKS\s*:\s*set\[str\]\s*=",
         },
@@ -103,15 +93,11 @@ pub(crate) const UPSTREAM: &[Watch] = &[
                 .filter(|&e| e == PRE_APPROVAL_REQUEST)
                 .collect()
         },
-        docs: &[Doc {
-            at: At::Path {
-                repo: "NousResearch/hermes-agent",
-                branch: "main",
-                path: "agent/shell_hooks.py",
-            },
-            anchor: r"_BLOCKING_EVENTS\s*=",
-            owns: "`_BLOCKING_EVENTS`",
-        }],
+        docs: &[REPO.doc(
+            "agent/shell_hooks.py",
+            r"_BLOCKING_EVENTS\s*=",
+            "`_BLOCKING_EVENTS`",
+        )],
         read: Read::PySet {
             decl: r"_BLOCKING_EVENTS\s*=\s*frozenset\(",
         },

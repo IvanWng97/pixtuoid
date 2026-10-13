@@ -19,6 +19,8 @@ use crate::install::io;
 use crate::install::merge::{prune_empty, prune_empty_root};
 use crate::install::target::MergeOutcome;
 #[cfg(feature = "upstream")]
+use pixtuoid_core::source::openclaw::REPO;
+#[cfg(feature = "upstream")]
 use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
 
 const PLUGIN_ID: &str = "pixtuoid";
@@ -86,18 +88,15 @@ pub(crate) fn default_gateway_port() -> Option<&'static str> {
 }
 
 #[cfg(feature = "upstream")]
-const fn openclaw(path: &'static str) -> At {
-    At::Path {
-        repo: "openclaw/openclaw",
-        branch: "main",
-        path,
-    }
-}
-
+const HOOK_TYPES: At = At::Path {
+    repo: &REPO,
+    path: "src/plugins/hook-types.ts",
+};
 #[cfg(feature = "upstream")]
-const HOOK_TYPES: At = openclaw("src/plugins/hook-types.ts");
-#[cfg(feature = "upstream")]
-const GATEWAY_TYPES: At = openclaw("src/plugins/hook-gateway.types.ts");
+const GATEWAY_TYPES: At = At::Path {
+    repo: &REPO,
+    path: "src/plugins/hook-gateway.types.ts",
+};
 
 #[cfg(feature = "upstream")]
 const DEGRADED: &str =
@@ -201,11 +200,11 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     reads(
         "openclaw.agent_context_ids",
         || RUN_KEY_FIELDS.to_vec(),
-        &[Doc {
-            at: openclaw("src/plugins/hook-agent-context.types.ts"),
-            anchor: r"(?m)^export type PluginHookAgentContext\b",
-            owns: "`PluginHookAgentContext`",
-        }],
+        &[REPO.doc(
+            "src/plugins/hook-agent-context.types.ts",
+            r"(?m)^export type PluginHookAgentContext\b",
+            "`PluginHookAgentContext`",
+        )],
         "PluginHookAgentContext",
         "the decoder pairs a run's start and end by these ids, so concurrent runs share one key \
          and the first to end shows the gateway idle while the rest still run",
@@ -213,11 +212,11 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "openclaw.default_gateway_port",
         ours: || default_gateway_port().into_iter().collect(),
-        docs: &[Doc {
-            at: openclaw("src/config/paths.ts"),
-            anchor: r"(?m)^export const DEFAULT_GATEWAY_PORT\b",
-            owns: "`DEFAULT_GATEWAY_PORT`",
-        }],
+        docs: &[REPO.doc(
+            "src/config/paths.ts",
+            r"(?m)^export const DEFAULT_GATEWAY_PORT\b",
+            "`DEFAULT_GATEWAY_PORT`",
+        )],
         read: Read::TsConst {
             name: "DEFAULT_GATEWAY_PORT",
         },

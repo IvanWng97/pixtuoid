@@ -27,9 +27,11 @@ use crate::install::io;
 use crate::install::target::MergeOutcome;
 #[cfg(feature = "upstream")]
 use crate::install::target::UNDOCUMENTED_HOOK;
+#[cfg(feature = "upstream")]
+use pixtuoid_core::source::kimi::REPO;
 use pixtuoid_core::source::kimi::SOURCE_NAME;
 #[cfg(feature = "upstream")]
-use pixtuoid_core::source::upstream::{At, Doc, Finding, Read, Watch, When};
+use pixtuoid_core::source::upstream::{Finding, Read, Watch, When};
 
 /// Events we register == events we decode, enforced by
 /// `every_registered_kimi_event_decodes`. The two `*Failure` variants close a
@@ -50,15 +52,11 @@ pub(crate) const KIMI_EVENTS: &[&str] = &[
 pub(crate) const UPSTREAM: &[Watch] = &[Watch {
     id: "kimi.hook_events",
     ours: || KIMI_EVENTS.to_vec(),
-    docs: &[Doc {
-        at: At::Path {
-            repo: "MoonshotAI/kimi-code",
-            branch: "main",
-            path: "docs/en/customization/hooks.md",
-        },
-        anchor: r"(?m)^## Event Reference",
-        owns: "the Event Reference table",
-    }],
+    docs: &[REPO.doc(
+        "docs/en/customization/hooks.md",
+        r"(?m)^## Event Reference",
+        "the Event Reference table",
+    )],
     read: Read::MdTable {
         header: "Event",
         under: "Event Reference",

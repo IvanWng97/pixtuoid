@@ -44,8 +44,9 @@ pub(crate) const DECODED_EFFORT_ATTACHMENTS: &[&str] = &[
     ATTACHMENT_ULTRA_EXIT,
 ];
 
+/// The installer's hook-set watch reads it too.
 #[cfg(any(test, feature = "upstream"))]
-const HOOKS_PAGE: Doc = Doc {
+pub const HOOKS_PAGE: Doc = Doc {
     at: At::Url("https://code.claude.com/docs/en/hooks.md"),
     anchor: r"(?m)^# Hooks reference",
     owns: "the hooks-reference page",

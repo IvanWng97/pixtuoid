@@ -15,7 +15,7 @@ use crate::AgentId;
 use crate::source::AgentEvent;
 use crate::source::decoder::{MAX_DECODED_FIELD_CHARS, ellipsize, make_tool_detail};
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{At, Doc, Family, Finding, Read, Siblings, Watch, When};
+use crate::source::upstream::{Family, Finding, Read, Release, Repo, Siblings, Watch, When};
 
 #[cfg(feature = "native")]
 mod native;
@@ -151,18 +151,12 @@ pub(crate) const RI_RESUME: &[&str] = &["function_call_output", "custom_tool_cal
 pub(crate) const RI_SEARCH: &[&str] =
     &["web_search_call", "tool_search_call", "tool_search_output"];
 
+/// The repository its drift watches read.
 #[cfg(any(test, feature = "upstream"))]
-const fn codex_rs(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
-    Doc {
-        at: At::Path {
-            repo: "openai/codex",
-            branch: "main",
-            path,
-        },
-        anchor,
-        owns,
-    }
-}
+pub const REPO: Repo = Repo {
+    name: "openai/codex",
+    release: Release::GithubLatest,
+};
 
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const UPSTREAM: &[Watch] = &[
@@ -171,7 +165,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         ours: || vec![EVENT_MSG, RESPONSE_ITEM, TURN_CONTEXT],
         // The wire enum: `RolloutItem` serializes through it and carries no
         // serde attributes of its own.
-        docs: &[codex_rs(
+        docs: &[REPO.doc(
             "codex-rs/history/src/rollout_payload.rs",
             r"enum RolloutItemWire\b",
             "`RolloutItemWire`",
@@ -205,7 +199,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "codex.event_msg",
         ours: || [EM_TURN_START, EM_RESUME, EM_SEARCH, EM_TURN_END, EM_TOKENS].concat(),
-        docs: &[codex_rs(
+        docs: &[REPO.doc(
             "codex-rs/protocol/src/protocol.rs",
             r"pub enum EventMsg\b",
             "`EventMsg`",
@@ -220,7 +214,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "codex.response_item",
         ours: || [RI_TOOL_START, RI_RESUME, RI_SEARCH].concat(),
-        docs: &[codex_rs(
+        docs: &[REPO.doc(
             "codex-rs/protocol/src/models.rs",
             r"pub enum ResponseItem\b",
             "`ResponseItem`",
@@ -252,7 +246,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         ours: || DECODED_ESCALATION.to_vec(),
         // The shell tool's own schema, which the model fills in. Quoted: a doc
         // comment naming the field would keep a renamed one alive.
-        docs: &[codex_rs(
+        docs: &[REPO.doc(
             "codex-rs/core/src/tools/handlers/shell_spec.rs",
             r"fn create_approval_parameters\b",
             "`create_approval_parameters`",

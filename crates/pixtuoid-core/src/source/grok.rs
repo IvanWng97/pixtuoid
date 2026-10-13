@@ -29,7 +29,7 @@
 
 use crate::source::decoder::{DecodeError, DecodeResult as Result};
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{At, Doc, Family, Finding, Read, Siblings, Watch, When};
+use crate::source::upstream::{Family, Finding, Read, Release, Repo, Siblings, Watch, When};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -73,18 +73,12 @@ pub(crate) const DECODED_XAI_TAGS: &[&str] = &[
     XAI_HOOK_EXECUTION,
 ];
 
+/// grok-build publishes no release.
 #[cfg(any(test, feature = "upstream"))]
-const fn grok_shell(path: &'static str, anchor: &'static str, owns: &'static str) -> Doc {
-    Doc {
-        at: At::Path {
-            repo: "xai-org/grok-build",
-            branch: "main",
-            path,
-        },
-        anchor,
-        owns,
-    }
-}
+pub const REPO: Repo = Repo {
+    name: "xai-org/grok-build",
+    release: Release::Branch,
+};
 
 #[cfg(any(test, feature = "upstream"))]
 pub(crate) const UPSTREAM: &[Watch] = &[
@@ -93,7 +87,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         ours: || vec![XAI_SESSION_UPDATE_METHOD],
         // The module that WRITES the method into updates.jsonl owns it; the
         // notification module only mentions it in a `///`.
-        docs: &[grok_shell(
+        docs: &[REPO.doc(
             "crates/codegen/xai-grok-shell/src/session/storage/mod.rs",
             r"const XAI_SESSION_UPDATE_METHOD\s*:",
             "`XAI_SESSION_UPDATE_METHOD`",
@@ -111,7 +105,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "grok.xai_tags",
         ours: || DECODED_XAI_TAGS.to_vec(),
-        docs: &[grok_shell(
+        docs: &[REPO.doc(
             "crates/codegen/xai-grok-shell/src/extensions/notification.rs",
             r"pub enum SessionUpdate\b",
             "the xAI `SessionUpdate`",

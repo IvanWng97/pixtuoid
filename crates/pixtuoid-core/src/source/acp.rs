@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 
 use crate::AgentId;
 #[cfg(any(test, feature = "upstream"))]
-use crate::source::upstream::{At, Doc, Family, Finding, Read, Siblings, Watch, When};
+use crate::source::upstream::{Doc, Family, Finding, Read, Release, Repo, Siblings, Watch, When};
 use crate::source::{AgentEvent, ToolDetail};
 
 const TOOL_CALL: &str = "tool_call";
@@ -40,32 +40,25 @@ pub(crate) const DECODED_TAGS: &[&str] = &[TOOL_CALL, TOOL_CALL_UPDATE];
 /// call on this method.
 pub(crate) const SESSION_UPDATE_METHOD: &str = "session/update";
 
-/// Both v1 schemas, each proven by the declaration a watch reads: grok pins
-/// `features = ["unstable"]`, so its ACP surface is the UNION of stable and
-/// unstable; v2 is a separate line grok does not speak.
 #[cfg(any(test, feature = "upstream"))]
-const fn v1_schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
-    const REPO: &str = "agentclientprotocol/agent-client-protocol";
-    const BRANCH: &str = "main";
+const SCHEMA_TAG: &str = "v0.11.4";
+
+/// Read at the `agent-client-protocol-schema` grok-build's `Cargo.lock` pins,
+/// which grok runs.
+#[cfg(any(test, feature = "upstream"))]
+const REPO: Repo = Repo {
+    name: "agentclientprotocol/agent-client-protocol",
+    release: Release::Pinned { tag: SCHEMA_TAG },
+};
+
+/// Both schemas, each proven by the declaration a watch reads: grok pins
+/// `features = ["unstable"]`, so its ACP surface is the UNION of stable and
+/// unstable.
+#[cfg(any(test, feature = "upstream"))]
+const fn schemas(anchor: &'static str, owns: &'static str) -> [Doc; 2] {
     [
-        Doc {
-            at: At::Path {
-                repo: REPO,
-                path: "schema/v1/schema.json",
-                branch: BRANCH,
-            },
-            anchor,
-            owns,
-        },
-        Doc {
-            at: At::Path {
-                repo: REPO,
-                path: "schema/v1/schema.unstable.json",
-                branch: BRANCH,
-            },
-            anchor,
-            owns,
-        },
+        REPO.doc("schema/schema.json", anchor, owns),
+        REPO.doc("schema/schema.unstable.json", anchor, owns),
     ]
 }
 
@@ -74,7 +67,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "acp.method",
         ours: || vec![SESSION_UPDATE_METHOD],
-        docs: &v1_schemas(r#""x-method"\s*:"#, "the schema's method declarations"),
+        docs: &schemas(r#""x-method"\s*:"#, "the schema's method declarations"),
         read: Read::Each {
             pattern: r#""x-method"\s*:\s*"{name}""#,
         },
@@ -88,7 +81,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "acp.session_update_tags",
         ours: || DECODED_TAGS.to_vec(),
-        docs: &v1_schemas(r#""SessionUpdate"\s*:"#, "the `SessionUpdate` union"),
+        docs: &schemas(r#""SessionUpdate"\s*:"#, "the `SessionUpdate` union"),
         read: Read::JsonUnion {
             def: "SessionUpdate",
             prop: Some("sessionUpdate"),
@@ -105,7 +98,7 @@ pub(crate) const UPSTREAM: &[Watch] = &[
     Watch {
         id: "acp.terminal_statuses",
         ours: || DECODED_TERMINAL_STATUSES.to_vec(),
-        docs: &v1_schemas(r#""ToolCallStatus"\s*:"#, "the `ToolCallStatus` union"),
+        docs: &schemas(r#""ToolCallStatus"\s*:"#, "the `ToolCallStatus` union"),
         read: Read::JsonUnion {
             def: "ToolCallStatus",
             prop: None,
@@ -114,6 +107,24 @@ pub(crate) const UPSTREAM: &[Watch] = &[
         finding: Finding::Breaking(
             "the `tool_call_update` arm falls through to `_ => vec![]`, so every \
              ACP tool call stays Active forever",
+        ),
+        siblings: None,
+    },
+    Watch {
+        id: "acp.grok_pin",
+        ours: || vec![SCHEMA_TAG.trim_start_matches('v')],
+        docs: &[crate::source::grok::REPO.doc(
+            "Cargo.lock",
+            r#"(?m)^name = "agent-client-protocol-schema""#,
+            "grok's `agent-client-protocol-schema` lock entry",
+        )],
+        read: Read::Matches {
+            pattern: r#"(?m)^name = "agent-client-protocol-schema"\s+version = "([^"]+)""#,
+        },
+        when: When::Vanishes,
+        finding: Finding::Review(
+            "the ACP watches read a schema grok no longer runs: repin `SCHEMA_TAG` to the one \
+             it locks",
         ),
         siblings: None,
     },
