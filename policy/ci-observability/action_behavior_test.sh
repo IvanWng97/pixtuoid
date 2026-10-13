@@ -266,4 +266,5 @@ git init -q "$test_dir/no-parent" && echo a >"$test_dir/no-parent/lock" && git -
     git -C "$test_dir/no-parent" -c user.email=t@t -c user.name=t commit -q -m only
 [[ "$(changed "$test_dir/no-parent" pull_request lock 2>"$test_dir/no-parent.err")" == true ]] ||
     fail "path-changed passed a diff it could not run: $(<"$test_dir/no-parent.err")"
-grep -q 'bad revision' "$test_dir/no-parent.err" || fail "the parentless repo's diff ran after all"
+grep -q 'bad revision' "$test_dir/no-parent.err" ||
+    fail "the parentless repo's diff did not fail on its missing parent: $(<"$test_dir/no-parent.err")"
