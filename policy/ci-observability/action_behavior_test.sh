@@ -345,7 +345,6 @@ echo old >"$bump_repo/${registry%/*}/lib.rs"
 git -C "$bump_repo" add -A && git -C "$bump_repo" -c user.email=t@t -c user.name=t commit -qm base
 
 pin() { perl -pi -e "s/\"$1\"/\"$2\"/" "$registry"; }
-# A re-record beside setup-npm's node_modules, which the bump's patch leaves out.
 rerecord() {
     pin 0.2.0-rc.2 0.2.0
     rm "$fx/fixtures/dsh/run/old-session.jsonl"
@@ -353,8 +352,10 @@ rerecord() {
     echo new >"$fx/fixtures/dsh/run/provenance.json"
     echo new >"$fx/delegation/fixtures/dsh/hook-payloads.jsonl"
     echo new >"$fx/snapshots/sources__conformance__dsh__run.snap"
-    mkdir -p "$fx/hermetic/aimock/node_modules/x" && echo x >"$fx/hermetic/aimock/node_modules/x/index.js"
 }
+# setup-npm's node_modules holds `fixtures/` of its own, which the patch leaves out.
+beside_npm() { rerecord && mkdir -p "$fx/hermetic/aimock/node_modules/p/fixtures" &&
+    echo x >"$fx/hermetic/aimock/node_modules/p/fixtures/a.json"; }
 rerecorded=$(printf '%s\n' "$registry" "$fx/delegation/fixtures/dsh/hook-payloads.jsonl" \
     "$fx/fixtures/dsh/run/new-session.jsonl" "$fx/fixtures/dsh/run/old-session.jsonl" \
     "$fx/fixtures/dsh/run/provenance.json" "$fx/snapshots/sources__conformance__dsh__run.snap")
@@ -368,7 +369,7 @@ check() {
         cd "$bump_repo"
         "$edit"
         case "$made" in
-        honest) RUNNER_TEMP="$test_dir" bash -c "$patch_script" ;;
+        honest) SOURCE=dsh RUNNER_TEMP="$test_dir" bash -c "$patch_script" ;;
         renamed) git diff --binary -M --cached HEAD >"$test_dir/bump.patch" ;;
         *) git add -N -- . && git diff --binary --no-renames HEAD -- . >"$test_dir/bump.patch" ;;
         esac
@@ -398,10 +399,12 @@ symlink() { rerecord && ln -s ../../../../src/source/lib.rs "$fx/fixtures/dsh/ru
 mode() { rerecord && chmod +x "$fx/fixtures/dsh/run/provenance.json"; }
 binary() { rerecord && printf '\0\1\2' >"$fx/fixtures/dsh/run/b.jsonl"; }
 renamed() { pin 0.2.0-rc.2 0.2.0 && git add -A && git mv "${registry%/*}/lib.rs" "$fx/fixtures/dsh/run/lib.jsonl"; }
-check take "the bump job's own patch of a re-record" rerecord honest
+planted() { rerecord && mkdir -p "$fx/hermetic/aimock/node_modules/p/fixtures/dsh" && echo x >"$fx/hermetic/aimock/node_modules/p/fixtures/dsh/x.jsonl"; }
+check take "the bump job's own patch of a re-record" beside_npm honest
 check skip "an empty patch" nothing honest
 check refuse "a forged change outside the source's fixtures" outside
-check refuse "setup-npm's node_modules" rerecord
+check refuse "setup-npm's node_modules" beside_npm
+check refuse "a jsonl planted under node_modules' own fixtures" planted
 check refuse "another source's fixture" other_source
 check refuse "another row's pin" wrong_row
 check refuse "a second pin" both_rows

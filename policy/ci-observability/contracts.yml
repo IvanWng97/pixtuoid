@@ -155,7 +155,7 @@
       and ($publish | test("\\bgit\\s+(add|commit|push)\\b") | not)
       and (.jobs.publish.if | test("github.ref == 'refs/heads/main'"))
       and ([.jobs.publish.steps[] | select((.uses // "") | startswith("peter-evans/create-pull-request@")) | .with["add-paths"]]
-           == [":(glob)crates/pixtuoid-core/tests/sources/**/fixtures/${{ matrix.source }}/**\n:(glob)crates/pixtuoid-core/tests/sources/snapshots/sources__conformance__${{ matrix.source }}__*.snap\ncrates/pixtuoid-core/src/source/registry.rs\n"])
+           == [":(glob)crates/pixtuoid-core/tests/sources/fixtures/${{ matrix.source }}/**\n:(glob)crates/pixtuoid-core/tests/sources/*/fixtures/${{ matrix.source }}/**\n:(glob)crates/pixtuoid-core/tests/sources/snapshots/sources__conformance__${{ matrix.source }}__*.snap\ncrates/pixtuoid-core/src/source/registry.rs\n"])
       and ([.jobs.plan, .jobs.bump, .jobs.publish | .steps[] | .run // ""] | all(test("\\$\\{\\{") | not))
   break:
     - '.jobs.publish.permissions.contents = "write"'

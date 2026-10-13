@@ -118,12 +118,17 @@ jobs:
       - name: Judge the re-recorded tree
         run: just test -p pixtuoid-core --test sources
       - name: Write the bump as a patch
+        env:
+          SOURCE: ${{ matrix.source }}
         run: |
           set -euo pipefail
-          # What a re-record writes, named positively: an `exclude` pathspec
-          # (for setup-npm's node_modules) makes `add -N` skip new files.
-          paths=(':(glob)crates/pixtuoid-core/tests/sources/**/fixtures/**'
-            crates/pixtuoid-core/tests/sources/snapshots crates/pixtuoid-core/src/source/registry.rs)
+          # What this source's re-record writes, named positively: an `exclude`
+          # pathspec makes `add -N` skip new files, and setup-npm's
+          # node_modules holds `fixtures/` directories of its own.
+          sources=crates/pixtuoid-core/tests/sources
+          paths=(":(glob)$sources/fixtures/$SOURCE/**" ":(glob)$sources/*/fixtures/$SOURCE/**"
+            ":(glob)$sources/snapshots/sources__conformance__${SOURCE}__*.snap"
+            crates/pixtuoid-core/src/source/registry.rs)
           git add -N -- "${paths[@]}"
           # A re-record renames a transcript (its name carries the session
           # id): `HEAD` keeps the deletion and `--no-renames` keeps it a delete.
@@ -206,9 +211,10 @@ jobs:
           fi
           git apply --index "$PATCH"
           registry=crates/pixtuoid-core/src/source/registry.rs
-          allowed=(":(glob)crates/pixtuoid-core/tests/sources/**/fixtures/$SOURCE/**/*.jsonl"
-            ":(glob)crates/pixtuoid-core/tests/sources/**/fixtures/$SOURCE/**/provenance.json"
-            ":(glob)crates/pixtuoid-core/tests/sources/snapshots/sources__conformance__${SOURCE}__*.snap"
+          sources=crates/pixtuoid-core/tests/sources
+          allowed=(":(glob)$sources/fixtures/$SOURCE/**/*.jsonl" ":(glob)$sources/*/fixtures/$SOURCE/**/*.jsonl"
+            ":(glob)$sources/fixtures/$SOURCE/**/provenance.json" ":(glob)$sources/*/fixtures/$SOURCE/**/provenance.json"
+            ":(glob)$sources/snapshots/sources__conformance__${SOURCE}__*.snap"
             "$registry")
           outside=$(comm -23 <(git diff --cached --name-only | sort) \
             <(git diff --cached --name-only -- "${allowed[@]}" | sort))
@@ -245,7 +251,8 @@ jobs:
           delete-branch: true
           sign-commits: true
           add-paths: |
-            :(glob)crates/pixtuoid-core/tests/sources/**/fixtures/${{ matrix.source }}/**
+            :(glob)crates/pixtuoid-core/tests/sources/fixtures/${{ matrix.source }}/**
+            :(glob)crates/pixtuoid-core/tests/sources/*/fixtures/${{ matrix.source }}/**
             :(glob)crates/pixtuoid-core/tests/sources/snapshots/sources__conformance__${{ matrix.source }}__*.snap
             crates/pixtuoid-core/src/source/registry.rs
           commit-message: "test(${{ matrix.source }}): re-record at ${{ steps.check.outputs.version }} and pin it"
