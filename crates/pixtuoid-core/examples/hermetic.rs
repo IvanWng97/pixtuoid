@@ -218,6 +218,10 @@ mod run {
                 continue;
             }
             let version = resolve(p, &args.versions);
+            let latest = match args.versions {
+                Versions::Exact(_) => resolve(p, &Versions::Latest).ok(),
+                _ => None,
+            };
             let (mut judged, mut banners, mut passed) = (Vec::new(), Vec::new(), true);
             for scenario in selected {
                 let dir = run_dir(&runs, p, scenario);
@@ -246,10 +250,11 @@ mod run {
                 passed &= verdict.label() == Label::Pass;
                 entries.push(Entry::new(key, None, verdict));
                 let d = p.descriptor();
-                let to = version
-                    .as_deref()
-                    .ok()
-                    .filter(|v| passed && moved(d.verified_version, v, &banners, d.version_hyphen));
+                let to = version.as_deref().ok().filter(|v| {
+                    passed
+                        && moved(d.verified_version, v, &banners, d.version_hyphen)
+                        && pinnable(&args.versions, v, latest.as_deref())
+                });
                 if let Some(v) = to {
                     moves.push(serde_json::json!({ "source": p.source, "version": v }));
                 }
@@ -261,7 +266,7 @@ mod run {
                             repin_registry(d.verified_version, v)?;
                         }
                         (_, None) => println!(
-                            "{}: nothing recorded, no version above its pin {} ran",
+                            "{}: nothing recorded, no npm `latest` above its pin {} ran",
                             p.source, d.verified_version
                         ),
                     }
@@ -316,6 +321,18 @@ mod run {
                 parse_version(b, hyphen).is_some_and(|b| b.cmp_precedence(&installed).is_eq())
             })
             && installed.cmp_precedence(&pin).is_gt()
+    }
+
+    /// Whether a run may move a pin to `installed`. A `latest` run installed
+    /// npm's `latest`; an exact version must still be it, read before any CLI
+    /// ran, so neither a version a CLI forged into the nightly's list nor
+    /// another dist-tag's release above the pin ever becomes one.
+    fn pinnable(versions: &Versions, installed: &str, latest: Option<&str>) -> bool {
+        match versions {
+            Versions::Pinned => false,
+            Versions::Latest => true,
+            Versions::Exact(_) => latest == Some(installed),
+        }
     }
 
     /// `registry` with its one `verified_version: "<old>",` line now naming
@@ -975,6 +992,26 @@ mod run {
                 ),
                 "a build id never moves a pin"
             );
+        }
+
+        #[test]
+        fn an_exact_version_pins_only_while_it_is_npms_latest() {
+            let exact = |v: &str| Versions::Exact(v.into());
+            assert!(pinnable(&exact("0.162.1"), "0.162.1", Some("0.162.1")));
+            assert!(
+                !pinnable(
+                    &exact("0.163.0-alpha.10"),
+                    "0.163.0-alpha.10",
+                    Some("0.162.1")
+                ),
+                "another dist-tag's release, above the pin but not `latest`"
+            );
+            assert!(
+                !pinnable(&exact("0.162.1"), "0.162.1", None),
+                "no answer from npm"
+            );
+            assert!(pinnable(&Versions::Latest, "0.162.1", None));
+            assert!(!pinnable(&Versions::Pinned, "0.155.1", Some("0.155.1")));
         }
 
         #[test]
