@@ -200,7 +200,8 @@ pub const PROFILES: &[Profile] = &[
             ("hook:SessionStart", "/model"),
             // A subagent transcript's (fixtures/claude-code/subagent-recorded).
             ("tx:assistant", "/attributionAgent"),
-            // aimock scripts only input and output tokens for Anthropic.
+            // aimock's Messages usage is input and output tokens alone
+            // (`CopilotKit/aimock` `src/messages.ts:405-414` at v1.43.0).
             ("tx:assistant", "/message/usage/cache_creation_input_tokens"),
         ],
     },
@@ -255,7 +256,8 @@ wire_api = "responses"
         }],
         not_yet: &["SubagentStart", "SubagentStop", "PermissionRequest"],
         event_name: hook_event_name,
-        // aimock scripts only input and output tokens for the Responses API.
+        // aimock's Responses usage has no token details (`CopilotKit/aimock`
+        // `src/responses.ts:266-279` at v1.43.0).
         not_yet_fields: &[
             (
                 "tx:event_msg",
@@ -313,7 +315,6 @@ wire_api = "responses"
             home: "OPENCODE_CONFIG_DIR",
             path: "opencode.jsonc",
             template: r#"{
-  "model": "openai/gpt-5.2",
   "providers": {
     "openai": {
       "settings": { "baseURL": "http://127.0.0.1:{port}/v1", "apiKey": "{key}" },
@@ -520,6 +521,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn opencodes_model_flag_names_a_model_its_config_declares() {
+        let p = profile("opencode").expect("opencode");
+        let model = p
+            .invocation
+            .windows(2)
+            .find_map(|w| (w[0] == "--model").then_some(w[1]))
+            .expect("a --model");
+        let (provider, id) = model.split_once('/').expect("provider/model");
+        let config: Value = serde_json::from_str(p.config[0].template).expect("plain JSON");
+        assert!(
+            config["providers"][provider]["models"].get(id).is_some(),
+            "{model} is not under the config's providers.{provider}.models"
+        );
     }
 
     #[test]

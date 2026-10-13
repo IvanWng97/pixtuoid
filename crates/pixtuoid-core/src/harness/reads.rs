@@ -247,22 +247,18 @@ pub(crate) fn strips(record: &Value) -> bool {
     record["origin"] == "recorded" && record["deidentified"]["method"] != "none"
 }
 
-/// What blanking writes over `node`: its type's empty value, `None` for a
-/// null, which has none.
-pub(crate) fn neutral_of(node: &Value) -> Option<Value> {
-    Some(match node {
+/// What blanking writes over `node`, its type's empty value; `None` when that
+/// would leave it as it is (a null, or a value already empty).
+pub(crate) fn blank_of(node: &Value) -> Option<Value> {
+    let blank = match node {
         Value::Null => return None,
         Value::Bool(_) => Value::Bool(false),
         Value::Number(_) => Value::from(0),
         Value::String(_) => Value::String(String::new()),
         Value::Array(_) => Value::Array(Vec::new()),
         Value::Object(_) => Value::Object(serde_json::Map::new()),
-    })
-}
-
-/// Whether blanking would leave `node` as it is.
-pub(crate) fn is_blank(node: &Value) -> bool {
-    neutral_of(node).is_none_or(|n| n == *node)
+    };
+    (blank != *node).then_some(blank)
 }
 
 /// The JSON pointer to `key` under `at`, escaped (RFC 6901).
@@ -270,15 +266,13 @@ pub(crate) fn child_pointer(at: &str, key: &str) -> String {
     format!("{at}/{}", key.replace('~', "~0").replace('/', "~1"))
 }
 
-/// Whether `key` under `at` is a shim stamp: a hook envelope's top-level `_`
-/// key, kept by namespace (`probe`).
+/// Whether `key` under `at` is a shim stamp, a hook envelope's top-level `_`
+/// key, which the strip keeps: `_shim_ts_ms` is read by no decoder, only by
+/// `tests/sources/captures.rs`, which dates a capture by it.
 pub(crate) fn is_shim_stamp(at: &str, key: &str) -> bool {
     at.is_empty() && key.starts_with('_')
 }
 
-/// A hook envelope's top-level `_` keys are the shim's stamps, kept by namespace:
-/// `_shim_ts_ms` is read by no decoder, only by `tests/sources/captures.rs`,
-/// which dates a capture by it.
 fn probe(
     source: &str,
     drive: &Drive,
@@ -291,10 +285,7 @@ fn probe(
     let Some(node) = lines[i].pointer(at) else {
         return 0;
     };
-    if is_blank(node) {
-        return 0;
-    }
-    let Some(neutral) = neutral_of(node) else {
+    let Some(neutral) = blank_of(node) else {
         return 0;
     };
     let Some(slot) = lines[i].pointer_mut(at) else {

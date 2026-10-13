@@ -14,10 +14,10 @@ on:
         description: '`pinned` (each registry `verified_version`) or `latest`'
         type: string
         default: pinned
-      artifact:
-        description: 'The name the runs upload under when a verdict is not Pass, for a caller that downloads them'
-        type: string
-        default: ''
+    outputs:
+      runs:
+        description: 'The artifact the runs upload as when `just hermetic` exits non-zero'
+        value: ${{ jobs.run.outputs.runs }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -31,6 +31,8 @@ jobs:
     # macOS's, the platform the corpus was recorded on.
     runs-on: macos-latest
     timeout-minutes: 30
+    outputs:
+      runs: ${{ steps.run.outputs.runs }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -49,10 +51,11 @@ jobs:
           set +e
           just hermetic --cli "$CLI"
           echo "exit=$?" >> "$GITHUB_OUTPUT"
+          echo "runs=hermetic-runs-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
       - if: steps.run.outputs.exit != '0'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.artifact || format('hermetic-runs-{0}-{1}', github.run_id, github.run_attempt) }}
+          name: ${{ steps.run.outputs.runs }}
           path: target/hermetic/runs
           retention-days: 7
           if-no-files-found: error

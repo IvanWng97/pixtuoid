@@ -102,23 +102,19 @@
     - '.jobs.file.steps = [{"uses": "actions/checkout@v7"}] + .jobs.file.steps'
     - '.jobs.file.steps += [{"run": "just drift-watch"}]'
 
-- id: hermetic-nightly-files-the-report-it-named
+- id: hermetic-nightly-files-the-runs-the-tier-named
   file: .github/workflows/hermetic-nightly.yml
   why: >-
-    The issue is filed from the report the tier uploads under the name this
-    workflow hands it. A download by any other name finds nothing, and one
-    with no attempt in its name takes a re-run's earlier report.
+    The issue is filed from the runs the tier uploaded, under the name its
+    upload chose and its `runs` output hands on. A name rebuilt here can
+    disagree with it and find nothing.
   assert: |
-    .jobs.drift.with.artifact as $name
-    | ($name | type) == "string"
-      and ($name | contains("github.run_attempt"))
-      and ([.jobs.file.steps[] | select((.uses // "") | startswith("actions/download-artifact")) | .with.name]
-           == [$name])
+    [.jobs.file.steps[] | select((.uses // "") | startswith("actions/download-artifact")) | .with.name]
+    == ["${{ needs.drift.outputs.runs }}"]
   break:
-    - '.jobs.drift.with.artifact = "hermetic-report"'
     - |
       .jobs.file.steps |= map(
-        if (.uses // "") | startswith("actions/download-artifact") then .with.name = "other" else . end)
+        if (.uses // "") | startswith("actions/download-artifact") then .with.name = "hermetic-runs-${{ github.run_id }}" else . end)
     - |
       .jobs.file.steps |= map(
         if (.uses // "") | startswith("actions/download-artifact") then .with = {"merge-multiple": true} else . end)

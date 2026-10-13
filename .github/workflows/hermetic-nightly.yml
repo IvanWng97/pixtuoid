@@ -18,7 +18,6 @@ jobs:
     with:
       full: true
       cli: latest
-      artifact: hermetic-report-${{ github.run_attempt }}
 
   file:
     name: file the hermetic report
@@ -31,7 +30,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: hermetic-report-${{ github.run_attempt }}
+          name: ${{ needs.drift.outputs.runs }}
 
       - name: Open or update tracking issue
         env:

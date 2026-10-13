@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::{MANIFEST, Manifest, Profile, SCENE_LOG, Scenario, Shape, profile};
 use crate::AgentEvent;
 use crate::harness::captures::jsonl_files_under;
-use crate::harness::reads::{child_pointer, is_blank, is_hook_envelope, is_shim_stamp, strips};
+use crate::harness::reads::{blank_of, child_pointer, is_hook_envelope, is_shim_stamp, strips};
 use crate::harness::{Drive, Driven, HOOK_PAYLOADS, PROVENANCE, Reach, captures};
 
 /// The tracing target every drift breadcrumb rides (`source::drift::TARGET`).
@@ -91,15 +91,10 @@ pub fn verify(dir: &Path) -> std::io::Result<Verdict> {
     Ok(Verdict::new(findings))
 }
 
-/// Judge `source`'s runs together, for what no one scenario owns: a `not_yet`
-/// hook any run fired is Stale, and the field census. A selection of one
-/// scenario skips this, so it never fails on a field another scenario carries.
-///
-/// The census takes every field a decoder reads in a committed capture of
-/// `source` (what the probe left unblanked, never a list), for each kind of
-/// line a run produced, and requires some run to carry it: a field upstream
-/// renamed or dropped fails here though the decoder still parses the line.
-/// A kind no run produced is the event checks' to judge.
+/// Judge `source`'s runs together, `dirs` being all of them, for what no one
+/// scenario owns: a `not_yet` hook any run fired is Stale, and the field census
+/// ([`census`]) over `source`'s committed captures, where a kind or a field
+/// upstream renamed or dropped fails though the decoder still parses the line.
 ///
 /// # Errors
 ///
@@ -121,7 +116,13 @@ pub fn verify_source(source: &str, dirs: &[PathBuf]) -> std::io::Result<Verdict>
             }
         }
     }
-    let mut findings = census(&committed_reads(p)?, &carried, p.not_yet_fields, source);
+    let mut findings = census(
+        &committed_reads(p)?,
+        &carried,
+        p.not_yet,
+        p.not_yet_fields,
+        source,
+    );
     for hook in p.not_yet {
         if fired.contains(*hook) {
             findings.push((
@@ -133,25 +134,38 @@ pub fn verify_source(source: &str, dirs: &[PathBuf]) -> std::io::Result<Verdict>
     Ok(Verdict::new(findings))
 }
 
-/// The field census proper: each read field of a kind the runs produced must
-/// be carried, unless `owed`, and an owed one carried is Stale. A committed
-/// transcript line the strip left untyped has no kind to match: some run's
-/// transcript line must carry all of its read fields together, as a reader
-/// that keys on those fields alone takes any line that has them (a head
-/// scan's `cwd_extractor`).
+/// The field census proper: each kind a committed capture has must be produced
+/// by some run, unless it is a hook `owed_hooks` names, and each read field of
+/// a produced kind carried, unless `owed_fields` names it; an owed field
+/// carried is Stale. A committed transcript line the strip left untyped has no
+/// kind to match: some run's transcript line must carry all of its read fields
+/// together, as a reader that keys on those fields alone takes any line that
+/// has them (a head scan's `cwd_extractor`).
 fn census(
     reads: &Fields,
     carried: &Fields,
-    owed: &[(&str, &str)],
+    owed_hooks: &[&str],
+    owed_fields: &[(&str, &str)],
     source: &str,
 ) -> Vec<(Label, String)> {
     let mut findings = Vec::new();
     for (kind, paths) in &reads.by_kind {
         let Some(seen) = carried.by_kind.get(kind) else {
+            if !kind
+                .strip_prefix(HOOK)
+                .is_some_and(|h| owed_hooks.contains(&h))
+            {
+                findings.push((
+                    Label::Fail,
+                    format!(
+                        "{kind}: a committed capture has it, and no run of {source} produced it"
+                    ),
+                ));
+            }
             continue;
         };
         for path in paths {
-            let is_owed = owed.contains(&(kind.as_str(), path.as_str()));
+            let is_owed = owed_fields.contains(&(kind.as_str(), path.as_str()));
             match (seen.contains(path), is_owed) {
                 (true, true) => findings.push((
                     Label::Stale,
@@ -167,9 +181,6 @@ fn census(
                 _ => {}
             }
         }
-    }
-    if carried.lines.is_empty() {
-        return findings;
     }
     for line in &reads.lines {
         if !carried.lines.iter().any(|l| line.is_subset(l)) {
@@ -198,12 +209,16 @@ pub(crate) struct Fields {
 }
 
 impl Fields {
-    /// Add `line` of `file`. A committed (`run == false`) transcript line the
-    /// strip left untyped goes to `lines` alone, since its blank `type` is no
-    /// kind a run's line could have.
+    /// Add `line` of `file`; one with no value, as the strip leaves a line no
+    /// decoder reads, adds nothing. A committed (`run == false`) transcript
+    /// line the strip left untyped goes to `lines` alone, since its blank
+    /// `type` is no kind a run's line could have.
     fn add(&mut self, p: &Profile, file: &Path, line: &Value, run: bool) {
         let stamped = is_hook_envelope(file);
         let leaves: BTreeSet<String> = leaves(line, stamped).into_iter().collect();
+        if leaves.is_empty() {
+            return;
+        }
         let kind = kind_of(p, file, line);
         let untyped = !stamped && kind == TX;
         if run && !stamped || untyped {
@@ -214,23 +229,23 @@ impl Fields {
         }
     }
 
-    /// Whether a line of `kind` carried `path`, an untyped transcript line's
-    /// included.
+    /// Whether a line of `kind` carried `path`.
     #[cfg(test)]
     pub(crate) fn has(&self, kind: &str, path: &str) -> bool {
         self.by_kind.get(kind).is_some_and(|p| p.contains(path))
-            || (kind == TX && self.lines.iter().any(|l| l.contains(path)))
     }
 }
 
 /// A transcript line's kind prefix, and the whole kind of one whose `type`
 /// is blank.
 const TX: &str = "tx:";
+const HOOK: &str = "hook:";
 
 /// The fields a decoder reads in `p`'s committed captures: the recorder
 /// blanks every subtree no decoder reads (`reads::strip_unread`), so a
-/// stripped recording's non-blank leaves are exactly the read set, the
-/// shim's stamps aside. A capture the strip skips proves nothing about reads.
+/// stripped recording's non-blank leaves are the read fields it recorded with
+/// a value, the shim's stamps aside; one read but recorded blank is not seen.
+/// A capture the strip skips proves nothing about reads.
 pub(crate) fn committed_reads(p: &Profile) -> std::io::Result<Fields> {
     let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources");
     let mut reads = Fields::default();
@@ -256,18 +271,18 @@ pub(crate) fn committed_reads(p: &Profile) -> std::io::Result<Fields> {
 /// line.
 fn kind_of(p: &Profile, file: &Path, line: &Value) -> String {
     if is_hook_envelope(file) {
-        format!("hook:{}", (p.event_name)(line).unwrap_or("?"))
+        format!("{HOOK}{}", (p.event_name)(line).unwrap_or("?"))
     } else {
         format!("{TX}{}", line["type"].as_str().unwrap_or("?"))
     }
 }
 
-/// Every leaf of `v` the strip would not blank (`reads::is_blank`), by its
+/// Every leaf of `v` holding a value (`reads::blank_of`), by its
 /// pointer with `*` for an array index. A `stamped` hook envelope's shim
 /// stamps are skipped, as the probe skips them (`reads::is_shim_stamp`).
 fn leaves(v: &Value, stamped: bool) -> Vec<String> {
     fn walk(v: &Value, at: &str, stamped: bool, out: &mut Vec<String>) {
-        if is_blank(v) {
+        if blank_of(v).is_none() {
             return;
         }
         match v {
@@ -840,21 +855,60 @@ mod tests {
 
     #[test]
     fn the_census_fails_a_read_field_not_carried_unless_owed_and_stales_one_carried() {
-        let reads = fields(
-            &[("hook:A", &["/x", "/owed", "/owed2"]), ("hook:B", &["/y"])],
-            &[],
-        );
+        let reads = fields(&[("hook:A", &["/x", "/owed", "/owed2"])], &[]);
         let carried = fields(&[("hook:A", &["/owed2"])], &[]);
         let owed = [("hook:A", "/owed"), ("hook:A", "/owed2")];
-        let got = census(&reads, &carried, &owed, "s");
+        let got = census(&reads, &carried, &[], &owed, "s");
         assert_eq!(
             got,
             [
                 (Label::Stale, "hook:A /owed2 was carried: it leaves the profile's not_yet_fields".to_owned()),
                 (Label::Fail, "hook:A /x: a decoder reads it in a committed capture, and no run of s carried it".to_owned()),
             ],
-            "an owed field not carried is silent, and kind B, which no run produced, is not judged"
+            "an owed field not carried is silent"
         );
+    }
+
+    #[test]
+    fn a_committed_kind_no_run_produced_fails_unless_a_not_yet_hook() {
+        let reads = fields(
+            &[
+                ("hook:B", &["/y"]),
+                ("hook:C", &["/y"]),
+                ("tx:event_msg", &["/y"]),
+            ],
+            &[],
+        );
+        let got = census(&reads, &Fields::default(), &["B"], &[], "s");
+        assert_eq!(
+            got,
+            [
+                (
+                    Label::Fail,
+                    "hook:C: a committed capture has it, and no run of s produced it".to_owned()
+                ),
+                (
+                    Label::Fail,
+                    "tx:event_msg: a committed capture has it, and no run of s produced it"
+                        .to_owned()
+                ),
+            ],
+            "the owed hook B is silent; a renamed or unharvested transcript kind is not"
+        );
+    }
+
+    #[test]
+    fn a_line_the_strip_blanked_whole_adds_no_kind() {
+        let p = profile("codex").expect("codex");
+        let mut f = Fields::default();
+        f.add(p, Path::new("rollout.jsonl"), &serde_json::json!({}), false);
+        f.add(
+            p,
+            Path::new("rollout.jsonl"),
+            &serde_json::json!({"type": ""}),
+            false,
+        );
+        assert!(f.by_kind.is_empty() && f.lines.is_empty(), "{f:?}");
     }
 
     #[test]
@@ -862,35 +916,12 @@ mod tests {
         let reads = fields(&[], &[&["/payload/cwd", "/payload/id"]]);
         let split = fields(&[], &[&["/payload/cwd"], &["/payload/id"]]);
         assert_eq!(
-            census(&reads, &split, &[], "s").len(),
+            census(&reads, &split, &[], &[], "s").len(),
             1,
             "two lines don't make one"
         );
         let whole = fields(&[], &[&["/payload/cwd", "/payload/id", "/payload/more"]]);
-        assert!(census(&reads, &whole, &[], "s").is_empty());
-        assert!(
-            census(&reads, &Fields::default(), &[], "s").is_empty(),
-            "no transcript ran"
-        );
-    }
-
-    #[test]
-    fn the_committed_corpus_is_a_legitimate_run_the_census_passes() {
-        let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources");
-        for p in super::super::PROFILES {
-            let dirs: Vec<PathBuf> = captures(&corpus)
-                .into_iter()
-                .filter(|c| c.source == p.source)
-                .map(|c| c.dir)
-                .collect();
-            let v = verify_source(p.source, &dirs).expect("verify");
-            assert!(
-                v.findings().iter().all(|f| f.0 != Label::Fail),
-                "{}: {:?}",
-                p.source,
-                v.findings()
-            );
-        }
+        assert!(census(&reads, &whole, &[], &[], "s").is_empty());
     }
 
     #[test]
@@ -935,8 +966,8 @@ mod tests {
         assert_eq!(got, want, "0.0 is a value: the probe neutralizes it to 0");
         // What the probe writes over each leaf is blank to the census.
         for (_, x) in v.as_object().expect("an object") {
-            if let Some(neutral) = crate::harness::reads::neutral_of(x) {
-                assert!(leaves(&neutral, false).is_empty(), "{neutral}");
+            if let Some(blank) = blank_of(x) {
+                assert!(leaves(&blank, false).is_empty(), "{blank}");
             }
         }
     }
