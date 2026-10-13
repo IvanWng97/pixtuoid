@@ -16,7 +16,6 @@ const PLUGIN_SOURCE = join(REPO_ROOT, "crates", "pixtuoid", "src", "install", "d
 const HOOK_PLACEHOLDER = '"{{HOOK_PATH_JSON}}"';
 
 const POSIX = process.platform !== "win32";
-// How long a poll waits for the shims, and how often it looks.
 const POLL_DEADLINE_MS = 10_000;
 const POLL_TICK_MS = 25;
 
@@ -46,8 +45,7 @@ async function renderPlugin(t) {
 const header = { id: "s1", cwd: "/w" };
 const session = { header };
 
-// The cordis surface the plugin touches: `on`, `effect`, and the injected agents;
-// `event` emits one of `session`'s events through the channel that carries them.
+// The cordis surface the plugin touches: `on`, `effect`, and the injected agents.
 function apply(module) {
   const handlers = new Map();
   module.apply({

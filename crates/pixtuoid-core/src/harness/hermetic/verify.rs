@@ -408,7 +408,6 @@ fn judge(
     Ok(())
 }
 
-/// Each session decodes to its own agent, and every one starts in the workspace.
 fn started_in(
     events: &[AgentEvent],
     workspace: &Path,

@@ -277,8 +277,6 @@ mod recorder {
         Ok(())
     }
 
-    /// What a capture written into the tree keeps: stripped of every subtree no
-    /// decoder reads, unless its record declares the exemption `exemption` is.
     fn deidentify(
         source: &str,
         files: &[PathBuf],
@@ -294,10 +292,8 @@ mod recorder {
         })
     }
 
-    /// `run`'s raw capture, a hermetic run the tier judged, written into the
-    /// fixture its scenario names under `root`: stripped unless its record is
-    /// exempt, recorded and scanned like a live capture. It replaces the
-    /// fixture's bytes whole; the old ones are git's.
+    /// Replaces the fixture's bytes whole, where a live recording writes `.new`
+    /// beside them: the old ones are git's.
     fn promote(run: &Path, root: &Path, needles: &BTreeSet<String>) -> std::io::Result<()> {
         let manifest: Manifest =
             serde_json::from_str(&std::fs::read_to_string(run.join(MANIFEST))?)?;
@@ -881,8 +877,6 @@ mod recorder {
         /// An operator nobody's bytes carry, so no test reads the machine's.
         const OPERATOR: &str = "Ada Lovelace";
 
-        /// A hermetic run of dsh's tool-run scenario and a corpus root to promote
-        /// it into, kept alive by the temp dir.
         struct Promotable {
             _dir: tempfile::TempDir,
             run: PathBuf,

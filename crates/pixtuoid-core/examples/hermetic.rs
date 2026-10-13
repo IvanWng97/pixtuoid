@@ -100,7 +100,6 @@ mod run {
     #[derive(Debug, PartialEq, Eq)]
     struct Args {
         versions: Versions,
-        /// Write each passing source's runs into the fixtures its scenarios name.
         record: bool,
         source: Option<String>,
         scenario: Option<String>,
@@ -241,7 +240,6 @@ mod run {
         Ok(entries.iter().all(|e| e.verdict.label() == Label::Pass))
     }
 
-    /// Where `scenario`'s run of `p` lives under `runs`.
     fn run_dir(runs: &Path, p: &Profile, scenario: &Scenario) -> PathBuf {
         runs.join(p.source).join(scenario.shape.name())
     }
