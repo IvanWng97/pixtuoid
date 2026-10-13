@@ -15,8 +15,8 @@
 //! Contract (workspace invariant: log + continue, never panic): every failure
 //! path — backend init, registration, thread death — degrades to the slower
 //! exit rungs. A missing instant exit costs latency, never correctness. A pid
-//! that died BEFORE registration is detected at the primitive (ESRCH) and its
-//! exit synthesized immediately.
+//! that died BEFORE registration is detected at registration (ESRCH; on Windows
+//! ERROR_INVALID_PARAMETER) and its exit synthesized immediately.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -591,10 +591,11 @@ mod imp {
         Opened::Failed
     }
 
+    /// Processes one wait holds beside the wake event; a pid past it is dropped
+    /// (logged) to the backstops, since one handle more fails the whole wait.
+    pub(super) const CAP: usize = MAXIMUM_WAIT_OBJECTS as usize - 1;
+
     pub(super) fn run(shared: &Shared, exit_tx: &UnboundedSender<i32>) {
-        // One wait holds the wake event and at most this many processes; a pid
-        // past it is dropped (logged) to the backstops.
-        let cap = MAXIMUM_WAIT_OBJECTS as usize - 1;
         let wake = shared.backend.wake.as_raw_handle();
         // pid → its process handle; the wait's handle `i + 1` is `watched[i]`.
         let mut watched: Vec<(i32, OwnedHandle)> = Vec::new();
@@ -632,7 +633,7 @@ mod imp {
                         if watched.iter().any(|(p, _)| *p == pid) {
                             continue; // idempotent: already watched
                         }
-                        if watched.len() == cap {
+                        if watched.len() == CAP {
                             tracing::debug!(
                                 pid,
                                 "exit-watch wait is full; dropped (backstops cover)"
@@ -793,7 +794,7 @@ mod tests {
             watch.watch(pid);
             assert!(
                 wait_for_pid(&mut rx, pid, LIVE_PID_DEADLINE).await,
-                "watching an already-dead pid must synthesize its exit (ESRCH path)"
+                "watching an already-dead pid must synthesize its exit (already-dead path)"
             );
         }
 
@@ -902,6 +903,41 @@ mod tests {
                     "dropping the ExitWatch must stop the thread (its sender must drop)"
                 );
             }
+        }
+
+        /// One handle past the cap would fail the whole wait and end the thread,
+        /// losing instant exit for every later pid.
+        #[cfg(windows)]
+        #[tokio::test]
+        async fn a_pid_past_the_wait_cap_is_dropped_and_the_watch_lives_on() {
+            use std::sync::atomic::Ordering;
+
+            use super::super::imp::CAP;
+
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let Some(watch) = ExitWatch::spawn(tx) else {
+                return;
+            };
+            let mut children: Vec<Child> = (0..=CAP).map(|_| sleeper()).collect();
+            // Registered in the order watched, so the highest pid is the one past the cap.
+            children.sort_by_key(Child::id);
+            for child in &children {
+                watch.watch(child.id() as i32);
+            }
+            let (inside, past) = (children[0].id() as i32, children[CAP].id() as i32);
+            kill_and_reap(&mut children[0]);
+            kill_and_reap(&mut children[CAP]);
+            let fired = wait_for_pid(&mut rx, inside, LIVE_PID_DEADLINE).await;
+            assert_no_pid_within(&mut rx, past, Duration::from_millis(500), "never watched").await;
+            let closed = watch.shared.closed.load(Ordering::SeqCst);
+            for child in &mut children {
+                kill_and_reap(child);
+            }
+            assert!(fired, "a pid inside the cap must still fire");
+            assert!(
+                !closed,
+                "the wait must never be handed more handles than it takes"
+            );
         }
     }
 }

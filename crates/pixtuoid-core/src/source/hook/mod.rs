@@ -292,10 +292,10 @@ pub(crate) async fn handle_conn(
                     continue;
                 }
                 // Peek the shim-supplied CLI pid BEFORE `v` is consumed by
-                // decode. Deliberately NOT gated on `pid_watch`: the exit-watch
-                // backend failing to init (pre-5.3 Linux kernel, Windows) must
-                // not take the focus-jump pid cache down with it — only the
-                // BIND below needs the watch.
+                // decode. Deliberately NOT gated on `pid_watch`: a platform with
+                // no exit-watch backend, or one that failed to init, must not
+                // take the focus-jump pid cache down with it — only the BIND
+                // below needs the watch.
                 let pid = v
                     .get("_pid")
                     .and_then(serde_json::Value::as_i64)
