@@ -38,8 +38,13 @@ pub mod reads;
 
 pub use captures::{
     CAPTURE_RECORD, CAPTURE_WORKSPACE, Capture, CaptureRecord, HOOK_PAYLOADS, PROVENANCE, captures,
-    recorder_flag, transcripts_under,
+    jsonl_files_under, recorder_flag, transcripts_under,
 };
+
+/// The committed corpus: every recorded capture, fixture and hermetic script.
+pub(crate) fn sources_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
+}
 
 /// A lifecycle CLASS a driven wire pushed the slot through — asserted as
 /// reached-at-some-point, never as the terminal state.
@@ -105,6 +110,9 @@ pub struct Driven {
     pub panics: Vec<LineFailure>,
     /// Lifecycle classes any slot passed through, in first-reached order.
     pub reached: Vec<Reach>,
+    /// The drift breadcrumbs the decode and fold logged, each as its fields: a
+    /// field whose only use is the breadcrumb its absence logs is still read.
+    pub(crate) breadcrumbs: Vec<String>,
 }
 
 impl Driven {
@@ -291,8 +299,19 @@ impl Drive {
             decode_errors: Vec::new(),
             panics: Vec::new(),
             reached: Vec::new(),
+            breadcrumbs: Vec::new(),
         };
+        let sink = BreadcrumbSink::default();
+        tracing::subscriber::with_default(sink.clone(), || self.drive(lines, &mut d));
+        d.breadcrumbs = sink.take();
+        d
+    }
 
+    fn drive<I, S>(&self, lines: I, d: &mut Driven)
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
         if let (
             true,
             Decode::Transcript {
@@ -338,8 +357,7 @@ impl Drive {
             }
         }
 
-        self.fold(&mut d);
-        d
+        self.fold(d);
     }
 
     fn decode_one(&self, v: Value) -> crate::source::decoder::DecodeResult<Vec<AgentEvent>> {
@@ -364,6 +382,52 @@ impl Drive {
             note_reached(&d.scene, &mut d.reached);
         }
     }
+}
+
+/// Collects the events logged on [`crate::source::drift::TARGET`] while it is the
+/// thread's default subscriber.
+#[derive(Clone, Default)]
+struct BreadcrumbSink(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+impl BreadcrumbSink {
+    fn take(&self) -> Vec<String> {
+        let mut logged = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::mem::take(&mut *logged)
+    }
+}
+
+impl tracing::Subscriber for BreadcrumbSink {
+    fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+        metadata.target() == crate::source::drift::TARGET
+    }
+
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+
+    fn event(&self, event: &tracing::Event<'_>) {
+        let mut line = String::new();
+        event.record(
+            &mut |field: &tracing::field::Field, value: &dyn std::fmt::Debug| {
+                line.push_str(&format!("{}={value:?} ", field.name()));
+            },
+        );
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(line.trim_end().to_owned());
+    }
+
+    fn enter(&self, _: &tracing::span::Id) {}
+
+    fn exit(&self, _: &tracing::span::Id) {}
 }
 
 /// Union the lifecycle classes every live slot is in into `reached`.
@@ -409,6 +473,25 @@ fn shape_of(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_breadcrumb_a_decode_logs_is_part_of_what_it_decoded() {
+        let file = sources_root()
+            .join("delegation/fixtures/dsh")
+            .join(HOOK_PAYLOADS);
+        let text = std::fs::read_to_string(&file).expect("the recorded delegation");
+        let call = text
+            .lines()
+            .map(|l| serde_json::from_str::<Value>(l).expect("json"))
+            .find(|v| v["type"] == "tool_call")
+            .expect("a tool_call line");
+        let crumbs = Drive::hooks().lines([call.to_string()]).breadcrumbs;
+        assert!(crumbs.is_empty(), "{crumbs:?}");
+        let mut dropped = call;
+        dropped.as_object_mut().expect("an object").remove("callId");
+        let crumbs = Drive::hooks().lines([dropped.to_string()]).breadcrumbs;
+        assert!(crumbs.iter().any(|c| c.contains("callId")), "{crumbs:?}");
+    }
 
     /// A CC transcript line carrying only tool activity — nothing in it
     /// registers a session.

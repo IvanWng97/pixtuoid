@@ -1099,16 +1099,16 @@ deb target:
 #   - npm/generate.test.mjs — the ONLY validation of npm/generate.mjs. release.yml
 #     runs it as a hard gate right before `npm publish`, and ci-lint.yml's `npm-gen` job
 #     so a generator regression is caught at review time, not at the tag-push.
-#   - scripts/openclaw-plugin.test.mjs — drives the RENDERED openclaw_plugin.js the
-#     way OpenClaw's loader does. The Rust side can only grep that template as a
-#     string, so this is the only place its runtime contract (never block the
-#     gateway / never forward content / always stamp the gateway identity) is
+#   - scripts/{openclaw,dsh}-plugin.test.mjs — drive each RENDERED plugin the way
+#     its CLI's loader does. The Rust side can only grep a template as a string, so
+#     this is the only place a plugin's runtime contract (never block its host /
+#     never forward content / openclaw's gateway identity, dsh's emit order) is
 #     actually EXECUTED.
 # NOT in preflight: a Rust pre-push shouldn't require a Node toolchain. Needs Node ≥ 22.
-[doc('Node gates: the npm package generator + the OpenClaw plugin contract (CI + release; not in preflight)')]
+[doc('Node gates: the npm package generator + the OpenClaw and dsh plugin contracts (CI + release; not in preflight)')]
 [group('release')]
 npm-check:
-    node --test npm/generate.test.mjs scripts/openclaw-plugin.test.mjs
+    node --test npm/generate.test.mjs scripts/openclaw-plugin.test.mjs scripts/dsh-plugin.test.mjs
 
 # ── meta ──────────────────────────────────────────────────────────
 

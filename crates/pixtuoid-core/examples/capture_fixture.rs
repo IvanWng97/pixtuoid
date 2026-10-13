@@ -45,8 +45,11 @@ mod recorder {
         "Read NOTE.txt, then list this directory, then read NOTE.txt again.";
 
     use pixtuoid_core::harness::CAPTURE_WORKSPACE as WORKSPACE;
-    use pixtuoid_core::harness::recorder_flag::{ENV, OUT, TEE, WITHIN};
-    use pixtuoid_core::harness::{CAPTURE_RECORD, CaptureRecord, HOOK_PAYLOADS, PROVENANCE};
+    use pixtuoid_core::harness::hermetic::{self, MANIFEST, Manifest};
+    use pixtuoid_core::harness::recorder_flag::{ENV, OUT, PROMOTE, TEE, WITHIN};
+    use pixtuoid_core::harness::{
+        CAPTURE_RECORD, CaptureRecord, HOOK_PAYLOADS, PROVENANCE, jsonl_files_under,
+    };
 
     /// Where a driver names the CLI it drives, a command or the path to its
     /// binary, for the recorder to ask its `--version`.
@@ -81,6 +84,9 @@ mod recorder {
         /// Set on the CLI after the agent-env scrub, which would strip a
         /// caller's own `CLAUDE_CODE_*` opt-outs with the agent's.
         env: Vec<(String, String)>,
+        /// Run no CLI: write this hermetic run's raw capture into the committed
+        /// fixture its scenario names, as a live recording would be written.
+        promote: Option<PathBuf>,
     }
 
     /// Leading option pairs, each a [`pixtuoid_core::harness::recorder_flag`]
@@ -100,6 +106,7 @@ mod recorder {
                 OUT => options.out = Some(PathBuf::from(take(&mut args, OUT)?)),
                 TEE => options.tee = Some(PathBuf::from(take(&mut args, TEE)?)),
                 WITHIN => options.within = Some(PathBuf::from(take(&mut args, WITHIN)?)),
+                PROMOTE => options.promote = Some(PathBuf::from(take(&mut args, PROMOTE)?)),
                 ENV => {
                     let value = take(&mut args, ENV)?;
                     let (k, v) = value
@@ -141,12 +148,16 @@ mod recorder {
                 std::process::exit(2);
             }
         };
+        if let Some(run) = options.promote.as_deref() {
+            return promote(run, &sources_root(), &identity_needles(git_config));
+        }
         if args.len() < 3 {
             eprintln!(
                 "usage: capture_fixture [{OUT} <dir>] [{TEE} <socket>] [{WITHIN} <dir>] [{ENV} K=V]... \
                  <source-id> <scenario> <cmd...>   \
                  ('{{prompt}}' expands)\n       \
-                 capture_fixture --strip-corpus   (strip every committed capture in place)"
+                 capture_fixture --strip-corpus   (strip every committed capture in place)\n       \
+                 capture_fixture {PROMOTE} <run>   (write a hermetic run into its fixture)"
             );
             std::process::exit(2);
         }
@@ -240,14 +251,7 @@ mod recorder {
             std::process::exit(1);
         }
 
-        let deidentified = match reads::exemption(&dest.join(PROVENANCE)) {
-            Some(why) => Deidentified::Exempt(why),
-            None => {
-                let strip = reads::strip_unread(&source, &wrote)?;
-                report_not_json(&strip);
-                Deidentified::Stripped(strip.blanked)
-            }
-        };
+        let deidentified = deidentify(&source, &wrote, reads::exemption(&dest.join(PROVENANCE)))?;
         write_provenance(
             &dest,
             (&cli, &version),
@@ -265,11 +269,85 @@ mod recorder {
             Deidentified::Stripped(n) => println!("blanked {n} subtrees no decoder reads"),
             Deidentified::Exempt(why) => println!("not stripped, as the record declares: {why}"),
         }
-        refuse_on_pii(&wrote)?;
+        refuse_on_pii(&wrote, &identity_needles(git_config))?;
         if !status.success() {
             eprintln!("WARNING: the CLI exited {status} — this capture may be truncated");
         }
         println!("next: just test conformance   then   cargo insta review");
+        Ok(())
+    }
+
+    fn deidentify(
+        source: &str,
+        files: &[PathBuf],
+        exemption: Option<String>,
+    ) -> std::io::Result<Deidentified> {
+        Ok(match exemption {
+            Some(why) => Deidentified::Exempt(why),
+            None => {
+                let strip = reads::strip_unread(source, files)?;
+                report_not_json(&strip);
+                Deidentified::Stripped(strip.blanked)
+            }
+        })
+    }
+
+    /// Replaces the fixture's bytes whole, where a live recording writes `.new`
+    /// beside them: the old ones are git's.
+    fn promote(run: &Path, root: &Path, needles: &BTreeSet<String>) -> std::io::Result<()> {
+        let manifest: Manifest =
+            serde_json::from_str(&std::fs::read_to_string(run.join(MANIFEST))?)?;
+        let named = format!("{}/{}", manifest.source, manifest.scenario);
+        let scenario = hermetic::profile(&manifest.source)
+            .and_then(|p| {
+                p.scenarios
+                    .iter()
+                    .find(|s| s.shape.name() == manifest.scenario)
+            })
+            .ok_or_else(|| std::io::Error::other(format!("{named}: no profiled scenario")))?;
+        let fixture = scenario
+            .fixture
+            .ok_or_else(|| std::io::Error::other(format!("{named}: records no fixture")))?;
+        let dest = root.join(fixture);
+        let exempt = reads::exemption(&dest.join(PROVENANCE));
+        for old in jsonl_files_under(&dest)
+            .into_iter()
+            .chain([dest.join(PROVENANCE)])
+        {
+            match std::fs::remove_file(&old) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+                _ => {}
+            }
+        }
+        let mut wrote = Vec::new();
+        for raw in jsonl_files_under(run) {
+            let to = dest.join(raw.strip_prefix(run).map_err(std::io::Error::other)?);
+            if let Some(dir) = to.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::copy(&raw, &to)?;
+            wrote.push(to);
+        }
+        let deidentified = deidentify(&manifest.source, &wrote, exempt)?;
+        let script = scenario.script(&manifest.source);
+        let script = script
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(&script)
+            .display()
+            .to_string();
+        let command = ["just", "hermetic", "--record", manifest.source.as_str()].map(String::from);
+        write_provenance(
+            &dest,
+            (&manifest.capture.cli, &manifest.capture.version),
+            &command,
+            &deidentified,
+            &[
+                ("aimock", Some(manifest.aimock.clone())),
+                ("script", Some(script)),
+            ],
+        )?;
+        refuse_on_pii(&wrote, needles)?;
+        println!("recorded {named} into {}", dest.display());
         Ok(())
     }
 
@@ -705,14 +783,13 @@ mod recorder {
             .collect()
     }
 
-    fn scan_for_pii(files: &[PathBuf]) -> Vec<String> {
-        let needles = identity_needles(git_config);
+    fn scan_for_pii(files: &[PathBuf], needles: &BTreeSet<String>) -> Vec<String> {
         let mut found = Vec::new();
         for f in files {
             let Ok(body) = std::fs::read_to_string(f) else {
                 continue;
             };
-            let hits = pii_hits(&body, &needles);
+            let hits = pii_hits(&body, needles);
             if !hits.is_empty() {
                 found.push(format!("{}: {}", f.display(), hits.join(", ")));
             }
@@ -723,8 +800,8 @@ mod recorder {
     /// A REFUSAL, not a warning. The old form printed to stderr and left the exit
     /// code at 0 on a run that had already written into the repo tree, so the
     /// capturer had to notice a line scrolling past — and twice did not.
-    fn refuse_on_pii(files: &[PathBuf]) -> std::io::Result<()> {
-        let found = scan_for_pii(files);
+    fn refuse_on_pii(files: &[PathBuf], needles: &BTreeSet<String>) -> std::io::Result<()> {
+        let found = scan_for_pii(files, needles);
         if found.is_empty() {
             return Ok(());
         }
@@ -796,6 +873,140 @@ mod recorder {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        /// An operator nobody's bytes carry, so no test reads the machine's.
+        const OPERATOR: &str = "Ada Lovelace";
+
+        struct Promotable {
+            _dir: tempfile::TempDir,
+            run: PathBuf,
+            root: PathBuf,
+            dest: PathBuf,
+        }
+
+        /// The run's raw capture is the committed recording with a key no
+        /// decoder reads planted on line 1, then `edit`ed; the root's fixture
+        /// holds `old.jsonl` and the `record` given.
+        fn promotable(
+            record: serde_json::Value,
+            edit: impl FnOnce(&mut [serde_json::Value]),
+        ) -> Promotable {
+            let d = tempfile::tempdir().expect("tempdir");
+            let (run, root) = (d.path().join("run"), d.path().join("sources"));
+            let fixture = hermetic::profile("dsh")
+                .and_then(|p| p.scenarios.iter().find(|s| s.shape.name() == "tool-run"))
+                .and_then(|s| s.fixture)
+                .expect("dsh's tool-run records");
+            let committed =
+                std::fs::read_to_string(sources_root().join(fixture).join(HOOK_PAYLOADS))
+                    .expect("the committed recording");
+            let mut lines: Vec<serde_json::Value> = committed
+                .lines()
+                .map(|l| serde_json::from_str(l).expect("json"))
+                .collect();
+            lines[0]["planted"] = "unread".into();
+            edit(&mut lines);
+            std::fs::create_dir_all(&run).expect("mkdir");
+            let raw: Vec<String> = lines.iter().map(ToString::to_string).collect();
+            std::fs::write(run.join(HOOK_PAYLOADS), raw.join("\n") + "\n").expect("raw");
+            let manifest = Manifest {
+                source: "dsh".into(),
+                scenario: "tool-run".into(),
+                capture: CaptureRecord {
+                    workspace: PathBuf::from(WORKSPACE),
+                    cli: "dsh".into(),
+                    version: "0.2.0-rc.2".into(),
+                    exit_code: Some(0),
+                },
+                aimock: "1.43.0".into(),
+                requests: 3,
+                unmatched: 0,
+            };
+            std::fs::write(
+                run.join(MANIFEST),
+                serde_json::to_string(&manifest).expect("json"),
+            )
+            .expect("manifest");
+            let dest = root.join(fixture);
+            std::fs::create_dir_all(&dest).expect("mkdir");
+            std::fs::write(dest.join("old.jsonl"), "{}\n").expect("old");
+            std::fs::write(dest.join(PROVENANCE), record.to_string()).expect("record");
+            Promotable {
+                _dir: d,
+                run,
+                root,
+                dest,
+            }
+        }
+
+        fn needles() -> BTreeSet<String> {
+            BTreeSet::from([OPERATOR.to_string()])
+        }
+
+        fn written(dest: &Path) -> (String, serde_json::Value) {
+            let bytes = std::fs::read_to_string(dest.join(HOOK_PAYLOADS)).expect("bytes");
+            let record = std::fs::read_to_string(dest.join(PROVENANCE)).expect("record");
+            (bytes, serde_json::from_str(&record).expect("json"))
+        }
+
+        #[test]
+        fn a_promoted_run_replaces_its_fixture_stripped_and_says_what_played_the_model() {
+            let p = promotable(
+                serde_json::json!({"origin": "recorded", "note": "the old record"}),
+                |_| {},
+            );
+            promote(&p.run, &p.root, &needles()).expect("promote");
+            assert!(
+                !p.dest.join("old.jsonl").exists(),
+                "the old bytes leave whole"
+            );
+            let (bytes, record) = written(&p.dest);
+            assert!(!bytes.contains("unread"), "the planted key is stripped");
+            assert_eq!(record["deidentified"]["method"], "decoder-allowlist");
+            assert!(
+                record["deidentified"]["blanked"]
+                    .as_u64()
+                    .is_some_and(|n| n > 0)
+            );
+            assert_eq!(record["aimock"], "1.43.0");
+            assert_eq!(record["script"], "tests/sources/hermetic/dsh/tool-run.json");
+            assert_eq!(record["version"], "0.2.0-rc.2");
+            assert!(
+                record.get("note").is_none(),
+                "the record is the run's, not the old one"
+            );
+        }
+
+        #[test]
+        fn a_promoted_run_carrying_the_operator_is_refused() {
+            let p = promotable(serde_json::json!({"origin": "recorded"}), |lines| {
+                lines[0]["cwd"] = format!("/Users/{OPERATOR}/proj").into();
+            });
+            assert!(
+                promote(&p.run, &p.root, &needles()).is_err(),
+                "the operator's name is refused"
+            );
+        }
+
+        #[test]
+        fn a_promoted_run_keeps_its_fixtures_exemption() {
+            let why = "a test reads the raw bytes";
+            let p = promotable(
+                serde_json::json!({
+                    "origin": "recorded",
+                    "deidentified": {"method": "none", "why": why},
+                }),
+                |_| {},
+            );
+            promote(&p.run, &p.root, &needles()).expect("promote");
+            let (bytes, record) = written(&p.dest);
+            assert!(
+                bytes.contains("unread"),
+                "an exempt capture is not stripped"
+            );
+            assert_eq!(record["deidentified"]["method"], "none");
+            assert_eq!(record["deidentified"]["why"], why);
+        }
 
         #[test]
         fn the_workspace_becomes_its_own_repository_or_fails() {

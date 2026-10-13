@@ -29,8 +29,8 @@ const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
 pub(crate) const PLUGIN_TEMPLATE: &str = include_str!("dsh_plugin.mjs");
 
-/// The upstream events the plugin listens for: its `ctx.on("…")`
-/// subscriptions and the `case "…"` labels of its `session/event` switch,
+/// The upstream events the plugin forwards: its literal `ctx.on("…")`
+/// subscriptions and the `case "…"` labels of its session-event switch,
 /// scanned from the template so a hand-kept list can't claim coverage the code
 /// doesn't have.
 #[cfg(any(test, feature = "upstream"))]
@@ -494,14 +494,19 @@ mod tests {
         // (deepseek-harness 9b7a8ccc), whose listener the no-await assert below
         // keeps synchronous (`runtime-types.ts` for the agent channels,
         // `session/src/index.ts` for `session/event`; fetched 2026-10-05).
+        // A channel is a literal, or a const the template declares it by.
         let subscribed: std::collections::BTreeSet<&str> = PLUGIN_TEMPLATE
             .split(r#"ctx.on("#)
             .skip(1)
-            .map(|p| {
-                p.trim_start_matches('"')
-                    .split('"')
-                    .next()
-                    .expect("closed quote")
+            .map(|p| match p.strip_prefix('"') {
+                Some(literal) => literal.split('"').next().expect("closed quote"),
+                None => {
+                    let name = p.split(',').next().expect("an argument").trim();
+                    PLUGIN_TEMPLATE
+                        .split_once(&format!("const {name} = \""))
+                        .and_then(|(_, rest)| rest.split('"').next())
+                        .expect("a named channel's const")
+                }
             })
             .collect();
         let allowed =

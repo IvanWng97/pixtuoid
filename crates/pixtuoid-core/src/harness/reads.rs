@@ -211,6 +211,7 @@ type Decoded = (
     Vec<String>,
     Vec<String>,
     Vec<String>,
+    Vec<String>,
     Vec<Option<DecodedPresence>>,
     Vec<String>,
 );
@@ -239,6 +240,7 @@ fn events_of(source: &str, drive: &Drive, lines: &[Value]) -> Decoded {
         d.events.iter().map(|e| format!("{e:?}")).collect(),
         failures(&d.decode_errors),
         failures(&d.panics),
+        d.breadcrumbs,
         presence,
         cwds,
     )
@@ -322,6 +324,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+    use crate::harness::sources_root;
 
     #[test]
     fn the_strip_applies_to_a_recording_not_declared_exempt() {
@@ -346,10 +349,6 @@ mod tests {
             "/~01",
             "a literal ~1 stays a tilde and a 1"
         );
-    }
-
-    fn sources_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
     }
 
     fn scenario_events(source: &str, files: &[PathBuf]) -> Vec<Decoded> {

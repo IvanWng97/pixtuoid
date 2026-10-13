@@ -19,15 +19,30 @@ export const inject = ["agents"]
 // channel but `agent/created` (below) is an emit, so this plugin cannot stall a
 // tool call, a prompt, or shutdown.
 export function apply(ctx) {
+  // One shim at a time, in emit order: shims spawned together race to the
+  // socket, and a decision that lands before its ask strands the slot waiting.
+  // The shim's own write watchdog bounds each turn of the queue.
+  let queue = Promise.resolve()
   const send = (payload) => {
     try {
       payload._pid = typeof process !== "undefined" ? process.pid : undefined
-      const proc = spawn(HOOK_PATH, ["--source", "dsh"], {
-        stdio: ["pipe", "ignore", "ignore"],
-      })
-      proc.on("error", () => {})
-      proc.stdin.on("error", () => {})
-      proc.stdin.end(JSON.stringify(payload) + "\n")
+      const line = JSON.stringify(payload) + "\n"
+      queue = queue.then(
+        () =>
+          new Promise((settled) => {
+            try {
+              const proc = spawn(HOOK_PATH, ["--source", "dsh"], {
+                stdio: ["pipe", "ignore", "ignore"],
+              })
+              proc.on("error", settled)
+              proc.on("close", settled)
+              proc.stdin.on("error", () => {})
+              proc.stdin.end(line)
+            } catch {
+              settled()
+            }
+          }),
+      )
     } catch {
       // A broken shim must never surface into dsh.
     }
@@ -74,7 +89,10 @@ export function apply(ctx) {
   // approval/decided carries only {id, outcome}; the asked side owns
   // callId/toolName, so remember the pair until it resolves.
   const asked = new Map()
-  ctx.on("session/event", (session, event) => {
+  // Named, not a literal: this channel only carries the events its cases
+  // forward, and `plugin_events` (install/dsh.rs) lists events, not carriers.
+  const SESSION_EVENT = "session/event"
+  ctx.on(SESSION_EVENT, (session, event) => {
     try {
       const header = session.header
       const d = event.data
