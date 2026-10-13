@@ -503,7 +503,7 @@ fn subagent(events: &[AgentEvent], reached: &[Reach], findings: &mut Vec<(Label,
             agent_id,
             parent_id: Some(parent),
             ..
-        } if ids.contains(parent) => Some(*agent_id),
+        } if parent != agent_id && ids.contains(parent) => Some(*agent_id),
         _ => None,
     });
     match child {
@@ -777,6 +777,31 @@ mod tests {
         let v = verify(d.path()).expect("verify");
         assert!(
             has(&v, Label::Fail, "child's tool never went Active"),
+            "{:?}",
+            v.findings()
+        );
+    }
+
+    #[test]
+    fn a_session_that_names_itself_its_parent_is_no_child() {
+        let d = recorded("dsh", Shape::Subagent, DS_DELEGATE_SCENE);
+        let mut parent = None;
+        edit_hooks(d.path(), |mut v| {
+            if let Some(p) = v.as_object_mut().and_then(|o| o.remove("parentSession")) {
+                parent = Some(p);
+            }
+            Some(v)
+        });
+        let parent = parent.expect("the recording links its child");
+        edit_hooks(d.path(), |mut v| {
+            if v["type"] == "session_start" && v["sessionId"] == parent {
+                v["parentSession"] = parent.clone();
+            }
+            Some(v)
+        });
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "as another's child"),
             "{:?}",
             v.findings()
         );
