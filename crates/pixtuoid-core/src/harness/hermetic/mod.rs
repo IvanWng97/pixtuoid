@@ -220,11 +220,10 @@ pub const PROFILES: &[Profile] = &[
         // reaches them (`codex-rs/config/src/loader/mod.rs:69`, `:102-107`,
         // `layer_io.rs:222-227`).
         unsandboxed: &["/etc/codex"],
-        // Its project config and AGENTS.md stop at the project root, which is the
-        // workspace itself unless a `.git` above it marks one
-        // (`codex-rs/config/src/loader/mod.rs:1497-1532`, `:1662`,
-        // `core/src/agents_md.rs:8-12`).
-        ancestor_config: &[".git"],
+        // Its project config and AGENTS.md stop at the project root
+        // (`codex-rs/config/src/loader/mod.rs:1662`, `core/src/agents_md.rs:8-12`),
+        // which the recorder's `git init` makes the workspace.
+        ancestor_config: &[],
         config: &[ConfigFile {
             home: "CODEX_HOME",
             path: "config.toml",
@@ -288,14 +287,14 @@ wire_api = "responses"
         homes: &["OPENCODE_CONFIG_DIR"],
         unsandboxed: &[],
         // Project config up to `/` (`packages/core/src/config/discovery.ts:10`,
-        // `:36`), and AGENTS.md (`config/plugin/instruction.ts:72`).
+        // `:36`); its AGENTS.md walk stops at the git worktree
+        // (`config/plugin/instruction.ts:37`), the workspace the recorder inits.
         ancestor_config: &[
             ".claude",
             ".agents",
             ".opencode",
             "opencode.jsonc",
             "opencode.json",
-            "AGENTS.md",
         ],
         config: &[ConfigFile {
             home: "OPENCODE_CONFIG_DIR",
