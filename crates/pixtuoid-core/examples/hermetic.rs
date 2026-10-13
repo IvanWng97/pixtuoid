@@ -888,6 +888,33 @@ mod run {
         }
 
         #[test]
+        fn every_child_of_a_run_gets_the_profiles_env_expanded() {
+            let built = Built {
+                pixtuoid: PathBuf::from("/nowhere/pixtuoid"),
+                shim: PathBuf::from("/nowhere/pixtuoid-hook"),
+                recorder: PathBuf::from("/nowhere/capture_fixture"),
+            };
+            for p in PROFILES {
+                let sandbox =
+                    Sandbox::new(p, &built, Path::new("/nowhere/bin"), 4321).expect("sandbox");
+                for (k, v) in p.env {
+                    let want = v.replace("{port}", "4321").replace("{key}", DUMMY_KEY);
+                    assert_eq!(
+                        sandbox.var(k),
+                        Some(PathBuf::from(&want)),
+                        "{}: {k} misses `connect`'s children",
+                        p.source
+                    );
+                    assert!(
+                        sandbox.cli_env.contains(&format!("{k}={want}")),
+                        "{}: {k}",
+                        p.source
+                    );
+                }
+            }
+        }
+
+        #[test]
         fn npm_and_aimock_keep_npm_config_and_lose_provider_keys() {
             temp_env::with_vars(
                 [
