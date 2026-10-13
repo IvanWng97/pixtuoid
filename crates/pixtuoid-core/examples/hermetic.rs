@@ -1610,6 +1610,15 @@ mod run {
             assert!(check(&[absent]).is_err(), "an unprofiled source says why");
         }
 
+        #[cfg(not(unix))]
+        #[test]
+        fn record_is_refused_off_unix() {
+            let check = |v: &[&str]| parse(&args(v)).expect("parse").check();
+            let refused = check(&["--record", "dsh"]).expect_err("the corpus pins Unix paths");
+            assert!(refused.contains("Unix"), "{refused}");
+        }
+
+        #[cfg(unix)]
         #[test]
         fn record_takes_whole_pinned_sources() {
             let a = parse(&args(&["--record", "--cli", "pinned", "dsh"])).expect("parse");
