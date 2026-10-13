@@ -1,0 +1,81 @@
+name: hermetic
+
+# `just hermetic`: every profiled agent CLI, run for real against a scripted
+# model with a headless pixtuoid on the same run.
+
+on:
+  workflow_call:
+    inputs:
+      full:
+        description: 'False on a PR outside the merge queue: only the jobs without `if: inputs.full` run'
+        type: boolean
+        required: true
+      cli:
+        description: '`pinned` (each registry `verified_version`) or `latest`'
+        type: string
+        default: pinned
+    outputs:
+      runs:
+        description: 'The artifact the runs upload as when `just hermetic` exits non-zero'
+        value: ${{ jobs.run.outputs.runs }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  run:
+    name: hermetic (${{ inputs.cli }})
+    if: ${{ inputs.full }}
+    # The recorded workspace's realpath (`/private/tmp`) and kqueue liveness are
+    # macOS's, the platform the corpus was recorded on.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    outputs:
+      runs: ${{ steps.run.outputs.runs }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-cargo-just
+      # Node, and the repo's one npm, whose allowScripts policy the tier's CLI
+      # installs rely on.
+      - uses: ./.github/actions/setup-npm
+        with:
+          directory: crates/pixtuoid-core/tests/sources/hermetic/aimock
+      - name: Run every profile
+        id: run
+        env:
+          CLI: ${{ inputs.cli }}
+        run: |
+          set +e
+          just hermetic --cli "$CLI"
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          echo "runs=hermetic-runs-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+      - if: steps.run.outputs.exit != '0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.run.outputs.runs }}
+          path: target/hermetic/runs
+          retention-days: 7
+          if-no-files-found: error
+      - name: Fail on any verdict but Pass
+        if: steps.run.outputs.exit != '0'
+        env:
+          CODE: ${{ steps.run.outputs.exit }}
+        run: |
+          echo "::error::just hermetic exited ${CODE}; its report.md heads the uploaded runs"
+          exit 1
+
+  required:
+    name: required-hermetic-jobs
+    if: ${{ always() }}
+    needs: [run]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: pixtuoid/.github/.github/actions/require-jobs@main
+        with:
+          results: ${{ toJSON(needs) }}
+          label: "Hermetic run failed"
+          allow-skipped: ${{ !inputs.full }}

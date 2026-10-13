@@ -7,9 +7,12 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::harness::CaptureRecord;
 use crate::source::registry;
+
+pub mod verify;
 
 /// The key every profile's CLI is handed for its scripted model: aimock
 /// accepts any, and a real provider must refuse it.
@@ -48,7 +51,7 @@ impl Shape {
 pub struct Scenario {
     /// What the run must look like.
     pub shape: Shape,
-    /// The hook events this run must fire, in the install's `registers()` terms.
+    /// The hook events this run must fire, as `Profile::event_name` reads them.
     pub expects: &'static [&'static str],
 }
 
@@ -90,9 +93,15 @@ pub struct Profile {
     pub config: &'static [ConfigFile],
     /// The scripted turns.
     pub scenarios: &'static [Scenario],
-    /// Registered hooks no scenario expects yet; moving one into `expects`
-    /// forces it out (`a_hook_both_expected_and_not_yet_is_a_stale_entry`).
+    /// Registered hooks no scenario expects yet. Shrink-only: a run that fires
+    /// one is Stale (`verify::verify_source`).
     pub not_yet: &'static [&'static str],
+    /// The hook event a captured payload is, in `registers()` terms.
+    pub(crate) event_name: fn(&Value) -> Option<&str>,
+    /// Fields a decoder reads in a committed capture that no scenario carries
+    /// yet, as `(kind, path)` the field census names them. Shrink-only: a run
+    /// that carries one is Stale.
+    pub(crate) not_yet_fields: &'static [(&'static str, &'static str)],
 }
 
 impl Profile {
@@ -137,6 +146,14 @@ pub enum Absence {
     AwaitingProfile,
 }
 
+fn hook_event_name(v: &Value) -> Option<&str> {
+    v.get("hook_event_name")?.as_str()
+}
+
+fn type_field(v: &Value) -> Option<&str> {
+    v.get("type")?.as_str()
+}
+
 /// The profiled CLIs.
 pub const PROFILES: &[Profile] = &[
     Profile {
@@ -173,6 +190,20 @@ pub const PROFILES: &[Profile] = &[
             "SubagentStart",
             "SubagentStop",
         ],
+        event_name: hook_event_name,
+        not_yet_fields: &[
+            // A Bash call's; the scripted turn reads a file.
+            ("hook:PreToolUse", "/tool_input/command"),
+            ("tx:assistant", "/message/content/*/input/command"),
+            // `claude -p` sends no model; the interactive TUI does
+            // (fixtures/claude-code/permission-recorded).
+            ("hook:SessionStart", "/model"),
+            // A subagent transcript's (fixtures/claude-code/subagent-recorded).
+            ("tx:assistant", "/attributionAgent"),
+            // aimock's Messages usage is input and output tokens alone
+            // (`CopilotKit/aimock` `src/messages.ts:405-414` at v1.43.0).
+            ("tx:assistant", "/message/usage/cache_creation_input_tokens"),
+        ],
     },
     Profile {
         source: "codex",
@@ -203,6 +234,7 @@ pub const PROFILES: &[Profile] = &[
             path: "config.toml",
             template: r#"model = "gpt-5.5"
 model_provider = "aimock"
+model_reasoning_effort = "high"
 
 [model_providers.aimock]
 name = "aimock"
@@ -223,6 +255,19 @@ wire_api = "responses"
             ],
         }],
         not_yet: &["SubagentStart", "SubagentStop", "PermissionRequest"],
+        event_name: hook_event_name,
+        // aimock's Responses usage has no token details (`CopilotKit/aimock`
+        // `src/responses.ts:266-279` at v1.43.0).
+        not_yet_fields: &[
+            (
+                "tx:event_msg",
+                "/payload/info/last_token_usage/cached_input_tokens",
+            ),
+            (
+                "tx:event_msg",
+                "/payload/info/last_token_usage/reasoning_output_tokens",
+            ),
+        ],
     },
     // opencode's cites are at v2.0.28, the release that added the system
     // config below.
@@ -231,8 +276,16 @@ wire_api = "responses"
         package: Package::Npm("@opencode/cli"),
         // A plain `run` attaches to the background service, whose env never
         // carries the run's PIXTUOID_SOCKET; a private server inherits it
-        // (`packages/cli/src/services/standalone.ts:24-25`).
-        invocation: &["opencode", "run", "--standalone", "{prompt}"],
+        // (`packages/cli/src/services/standalone.ts:24-25`). Only an explicit
+        // `--model` reaches the session's events (`packages/cli/src/run/run.ts:91`).
+        invocation: &[
+            "opencode",
+            "run",
+            "--standalone",
+            "--model",
+            "openai/gpt-5.2",
+            "{prompt}",
+        ],
         // The models.dev fetch and the update check
         // (`packages/cli/src/server-process.ts:113`, `services/updater.ts:534`).
         env: &[
@@ -262,7 +315,6 @@ wire_api = "responses"
             home: "OPENCODE_CONFIG_DIR",
             path: "opencode.jsonc",
             template: r#"{
-  "model": "openai/gpt-5.2",
   "providers": {
     "openai": {
       "settings": { "baseURL": "http://127.0.0.1:{port}/v1", "apiKey": "{key}" },
@@ -288,6 +340,12 @@ wire_api = "responses"
             "session.execution.interrupted",
             "session.tool.failed",
             "permission.asked",
+        ],
+        event_name: type_field,
+        // A child session's (tests/sources/opencode/fixtures).
+        not_yet_fields: &[
+            ("hook:session.created", "/data/parentID"),
+            ("hook:session.execution.started", "/data/parentID"),
         ],
     },
 ];
@@ -422,6 +480,20 @@ mod tests {
     }
 
     #[test]
+    fn every_not_yet_field_is_one_a_decoder_reads() {
+        for p in PROFILES {
+            let reads = verify::committed_reads(p).expect("the committed corpus reads");
+            for (kind, path) in p.not_yet_fields {
+                assert!(
+                    reads.has(kind, path),
+                    "{}: no committed capture shows a decoder reading {kind} {path}",
+                    p.source
+                );
+            }
+        }
+    }
+
+    #[test]
     fn config_outside_the_sandbox_is_spelled_as_its_reader_expands_it() {
         for p in PROFILES {
             // Unix paths, as the tier runs only on Unix: `Path::is_absolute`
@@ -449,6 +521,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn opencodes_model_flag_names_a_model_its_config_declares() {
+        let p = profile("opencode").expect("opencode");
+        let model = p
+            .invocation
+            .windows(2)
+            .find_map(|w| (w[0] == "--model").then_some(w[1]))
+            .expect("a --model");
+        let (provider, id) = model.split_once('/').expect("provider/model");
+        let config: Value = serde_json::from_str(p.config[0].template).expect("plain JSON");
+        assert!(
+            config["providers"][provider]["models"].get(id).is_some(),
+            "{model} is not under the config's providers.{provider}.models"
+        );
     }
 
     #[test]

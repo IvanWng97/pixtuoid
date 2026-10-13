@@ -75,12 +75,14 @@
     - '.jobs.publish.steps += [{"run": "bash scripts/x.sh"}]'
 
 - id: drift-watch-files-issues-from-a-job-that-runs-no-tree-code
-  file: .github/workflows/upstream-drift.yml
+  file:
+    - .github/workflows/upstream-drift.yml
+    - .github/workflows/hermetic-nightly.yml
   why: >-
-    The watch builds and runs the tree, every dependency's build script
-    included, and hands its token to curl; that job's token only reads. The
-    token that writes issues lives in a job that checks nothing out and runs
-    no build, so no code of the tree ever holds it.
+    Each watch runs code the repo does not vet: the tree with every
+    dependency's build script, or a third-party CLI's latest release. That
+    job's token only reads. The token that writes issues lives in a job that
+    checks nothing out and runs no build, so no code of the tree ever holds it.
   assert: |
     ([.jobs.file.steps[] | .run // "" | split("\n")[] | select(test("^\\s*#") | not)]
      | join("\n")) as $file
@@ -99,6 +101,23 @@
     - '.jobs.other = {"permissions": {"pull-requests": "write"}}'
     - '.jobs.file.steps = [{"uses": "actions/checkout@v7"}] + .jobs.file.steps'
     - '.jobs.file.steps += [{"run": "just drift-watch"}]'
+
+- id: hermetic-nightly-files-the-runs-the-tier-named
+  file: .github/workflows/hermetic-nightly.yml
+  why: >-
+    The issue is filed from the runs the tier uploaded, under the name its
+    upload chose and its `runs` output hands on. A name rebuilt here can
+    disagree with it and find nothing.
+  assert: |
+    [.jobs.file.steps[] | select((.uses // "") | startswith("actions/download-artifact")) | .with.name]
+    == ["${{ needs.drift.outputs.runs }}"]
+  break:
+    - |
+      .jobs.file.steps |= map(
+        if (.uses // "") | startswith("actions/download-artifact") then .with.name = "hermetic-runs-${{ github.run_id }}" else . end)
+    - |
+      .jobs.file.steps |= map(
+        if (.uses // "") | startswith("actions/download-artifact") then .with = {"merge-multiple": true} else . end)
 
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml
@@ -142,6 +161,7 @@
     - .github/workflows/ci-tests.yml
     - .github/workflows/site.yml
     - .github/workflows/raycast.yml
+    - .github/workflows/hermetic.yml
   why: >-
     ci.yml's gate sees a group only through the call's result, and GitHub does
     not document how a called workflow's jobs roll up into it. The `required`
@@ -177,6 +197,7 @@
     - .github/workflows/ci-builds.yml
     - .github/workflows/ci-tests.yml
     - .github/workflows/site.yml
+    - .github/workflows/hermetic.yml
   why: >-
     A PR's light tier skips its full-only jobs by design and must still pass
     ci-gate to enter the queue; the full tier judges the same jobs on the

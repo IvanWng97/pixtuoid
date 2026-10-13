@@ -1,12 +1,13 @@
 //! Run each profiled agent CLI for real against a scripted model (aimock), with
-//! a headless pixtuoid on the same run, each run's raw capture written under
-//! `target/hermetic/runs`. Profiles and scripts: `pixtuoid_core::harness::hermetic`.
+//! a headless pixtuoid on the same run, and judge what pixtuoid made of it.
+//! Profiles, scripts and the judgement: `pixtuoid_core::harness::hermetic`.
 //!
 //! `--cli pinned` (the default) installs each CLI at its registry
-//! `verified_version`; `--cli latest` installs what npm's `latest` tag points at.
+//! `verified_version`, the merge queue's end-to-end gate; `--cli latest` installs
+//! what npm's `latest` tag points at, the nightly drift run.
 //!
-//! Exits 0 when every run ran, 1 when one could not, and anything else when the
-//! tier itself could not run.
+//! Exits 0 when every run passed, 1 on any other verdict, and anything else
+//! when the tier itself could not run.
 
 #[cfg(not(unix))]
 fn main() {
@@ -19,7 +20,7 @@ fn main() {
 #[cfg(unix)]
 fn main() {
     match run::main() {
-        Ok(all_ran) => std::process::exit(i32::from(!all_ran)),
+        Ok(all_passed) => std::process::exit(i32::from(!all_passed)),
         Err(e) => {
             eprintln!("hermetic: the tier could not run: {e}");
             std::process::exit(2);
@@ -36,6 +37,7 @@ mod run {
     use std::process::{Child, Command, Stdio};
     use std::time::{Duration, Instant};
 
+    use pixtuoid_core::harness::hermetic::verify::{self, Label, Verdict};
     use pixtuoid_core::harness::hermetic::{
         self, DUMMY_KEY, MANIFEST, Manifest, NOT_HERMETIC, PROFILES, Package, Profile, SCENE_LOG,
         Scenario, USER_PLACEHOLDER,
@@ -148,7 +150,7 @@ mod run {
         }
     }
 
-    /// Whether every selected run ran.
+    /// Whether every selected run passed.
     pub(crate) fn main() -> std::io::Result<bool> {
         let args = match parse(&std::env::args().skip(1).collect::<Vec<_>>()) {
             Ok(a) => a,
@@ -175,8 +177,9 @@ mod run {
             versions: args.versions,
         };
 
-        let mut all_ran = true;
+        let mut entries = Vec::new();
         for p in PROFILES {
+            let mut judged = Vec::new();
             for scenario in p.scenarios {
                 let name = scenario.shape.name();
                 if !args.selects(p.source, name) {
@@ -186,28 +189,83 @@ mod run {
                 std::fs::create_dir_all(&dir)?;
                 let key = format!("{}/{name}", p.source);
                 println!("== {key}");
-                match run_one(&ctx, p, scenario, &dir) {
-                    Ok(m) => println!(
-                        "   {}: exit {:?}, {} model requests ({} unmatched)",
-                        m.capture.version, m.capture.exit_code, m.requests, m.unmatched
-                    ),
-                    Err(e) => {
-                        all_ran = false;
-                        println!("   could not run: {e}");
-                    }
+                let (version, verdict) = match run_one(&ctx, p, scenario, &dir) {
+                    Ok(manifest) => (Some(manifest.capture.version), verify::verify(&dir)?),
+                    Err(e) => (None, Verdict::new(vec![(Label::Blocked, e.to_string())])),
+                };
+                if verdict.judged() {
+                    judged.push(dir);
                 }
+                entries.push(Entry::new(key, version, verdict));
+            }
+            if judges_source(&judged, p.scenarios.len()) {
+                let key = format!("{} (every scenario)", p.source);
+                println!("== {key}");
+                let verdict = verify::verify_source(p, &judged)?;
+                entries.push(Entry::new(key, None, verdict));
             }
         }
-        let absent: Vec<String> = NOT_HERMETIC
-            .iter()
-            .map(|(source, why)| format!("{source} ({why:?})"))
-            .collect();
-        println!(
-            "not covered: {}\nruns: {}",
-            absent.join(", "),
-            runs.display()
-        );
-        Ok(all_ran)
+        let report = report(args.versions, &entries);
+        std::fs::write(runs.join(REPORT), &report)?;
+        println!("\n{report}");
+        Ok(entries.iter().all(|e| e.verdict.label() == Label::Pass))
+    }
+
+    /// Whether `verify_source` takes a source's `judged` runs: only when they are
+    /// every one of its `scenarios`, since a subset, one selected or one Blocked,
+    /// fails on a field only another carries.
+    fn judges_source(judged: &[PathBuf], scenarios: usize) -> bool {
+        judged.len() == scenarios
+    }
+
+    /// The run's report, beside the runs; its H1 is the tracking issue's title.
+    const REPORT: &str = "report.md";
+
+    /// One section of the report: a scenario's run, or a source's runs together.
+    struct Entry {
+        key: String,
+        /// The CLI's `--version`, for a scenario's run.
+        version: Option<String>,
+        verdict: Verdict,
+    }
+
+    impl Entry {
+        fn new(key: String, version: Option<String>, verdict: Verdict) -> Self {
+            println!("   {:?}", verdict.label());
+            Self {
+                key,
+                version,
+                verdict,
+            }
+        }
+    }
+
+    fn report(versions: Versions, entries: &[Entry]) -> String {
+        let which = match versions {
+            Versions::Pinned => "verified",
+            Versions::Latest => "latest",
+        };
+        let labels = || entries.iter().map(|e| e.verdict.label());
+        let title = match labels().max() {
+            Some(worst) if labels().any(|l| l != Label::Blocked) => format!("{worst:?}"),
+            _ => "NOTHING RAN".to_owned(),
+        };
+        let mut out = format!("# hermetic, {which} CLIs: {title}\n");
+        for e in entries {
+            let version = e
+                .version
+                .as_deref()
+                .map_or(String::new(), |v| format!(" ({v})"));
+            out += &format!("\n## {}{version}: {:?}\n", e.key, e.verdict.label());
+            for (label, finding) in e.verdict.findings() {
+                out += &format!("- {label:?}: {finding}\n");
+            }
+        }
+        out += "\nNot covered:";
+        for (source, absence) in NOT_HERMETIC {
+            out += &format!(" {source} ({absence:?})");
+        }
+        out + "\n"
     }
 
     /// Where installs and runs live: `hermetic/` in the target dir this example
@@ -736,6 +794,42 @@ mod run {
         }
 
         #[test]
+        fn the_reports_title_is_the_worst_verdict_or_that_nothing_ran() {
+            let pass = Entry::new(
+                "codex/tool-run".into(),
+                Some("codex-cli 0.155.1".into()),
+                Verdict::new(vec![]),
+            );
+            let blocked = || {
+                Entry::new(
+                    "opencode/tool-run".into(),
+                    None,
+                    Verdict::new(vec![(Label::Blocked, "npm view failed".into())]),
+                )
+            };
+            let r = report(Versions::Latest, &[pass, blocked()]);
+            assert_eq!(r.lines().next(), Some("# hermetic, latest CLIs: Blocked"));
+            assert!(r.contains("## opencode/tool-run: Blocked\n- Blocked: npm view failed"));
+            assert!(r.contains("## codex/tool-run (codex-cli 0.155.1): Pass"));
+            let r = report(Versions::Pinned, &[blocked()]);
+            assert_eq!(
+                r.lines().next(),
+                Some("# hermetic, verified CLIs: NOTHING RAN")
+            );
+            // The script lost a CLI that then exited: it ran, and its drift is the title.
+            let lost = Entry::new(
+                "codex/tool-run".into(),
+                None,
+                Verdict::new(vec![
+                    (Label::Blocked, "exit 1".into()),
+                    (Label::Script, "1 unmatched".into()),
+                ]),
+            );
+            let r = report(Versions::Latest, &[lost, blocked()]);
+            assert_eq!(r.lines().next(), Some("# hermetic, latest CLIs: Script"));
+        }
+
+        #[test]
         fn config_outside_the_sandbox_is_found_through_a_symlinked_ancestor() {
             let d = tempfile::tempdir().expect("tempdir");
             let real = d.path().join("real/sub");
@@ -833,6 +927,13 @@ mod run {
                 .map(OsString::from)
                 .collect();
             assert_eq!(args[source..], positionals[..], "{args:?}");
+        }
+
+        #[test]
+        fn a_sources_runs_are_judged_together_only_when_every_scenario_was() {
+            let one = [PathBuf::from("/runs/x")];
+            assert!(judges_source(&one, 1));
+            assert!(!judges_source(&one, 2), "a sibling selected out or Blocked");
         }
 
         #[test]

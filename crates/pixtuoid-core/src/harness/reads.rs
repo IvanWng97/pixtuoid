@@ -132,11 +132,10 @@ fn sibling_of(file: &Path) -> PathBuf {
 /// Strip every RECORDED capture under `root` in place — local and unbilled — and
 /// record the count in its provenance. A composed capture carries no operator
 /// data by construction, and the README demo reads its bytes past the decoders.
-/// A pass that blanks nothing leaves a record that already carries a count
-/// alone, so re-running never erases history: `blanked` counts the original
-/// recording, not what a fresh capture would differ by today. `report` hears each
-/// capture as soon as its rewrite lands, so a later failure cannot hide one that
-/// already happened.
+/// `blanked` counts every subtree blanked from the original recording: a pass
+/// adds to the record's count, and one that blanks nothing leaves it alone.
+/// `report` hears each capture as soon as its rewrite lands, so a later failure
+/// cannot hide one that already happened.
 ///
 /// # Errors
 ///
@@ -145,7 +144,7 @@ pub fn strip_corpus(root: &Path, mut report: impl FnMut(&Capture, &Strip)) -> st
     for capture in captures(root) {
         let prov = capture.dir.join(crate::harness::PROVENANCE);
         let mut record: Value = serde_json::from_str(&std::fs::read_to_string(&prov)?)?;
-        if record["origin"] != "recorded" || record["deidentified"]["method"] == "none" {
+        if !strips(&record) {
             continue;
         }
         let files = capture.jsonl_files();
@@ -156,9 +155,14 @@ pub fn strip_corpus(root: &Path, mut report: impl FnMut(&Capture, &Strip)) -> st
         if let Some(obj) = record.as_object_mut()
             && (strip.blanked > 0 || !obj.contains_key("deidentified"))
         {
+            let earlier = obj
+                .get("deidentified")
+                .and_then(|d| d["blanked"].as_u64())
+                .and_then(|n| usize::try_from(n).ok())
+                .unwrap_or(0);
             obj.insert(
                 "deidentified".into(),
-                Deidentified::Stripped(strip.blanked).record(),
+                Deidentified::Stripped(earlier + strip.blanked).record(),
             );
             std::fs::write(
                 &prov,
@@ -240,9 +244,39 @@ fn events_of(source: &str, drive: &Drive, lines: &[Value]) -> Decoded {
     )
 }
 
-/// A hook envelope's top-level `_` keys are the shim's stamps, kept by namespace:
-/// `_shim_ts_ms` is read by no decoder, only by `tests/sources/captures.rs`,
-/// which dates a capture by it.
+/// Whether the strip applies to a capture with this provenance: a recording
+/// not declared exempt, whose committed bytes then hold only what a decoder
+/// reads.
+pub(crate) fn strips(record: &Value) -> bool {
+    record["origin"] == "recorded" && record["deidentified"]["method"] != "none"
+}
+
+/// What blanking writes over `node`, its type's empty value; `None` when that
+/// would leave it as it is (a null, or a value already empty).
+pub(crate) fn blank_of(node: &Value) -> Option<Value> {
+    let blank = match node {
+        Value::Null => return None,
+        Value::Bool(_) => Value::Bool(false),
+        Value::Number(_) => Value::from(0),
+        Value::String(_) => Value::String(String::new()),
+        Value::Array(_) => Value::Array(Vec::new()),
+        Value::Object(_) => Value::Object(serde_json::Map::new()),
+    };
+    (blank != *node).then_some(blank)
+}
+
+/// The JSON pointer to `key` under `at`, escaped (RFC 6901).
+pub(crate) fn child_pointer(at: &str, key: &str) -> String {
+    format!("{at}/{}", key.replace('~', "~0").replace('/', "~1"))
+}
+
+/// Whether `key` under `at` is a shim stamp, a hook envelope's top-level `_`
+/// key, which the strip keeps: `_shim_ts_ms` is read by no decoder, only by
+/// `tests/sources/captures.rs`, which dates a capture by it.
+pub(crate) fn is_shim_stamp(at: &str, key: &str) -> bool {
+    at.is_empty() && key.starts_with('_')
+}
+
 fn probe(
     source: &str,
     drive: &Drive,
@@ -255,17 +289,9 @@ fn probe(
     let Some(node) = lines[i].pointer(at) else {
         return 0;
     };
-    let neutral = match node {
-        Value::Null => return 0,
-        Value::Bool(_) => Value::Bool(false),
-        Value::Number(_) => Value::from(0),
-        Value::String(_) => Value::String(String::new()),
-        Value::Array(_) => Value::Array(Vec::new()),
-        Value::Object(_) => Value::Object(serde_json::Map::new()),
-    };
-    if *node == neutral {
+    let Some(neutral) = blank_of(node) else {
         return 0;
-    }
+    };
     let Some(slot) = lines[i].pointer_mut(at) else {
         return 0;
     };
@@ -277,8 +303,8 @@ fn probe(
         Value::Array(a) => (0..a.len()).map(|k| format!("{at}/{k}")).collect(),
         Value::Object(m) => m
             .keys()
-            .filter(|k| !(stamped && at.is_empty() && k.starts_with('_')))
-            .map(|k| format!("{at}/{}", k.replace('~', "~0").replace('/', "~1")))
+            .filter(|k| !(stamped && is_shim_stamp(at, k)))
+            .map(|k| child_pointer(at, k))
             .collect(),
         _ => Vec::new(),
     };
@@ -296,6 +322,31 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    #[test]
+    fn the_strip_applies_to_a_recording_not_declared_exempt() {
+        let record = |v: Value| strips(&v);
+        assert!(record(serde_json::json!({"origin": "recorded",
+            "deidentified": {"method": "decoder-allowlist"}})));
+        assert!(
+            record(serde_json::json!({"origin": "recorded"})),
+            "not yet stripped"
+        );
+        assert!(!record(serde_json::json!({"origin": "recorded",
+            "deidentified": {"method": "none"}})));
+        assert!(!record(serde_json::json!({"origin": "composed"})));
+    }
+
+    #[test]
+    fn a_child_pointer_escapes_tilde_before_slash() {
+        assert_eq!(child_pointer("/a", "b"), "/a/b");
+        assert_eq!(child_pointer("", "x~y/z"), "/x~0y~1z");
+        assert_eq!(
+            child_pointer("", "~1"),
+            "/~01",
+            "a literal ~1 stays a tilde and a 1"
+        );
+    }
 
     fn sources_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
@@ -526,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn every_committed_scenario_decodes_the_same_once_stripped() {
+    fn stripping_a_committed_scenario_keeps_its_events_and_a_recordings_bytes() {
         let root = sources_root();
         let mut walked = BTreeSet::new();
         for capture in captures(&root) {
@@ -566,8 +617,17 @@ mod tests {
                 );
             }
             let before = scenario_events(source, &files);
-            strip_unread(source, &files).expect("strip");
+            let strip = strip_unread(source, &files).expect("strip");
             assert_eq!(scenario_events(source, &files), before, "{label}");
+            let recorded = std::fs::read_to_string(scenario.join(crate::harness::PROVENANCE))
+                .ok()
+                .and_then(|record| serde_json::from_str(&record).ok())
+                .is_some_and(|record| strips(&record));
+            assert!(
+                !recorded || strip.blanked == 0,
+                "{label}: {} subtrees no decoder reads any more; `just restrip-fixtures`",
+                strip.blanked
+            );
             walked.insert(label);
         }
         for sentinel in [
@@ -672,19 +732,25 @@ mod tests {
             "example-skill-1",
         );
         let wire = snapshot(&scenario);
+        let record = || -> serde_json::Value {
+            serde_json::from_str(
+                &std::fs::read_to_string(scenario.join("provenance.json")).expect("read"),
+            )
+            .expect("json")
+        };
+        let recorded = record()["deidentified"]["blanked"]
+            .as_u64()
+            .expect("a count");
 
         strip_corpus(d.path(), |_, _| {}).expect("strip corpus");
         let once = snapshot(&scenario);
         assert_ne!(once, wire, "the planted key is unread");
-        let prov: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(scenario.join("provenance.json")).expect("read"),
-        )
-        .expect("json");
+        let prov = record();
         assert_eq!(prov["deidentified"]["method"], "decoder-allowlist");
-        assert!(
-            prov["deidentified"]["blanked"]
-                .as_u64()
-                .is_some_and(|n| n > 0)
+        assert_eq!(
+            prov["deidentified"]["blanked"].as_u64(),
+            Some(recorded + 1),
+            "the planted key adds to the recording's count"
         );
         assert_eq!(prov["origin"], "recorded", "the rest of the record is kept");
 

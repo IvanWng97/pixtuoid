@@ -151,3 +151,12 @@ updates:
         update-types: ["version-update:semver-major"]
     cooldown:
       default-days: 7
+
+  # The hermetic tier's scripted model; the merge queue's full tier runs every
+  # profile against a bump before it lands.
+  - package-ecosystem: npm
+    directory: /crates/pixtuoid-core/tests/sources/hermetic/aimock
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
