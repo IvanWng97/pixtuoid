@@ -245,7 +245,7 @@ const HOOK: &str = "hook:";
 /// read but recorded blank is not seen.
 /// A capture the strip skips proves nothing about reads.
 pub(crate) fn committed_reads(p: &Profile) -> std::io::Result<Fields> {
-    let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources");
+    let corpus = crate::harness::sources_root();
     let mut reads = Fields::default();
     for capture in captures(&corpus) {
         if capture.source != p.source {
@@ -503,7 +503,7 @@ fn subagent(events: &[AgentEvent], reached: &[Reach], findings: &mut Vec<(Label,
             agent_id,
             parent_id: Some(parent),
             ..
-        } if parent != agent_id && ids.contains(parent) => Some(*agent_id),
+        } if ids.contains(parent) => Some(*agent_id),
         _ => None,
     });
     match child {
@@ -586,8 +586,8 @@ mod tests {
     /// A run directory built from a committed recording of `source`'s tool run,
     /// judged as if the tier had just produced it.
     fn run_from(source: &str, scenario_dir: &str, scene: &str) -> tempfile::TempDir {
-        let src = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/sources/fixtures")
+        let src = crate::harness::sources_root()
+            .join("fixtures")
             .join(source)
             .join(scenario_dir);
         run_of(&src, source, Shape::ToolRun, scene)
@@ -600,9 +600,7 @@ mod tests {
             .and_then(|p| p.scenarios.iter().find(|s| s.shape == shape))
             .and_then(|s| s.fixture)
             .expect("a scenario that records");
-        let src = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/sources")
-            .join(fixture);
+        let src = crate::harness::sources_root().join(fixture);
         run_of(&src, source, shape, scene)
     }
 
@@ -637,16 +635,24 @@ mod tests {
             .expect("write");
     }
 
-    /// Rewrite every hook line; `None` drops it.
-    fn edit_hooks(dir: &Path, mut f: impl FnMut(Value) -> Option<Value>) {
+    /// Rewrite the hook lines through `f`, which may reorder them.
+    fn reorder_hooks(dir: &Path, f: impl FnOnce(&mut Vec<Value>)) {
         let path = dir.join(HOOK_PAYLOADS);
-        let text = std::fs::read_to_string(&path).expect("read");
-        let out: Vec<String> = text
+        let mut lines: Vec<Value> = std::fs::read_to_string(&path)
+            .expect("read")
             .lines()
-            .filter_map(|l| f(serde_json::from_str(l).expect("json")))
-            .map(|v| v.to_string())
+            .map(|l| serde_json::from_str(l).expect("json"))
             .collect();
+        f(&mut lines);
+        let out: Vec<String> = lines.iter().map(Value::to_string).collect();
         std::fs::write(&path, out.join("\n") + "\n").expect("write");
+    }
+
+    /// Rewrite every hook line; `None` drops it.
+    fn edit_hooks(dir: &Path, f: impl FnMut(Value) -> Option<Value>) {
+        reorder_hooks(dir, |lines| {
+            *lines = std::mem::take(lines).into_iter().filter_map(f).collect();
+        });
     }
 
     fn blank_transcripts(dir: &Path) {
@@ -715,19 +721,6 @@ mod tests {
             "{:?}",
             v.findings()
         );
-    }
-
-    /// Rewrite the hook lines through `f`, which may reorder them.
-    fn reorder_hooks(dir: &Path, f: impl FnOnce(&mut Vec<Value>)) {
-        let path = dir.join(HOOK_PAYLOADS);
-        let mut lines: Vec<Value> = std::fs::read_to_string(&path)
-            .expect("read")
-            .lines()
-            .map(|l| serde_json::from_str(l).expect("json"))
-            .collect();
-        f(&mut lines);
-        let out: Vec<String> = lines.iter().map(Value::to_string).collect();
-        std::fs::write(&path, out.join("\n") + "\n").expect("write");
     }
 
     #[test]

@@ -878,10 +878,25 @@ mod recorder {
     mod tests {
         use super::*;
 
-        /// A hermetic run of dsh's tool-run scenario, its raw capture the
-        /// committed recording with a key no decoder reads planted on line 1,
-        /// and a root whose fixture holds `old` and the `record` given.
-        fn promotable(record: serde_json::Value) -> (tempfile::TempDir, PathBuf, PathBuf) {
+        /// An operator nobody's bytes carry, so no test reads the machine's.
+        const OPERATOR: &str = "Ada Lovelace";
+
+        /// A hermetic run of dsh's tool-run scenario and a corpus root to promote
+        /// it into, kept alive by the temp dir.
+        struct Promotable {
+            _dir: tempfile::TempDir,
+            run: PathBuf,
+            root: PathBuf,
+            dest: PathBuf,
+        }
+
+        /// The run's raw capture is the committed recording with a key no
+        /// decoder reads planted on line 1, then `edit`ed; the root's fixture
+        /// holds `old.jsonl` and the `record` given.
+        fn promotable(
+            record: serde_json::Value,
+            edit: impl FnOnce(&mut [serde_json::Value]),
+        ) -> Promotable {
             let d = tempfile::tempdir().expect("tempdir");
             let (run, root) = (d.path().join("run"), d.path().join("sources"));
             let fixture = hermetic::profile("dsh")
@@ -896,6 +911,7 @@ mod recorder {
                 .map(|l| serde_json::from_str(l).expect("json"))
                 .collect();
             lines[0]["planted"] = "unread".into();
+            edit(&mut lines);
             std::fs::create_dir_all(&run).expect("mkdir");
             let raw: Vec<String> = lines.iter().map(ToString::to_string).collect();
             std::fs::write(run.join(HOOK_PAYLOADS), raw.join("\n") + "\n").expect("raw");
@@ -921,12 +937,16 @@ mod recorder {
             std::fs::create_dir_all(&dest).expect("mkdir");
             std::fs::write(dest.join("old.jsonl"), "{}\n").expect("old");
             std::fs::write(dest.join(PROVENANCE), record.to_string()).expect("record");
-            (d, run, dest)
+            Promotable {
+                _dir: d,
+                run,
+                root,
+                dest,
+            }
         }
 
-        /// An operator who is nobody in these bytes, so no test reads the machine's.
         fn needles() -> BTreeSet<String> {
-            BTreeSet::from(["Ada Lovelace".to_string()])
+            BTreeSet::from([OPERATOR.to_string()])
         }
 
         fn written(dest: &Path) -> (String, serde_json::Value) {
@@ -937,14 +957,16 @@ mod recorder {
 
         #[test]
         fn a_promoted_run_replaces_its_fixture_stripped_and_says_what_played_the_model() {
-            let (_d, run, dest) =
-                promotable(serde_json::json!({"origin": "recorded", "note": "the old record"}));
-            promote(&run, dest.ancestors().nth(3).expect("the root"), &needles()).expect("promote");
+            let p = promotable(
+                serde_json::json!({"origin": "recorded", "note": "the old record"}),
+                |_| {},
+            );
+            promote(&p.run, &p.root, &needles()).expect("promote");
             assert!(
-                !dest.join("old.jsonl").exists(),
+                !p.dest.join("old.jsonl").exists(),
                 "the old bytes leave whole"
             );
-            let (bytes, record) = written(&dest);
+            let (bytes, record) = written(&p.dest);
             assert!(!bytes.contains("unread"), "the planted key is stripped");
             assert_eq!(record["deidentified"]["method"], "decoder-allowlist");
             assert!(
@@ -963,17 +985,11 @@ mod recorder {
 
         #[test]
         fn a_promoted_run_carrying_the_operator_is_refused() {
-            let (_d, run, dest) = promotable(serde_json::json!({"origin": "recorded"}));
-            let raw = std::fs::read_to_string(run.join(HOOK_PAYLOADS)).expect("raw");
-            let planted = raw.replacen(
-                "/private/tmp/pixtuoid-capture/proj",
-                "/Users/Ada Lovelace/proj",
-                1,
-            );
-            std::fs::write(run.join(HOOK_PAYLOADS), planted).expect("plant");
-            let root = dest.ancestors().nth(3).expect("the root");
+            let p = promotable(serde_json::json!({"origin": "recorded"}), |lines| {
+                lines[0]["cwd"] = format!("/Users/{OPERATOR}/proj").into();
+            });
             assert!(
-                promote(&run, root, &needles()).is_err(),
+                promote(&p.run, &p.root, &needles()).is_err(),
                 "the operator's name is refused"
             );
         }
@@ -981,12 +997,15 @@ mod recorder {
         #[test]
         fn a_promoted_run_keeps_its_fixtures_exemption() {
             let why = "a test reads the raw bytes";
-            let (_d, run, dest) = promotable(serde_json::json!({
-                "origin": "recorded",
-                "deidentified": {"method": "none", "why": why},
-            }));
-            promote(&run, dest.ancestors().nth(3).expect("the root"), &needles()).expect("promote");
-            let (bytes, record) = written(&dest);
+            let p = promotable(
+                serde_json::json!({
+                    "origin": "recorded",
+                    "deidentified": {"method": "none", "why": why},
+                }),
+                |_| {},
+            );
+            promote(&p.run, &p.root, &needles()).expect("promote");
+            let (bytes, record) = written(&p.dest);
             assert!(
                 bytes.contains("unread"),
                 "an exempt capture is not stripped"

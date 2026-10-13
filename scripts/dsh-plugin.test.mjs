@@ -16,6 +16,9 @@ const PLUGIN_SOURCE = join(REPO_ROOT, "crates", "pixtuoid", "src", "install", "d
 const HOOK_PLACEHOLDER = '"{{HOOK_PATH_JSON}}"';
 
 const POSIX = process.platform !== "win32";
+// How long a poll waits for the shims, and how often it looks.
+const POLL_DEADLINE_MS = 10_000;
+const POLL_TICK_MS = 25;
 
 async function renderPlugin(t) {
   const root = await mkdtemp(join(tmpdir(), "pixtuoid-dsh-plugin-"));
@@ -40,7 +43,11 @@ async function renderPlugin(t) {
   return { module, outFile, traceFile };
 }
 
-// The cordis surface the plugin touches: `on`, `effect`, and the injected agents.
+const header = { id: "s1", cwd: "/w" };
+const session = { header };
+
+// The cordis surface the plugin touches: `on`, `effect`, and the injected agents;
+// `event` emits one of `session`'s events through the channel that carries them.
 function apply(module) {
   const handlers = new Map();
   module.apply({
@@ -50,49 +57,37 @@ function apply(module) {
     effect() {},
     agents: { list: () => [] },
   });
-  return handlers;
+  const event = (type, data) => handlers.get("session/event")(session, { type, data });
+  return { handlers, event };
 }
 
-// The first `n` lines of `file` once it holds them: the shims write after the
+// `file`'s non-empty lines once `done` holds of them: the shims write after the
 // listeners return.
-async function lines(file, n) {
-  const deadline = Date.now() + 10_000;
+async function poll(file, done) {
+  const deadline = Date.now() + POLL_DEADLINE_MS;
   for (;;) {
     const text = await readFile(file, "utf8").catch(() => "");
     const got = text.split("\n").filter((l) => l.trim().length > 0);
-    if (got.length >= n) return got.slice(0, n);
+    if (done(got)) return got;
     if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${n} line(s) of ${file}; got ${got.length}`);
+      throw new Error(`timed out polling ${file}; got ${got.length} line(s)`);
     }
-    await new Promise((r) => setTimeout(r, 25));
+    await new Promise((r) => setTimeout(r, POLL_TICK_MS));
   }
 }
+
+const lines = async (file, n) => (await poll(file, (got) => got.length >= n)).slice(0, n);
 
 // Every payload once `agent/disposed`'s session_end, sent last, has landed: the
 // queue is first in, first out, so nothing sent before it can still be missing.
-async function payloadsThroughEnd(file) {
-  const deadline = Date.now() + 10_000;
-  for (;;) {
-    const text = await readFile(file, "utf8").catch(() => "");
-    const got = text
-      .split("\n")
-      .filter((l) => l.trim().length > 0)
-      .map((l) => JSON.parse(l));
-    if (got.some((p) => p.type === "session_end")) return got;
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for session_end in ${file}; got ${got.length} line(s)`);
-    }
-    await new Promise((r) => setTimeout(r, 25));
-  }
-}
+const payloadsThroughEnd = async (file) =>
+  (await poll(file, (got) => got.some((l) => JSON.parse(l).type === "session_end"))).map((l) =>
+    JSON.parse(l),
+  );
 
-const header = { id: "s1", cwd: "/w" };
-const session = { header };
-
-test("listeners return nothing, and events reach the shim in order, one at a time", { skip: !POSIX }, async (t) => {
+test("agent/created returns nothing, and events reach the shim in order, one at a time", { skip: !POSIX }, async (t) => {
   const { module, outFile, traceFile } = await renderPlugin(t);
-  const handlers = apply(module);
-  const event = (type, data) => handlers.get("session/event")(session, { type, data });
+  const { handlers, event } = apply(module);
 
   assert.equal(
     handlers.get("agent/created")({ agent: { session } }),
@@ -118,8 +113,7 @@ test("listeners return nothing, and events reach the shim in order, one at a tim
 
 test("forwards only the allowlist, never content", { skip: !POSIX }, async (t) => {
   const { module, outFile } = await renderPlugin(t);
-  const handlers = apply(module);
-  const event = (type, data) => handlers.get("session/event")(session, { type, data });
+  const { handlers, event } = apply(module);
 
   handlers.get("agent/created")({
     agent: { session: { header: { ...header, title: "SECRET_TITLE", prompt: "SECRET_PROMPT" } } },

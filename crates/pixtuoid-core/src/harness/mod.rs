@@ -41,6 +41,11 @@ pub use captures::{
     jsonl_files_under, recorder_flag, transcripts_under,
 };
 
+/// The committed corpus: every recorded capture, fixture and hermetic script.
+pub(crate) fn sources_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
+}
+
 /// A lifecycle CLASS a driven wire pushed the slot through — asserted as
 /// reached-at-some-point, never as the terminal state.
 ///
@@ -471,8 +476,8 @@ mod tests {
 
     #[test]
     fn a_breadcrumb_a_decode_logs_is_part_of_what_it_decoded() {
-        let file = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/sources/delegation/fixtures/dsh")
+        let file = sources_root()
+            .join("delegation/fixtures/dsh")
             .join(HOOK_PAYLOADS);
         let text = std::fs::read_to_string(&file).expect("the recorded delegation");
         let call = text

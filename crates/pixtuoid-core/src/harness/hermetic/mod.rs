@@ -4,7 +4,7 @@
 //! the home variable (`home_env`) and the pinned version (`verified_version`);
 //! a profile holds only what it doesn't.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -467,7 +467,7 @@ pub fn profile(source: &str) -> Option<&'static Profile> {
 /// Where each profile's scenario scripts live, as `<source>/<shape>.json`, and
 /// the scripted model's npm lockfile, under `aimock/`.
 pub fn scripts_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources/hermetic")
+    crate::harness::sources_root().join("hermetic")
 }
 
 impl Scenario {
@@ -482,6 +482,7 @@ impl Scenario {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::path::Path;
 
     use super::*;
 
@@ -590,8 +591,7 @@ mod tests {
                     p.not_yet_fields
                 );
                 assert!(fixtures.insert(fixture), "{fixture} recorded twice");
-                let prov = Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/sources")
+                let prov = crate::harness::sources_root()
                     .join(fixture)
                     .join(crate::harness::PROVENANCE);
                 assert!(prov.is_file(), "{}: no {}", p.source, prov.display());
