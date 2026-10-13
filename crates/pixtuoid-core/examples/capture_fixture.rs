@@ -149,7 +149,7 @@ mod recorder {
             }
         };
         if let Some(run) = options.promote.as_deref() {
-            return promote(run);
+            return promote(run, &sources_root());
         }
         if args.len() < 3 {
             eprintln!(
@@ -285,9 +285,10 @@ mod recorder {
     }
 
     /// `run`'s raw capture, a hermetic run the tier judged, written into the
-    /// fixture its scenario names: stripped, recorded and scanned like a live
-    /// capture. It replaces the fixture's bytes whole; the old ones are git's.
-    fn promote(run: &Path) -> std::io::Result<()> {
+    /// fixture its scenario names under `root`: stripped unless its record is
+    /// exempt, recorded and scanned like a live capture. It replaces the
+    /// fixture's bytes whole; the old ones are git's.
+    fn promote(run: &Path, root: &Path) -> std::io::Result<()> {
         let manifest: Manifest =
             serde_json::from_str(&std::fs::read_to_string(run.join(MANIFEST))?)?;
         let named = format!("{}/{}", manifest.source, manifest.scenario);
@@ -301,7 +302,8 @@ mod recorder {
         let fixture = scenario
             .fixture
             .ok_or_else(|| std::io::Error::other(format!("{named}: records no fixture")))?;
-        let dest = sources_root().join(fixture);
+        let dest = root.join(fixture);
+        let exempt = reads::exemption(&dest.join(PROVENANCE));
         for old in jsonl_files_under(&dest)
             .into_iter()
             .chain([dest.join(PROVENANCE)])
@@ -320,8 +322,14 @@ mod recorder {
             std::fs::copy(&raw, &to)?;
             wrote.push(to);
         }
-        let strip = reads::strip_unread(&manifest.source, &wrote)?;
-        report_not_json(&strip);
+        let deidentified = match exempt {
+            Some(why) => Deidentified::Exempt(why),
+            None => {
+                let strip = reads::strip_unread(&manifest.source, &wrote)?;
+                report_not_json(&strip);
+                Deidentified::Stripped(strip.blanked)
+            }
+        };
         let script = scenario.script(&manifest.source);
         let script = script
             .strip_prefix(env!("CARGO_MANIFEST_DIR"))
@@ -333,18 +341,14 @@ mod recorder {
             &dest,
             (&manifest.capture.cli, &manifest.capture.version),
             &command,
-            &Deidentified::Stripped(strip.blanked),
+            &deidentified,
             &[
                 ("aimock", Some(manifest.aimock.clone())),
                 ("script", Some(script)),
             ],
         )?;
         refuse_on_pii(&wrote)?;
-        println!(
-            "recorded {named} into {} (blanked {} subtrees)",
-            dest.display(),
-            strip.blanked
-        );
+        println!("recorded {named} into {}", dest.display());
         Ok(())
     }
 
@@ -871,6 +875,101 @@ mod recorder {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        /// A hermetic run of dsh's tool-run scenario, its raw capture the
+        /// committed recording with a key no decoder reads planted on line 1,
+        /// and a root whose fixture holds `old` and the `record` given.
+        fn promotable(record: serde_json::Value) -> (tempfile::TempDir, PathBuf, PathBuf) {
+            let d = tempfile::tempdir().expect("tempdir");
+            let (run, root) = (d.path().join("run"), d.path().join("sources"));
+            let fixture = hermetic::profile("dsh")
+                .and_then(|p| p.scenarios.iter().find(|s| s.shape.name() == "tool-run"))
+                .and_then(|s| s.fixture)
+                .expect("dsh's tool-run records");
+            let committed =
+                std::fs::read_to_string(sources_root().join(fixture).join(HOOK_PAYLOADS))
+                    .expect("the committed recording");
+            let mut lines: Vec<serde_json::Value> = committed
+                .lines()
+                .map(|l| serde_json::from_str(l).expect("json"))
+                .collect();
+            lines[0]["planted"] = "unread".into();
+            std::fs::create_dir_all(&run).expect("mkdir");
+            let raw: Vec<String> = lines.iter().map(ToString::to_string).collect();
+            std::fs::write(run.join(HOOK_PAYLOADS), raw.join("\n") + "\n").expect("raw");
+            let manifest = Manifest {
+                source: "dsh".into(),
+                scenario: "tool-run".into(),
+                capture: CaptureRecord {
+                    workspace: PathBuf::from(WORKSPACE),
+                    cli: "dsh".into(),
+                    version: "0.2.0-rc.2".into(),
+                    exit_code: Some(0),
+                },
+                aimock: "1.43.0".into(),
+                requests: 3,
+                unmatched: 0,
+            };
+            std::fs::write(
+                run.join(MANIFEST),
+                serde_json::to_string(&manifest).expect("json"),
+            )
+            .expect("manifest");
+            let dest = root.join(fixture);
+            std::fs::create_dir_all(&dest).expect("mkdir");
+            std::fs::write(dest.join("old.jsonl"), "{}\n").expect("old");
+            std::fs::write(dest.join(PROVENANCE), record.to_string()).expect("record");
+            (d, run, dest)
+        }
+
+        fn written(dest: &Path) -> (String, serde_json::Value) {
+            let bytes = std::fs::read_to_string(dest.join(HOOK_PAYLOADS)).expect("bytes");
+            let record = std::fs::read_to_string(dest.join(PROVENANCE)).expect("record");
+            (bytes, serde_json::from_str(&record).expect("json"))
+        }
+
+        #[test]
+        fn a_promoted_run_replaces_its_fixture_stripped_and_says_what_played_the_model() {
+            let (_d, run, dest) =
+                promotable(serde_json::json!({"origin": "recorded", "note": "the old record"}));
+            promote(&run, dest.ancestors().nth(3).expect("the root")).expect("promote");
+            assert!(
+                !dest.join("old.jsonl").exists(),
+                "the old bytes leave whole"
+            );
+            let (bytes, record) = written(&dest);
+            assert!(!bytes.contains("unread"), "the planted key is stripped");
+            assert_eq!(record["deidentified"]["method"], "decoder-allowlist");
+            assert!(
+                record["deidentified"]["blanked"]
+                    .as_u64()
+                    .is_some_and(|n| n > 0)
+            );
+            assert_eq!(record["aimock"], "1.43.0");
+            assert_eq!(record["script"], "tests/sources/hermetic/dsh/tool-run.json");
+            assert_eq!(record["version"], "0.2.0-rc.2");
+            assert!(
+                record.get("note").is_none(),
+                "the record is the run's, not the old one"
+            );
+        }
+
+        #[test]
+        fn a_promoted_run_keeps_its_fixtures_exemption() {
+            let why = "a test reads the raw bytes";
+            let (_d, run, dest) = promotable(serde_json::json!({
+                "origin": "recorded",
+                "deidentified": {"method": "none", "why": why},
+            }));
+            promote(&run, dest.ancestors().nth(3).expect("the root")).expect("promote");
+            let (bytes, record) = written(&dest);
+            assert!(
+                bytes.contains("unread"),
+                "an exempt capture is not stripped"
+            );
+            assert_eq!(record["deidentified"]["method"], "none");
+            assert_eq!(record["deidentified"]["why"], why);
+        }
 
         #[test]
         fn the_workspace_becomes_its_own_repository_or_fails() {

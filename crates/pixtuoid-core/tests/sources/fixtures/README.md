@@ -3,8 +3,8 @@
 Golden fixtures for the per-CLI decode + hook↔JSONL **coalescing** contract,
 driven by `tests/sources/conformance.rs`.
 
-**Record these; do not compose them.** `just hermetic --record <source>` records a
-profiled CLI; `just capture-fixture <source> <scenario> <cmd...>` records any other.
+**Record these; do not compose them.** `just hermetic --record <source>` records a CLI
+whose scenarios name a fixture; `just capture-fixture <source> <scenario> <cmd...>` the rest.
 
 ```text
 just capture-fixture kimi tool-run kimi -p '{prompt}'
@@ -81,13 +81,13 @@ there (omp's bridge rounds), else to the conformance root — where a new
 directory would be auto-scanned by `conformance.rs` with no committed bytes
 beside it for the `.new` no-clobber rule to protect.
 
-**Re-recording an existing scenario needs a hand.** The recorder never
-overwrites committed bytes — it writes `<name>.new` beside them, so a re-record
-can be diffed rather than trusted. Nothing READS a `.new`: `conformance.rs` walks
-`*.jsonl` and opens `provenance.json` by exact name, and `fixture-age.py`
-rglobs the same. So a re-record that you do not promote costs a billed turn and
-changes nothing while the suite stays green. Diff the pair, then `mv` the `.new`
-over the old one or delete it.
+**Re-recording an existing scenario needs a hand** unless the tier records it:
+`just hermetic --record` replaces a fixture's bytes whole, and git holds the diff.
+`just capture-fixture` never overwrites committed bytes — it writes `<name>.new`
+beside them, so a re-record can be diffed rather than trusted. Nothing READS a
+`.new` (`conformance.rs` and `fixture-age.py` read only `*.jsonl` and
+`provenance.json`), so one you do not promote costs a billed turn and changes
+nothing. Diff the pair, then `mv` the `.new` over the old one or delete it.
 
 **A capture can only be recorded on Unix.** The recorder listens on a
 `UnixListener`; the Windows shim speaks a named pipe, so there is no Windows arm

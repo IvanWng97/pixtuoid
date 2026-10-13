@@ -473,16 +473,25 @@ fn permission(events: &[AgentEvent], reached: &[Reach], findings: &mut Vec<(Labe
     if !reached.contains(&Reach::Waiting) {
         findings.push((Label::Fail, "the slot never went Waiting".into()));
     }
-    let waited = events
+    // In any order: a hook payload's arrival order is its shim process's, not
+    // the CLI's, so the wait, the decision and the result can land in any order.
+    let waited: BTreeSet<&String> = events
         .iter()
-        .position(|e| matches!(e, AgentEvent::Waiting { .. }));
-    let ended = events
-        .iter()
-        .rposition(|e| matches!(e, AgentEvent::ActivityEnd { .. }));
-    if !matches!((waited, ended), (Some(w), Some(e)) if w < e) {
+        .filter_map(|e| match e {
+            AgentEvent::Waiting {
+                tool_use_id: Some(t),
+                ..
+            } => Some(t),
+            _ => None,
+        })
+        .collect();
+    let ended = events.iter().any(
+        |e| matches!(e, AgentEvent::ActivityEnd { tool_use_id: Some(t), .. } if waited.contains(t)),
+    );
+    if !ended {
         findings.push((
             Label::Fail,
-            "the refused tool never ended after the wait".into(),
+            "the tool the slot waited on never ended".into(),
         ));
     }
 }
@@ -695,15 +704,46 @@ mod tests {
     }
 
     #[test]
-    fn a_wait_whose_tool_never_ends_after_it_fails() {
+    fn a_wait_whose_tool_never_ends_fails() {
         let d = recorded("dsh", Shape::Permission, DS_WAIT_SCENE);
-        edit_hooks(d.path(), |v| (v["type"] != "tool_result").then_some(v));
+        edit_hooks(d.path(), |v| {
+            (v["type"] != "tool_result" && v["type"] != "approval_decided").then_some(v)
+        });
         let v = verify(d.path()).expect("verify");
         assert!(
-            has(&v, Label::Fail, "never ended after the wait"),
+            has(&v, Label::Fail, "the slot waited on never ended"),
             "{:?}",
             v.findings()
         );
+    }
+
+    #[test]
+    fn a_permission_run_passes_in_either_arrival_order() {
+        for order in [
+            ["approval_asked", "approval_decided"],
+            ["approval_decided", "approval_asked"],
+        ] {
+            let d = recorded("dsh", Shape::Permission, DS_WAIT_SCENE);
+            let text = std::fs::read_to_string(d.path().join(HOOK_PAYLOADS)).expect("read");
+            let mut lines: Vec<Value> = text
+                .lines()
+                .map(|l| serde_json::from_str(l).expect("json"))
+                .collect();
+            let at = |lines: &[Value], ty: &str| {
+                lines
+                    .iter()
+                    .position(|v| v["type"] == ty)
+                    .expect("recorded")
+            };
+            let (first, second) = (at(&lines, order[0]), at(&lines, order[1]));
+            if first > second {
+                lines.swap(first, second);
+            }
+            let out: Vec<String> = lines.iter().map(Value::to_string).collect();
+            std::fs::write(d.path().join(HOOK_PAYLOADS), out.join("\n") + "\n").expect("write");
+            let v = verify(d.path()).expect("verify");
+            assert_eq!(v.label(), Label::Pass, "{order:?}: {:?}", v.findings());
+        }
     }
 
     #[test]

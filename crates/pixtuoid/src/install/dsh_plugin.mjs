@@ -19,15 +19,30 @@ export const inject = ["agents"]
 // channel but `agent/created` (below) is an emit, so this plugin cannot stall a
 // tool call, a prompt, or shutdown.
 export function apply(ctx) {
+  // One shim at a time, in emit order: shims spawned together race to the
+  // socket, and a decision that lands before its ask strands the slot waiting.
+  // The shim's own write watchdog bounds each turn of the queue.
+  let queue = Promise.resolve()
   const send = (payload) => {
     try {
       payload._pid = typeof process !== "undefined" ? process.pid : undefined
-      const proc = spawn(HOOK_PATH, ["--source", "dsh"], {
-        stdio: ["pipe", "ignore", "ignore"],
-      })
-      proc.on("error", () => {})
-      proc.stdin.on("error", () => {})
-      proc.stdin.end(JSON.stringify(payload) + "\n")
+      const line = JSON.stringify(payload) + "\n"
+      queue = queue.then(
+        () =>
+          new Promise((settled) => {
+            try {
+              const proc = spawn(HOOK_PATH, ["--source", "dsh"], {
+                stdio: ["pipe", "ignore", "ignore"],
+              })
+              proc.on("error", settled)
+              proc.on("close", settled)
+              proc.stdin.on("error", () => {})
+              proc.stdin.end(line)
+            } catch {
+              settled()
+            }
+          }),
+      )
     } catch {
       // A broken shim must never surface into dsh.
     }
