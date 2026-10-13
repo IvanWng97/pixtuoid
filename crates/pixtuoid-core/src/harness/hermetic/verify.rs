@@ -717,33 +717,53 @@ mod tests {
         );
     }
 
+    /// Rewrite the hook lines through `f`, which may reorder them.
+    fn reorder_hooks(dir: &Path, f: impl FnOnce(&mut Vec<Value>)) {
+        let path = dir.join(HOOK_PAYLOADS);
+        let mut lines: Vec<Value> = std::fs::read_to_string(&path)
+            .expect("read")
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("json"))
+            .collect();
+        f(&mut lines);
+        let out: Vec<String> = lines.iter().map(Value::to_string).collect();
+        std::fs::write(&path, out.join("\n") + "\n").expect("write");
+    }
+
     #[test]
-    fn a_permission_run_passes_in_either_arrival_order() {
-        for order in [
-            ["approval_asked", "approval_decided"],
-            ["approval_decided", "approval_asked"],
-        ] {
-            let d = recorded("dsh", Shape::Permission, DS_WAIT_SCENE);
-            let text = std::fs::read_to_string(d.path().join(HOOK_PAYLOADS)).expect("read");
-            let mut lines: Vec<Value> = text
-                .lines()
-                .map(|l| serde_json::from_str(l).expect("json"))
-                .collect();
-            let at = |lines: &[Value], ty: &str| {
-                lines
-                    .iter()
-                    .position(|v| v["type"] == ty)
-                    .expect("recorded")
-            };
-            let (first, second) = (at(&lines, order[0]), at(&lines, order[1]));
-            if first > second {
-                lines.swap(first, second);
+    fn a_wait_that_lands_after_every_end_of_its_tool_still_passes() {
+        let d = recorded("dsh", Shape::Permission, DS_WAIT_SCENE);
+        reorder_hooks(d.path(), |lines| {
+            let asked = lines
+                .iter()
+                .position(|v| v["type"] == "approval_asked")
+                .expect("recorded");
+            let wait = lines.remove(asked);
+            let end = lines
+                .iter()
+                .position(|v| v["type"] == "session_end")
+                .expect("recorded");
+            lines.insert(end, wait);
+        });
+        let v = verify(d.path()).expect("verify");
+        assert_eq!(v.label(), Label::Pass, "{:?}", v.findings());
+    }
+
+    #[test]
+    fn a_wait_ended_only_by_another_tool_fails() {
+        let d = recorded("dsh", Shape::Permission, DS_WAIT_SCENE);
+        edit_hooks(d.path(), |mut v| {
+            if v["type"] == "tool_result" {
+                v["callId"] = "another-call".into();
             }
-            let out: Vec<String> = lines.iter().map(Value::to_string).collect();
-            std::fs::write(d.path().join(HOOK_PAYLOADS), out.join("\n") + "\n").expect("write");
-            let v = verify(d.path()).expect("verify");
-            assert_eq!(v.label(), Label::Pass, "{order:?}: {:?}", v.findings());
-        }
+            (v["type"] != "approval_decided").then_some(v)
+        });
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "the slot waited on never ended"),
+            "{:?}",
+            v.findings()
+        );
     }
 
     #[test]

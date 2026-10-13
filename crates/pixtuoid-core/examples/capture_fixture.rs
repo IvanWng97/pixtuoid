@@ -149,7 +149,7 @@ mod recorder {
             }
         };
         if let Some(run) = options.promote.as_deref() {
-            return promote(run, &sources_root());
+            return promote(run, &sources_root(), &identity_needles(git_config));
         }
         if args.len() < 3 {
             eprintln!(
@@ -251,14 +251,7 @@ mod recorder {
             std::process::exit(1);
         }
 
-        let deidentified = match reads::exemption(&dest.join(PROVENANCE)) {
-            Some(why) => Deidentified::Exempt(why),
-            None => {
-                let strip = reads::strip_unread(&source, &wrote)?;
-                report_not_json(&strip);
-                Deidentified::Stripped(strip.blanked)
-            }
-        };
+        let deidentified = deidentify(&source, &wrote, reads::exemption(&dest.join(PROVENANCE)))?;
         write_provenance(
             &dest,
             (&cli, &version),
@@ -276,7 +269,7 @@ mod recorder {
             Deidentified::Stripped(n) => println!("blanked {n} subtrees no decoder reads"),
             Deidentified::Exempt(why) => println!("not stripped, as the record declares: {why}"),
         }
-        refuse_on_pii(&wrote)?;
+        refuse_on_pii(&wrote, &identity_needles(git_config))?;
         if !status.success() {
             eprintln!("WARNING: the CLI exited {status} — this capture may be truncated");
         }
@@ -284,11 +277,28 @@ mod recorder {
         Ok(())
     }
 
+    /// What a capture written into the tree keeps: stripped of every subtree no
+    /// decoder reads, unless its record declares the exemption `exemption` is.
+    fn deidentify(
+        source: &str,
+        files: &[PathBuf],
+        exemption: Option<String>,
+    ) -> std::io::Result<Deidentified> {
+        Ok(match exemption {
+            Some(why) => Deidentified::Exempt(why),
+            None => {
+                let strip = reads::strip_unread(source, files)?;
+                report_not_json(&strip);
+                Deidentified::Stripped(strip.blanked)
+            }
+        })
+    }
+
     /// `run`'s raw capture, a hermetic run the tier judged, written into the
     /// fixture its scenario names under `root`: stripped unless its record is
     /// exempt, recorded and scanned like a live capture. It replaces the
     /// fixture's bytes whole; the old ones are git's.
-    fn promote(run: &Path, root: &Path) -> std::io::Result<()> {
+    fn promote(run: &Path, root: &Path, needles: &BTreeSet<String>) -> std::io::Result<()> {
         let manifest: Manifest =
             serde_json::from_str(&std::fs::read_to_string(run.join(MANIFEST))?)?;
         let named = format!("{}/{}", manifest.source, manifest.scenario);
@@ -322,14 +332,7 @@ mod recorder {
             std::fs::copy(&raw, &to)?;
             wrote.push(to);
         }
-        let deidentified = match exempt {
-            Some(why) => Deidentified::Exempt(why),
-            None => {
-                let strip = reads::strip_unread(&manifest.source, &wrote)?;
-                report_not_json(&strip);
-                Deidentified::Stripped(strip.blanked)
-            }
-        };
+        let deidentified = deidentify(&manifest.source, &wrote, exempt)?;
         let script = scenario.script(&manifest.source);
         let script = script
             .strip_prefix(env!("CARGO_MANIFEST_DIR"))
@@ -347,7 +350,7 @@ mod recorder {
                 ("script", Some(script)),
             ],
         )?;
-        refuse_on_pii(&wrote)?;
+        refuse_on_pii(&wrote, needles)?;
         println!("recorded {named} into {}", dest.display());
         Ok(())
     }
@@ -784,14 +787,13 @@ mod recorder {
             .collect()
     }
 
-    fn scan_for_pii(files: &[PathBuf]) -> Vec<String> {
-        let needles = identity_needles(git_config);
+    fn scan_for_pii(files: &[PathBuf], needles: &BTreeSet<String>) -> Vec<String> {
         let mut found = Vec::new();
         for f in files {
             let Ok(body) = std::fs::read_to_string(f) else {
                 continue;
             };
-            let hits = pii_hits(&body, &needles);
+            let hits = pii_hits(&body, needles);
             if !hits.is_empty() {
                 found.push(format!("{}: {}", f.display(), hits.join(", ")));
             }
@@ -802,8 +804,8 @@ mod recorder {
     /// A REFUSAL, not a warning. The old form printed to stderr and left the exit
     /// code at 0 on a run that had already written into the repo tree, so the
     /// capturer had to notice a line scrolling past — and twice did not.
-    fn refuse_on_pii(files: &[PathBuf]) -> std::io::Result<()> {
-        let found = scan_for_pii(files);
+    fn refuse_on_pii(files: &[PathBuf], needles: &BTreeSet<String>) -> std::io::Result<()> {
+        let found = scan_for_pii(files, needles);
         if found.is_empty() {
             return Ok(());
         }
@@ -922,6 +924,29 @@ mod recorder {
             (d, run, dest)
         }
 
+        /// An operator who is nobody in these bytes, so no test reads the machine's.
+        fn needles() -> BTreeSet<String> {
+            BTreeSet::from(["Ada Lovelace".to_string()])
+        }
+
+        #[test]
+        fn a_capture_is_stripped_unless_its_record_is_exempt() {
+            let (_d, run, _) = promotable(serde_json::json!({"origin": "recorded"}));
+            let files = vec![run.join(HOOK_PAYLOADS)];
+            let why = "a test reads the raw bytes".to_string();
+            let kept = deidentify("dsh", &files, Some(why.clone())).expect("deidentify");
+            assert!(matches!(kept, Deidentified::Exempt(w) if w == why));
+            let raw = std::fs::read_to_string(&files[0]).expect("raw");
+            assert!(
+                raw.contains("unread"),
+                "an exempt capture is left as recorded"
+            );
+            let stripped = deidentify("dsh", &files, None).expect("deidentify");
+            assert!(matches!(stripped, Deidentified::Stripped(n) if n > 0));
+            let raw = std::fs::read_to_string(&files[0]).expect("raw");
+            assert!(!raw.contains("unread"), "the unread key is blanked");
+        }
+
         fn written(dest: &Path) -> (String, serde_json::Value) {
             let bytes = std::fs::read_to_string(dest.join(HOOK_PAYLOADS)).expect("bytes");
             let record = std::fs::read_to_string(dest.join(PROVENANCE)).expect("record");
@@ -932,7 +957,7 @@ mod recorder {
         fn a_promoted_run_replaces_its_fixture_stripped_and_says_what_played_the_model() {
             let (_d, run, dest) =
                 promotable(serde_json::json!({"origin": "recorded", "note": "the old record"}));
-            promote(&run, dest.ancestors().nth(3).expect("the root")).expect("promote");
+            promote(&run, dest.ancestors().nth(3).expect("the root"), &needles()).expect("promote");
             assert!(
                 !dest.join("old.jsonl").exists(),
                 "the old bytes leave whole"
@@ -961,7 +986,7 @@ mod recorder {
                 "origin": "recorded",
                 "deidentified": {"method": "none", "why": why},
             }));
-            promote(&run, dest.ancestors().nth(3).expect("the root")).expect("promote");
+            promote(&run, dest.ancestors().nth(3).expect("the root"), &needles()).expect("promote");
             let (bytes, record) = written(&dest);
             assert!(
                 bytes.contains("unread"),
