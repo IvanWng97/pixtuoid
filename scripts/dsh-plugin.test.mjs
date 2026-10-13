@@ -89,12 +89,16 @@ async function payloadsThroughEnd(file) {
 const header = { id: "s1", cwd: "/w" };
 const session = { header };
 
-test("events reach the shim in emission order, one shim at a time", { skip: !POSIX }, async (t) => {
+test("listeners return nothing, and events reach the shim in order, one at a time", { skip: !POSIX }, async (t) => {
   const { module, outFile, traceFile } = await renderPlugin(t);
   const handlers = apply(module);
   const event = (type, data) => handlers.get("session/event")(session, { type, data });
 
-  handlers.get("agent/created")({ agent: { session } });
+  assert.equal(
+    handlers.get("agent/created")({ agent: { session } }),
+    undefined,
+    "agent/created's listener must return nothing",
+  );
   event("approval/asked", { id: "a1", callId: "c1", toolName: "bash", reason: "wider" });
   event("approval/decided", { id: "a1", outcome: "unavailable" });
   event("tool/result", { message: { toolCallId: "c1" } });
@@ -110,16 +114,6 @@ test("events reach the shim in emission order, one shim at a time", { skip: !POS
   ]);
   const trace = await lines(traceFile, 2 * types.length);
   assert.deepEqual(trace, types.flatMap(() => ["begin", "end"]));
-});
-
-test("agent/created's listener returns nothing", async (t) => {
-  const { module } = await renderPlugin(t);
-  const handlers = apply(module);
-  assert.equal(
-    handlers.get("agent/created")({ agent: { session } }),
-    undefined,
-    "agent/created's listener must return nothing",
-  );
 });
 
 test("forwards only the allowlist, never content", { skip: !POSIX }, async (t) => {
