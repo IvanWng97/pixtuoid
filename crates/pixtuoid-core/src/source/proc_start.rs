@@ -92,30 +92,11 @@ fn imp(_pid: i32) -> Option<u64> {
 #[cfg(all(test, any(target_os = "macos", target_os = "linux", windows)))]
 mod tests {
     use super::*;
-
-    /// A child that outlives the assertions. `ping` because Windows `timeout`
-    /// refuses a redirected stdin and `waitfor` is not on every SKU.
-    fn spawn_sleeper() -> std::process::Child {
-        #[cfg(windows)]
-        let mut cmd = {
-            let mut c = std::process::Command::new("ping");
-            c.args(["-n", "31", "127.0.0.1"]);
-            c
-        };
-        #[cfg(not(windows))]
-        let mut cmd = {
-            let mut c = std::process::Command::new("sleep");
-            c.arg("30");
-            c
-        };
-        cmd.stdout(std::process::Stdio::null())
-            .spawn()
-            .expect("spawn a child to mark")
-    }
+    use crate::test_child::sleeper;
 
     #[test]
     fn marker_is_stable_for_a_live_process() {
-        let mut child = spawn_sleeper();
+        let mut child = sleeper();
         let pid = child.id() as i32;
         let first = pid_start_marker(pid).expect("a live child has a marker");
         let second = pid_start_marker(pid).expect("still alive");
@@ -129,7 +110,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn marker_is_none_after_the_process_dies() {
-        let mut child = spawn_sleeper();
+        let mut child = sleeper();
         let pid = child.id() as i32;
         assert!(pid_start_marker(pid).is_some(), "alive before the kill");
         child.kill().expect("kill the child");
@@ -148,7 +129,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn two_live_processes_have_different_markers() {
-        let mut child = spawn_sleeper();
+        let mut child = sleeper();
         let mine = pid_start_marker(std::process::id() as i32).expect("our own marker");
         let theirs = pid_start_marker(child.id() as i32).expect("the child's marker");
         child.kill().expect("kill the child");

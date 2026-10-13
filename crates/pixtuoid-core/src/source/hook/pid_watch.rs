@@ -48,9 +48,9 @@ struct Bindings {
 
 impl HookPidWatch {
     /// Spawn the exit watcher + the drain task that turns a dead pid into a
-    /// `SessionEnd` for each agent bound to it. `None` if no exit-watch backend
-    /// exists on this platform (Windows, pre-5.3 Linux) — the source then falls
-    /// back to `session_end` + the stale-sweep.
+    /// `SessionEnd` for each agent bound to it. `None` if this platform has no
+    /// exit-watch backend or it failed to init — the source then falls back to
+    /// `session_end` + the stale-sweep.
     pub(crate) fn spawn(tx: TaggedSender) -> Option<Self> {
         let (exit_tx, mut exit_rx) = tokio::sync::mpsc::unbounded_channel::<i32>();
         let exit = Arc::new(ExitWatch::spawn(exit_tx)?);
@@ -148,11 +148,13 @@ impl Bindings {
 mod tests {
     use super::*;
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[tokio::test]
-    async fn spawn_returns_a_watch_on_first_class_platforms() {
+    async fn spawn_returns_a_watch_exactly_where_a_backend_exists() {
         let (tx, _rx) = tokio::sync::mpsc::channel(4);
-        assert!(HookPidWatch::spawn(tx).is_some());
+        assert_eq!(
+            HookPidWatch::spawn(tx).is_some(),
+            crate::source::exit_watch::HAS_BACKEND
+        );
     }
 
     const GUESS: bool = true;
@@ -301,10 +303,7 @@ mod tests {
         let Some(watch) = HookPidWatch::spawn(tx) else {
             return; // no exit-watch backend on this platform — nothing to assert
         };
-        let mut child = std::process::Command::new("sleep")
-            .arg("60")
-            .spawn()
-            .expect("spawn a child to watch");
+        let mut child = crate::test_child::sleeper();
         let pid = i32::try_from(child.id()).expect("pid fits i32");
         let agent = AgentId::from_parts("codewhale", "/ws");
         watch.note(pid, agent, true);
@@ -330,10 +329,7 @@ mod tests {
         let Some(watch) = HookPidWatch::spawn(tx) else {
             return; // no exit-watch backend on this platform — nothing to assert
         };
-        let mut wrapper = std::process::Command::new("sleep")
-            .arg("60")
-            .spawn()
-            .expect("spawn a stand-in wrapper shell");
+        let mut wrapper = crate::test_child::sleeper();
         let pid = i32::try_from(wrapper.id()).expect("pid fits i32");
         watch.note(pid, AgentId::from_parts("cursor", "sess-A"), true);
         wrapper.kill().expect("kill the wrapper");

@@ -320,10 +320,7 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn pids_by_name_finds_a_spawned_child() {
-        let mut child = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
+        let mut child = crate::test_child::sleeper();
         let pid = child.id() as i32;
         // A just-spawned child isn't always named in the proc-table at the first
         // probe — poll rather than assert once.

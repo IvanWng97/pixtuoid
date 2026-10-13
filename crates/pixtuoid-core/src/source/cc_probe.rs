@@ -695,10 +695,7 @@ mod liveness_tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn pid_start_time_secs_reports_a_fresh_child_as_just_started() {
-        let mut child = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
+        let mut child = crate::test_child::sleeper();
         let started = pid_start_time_secs(child.id() as i32);
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
@@ -780,14 +777,8 @@ mod liveness_tests {
         // The same pair is presented under file names sorting in OPPOSITE
         // orders; whatever order read_dir yields, the binding must come out
         // identical. One shared startedAt, so the pid tiebreak decides.
-        let mut child_a = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
-        let mut child_b = std::process::Command::new("sleep")
-            .arg("30")
-            .spawn()
-            .unwrap();
+        let mut child_a = crate::test_child::sleeper();
+        let mut child_b = crate::test_child::sleeper();
         let (pid_a, pid_b) = (i64::from(child_a.id()), i64::from(child_b.id()));
         let expected = pid_a.max(pid_b) as i32;
         // Both children start within the PID-reuse tolerance of this.
