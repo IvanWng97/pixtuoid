@@ -432,18 +432,34 @@ mod recorder {
                 "user.email=fixture@pixtuoid",
                 "-c",
                 "user.name=fixture",
+                "-c",
+                "commit.gpgsign=false",
                 "commit",
                 "-qm",
                 "init",
             ],
         ] {
-            let _ = std::process::Command::new("git")
-                .arg("-C")
-                .arg(&ws)
-                .args(cmd)
-                .status();
+            git_in(&ws, &cmd)?;
         }
         Ok(ws)
+    }
+
+    /// One git step in the workspace, which must succeed: the workspace being
+    /// its own repository is what stops every CLI's project-root walk there, so
+    /// a failed `git init` would let a repository above it in.
+    fn git_in(ws: &Path, args: &[&str]) -> std::io::Result<()> {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(ws)
+            .args(args)
+            .status()?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(format!(
+                "git {args:?} exited {status}"
+            )))
+        }
     }
 
     /// A per-CLI ask rule (CC's `.claude/settings.json`, opencode's
@@ -768,6 +784,13 @@ mod recorder {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn a_failed_git_step_fails_the_workspace() {
+            let d = tempfile::tempdir().expect("tempdir");
+            assert!(git_in(d.path(), &["init", "-q"]).is_ok());
+            assert!(git_in(d.path(), &["no-such-git-command"]).is_err());
+        }
 
         #[test]
         fn leading_option_pairs_are_options_and_the_rest_is_positional() {
