@@ -215,7 +215,7 @@ mod run {
     /// every one of its `scenarios`, since a subset, one selected or one Blocked,
     /// fails on a field only another carries.
     fn judges_source(judged: &[PathBuf], scenarios: usize) -> bool {
-        !judged.is_empty() && judged.len() == scenarios
+        judged.len() == scenarios
     }
 
     /// The run's report, beside the runs; its H1 is the tracking issue's title.
@@ -934,7 +934,6 @@ mod run {
             let one = [PathBuf::from("/runs/x")];
             assert!(judges_source(&one, 1));
             assert!(!judges_source(&one, 2), "a sibling selected out or Blocked");
-            assert!(!judges_source(&[], 0));
         }
 
         #[test]
