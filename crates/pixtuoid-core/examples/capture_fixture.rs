@@ -45,6 +45,7 @@ mod recorder {
         "Read NOTE.txt, then list this directory, then read NOTE.txt again.";
 
     use pixtuoid_core::harness::CAPTURE_WORKSPACE as WORKSPACE;
+    use pixtuoid_core::harness::recorder_flag::{ENV, OUT, TEE, WITHIN};
     use pixtuoid_core::harness::{CAPTURE_RECORD, CaptureRecord, HOOK_PAYLOADS, PROVENANCE};
 
     /// Where a driver names the CLI it drives, a command or the path to its
@@ -87,7 +88,7 @@ mod recorder {
     fn parse_options(mut args: Vec<String>) -> Result<(Options, Vec<String>), String> {
         let mut options = Options::default();
         while let Some(flag) = args.first().cloned() {
-            if !matches!(flag.as_str(), "--out" | "--tee" | "--within" | "--env") {
+            if !matches!(flag.as_str(), OUT | TEE | WITHIN | ENV) {
                 break;
             }
             if args.len() < 2 {
@@ -96,13 +97,13 @@ mod recorder {
             let value = args.remove(1);
             args.remove(0);
             match flag.as_str() {
-                "--out" => options.out = Some(PathBuf::from(value)),
-                "--tee" => options.tee = Some(PathBuf::from(value)),
-                "--within" => options.within = Some(PathBuf::from(value)),
+                OUT => options.out = Some(PathBuf::from(value)),
+                TEE => options.tee = Some(PathBuf::from(value)),
+                WITHIN => options.within = Some(PathBuf::from(value)),
                 _ => {
                     let (k, v) = value
                         .split_once('=')
-                        .ok_or_else(|| format!("--env takes KEY=VALUE, got {value:?}"))?;
+                        .ok_or_else(|| format!("{ENV} takes KEY=VALUE, got {value:?}"))?;
                     options.env.push((k.to_string(), v.to_string()));
                 }
             }
@@ -424,6 +425,15 @@ mod recorder {
         if let Some(seed) = std::env::var_os("CAPTURE_SEED") {
             copy_tree(Path::new(&seed), &ws)?;
         }
+        init_repo(&ws)?;
+        Ok(ws)
+    }
+
+    /// Make `ws` its own repository, every step of which must succeed: the
+    /// workspace being one is what stops every CLI's project-root walk there,
+    /// so a failed `git init` would let a repository above it in. The commit
+    /// does not depend on the operator's signing config.
+    fn init_repo(ws: &Path) -> std::io::Result<()> {
         for cmd in [
             vec!["init", "-q"],
             vec!["add", "-A"],
@@ -439,14 +449,11 @@ mod recorder {
                 "init",
             ],
         ] {
-            git_in(&ws, &cmd)?;
+            git_in(ws, &cmd)?;
         }
-        Ok(ws)
+        Ok(())
     }
 
-    /// One git step in the workspace, which must succeed: the workspace being
-    /// its own repository is what stops every CLI's project-root walk there, so
-    /// a failed `git init` would let a repository above it in.
     fn git_in(ws: &Path, args: &[&str]) -> std::io::Result<()> {
         let status = std::process::Command::new("git")
             .arg("-C")
@@ -786,10 +793,30 @@ mod recorder {
         use super::*;
 
         #[test]
-        fn a_failed_git_step_fails_the_workspace() {
+        fn the_workspace_becomes_its_own_repository_or_fails() {
             let d = tempfile::tempdir().expect("tempdir");
-            assert!(git_in(d.path(), &["init", "-q"]).is_ok());
-            assert!(git_in(d.path(), &["no-such-git-command"]).is_err());
+            let ws = d.path().join("ws");
+            std::fs::create_dir(&ws).expect("mkdir");
+            std::fs::write(ws.join("NOTE.txt"), "pong\n").expect("write");
+            // An operator config that signs every commit with a failing program.
+            let config = d.path().join("gitconfig");
+            std::fs::write(
+                &config,
+                "[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n",
+            )
+            .expect("config");
+            let made = temp_env::with_vars(
+                [
+                    ("GIT_CONFIG_GLOBAL", Some(config.as_os_str())),
+                    ("GIT_CONFIG_NOSYSTEM", Some("1".as_ref())),
+                ],
+                || init_repo(&ws),
+            );
+            assert!(made.is_ok(), "{made:?}");
+            assert!(git_in(&ws, &["rev-parse", "--verify", "-q", "HEAD"]).is_ok());
+            let file = d.path().join("a-file");
+            std::fs::write(&file, "").expect("write");
+            assert!(init_repo(&file).is_err(), "a failed step fails it");
         }
 
         #[test]
