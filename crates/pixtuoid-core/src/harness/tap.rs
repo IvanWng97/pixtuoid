@@ -69,7 +69,7 @@ impl Endpoint {
     /// # Errors
     ///
     /// If nothing listens, or the write fails.
-    pub async fn send(&self, bytes: &[u8]) -> std::io::Result<()> {
+    pub(crate) async fn send(&self, bytes: &[u8]) -> std::io::Result<()> {
         #[cfg(windows)]
         let mut conn = {
             use tokio::net::windows::named_pipe::ClientOptions;
@@ -100,10 +100,9 @@ impl Endpoint {
 /// none (learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-waitnamedpipew).
 #[cfg(windows)]
 fn pipe_accepting(name: &Path) -> bool {
-    use std::os::windows::ffi::OsStrExt;
     /// Long enough to find a free instance, short enough to poll with.
     const WAIT_MS: u32 = 1;
-    let wide: Vec<u16> = name.as_os_str().encode_wide().chain(Some(0)).collect();
+    let wide = super::host::nul_terminated(name.as_os_str());
     // SAFETY: `wide` is NUL-terminated and outlives the call, which only reads it.
     unsafe { windows_sys::Win32::System::Pipes::WaitNamedPipeW(wide.as_ptr(), WAIT_MS) != 0 }
 }

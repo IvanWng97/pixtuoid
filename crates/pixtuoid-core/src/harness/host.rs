@@ -6,6 +6,13 @@ use std::path::Path;
 #[cfg(any(windows, test))]
 use std::path::PathBuf;
 
+/// `s` as the NUL-terminated wide string a Win32 call takes.
+#[cfg(windows)]
+pub(crate) fn nul_terminated(s: &std::ffi::OsStr) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    s.encode_wide().chain(Some(0)).collect()
+}
+
 /// A Windows known folder, resolved through the shell rather than through an
 /// environment variable a sandbox redirects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,11 +89,10 @@ const PRIVATE_DIR: windows_sys::core::PCWSTR =
 pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
 
         let sd = crate::security_descriptor::SecurityDescriptor::from_sddl(PRIVATE_DIR)?;
-        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let wide = nul_terminated(path.as_os_str());
         // SAFETY: `wide` is NUL-terminated, and `sd` outlives the call, which
         // copies the descriptor onto the new directory.
         if unsafe { CreateDirectoryW(wide.as_ptr(), sd.attributes()) } == 0 {
@@ -122,7 +128,6 @@ pub fn owned_by_us(path: &Path) -> bool {
 /// elevated administrator's new objects are owned by Administrators.
 #[cfg(windows)]
 fn windows_owned(path: &Path) -> Option<bool> {
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE, LocalFree};
     use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT};
     use windows_sys::Win32::Security::{
@@ -135,7 +140,7 @@ fn windows_owned(path: &Path) -> Option<bool> {
     };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let wide = nul_terminated(path.as_os_str());
     // SAFETY: `wide` is NUL-terminated; the handle is closed below. The
     // reparse-point flag opens a link itself, never its target.
     let file = unsafe {
@@ -215,7 +220,6 @@ fn windows_owned(path: &Path) -> Option<bool> {
 /// not read it either, but the run would not be shown to be hermetic.
 #[cfg(windows)]
 pub fn registry_key_exists(key: &str) -> bool {
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
     use windows_sys::Win32::System::Registry::{
         HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegOpenKeyExW,
@@ -226,10 +230,7 @@ pub fn registry_key_exists(key: &str) -> bool {
         Some(("HKCU", sub)) => (HKEY_CURRENT_USER, sub),
         _ => return false,
     };
-    let wide: Vec<u16> = std::ffi::OsStr::new(sub)
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
+    let wide = nul_terminated(std::ffi::OsStr::new(sub));
     let mut opened: HKEY = std::ptr::null_mut();
     // SAFETY: `wide` is NUL-terminated and `opened` a live out-pointer.
     let rc = unsafe { RegOpenKeyExW(hive, wide.as_ptr(), 0, KEY_READ, &mut opened) };
@@ -342,7 +343,6 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_registry_key_exists_only_while_it_does() {
-        use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Foundation::ERROR_SUCCESS;
         use windows_sys::Win32::System::Registry::{
             HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_VOLATILE, RegCloseKey, RegCreateKeyExW,
@@ -352,10 +352,7 @@ mod tests {
         let sub = format!(r"Software\pixtuoid-test-{}", std::process::id());
         let key = format!(r"HKCU\{sub}");
         assert!(!registry_key_exists(&key));
-        let wide: Vec<u16> = std::ffi::OsStr::new(&sub)
-            .encode_wide()
-            .chain(Some(0))
-            .collect();
+        let wide = nul_terminated(std::ffi::OsStr::new(&sub));
         let mut made: HKEY = std::ptr::null_mut();
         // SAFETY: `wide` is NUL-terminated; every other pointer is a live
         // out-pointer or documented optional null.

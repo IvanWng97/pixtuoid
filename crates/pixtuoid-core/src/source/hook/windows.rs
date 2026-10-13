@@ -19,8 +19,7 @@ use super::{CONN_TIMEOUT, MAX_CONCURRENT_CONNS};
 const IN_BUFFER_SIZE: u32 = 1 << 20;
 
 /// Owner-only, the named-pipe equivalent of the Unix socket's umask-0700,
-/// closing the default DACL's Everyone-READ. Its descriptor is held for the
-/// daemon's lifetime, so every create site's attributes stay valid.
+/// closing the default DACL's Everyone-READ.
 const OWNER_ONLY: PCWSTR = windows_sys::w!("D:P(A;;GA;;;OW)");
 
 /// A hook pipe instance under `sd`. `first` claims `first_pipe_instance`: ONLY
@@ -46,6 +45,7 @@ pub(super) type Conn = NamedPipeServer;
 pub(super) struct Listener {
     server: NamedPipeServer,
     name: String,
+    /// Held for the daemon's lifetime, so every create site's attributes stay valid.
     sd: SecurityDescriptor,
 }
 
