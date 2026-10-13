@@ -4,7 +4,9 @@
 //!
 //! `--cli pinned` (the default) installs each CLI at its registry
 //! `verified_version`, the merge queue's end-to-end gate; `--cli latest` installs
-//! what npm's `latest` tag points at, the nightly drift run.
+//! what npm's `latest` tag points at, the nightly drift run; `--cli <version>`
+//! installs one source at that version, the nightly's bump. Off the pins,
+//! `--record` also moves a source's pin, and only up.
 //!
 //! Exits 0 when every run passed, 1 on any other verdict, and anything else
 //! when the tier itself could not run.
@@ -43,6 +45,7 @@ mod run {
         Scenario, USER_PLACEHOLDER,
     };
     use pixtuoid_core::harness::{CAPTURE_RECORD, CAPTURE_WORKSPACE, CaptureRecord, recorder_flag};
+    use pixtuoid_core::source::registry::{Hyphen, parse_version};
 
     /// How long a server gets to come up before the run gives up.
     const BOOT: Duration = Duration::from_secs(60);
@@ -91,10 +94,13 @@ mod run {
         c
     }
 
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    #[derive(Clone, PartialEq, Eq, Debug)]
     enum Versions {
         Pinned,
         Latest,
+        /// One source at the version its nightly bump verified, so the
+        /// recording is of that version even if `latest` moved since.
+        Exact(String),
     }
 
     #[derive(Debug, PartialEq, Eq)]
@@ -109,8 +115,8 @@ mod run {
         /// A selection that names nothing runnable is an operator's typo, not
         /// a run where everything was blocked.
         fn check(&self) -> Result<(), String> {
-            if self.record && self.versions == Versions::Latest {
-                return Err("--record writes fixtures of the pinned CLIs only".into());
+            if matches!(self.versions, Versions::Exact(_)) && self.source.is_none() {
+                return Err("--cli <version> is one source's version: name the source".into());
             }
             if self.record && self.scenario.is_some() {
                 return Err("--record writes a whole source: its census judges every run".into());
@@ -137,6 +143,8 @@ mod run {
         }
     }
 
+    const CLI_TAKES: &str = "--cli takes pinned, latest or a version";
+
     fn parse(mut rest: &[String]) -> Result<Args, String> {
         let (mut versions, mut record) = (Versions::Pinned, false);
         loop {
@@ -145,11 +153,14 @@ mod run {
                     versions = match v.as_str() {
                         "pinned" => Versions::Pinned,
                         "latest" => Versions::Latest,
-                        _ => return Err("--cli takes pinned or latest".into()),
+                        // Strict semver, the grammar npm publishes under, so
+                        // nothing else reaches the install spec.
+                        v if semver::Version::parse(v).is_ok() => Versions::Exact(v.into()),
+                        _ => return Err(CLI_TAKES.into()),
                     };
                     rest = tail;
                 }
-                [flag] if flag == "--cli" => return Err("--cli takes pinned or latest".into()),
+                [flag] if flag == "--cli" => return Err(CLI_TAKES.into()),
                 [flag, tail @ ..] if flag == "--record" => {
                     record = true;
                     rest = tail;
@@ -174,7 +185,7 @@ mod run {
             Ok(a) => a,
             Err(e) => {
                 eprintln!(
-                    "{e}\nusage: hermetic [--cli pinned|latest] [--record] [<source> [<scenario>]]"
+                    "{e}\nusage: hermetic [--cli pinned|latest|<version>] [--record] [<source> [<scenario>]]"
                 );
                 std::process::exit(2);
             }
@@ -194,23 +205,30 @@ mod run {
             built: Built::find()?,
             aimock: Aimock::install(&tier)?,
             tier,
-            versions: args.versions,
         };
 
-        let mut entries = Vec::new();
+        let (mut entries, mut moves) = (Vec::new(), Vec::new());
         for p in PROFILES {
-            let mut judged = Vec::new();
-            let mut passed = true;
-            for scenario in p.scenarios {
-                let name = scenario.shape.name();
-                if !args.selects(p.source, name) {
-                    continue;
-                }
+            let selected: Vec<&Scenario> = p
+                .scenarios
+                .iter()
+                .filter(|s| args.selects(p.source, s.shape.name()))
+                .collect();
+            if selected.is_empty() {
+                continue;
+            }
+            let version = resolve(p, &args.versions);
+            let (mut judged, mut banners, mut passed) = (Vec::new(), Vec::new(), true);
+            for scenario in selected {
                 let dir = run_dir(&runs, p, scenario);
                 std::fs::create_dir_all(&dir)?;
-                let key = format!("{}/{name}", p.source);
+                let key = format!("{}/{}", p.source, scenario.shape.name());
                 println!("== {key}");
-                let (version, verdict) = match run_one(&ctx, p, scenario, &dir) {
+                let ran = match &version {
+                    Ok(v) => run_one(&ctx, p, scenario, v, &dir),
+                    Err(e) => Err(std::io::Error::other(e.clone())),
+                };
+                let (banner, verdict) = match ran {
                     Ok(manifest) => (Some(manifest.capture.version), verify::verify(&dir)?),
                     Err(e) => (None, Verdict::new(vec![(Label::Blocked, e.to_string())])),
                 };
@@ -218,7 +236,8 @@ mod run {
                     judged.push(dir);
                 }
                 passed &= verdict.label() == Label::Pass;
-                entries.push(Entry::new(key, version, verdict));
+                banners.extend(banner.clone());
+                entries.push(Entry::new(key, banner, verdict));
             }
             if judges_source(&judged, p.scenarios.len()) {
                 let key = format!("{} (every scenario)", p.source);
@@ -226,12 +245,31 @@ mod run {
                 let verdict = verify::verify_source(p, &judged)?;
                 passed &= verdict.label() == Label::Pass;
                 entries.push(Entry::new(key, None, verdict));
+                let d = p.descriptor();
+                let to = version
+                    .as_deref()
+                    .ok()
+                    .filter(|v| passed && moved(d.verified_version, v, &banners, d.version_hyphen));
+                if let Some(v) = to {
+                    moves.push(serde_json::json!({ "source": p.source, "version": v }));
+                }
                 if args.record && passed {
-                    record(&ctx, p, &runs)?;
+                    match (&args.versions, to) {
+                        (Versions::Pinned, _) => record(&ctx, p, &runs)?,
+                        (_, Some(v)) => {
+                            record(&ctx, p, &runs)?;
+                            repin_registry(d.verified_version, v)?;
+                        }
+                        (_, None) => println!(
+                            "{}: nothing recorded, no version above its pin {} ran",
+                            p.source, d.verified_version
+                        ),
+                    }
                 }
             }
         }
-        let report = report(args.versions, &entries);
+        std::fs::write(runs.join(MOVED), serde_json::to_string(&moves)?)?;
+        let report = report(&args.versions, &entries);
         std::fs::write(runs.join(REPORT), &report)?;
         println!("\n{report}");
         Ok(entries.iter().all(|e| e.verdict.label() == Label::Pass))
@@ -258,6 +296,47 @@ mod run {
             }
         }
         Ok(())
+    }
+
+    /// The sources whose every run and census passed at a version above their
+    /// pin, as `[{"source", "version"}]` beside the runs: the nightly's bump list.
+    const MOVED: &str = "moved.json";
+
+    /// Whether `installed` moves a pin: every run's CLI reported that version,
+    /// and it is above `pin`. A `latest` tag moved back never downgrades, and a
+    /// build id, which `cmp_precedence` skips, never moves one.
+    fn moved(pin: &str, installed: &str, banners: &[String], hyphen: Hyphen) -> bool {
+        let (Some(pin), Some(installed)) =
+            (parse_version(pin, hyphen), parse_version(installed, hyphen))
+        else {
+            return false;
+        };
+        !banners.is_empty()
+            && banners.iter().all(|b| {
+                parse_version(b, hyphen).is_some_and(|b| b.cmp_precedence(&installed).is_eq())
+            })
+            && installed.cmp_precedence(&pin).is_gt()
+    }
+
+    /// `registry` with its one `verified_version: "<old>",` line now naming
+    /// `new`. A bare version also appears in the registry's test vectors, so
+    /// only the whole line counts, and anything but one match is refused.
+    fn repin(registry: &str, old: &str, new: &str) -> Result<String, String> {
+        let line = |v: &str| format!("verified_version: \"{v}\",");
+        match registry.matches(&line(old)).count() {
+            1 => Ok(registry.replacen(&line(old), &line(new), 1)),
+            n => Err(format!(
+                "`{}` is on {n} lines of the registry, not 1: move the pin by hand",
+                line(old)
+            )),
+        }
+    }
+
+    fn repin_registry(old: &str, new: &str) -> std::io::Result<()> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/source/registry.rs");
+        let moved =
+            repin(&std::fs::read_to_string(&path)?, old, new).map_err(std::io::Error::other)?;
+        std::fs::write(&path, moved)
     }
 
     /// Whether `verify_source` takes a source's `judged` runs: only when they are
@@ -289,10 +368,11 @@ mod run {
         }
     }
 
-    fn report(versions: Versions, entries: &[Entry]) -> String {
+    fn report(versions: &Versions, entries: &[Entry]) -> String {
         let which = match versions {
             Versions::Pinned => "verified",
             Versions::Latest => "latest",
+            Versions::Exact(_) => "exact",
         };
         let labels = || entries.iter().map(|e| e.verdict.label());
         let title = match labels().max() {
@@ -426,22 +506,34 @@ mod run {
         }
     }
 
+    /// The version `versions` names for `p`, resolved once per source so every
+    /// scenario runs, and records, the same release.
+    fn resolve(p: &Profile, versions: &Versions) -> Result<String, String> {
+        let Package::Npm(package) = p.package;
+        match versions {
+            Versions::Pinned => Ok(p.descriptor().verified_version.to_string()),
+            Versions::Exact(v) => Ok(v.clone()),
+            Versions::Latest => {
+                let out = tool("npm")
+                    .args(["view", package, "version"])
+                    .output()
+                    .map_err(|e| format!("npm view {package}: {e}"))?;
+                let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                // It becomes an install spec, a directory name and maybe a pin.
+                match semver::Version::parse(&v) {
+                    Ok(_) if out.status.success() => Ok(v),
+                    _ => Err(format!("npm view {package} gave no version: {v:?}")),
+                }
+            }
+        }
+    }
+
     /// The CLI at the version this run tests, installed into its own project the
     /// way users install it. Its own install scripts run, since they link the
     /// binary: npm 12 blocks a dependency's unless the project's `allowScripts`
     /// names it (`npm help install-scripts`), and older npm ignores the field.
-    fn install_cli(tier: &Path, p: &Profile, versions: Versions) -> std::io::Result<PathBuf> {
+    fn install_cli(tier: &Path, p: &Profile, version: &str) -> std::io::Result<PathBuf> {
         let Package::Npm(package) = p.package;
-        let version = match versions {
-            Versions::Pinned => p.descriptor().verified_version.to_string(),
-            Versions::Latest => {
-                let out = tool("npm").args(["view", package, "version"]).output()?;
-                if !out.status.success() {
-                    return Err(std::io::Error::other(format!("npm view {package} failed")));
-                }
-                String::from_utf8_lossy(&out.stdout).trim().to_string()
-            }
-        };
         let prefix = tier.join("cli").join(format!("{}-{version}", p.source));
         let pinned = format!("{package}@{version}");
         install_once(&prefix, |dir| {
@@ -584,20 +676,19 @@ mod run {
         tier: PathBuf,
         built: Built,
         aimock: Aimock,
-        versions: Versions,
     }
 
     fn run_one(
         ctx: &Ctx,
         p: &Profile,
         scenario: &Scenario,
+        version: &str,
         dir: &Path,
     ) -> std::io::Result<Manifest> {
         let Ctx {
             tier,
             built,
             aimock,
-            versions,
         } = ctx;
         if let Some(found) = outside_config(
             p.system_config,
@@ -613,7 +704,7 @@ mod run {
                 p.source
             )));
         }
-        let cli_bin = install_cli(tier, p, *versions)?;
+        let cli_bin = install_cli(tier, p, version)?;
         let port = free_port()?;
         let sandbox = Sandbox::new(p, built, &cli_bin, port)?;
 
@@ -840,6 +931,67 @@ mod run {
             assert!(parse(&args(&["--cli"])).is_err());
             assert!(parse(&args(&["--cli", "newest"])).is_err());
             assert!(parse(&args(&["codex", "tool-run", "extra"])).is_err());
+            let a = parse(&args(&["--cli", "0.162.1", "codex"])).expect("parse");
+            assert_eq!(a.versions, Versions::Exact("0.162.1".into()));
+            assert!(
+                parse(&args(&["--cli", "0.162.1;rm"])).is_err(),
+                "an exact version is strict semver, as npm's are"
+            );
+        }
+
+        #[test]
+        fn a_source_moves_only_to_a_version_every_run_reported_above_its_pin() {
+            let pre = Hyphen::Prerelease;
+            let ran = |v: &str| vec![v.to_string()];
+            assert!(moved(
+                "2.1.278",
+                "2.1.296",
+                &ran("2.1.296 (Claude Code)"),
+                pre
+            ));
+            assert!(!moved(
+                "2.1.278",
+                "2.1.278",
+                &ran("2.1.278 (Claude Code)"),
+                pre
+            ));
+            assert!(
+                !moved("0.2.0-rc.2", "0.1.9", &ran("dsh 0.1.9"), pre),
+                "a `latest` tag moved back never downgrades"
+            );
+            assert!(moved("0.2.0-rc.2", "0.2.0", &ran("dsh 0.2.0"), pre));
+            assert!(!moved("unknown", "1.0.0", &ran("1.0.0"), pre));
+            assert!(
+                !moved("0.155.1", "0.162.1", &ran("codex-cli 0.155.1"), pre),
+                "the CLI must report the version npm installed"
+            );
+            assert!(!moved("0.155.1", "0.162.1", &[], pre), "no run, no report");
+            assert!(
+                !moved(
+                    "2026.09.18-aaa",
+                    "2026.09.18-bbb",
+                    &ran("2026.09.18-bbb"),
+                    Hyphen::Build
+                ),
+                "a build id never moves a pin"
+            );
+        }
+
+        #[test]
+        fn a_pin_moves_only_where_its_line_is_the_one_line_naming_it() {
+            let row = "    verified_version: \"0.155.1\",\n";
+            let src = format!("const CODEX: X = X {{\n{row}}};\nconst V: &str = \"0.155.1\";\n");
+            let moved = repin(&src, "0.155.1", "0.162.1").expect("one line");
+            assert!(moved.contains("    verified_version: \"0.162.1\",\n"));
+            assert!(
+                moved.contains("const V: &str = \"0.155.1\";"),
+                "only the row's line"
+            );
+            assert!(repin(&src, "9.9.9", "9.9.10").is_err(), "no line");
+            assert!(
+                repin(&format!("{src}{row}"), "0.155.1", "0.162.1").is_err(),
+                "two rows"
+            );
         }
 
         #[test]
@@ -856,11 +1008,11 @@ mod run {
                     Verdict::new(vec![(Label::Blocked, "npm view failed".into())]),
                 )
             };
-            let r = report(Versions::Latest, &[pass, blocked()]);
+            let r = report(&Versions::Latest, &[pass, blocked()]);
             assert_eq!(r.lines().next(), Some("# hermetic, latest CLIs: Blocked"));
             assert!(r.contains("## opencode/tool-run: Blocked\n- Blocked: npm view failed"));
             assert!(r.contains("## codex/tool-run (codex-cli 0.155.1): Pass"));
-            let r = report(Versions::Pinned, &[blocked()]);
+            let r = report(&Versions::Pinned, &[blocked()]);
             assert_eq!(
                 r.lines().next(),
                 Some("# hermetic, verified CLIs: NOTHING RAN")
@@ -874,7 +1026,7 @@ mod run {
                     (Label::Script, "1 unmatched".into()),
                 ]),
             );
-            let r = report(Versions::Latest, &[lost, blocked()]);
+            let r = report(&Versions::Latest, &[lost, blocked()]);
             assert_eq!(r.lines().next(), Some("# hermetic, latest CLIs: Script"));
         }
 
@@ -1046,16 +1198,18 @@ mod run {
         }
 
         #[test]
-        fn record_takes_whole_pinned_sources() {
+        fn record_takes_whole_sources() {
             let a = parse(&args(&["--record", "--cli", "pinned", "dsh"])).expect("parse");
             assert!(a.record);
             assert_eq!(a.versions, Versions::Pinned);
             let check = |v: &[&str]| parse(&args(v)).expect("parse").check();
             assert!(check(&["--record"]).is_ok());
             assert!(check(&["--record", "dsh"]).is_ok());
+            assert!(check(&["--cli", "latest", "--record"]).is_ok());
+            assert!(check(&["--cli", "0.2.0", "--record", "dsh"]).is_ok());
             assert!(
-                check(&["--cli", "latest", "--record"]).is_err(),
-                "fixtures track the pin"
+                check(&["--cli", "0.2.0", "--record"]).is_err(),
+                "an exact version is one source's"
             );
             assert!(
                 check(&["--record", "dsh", "tool-run"]).is_err(),
