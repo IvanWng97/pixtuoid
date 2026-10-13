@@ -16,6 +16,10 @@ const SETTLE: Duration = Duration::from_millis(500);
 const QUIET_ROUNDS: u32 = 4;
 const MAX_ROUNDS: u32 = 40;
 
+/// How long a bound tap may take to start accepting.
+const READY_BOUND: Duration = Duration::from_secs(5);
+const READY_POLL: Duration = Duration::from_millis(10);
+
 /// How long a send waits out a pipe whose every instance is mid-handshake.
 #[cfg(windows)]
 const PIPE_BUSY_BOUND: Duration = Duration::from_secs(2);
@@ -115,15 +119,19 @@ pub struct Tap {
 
 impl Tap {
     /// Listen at `at` on a runtime of its own, keeping each payload and teeing
-    /// it to `tee`.
+    /// it to `tee`; returns once it accepts. A pipe accepts only once its server
+    /// waits in `ConnectNamedPipe`, which fails with `ERROR_NO_DATA` for a client
+    /// that already closed (learn.microsoft.com, ConnectNamedPipe): its payload
+    /// is lost.
     ///
     /// # Errors
     ///
     /// `AddrInUse` if a live listener holds `at` (a squatted pipe name is one);
-    /// any other bind failure as itself.
+    /// any other bind failure as itself, or one that never starts accepting.
     pub fn bind(at: &Endpoint, tee: Option<Endpoint>) -> std::io::Result<Self> {
         let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&lines);
+        let ready = at.clone();
         let at = at.path().to_path_buf();
         let (bound_tx, bound_rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -158,6 +166,16 @@ impl Tap {
             });
         });
         bound_rx.recv().map_err(std::io::Error::other)??;
+        let started = std::time::Instant::now();
+        while !ready.accepting() {
+            if started.elapsed() > READY_BOUND {
+                return Err(std::io::Error::other(format!(
+                    "{} never started accepting",
+                    ready.path().display()
+                )));
+            }
+            std::thread::sleep(READY_POLL);
+        }
         Ok(Self { lines })
     }
 
