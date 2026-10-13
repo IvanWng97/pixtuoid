@@ -328,6 +328,31 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn the_strip_applies_to_a_recording_not_declared_exempt() {
+        let record = |v: Value| strips(&v);
+        assert!(record(serde_json::json!({"origin": "recorded",
+            "deidentified": {"method": "decoder-allowlist"}})));
+        assert!(
+            record(serde_json::json!({"origin": "recorded"})),
+            "not yet stripped"
+        );
+        assert!(!record(serde_json::json!({"origin": "recorded",
+            "deidentified": {"method": "none"}})));
+        assert!(!record(serde_json::json!({"origin": "composed"})));
+    }
+
+    #[test]
+    fn a_child_pointer_escapes_tilde_before_slash() {
+        assert_eq!(child_pointer("/a", "b"), "/a/b");
+        assert_eq!(child_pointer("", "x~y/z"), "/x~0y~1z");
+        assert_eq!(
+            child_pointer("", "~1"),
+            "/~01",
+            "a literal ~1 stays a tilde and a 1"
+        );
+    }
+
     fn sources_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
     }

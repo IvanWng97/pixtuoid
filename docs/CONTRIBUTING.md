@@ -153,12 +153,11 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    a line on the narrowest rule it amends — never an agent's private memory,
    which nobody reviews and nothing executes.
 
-`just hermetic [--cli pinned|latest] [source]` runs each profiled CLI for real
-against a scripted model (aimock), a headless pixtuoid on the same run; the full
-tier gates on it at each `verified_version`, and `hermetic-nightly.yml` runs it
-at latest. The tiers under `scripts/lib/` run in no CI: `just openclaw-e2e` ·
-`just replay <fixture>` · `just openclaw-multi-e2e` · `just openclaw-backend-e2e`
-(BILLED) · `just live-sources [id ...]` (BILLED per installed CLI).
+`just hermetic [--cli pinned|latest] [source]` runs each profiled CLI against a
+scripted model (aimock) with a headless pixtuoid: the full tier gates on it at
+each `verified_version`, the nightly runs it at latest. `scripts/lib/`'s tiers
+run in no CI: `just openclaw-e2e` · `just replay <fixture>` · `just openclaw-multi-e2e`
+· `just openclaw-backend-e2e` (BILLED) · `just live-sources [id ...]` (BILLED).
 
 ### Parallel sessions
 
