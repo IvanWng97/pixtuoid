@@ -29,6 +29,7 @@ tests/
 │   ├── delegation/      the NAME-KEYED family (a tool literally called `task`
 │   │                    — `subagent` for dsh): copilot, omp, dsh —
 │   │                    one rule, one table
+│   ├── hermetic/        `harness::hermetic`'s aimock lock and per-CLI scripts: data, no module
 │   ├── snapshots/       insta snaps (sources__conformance__<source>__<scenario>)
 │   └── fixtures/<source>/<scenario>/  conformance scenarios ONLY — dir name MUST be a
 │                        registered source; provenance.json REQUIRED (fixtures/README.md)

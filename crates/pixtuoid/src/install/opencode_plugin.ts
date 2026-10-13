@@ -2,10 +2,10 @@
 //
 // opencode has no config-level shell hook, so pixtuoid integrates as a tiny plugin
 // (auto-discovered from `<config>/plugins/*.ts`) that pipes the session lifecycle /
-// tool / permission events into the `pixtuoid-hook` shim on stdin. It NEVER blocks
-// or breaks opencode (the shim is best-effort, bounded by its own write-timeout
-// watchdog, `transport::WRITE_TIMEOUT`, and every error here is swallowed —
-// invariant #5).
+// tool / permission events into the `pixtuoid-hook` shim on stdin. It never breaks
+// opencode, and its only wait is bounded: each send by the shim's write-timeout
+// watchdog (`transport::WRITE_TIMEOUT`, invariant #5), and unload by DRAIN_MS.
+// Every error here is swallowed.
 //
 // HOOK_PATH is baked in at install time (a JSON-encoded absolute path). Safe to
 // delete — disconnecting opencode in pixtuoid's Sources panel replaces this
@@ -13,6 +13,16 @@
 import { spawn } from "node:child_process"
 
 const HOOK_PATH: string = "{{HOOK_PATH_JSON}}"
+
+// opencode's plugin host awaits the cleanup `setup` returns
+// (`packages/plugin/src/promise/adapter.ts:610-613`, v2.0.27), and a standalone
+// server shuts down the moment its `run` exits, with the turn's last events
+// still queued here; its client kills it 3s after SIGTERM
+// (`packages/cli/src/services/standalone.ts:31`), so the drain ends first.
+const DRAIN_MS = 2000
+// How long nothing may be in flight before the drain is done: an event already
+// published reaches the loop well within it.
+const QUIET_MS = 50
 
 // Only forward what pixtuoid maps; the decoder (`source/opencode.rs`) ignores
 // anything else anyway.
@@ -79,33 +89,50 @@ export default {
   id: "pixtuoid",
   setup(ctx: any) {
     const controller = new AbortController()
+    let inFlight = 0
+    let lastActivity = 0
     // Not awaited: setup returns at once, and the loop's own awaits only pace
     // this subscription, whose queue is unbounded.
     void (async () => {
       try {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
           if (!FORWARD.has(event?.type)) continue
-          // A turn's start carries only `sessionID`; the session's record adds
-          // what `session.created` did, for a session swept since.
-          const data =
-            event.type === "session.execution.started"
-              ? { ...(await record(ctx, event.data?.sessionID)), ...event.data }
-              : event.data
-          await send(
-            JSON.stringify({
-              type: event.type,
-              location: event.location && { directory: event.location.directory },
-              data: allowlisted(data),
-              // The opencode server's pid; the daemon's HookPidWatch ends every
-              // sprite bound to it when it dies.
-              _pid: process.pid,
-            }),
-          )
+          inFlight++
+          try {
+            // A turn's start carries only `sessionID`; the session's record adds
+            // what `session.created` did, for a session swept since.
+            const data =
+              event.type === "session.execution.started"
+                ? { ...(await record(ctx, event.data?.sessionID)), ...event.data }
+                : event.data
+            await send(
+              JSON.stringify({
+                type: event.type,
+                location: event.location && { directory: event.location.directory },
+                data: allowlisted(data),
+                // The opencode server's pid; the daemon's HookPidWatch ends every
+                // sprite bound to it when it dies.
+                _pid: process.pid,
+              }),
+            )
+          } finally {
+            inFlight--
+            lastActivity = Date.now()
+          }
         }
       } catch {
         // Best-effort: a failed stream must never surface in opencode.
       }
     })()
-    return () => controller.abort()
+    return async () => {
+      const start = Date.now()
+      while (
+        Date.now() - start < DRAIN_MS &&
+        (inFlight > 0 || Date.now() - Math.max(lastActivity, start) < QUIET_MS)
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, QUIET_MS))
+      }
+      controller.abort()
+    }
   },
 }

@@ -1,7 +1,10 @@
 //! The committed capture corpus: where each capture's bytes live and which
-//! registered source owns them, read off the tree's layout.
+//! registered source owns them, read off the tree's layout; and the recorder's
+//! contract with its callers: its workspace, raw record and flag spellings.
 
 use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
 
 use crate::source::registry;
 
@@ -33,6 +36,45 @@ pub fn transcripts_under(source: &str, root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     walk(&admits, root, &mut out);
     out
+}
+
+/// Where every capture's CLI runs. The path is FIXED and generic on purpose:
+/// every payload embeds its own cwd, the decoders read it, so the strip keeps it —
+/// capturing somewhere already generic is what keeps a per-run path out of the
+/// bytes. The recorder prepares it; a hermetic script names files under it.
+pub const CAPTURE_WORKSPACE: &str = "/tmp/pixtuoid-capture/proj";
+
+/// A capture's hook payloads, one per line as the shim sent them.
+pub const HOOK_PAYLOADS: &str = "hook-payloads.jsonl";
+/// A committed capture's declaration of what ran and how it was de-identified.
+pub const PROVENANCE: &str = "provenance.json";
+/// A raw capture's [`CaptureRecord`].
+pub const CAPTURE_RECORD: &str = "capture.json";
+
+/// The recorder's (`capture_fixture`) options, as its callers spell them; each
+/// does what the recorder's `Options` field of its name says.
+pub mod recorder_flag {
+    /// `Options::out`.
+    pub const OUT: &str = "--out";
+    /// `Options::tee`.
+    pub const TEE: &str = "--tee";
+    /// `Options::within`.
+    pub const WITHIN: &str = "--within";
+    /// `Options::env`.
+    pub const ENV: &str = "--env";
+}
+
+/// What only the recorder knows about a raw (`--out`) capture.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureRecord {
+    /// The workspace the CLI ran in, canonicalized.
+    pub workspace: PathBuf,
+    /// The CLI the recorder drove.
+    pub cli: String,
+    /// Its `--version`.
+    pub version: String,
+    /// Its exit code; `None` when a signal ended it.
+    pub exit_code: Option<i32>,
 }
 
 /// Module dirs whose name is NOT the registered source id.
@@ -126,7 +168,7 @@ pub fn captures(root: &Path) -> Vec<Capture> {
             continue;
         }
         let subs = dirs(&fixtures);
-        if fixtures.join("provenance.json").is_file() || subs.is_empty() {
+        if fixtures.join(PROVENANCE).is_file() || subs.is_empty() {
             out.push(Capture {
                 dir: fixtures,
                 source: source_id(&module_name),

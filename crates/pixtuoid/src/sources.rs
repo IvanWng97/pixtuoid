@@ -1019,7 +1019,6 @@ mod tests {
         host: None,
         #[cfg(feature = "upstream")]
         upstream: &[],
-        #[cfg(feature = "upstream")]
         registers: Vec::new,
     };
 

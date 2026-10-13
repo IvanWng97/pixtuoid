@@ -1,0 +1,12 @@
+{
+  "fixtures": [
+    {
+      "match": { "hasToolResult": false },
+      "response": { "toolCalls": [ { "name": "Read", "arguments": { "file_path": "{workspace}/NOTE.txt" } } ] }
+    },
+    {
+      "match": { "hasToolResult": true },
+      "response": { "content": "pong" }
+    }
+  ]
+}

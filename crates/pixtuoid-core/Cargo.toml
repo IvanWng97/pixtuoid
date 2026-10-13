@@ -106,3 +106,7 @@ harness = false
 [[example]]
 name = "capture_fixture"
 test = true
+
+[[example]]
+name = "hermetic"
+test = true

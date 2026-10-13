@@ -44,14 +44,17 @@ mod recorder {
     const DEFAULT_PROMPT: &str =
         "Read NOTE.txt, then list this directory, then read NOTE.txt again.";
 
-    /// The workspace path is FIXED and generic on purpose: every payload embeds its
-    /// own cwd, the decoders read it, so the strip keeps it — capturing somewhere
-    /// already generic is what keeps a per-run path out of the bytes.
-    const WORKSPACE: &str = "/tmp/pixtuoid-capture/proj";
+    use pixtuoid_core::harness::CAPTURE_WORKSPACE as WORKSPACE;
+    use pixtuoid_core::harness::recorder_flag::{ENV, OUT, TEE, WITHIN};
+    use pixtuoid_core::harness::{CAPTURE_RECORD, CaptureRecord, HOOK_PAYLOADS, PROVENANCE};
 
     /// Where a driver names the CLI it drives, a command or the path to its
     /// binary, for the recorder to ask its `--version`.
     const CLI_ENV: &str = "PIXTUOID_CAPTURE_CLI";
+
+    /// Where the recorder names the source's registry `verified_version`, for a
+    /// driver that installs its CLI: a capture must anchor that version.
+    const VERSION_ENV: &str = "PIXTUOID_CAPTURE_VERSION";
 
     /// A hook can still be in flight when the CLI's own process exits, so the wait
     /// is measured from the LAST PAYLOAD rather than from that exit.
@@ -59,14 +62,90 @@ mod recorder {
     const QUIET_ROUNDS: u32 = 4;
     const MAX_ROUNDS: u32 = 40;
 
+    /// A hermetic run's overrides: where the capture goes, and what the harvest
+    /// and the CLI may see.
+    #[derive(Debug, Default, PartialEq)]
+    struct Options {
+        /// Write the RAW capture here: not stripped, no provenance, no PII scan.
+        /// The strip blanks what the decoder under test does not read, which is
+        /// exactly where a renamed upstream field lands, so drift evidence must
+        /// keep it; these bytes are never committed.
+        out: Option<PathBuf>,
+        /// Forward each payload, as received, to this socket: a headless pixtuoid
+        /// renders the same run the recorder records.
+        tee: Option<PathBuf>,
+        /// Refuse a harvest root outside this directory, a sandbox the caller
+        /// pointed every home into: a resolver that slipped would otherwise
+        /// harvest the operator's own transcripts.
+        within: Option<PathBuf>,
+        /// Set on the CLI after the agent-env scrub, which would strip a
+        /// caller's own `CLAUDE_CODE_*` opt-outs with the agent's.
+        env: Vec<(String, String)>,
+    }
+
+    /// Leading option pairs, each a [`pixtuoid_core::harness::recorder_flag`]
+    /// and its value, then the positionals.
+    fn parse_options(mut args: Vec<String>) -> Result<(Options, Vec<String>), String> {
+        let mut options = Options::default();
+        // The flag's value, taking the pair off the front of `args`.
+        let take = |args: &mut Vec<String>, flag: &str| {
+            if args.len() < 2 {
+                return Err(format!("{flag} takes a value"));
+            }
+            args.remove(0);
+            Ok(args.remove(0))
+        };
+        while let Some(flag) = args.first().cloned() {
+            match flag.as_str() {
+                OUT => options.out = Some(PathBuf::from(take(&mut args, OUT)?)),
+                TEE => options.tee = Some(PathBuf::from(take(&mut args, TEE)?)),
+                WITHIN => options.within = Some(PathBuf::from(take(&mut args, WITHIN)?)),
+                ENV => {
+                    let value = take(&mut args, ENV)?;
+                    let (k, v) = value
+                        .split_once('=')
+                        .ok_or_else(|| format!("{ENV} takes KEY=VALUE, got {value:?}"))?;
+                    options.env.push((k.to_string(), v.to_string()));
+                }
+                _ => break,
+            }
+        }
+        Ok((options, args))
+    }
+
+    /// Why `root` may not be harvested from inside `within`, if it may not.
+    /// Lexical: every home the caller set is a join under `within`.
+    fn harvest_root_refusal(root: Option<&Path>, within: &Path) -> Option<String> {
+        let root = root?;
+        let escapes = root
+            .components()
+            .any(|c| c == std::path::Component::ParentDir);
+        (escapes || !root.starts_with(within)).then(|| {
+            format!(
+                "the harvest root {} is outside {}: a home the sandbox did not set",
+                root.display(),
+                within.display()
+            )
+        })
+    }
+
     pub(crate) fn main() -> std::io::Result<()> {
         let args: Vec<String> = std::env::args().skip(1).collect();
         if args.first().map(String::as_str) == Some("--strip-corpus") {
             return strip_corpus(&sources_root());
         }
+        let (options, args) = match parse_options(args) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
+        };
         if args.len() < 3 {
             eprintln!(
-                "usage: capture_fixture <source-id> <scenario> <cmd...>   ('{{prompt}}' expands)\n       \
+                "usage: capture_fixture [{OUT} <dir>] [{TEE} <socket>] [{WITHIN} <dir>] [{ENV} K=V]... \
+                 <source-id> <scenario> <cmd...>   \
+                 ('{{prompt}}' expands)\n       \
                  capture_fixture --strip-corpus   (strip every committed capture in place)"
             );
             std::process::exit(2);
@@ -80,55 +159,88 @@ mod recorder {
             .map(|a| a.replace("{prompt}", &prompt))
             .collect();
 
-        if registry::descriptor_for(&source).is_none() {
+        let Some(descriptor) = registry::descriptor_for(&source) else {
             let known: Vec<&str> = registry::registered_source_names().collect();
             eprintln!("no source {source:?} — registered: {}", known.join(", "));
             std::process::exit(2);
-        }
+        };
 
-        let dest = scenario_dest(&sources_root(), &source, &scenario);
+        let dest = options
+            .out
+            .clone()
+            .unwrap_or_else(|| scenario_dest(&sources_root(), &source, &scenario));
         let root = resolved_source_root(&source);
+        if let Some(why) = options
+            .within
+            .as_deref()
+            .and_then(|w| harvest_root_refusal(root.as_deref(), w))
+        {
+            eprintln!("{why}");
+            std::process::exit(2);
+        }
 
         let workspace = prepare_workspace()?;
         let sandbox = tempfile::tempdir()?;
         let sock = sandbox.path().join("capture.sock");
-        let listener = Listener::bind(&sock)?;
+        let listener = Listener::bind(&sock, options.tee.clone())?;
 
         println!("capturing {source}/{scenario} — one real model turn");
         let started = SystemTime::now();
-        let status = run_cli(&cmd, &workspace, &sock)?;
+        let status = run_cli(
+            &cmd,
+            &workspace,
+            &sock,
+            descriptor.verified_version,
+            &options.env,
+        )?;
         listener.settle();
         let payloads = listener.take();
 
         std::fs::create_dir_all(&dest)?;
         let mut wrote: Vec<PathBuf> = Vec::new();
 
+        // A source can be BOTH: CC's tool run is in the transcript while its
+        // permission gate is a hook event, so the two are harvested together.
         if let Some(root) = root.as_deref() {
-            // A source can be BOTH: CC's tool run is in the transcript while its
-            // permission gate is a hook event, so the two are harvested together.
             let candidates = pixtuoid_core::harness::transcripts_under(&source, root);
-            match newest_born_after(&candidates, started) {
-                Some(fresh) => wrote.push(place_transcript(&fresh, &candidates, &dest)?),
-                None if payloads.is_empty() => {
-                    eprintln!(
-                        "captured nothing — no transcript created under {} and no hook fired; \
-                         did the turn run?",
-                        root.display()
-                    );
-                    std::process::exit(1);
-                }
-                None => {}
+            if let Some(fresh) = newest_born_after(&candidates, started) {
+                wrote.push(place_transcript(&fresh, &candidates, &dest)?);
             }
         }
         if !payloads.is_empty() {
             wrote.push(write_payloads(&payloads, &dest)?);
         }
+
+        let named = std::fs::read_to_string(named_cli(&sock)).ok();
+        let (cli, version) = identity(&cmd[0], named.as_deref(), probe_version);
+        if options.out.is_some() {
+            // An empty raw capture is still recorded: a hook that never fired
+            // is evidence about the run, which a missing record would hide.
+            let record = CaptureRecord {
+                workspace: std::fs::canonicalize(&workspace).unwrap_or(workspace),
+                cli,
+                version,
+                exit_code: status.code(),
+            };
+            std::fs::write(
+                dest.join(CAPTURE_RECORD),
+                format!("{}\n", serde_json::to_string_pretty(&record)?),
+            )?;
+            for p in &wrote {
+                println!("wrote raw {} ({} lines)", p.display(), count_lines(p));
+            }
+            return Ok(());
+        }
         if wrote.is_empty() {
-            eprintln!("captured nothing — the CLI fired no hook and wrote no transcript");
+            eprintln!(
+                "captured nothing — no hook fired and no transcript was created{}; did the turn run?",
+                root.map(|r| format!(" under {}", r.display()))
+                    .unwrap_or_default()
+            );
             std::process::exit(1);
         }
 
-        let deidentified = match reads::exemption(&dest.join("provenance.json")) {
+        let deidentified = match reads::exemption(&dest.join(PROVENANCE)) {
             Some(why) => Deidentified::Exempt(why),
             None => {
                 let strip = reads::strip_unread(&source, &wrote)?;
@@ -136,8 +248,6 @@ mod recorder {
                 Deidentified::Stripped(strip.blanked)
             }
         };
-        let named = std::fs::read_to_string(named_cli(&sock)).ok();
-        let (cli, version) = identity(&cmd[0], named.as_deref(), probe_version);
         write_provenance(
             &dest,
             (&cli, &version),
@@ -246,17 +356,22 @@ mod recorder {
     }
 
     impl Listener {
-        fn bind(sock: &Path) -> std::io::Result<Self> {
+        fn bind(sock: &Path, tee: Option<PathBuf>) -> std::io::Result<Self> {
             let listener = UnixListener::bind(sock)?;
             let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
             let sink = Arc::clone(&lines);
+            let tee = Arc::new(tee);
             std::thread::spawn(move || {
                 for stream in listener.incoming() {
                     let Ok(mut stream) = stream else { continue };
                     let sink = Arc::clone(&sink);
+                    let tee = Arc::clone(&tee);
                     std::thread::spawn(move || {
                         let mut buf = String::new();
                         if stream.read_to_string(&mut buf).is_ok() && !buf.trim().is_empty() {
+                            if let Some(to) = tee.as_deref() {
+                                forward(to, &buf);
+                            }
                             sink.lock().expect("listener sink").push(buf);
                         }
                     });
@@ -285,6 +400,15 @@ mod recorder {
         }
     }
 
+    /// One connection per payload, as the shim itself sends. A tee that cannot
+    /// connect is the headless renderer's failure, left in its scene log; the
+    /// recording goes on.
+    fn forward(to: &Path, payload: &str) {
+        if let Ok(mut s) = std::os::unix::net::UnixStream::connect(to) {
+            let _ = s.write_all(payload.as_bytes());
+        }
+    }
+
     fn prepare_workspace() -> std::io::Result<PathBuf> {
         let ws = PathBuf::from(WORKSPACE);
         let base = ws.parent().expect("WORKSPACE has a parent");
@@ -303,6 +427,15 @@ mod recorder {
         if let Some(seed) = std::env::var_os("CAPTURE_SEED") {
             copy_tree(Path::new(&seed), &ws)?;
         }
+        init_repo(&ws)?;
+        Ok(ws)
+    }
+
+    /// Make `ws` its own repository, every step of which must succeed: that
+    /// stops codex's project-root walk and opencode's AGENTS.md walk there, so
+    /// a failed `git init` would let a repository above it in; the walks that
+    /// reach `/` are each profile's `ancestor_config`.
+    fn init_repo(ws: &Path) -> std::io::Result<()> {
         for cmd in [
             vec!["init", "-q"],
             vec!["add", "-A"],
@@ -316,13 +449,29 @@ mod recorder {
                 "init",
             ],
         ] {
-            let _ = std::process::Command::new("git")
-                .arg("-C")
-                .arg(&ws)
-                .args(cmd)
-                .status();
+            git_in(ws, &cmd)?;
         }
-        Ok(ws)
+        Ok(())
+    }
+
+    /// One git step, reading none of the operator's config: their hooks,
+    /// templates or signing would otherwise decide whether the workspace is made
+    /// (git(1): `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` set to `/dev/null`).
+    fn git_in(ws: &Path, args: &[&str]) -> std::io::Result<()> {
+        let status = std::process::Command::new("git")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .arg("-C")
+            .arg(ws)
+            .args(args)
+            .status()?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(format!(
+                "git {args:?} exited {status}"
+            )))
+        }
     }
 
     /// A per-CLI ask rule (CC's `.claude/settings.json`, opencode's
@@ -356,6 +505,8 @@ mod recorder {
         cmd: &[String],
         ws: &Path,
         sock: &Path,
+        verified: &str,
+        env: &[(String, String)],
     ) -> std::io::Result<std::process::ExitStatus> {
         let mut c = std::process::Command::new(&cmd[0]);
         c.args(&cmd[1..])
@@ -366,15 +517,16 @@ mod recorder {
         if let Some(dir) = sock.parent() {
             c.env("TUIDRIVE_LOG", dir.join("tuidrive.log"));
         }
-        c.env(CLI_ENV, named_cli(sock));
+        c.env(CLI_ENV, named_cli(sock)).env(VERSION_ENV, verified);
         for k in agent_env_names(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok())) {
             c.env_remove(k);
         }
+        c.envs(env.iter().map(|(k, v)| (k, v)));
         c.status()
     }
 
     fn write_payloads(payloads: &[String], dest: &Path) -> std::io::Result<PathBuf> {
-        let out = no_clobber(dest.join("hook-payloads.jsonl"));
+        let out = no_clobber(dest.join(HOOK_PAYLOADS));
         let mut f = std::fs::File::create(&out)?;
         for p in payloads {
             // The shim already stamped `_pixtuoid_source`.
@@ -447,7 +599,7 @@ mod recorder {
                 }
             }
         }
-        let out = no_clobber(dest.join("provenance.json"));
+        let out = no_clobber(dest.join(PROVENANCE));
         std::fs::write(&out, format!("{}\n", serde_json::to_string_pretty(&prov)?))?;
         // Loud, because the record just written is unusable.
         if version == "unknown" {
@@ -635,7 +787,7 @@ mod recorder {
     /// scenario subdirectory, so it cannot reach here.
     fn scenario_dest(sources: &Path, source: &str, scenario: &str) -> PathBuf {
         let owned = sources.join(source).join("fixtures").join(scenario);
-        if owned.join("provenance.json").is_file() {
+        if owned.join(PROVENANCE).is_file() {
             return owned;
         }
         sources.join("fixtures").join(source).join(scenario)
@@ -644,6 +796,129 @@ mod recorder {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn the_workspace_becomes_its_own_repository_or_fails() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let ws = d.path().join("ws");
+            std::fs::create_dir(&ws).expect("mkdir");
+            std::fs::write(ws.join("NOTE.txt"), "pong\n").expect("write");
+            // An operator config whose signing and commit-msg hook both fail.
+            let hooks = d.path().join("hooks");
+            std::fs::create_dir(&hooks).expect("mkdir");
+            let hook = hooks.join("commit-msg");
+            std::fs::write(&hook, "#!/bin/sh\nexit 1\n").expect("hook");
+            std::fs::set_permissions(
+                &hook,
+                <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755),
+            )
+            .expect("chmod");
+            let config = d.path().join("gitconfig");
+            std::fs::write(
+                &config,
+                format!(
+                    "[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n\
+                     [core]\n\thooksPath = {}\n",
+                    hooks.display()
+                ),
+            )
+            .expect("config");
+            let made = temp_env::with_vars(
+                [
+                    ("GIT_CONFIG_GLOBAL", Some(config.as_os_str())),
+                    ("GIT_CONFIG_SYSTEM", Some(config.as_os_str())),
+                ],
+                || init_repo(&ws),
+            );
+            assert!(made.is_ok(), "{made:?}");
+            assert!(git_in(&ws, &["rev-parse", "--verify", "-q", "HEAD"]).is_ok());
+            let file = d.path().join("a-file");
+            std::fs::write(&file, "").expect("write");
+            assert!(init_repo(&file).is_err(), "a failed step fails it");
+        }
+
+        #[test]
+        fn leading_option_pairs_are_options_and_the_rest_is_positional() {
+            let args = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+            let (o, rest) = parse_options(args(&[
+                "--tee", "/s", "--out", "/o", "--within", "/w", "--env", "A=b=c", "codex",
+                "tool-run", "codex",
+            ]))
+            .expect("parse");
+            assert_eq!(o.out, Some(PathBuf::from("/o")));
+            assert_eq!(o.tee, Some(PathBuf::from("/s")));
+            assert_eq!(o.within, Some(PathBuf::from("/w")));
+            assert_eq!(o.env, [("A".to_string(), "b=c".to_string())]);
+            assert_eq!(rest, args(&["codex", "tool-run", "codex"]));
+            assert!(
+                parse_options(args(&["--env", "NOEQUALS", "codex"])).is_err(),
+                "an env pair without its value"
+            );
+            let (o, rest) = parse_options(args(&["--other", "x=y", "codex"])).expect("parse");
+            assert_eq!(o, Options::default(), "an unknown flag ends the options");
+            assert_eq!(rest, args(&["--other", "x=y", "codex"]));
+            let (o, rest) = parse_options(args(&["codex", "tool-run", "--out"])).expect("parse");
+            assert_eq!(
+                o,
+                Options::default(),
+                "a flag after the positionals is the CLI's"
+            );
+            assert_eq!(rest.len(), 3);
+            assert!(
+                parse_options(args(&["--out"])).is_err(),
+                "a flag without its path"
+            );
+        }
+
+        #[test]
+        fn a_harvest_root_outside_the_sandbox_is_refused() {
+            let within = Path::new("/sandbox");
+            assert_eq!(harvest_root_refusal(None, within), None);
+            assert_eq!(
+                harvest_root_refusal(
+                    Some(Path::new("/sandbox/homes/CODEX_HOME/sessions")),
+                    within
+                ),
+                None
+            );
+            assert!(
+                harvest_root_refusal(Some(Path::new("/Users/me/.claude/projects")), within)
+                    .is_some()
+            );
+            assert!(
+                harvest_root_refusal(Some(Path::new("/sandbox/../Users/me/.codex")), within)
+                    .is_some(),
+                "a lexical prefix that climbs out"
+            );
+            assert!(
+                harvest_root_refusal(Some(Path::new("/sandboxed")), within).is_some(),
+                "a sibling sharing the prefix's text"
+            );
+        }
+
+        #[test]
+        fn the_listener_forwards_each_payload_to_the_tee_as_received() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let tee = d.path().join("tee.sock");
+            let downstream = UnixListener::bind(&tee).expect("bind tee");
+            let sock = d.path().join("capture.sock");
+            let listener = Listener::bind(&sock, Some(tee)).expect("bind");
+            let payload = "{\"hook_event_name\":\"SessionStart\"}\n";
+            std::os::unix::net::UnixStream::connect(&sock)
+                .expect("connect")
+                .write_all(payload.as_bytes())
+                .expect("send");
+            let (mut got, _) = downstream.accept().expect("forwarded");
+            let mut buf = String::new();
+            got.read_to_string(&mut buf).expect("read");
+            assert_eq!(buf, payload);
+            listener.settle();
+            assert_eq!(
+                listener.take(),
+                vec![payload.to_string()],
+                "recorded as well"
+            );
+        }
 
         #[test]
         fn the_not_json_notice_names_the_file_and_the_parse_error() {
@@ -922,12 +1197,27 @@ mod recorder {
         }
 
         #[test]
-        fn a_driver_names_its_cli_where_the_recorder_reads_it() {
+        fn a_driver_gets_the_verified_version_and_its_callers_env_and_names_its_cli() {
             let sandbox = tempfile::tempdir().expect("sandbox");
             let ws = tempfile::tempdir().expect("workspace");
             let sock = sandbox.path().join("capture.sock");
-            let cmd = ["sh", "-c", &format!(r#"echo dsh >"${CLI_ENV}""#)].map(String::from);
-            assert!(run_cli(&cmd, ws.path(), &sock).expect("runs").success());
+            // An inherited agent var is scrubbed; a caller's `CLAUDE_CODE_*`
+            // opt-out outlives the scrub.
+            let script = format!(
+                r#"test "${VERSION_ENV}" = 1.0.0 && test -z "$CLAUDE_CODE_CHILD_SESSION" \
+                   && test "$CLAUDE_CODE_PROBE" = 1 && echo dsh >"${CLI_ENV}""#
+            );
+            let cmd = ["sh", "-c", &script].map(String::from);
+            let env = [("CLAUDE_CODE_PROBE".to_string(), "1".to_string())];
+            // The host holds the probe too, so only scrub-then-set yields its 1.
+            let ran = temp_env::with_vars(
+                [
+                    ("CLAUDE_CODE_CHILD_SESSION", Some("1")),
+                    ("CLAUDE_CODE_PROBE", Some("0")),
+                ],
+                || run_cli(&cmd, ws.path(), &sock, "1.0.0", &env).expect("runs"),
+            );
+            assert!(ran.success());
             assert_eq!(
                 std::fs::read_to_string(named_cli(&sock)).ok().as_deref(),
                 Some("dsh\n")

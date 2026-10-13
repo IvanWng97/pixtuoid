@@ -33,7 +33,7 @@ pub(crate) const PLUGIN_TEMPLATE: &str = include_str!("dsh_plugin.mjs");
 /// subscriptions and the `case "…"` labels of its `session/event` switch,
 /// scanned from the template so a hand-kept list can't claim coverage the code
 /// doesn't have.
-#[cfg(feature = "upstream")]
+#[cfg(any(test, feature = "upstream"))]
 pub(crate) fn plugin_events() -> Vec<&'static str> {
     let mut names = Vec::new();
     for marker in [r#"ctx.on(""#, r#"case ""#] {

@@ -143,7 +143,7 @@ fn sibling_of(file: &Path) -> PathBuf {
 /// If a provenance or capture file cannot be read, parsed or rewritten.
 pub fn strip_corpus(root: &Path, mut report: impl FnMut(&Capture, &Strip)) -> std::io::Result<()> {
     for capture in captures(root) {
-        let prov = capture.dir.join("provenance.json");
+        let prov = capture.dir.join(crate::harness::PROVENANCE);
         let mut record: Value = serde_json::from_str(&std::fs::read_to_string(&prov)?)?;
         if record["origin"] != "recorded" || record["deidentified"]["method"] == "none" {
             continue;
@@ -170,11 +170,11 @@ pub fn strip_corpus(root: &Path, mut report: impl FnMut(&Capture, &Strip)) -> st
     Ok(())
 }
 
-/// A hook envelope file, by the name the recorder gives it.
+/// A hook envelope file, by the name the recorder gives it, `.new` included.
 pub(crate) fn is_hook_envelope(file: &Path) -> bool {
     file.file_name()
         .and_then(|n| n.to_str())
-        .is_some_and(|n| n.starts_with("hook-payloads"))
+        .is_some_and(|n| n.starts_with(crate::harness::HOOK_PAYLOADS))
 }
 
 fn drive_for(source: &str, file: &Path) -> Option<Drive> {
