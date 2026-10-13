@@ -142,8 +142,9 @@ pub struct SourceDescriptor {
     /// Exactly 2 chars; applied at `SessionStart` and reinforced idempotently by
     /// the JSONL label derivers.
     pub label_prefix: &'static str,
-    /// The CLI version this build's decoder + fixtures were last verified
-    /// against. `"unknown"`, NOT `""`, where we have no fixed anchor —
+    /// The CLI release this build's decoder + fixtures were last verified
+    /// against, exactly as published (prerelease included): the hermetic tier
+    /// installs it. `"unknown"`, NOT `""`, where we have no fixed anchor —
     /// `pixtuoid doctor` only flags SKEW when this parses to a version.
     /// Pinned to the highest recorded capture's `version` banner by
     /// `a_recorded_capture_anchors_its_sources_verified_version`, so a
@@ -589,9 +590,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
 const DSH: SourceDescriptor = SourceDescriptor {
     name: dsh::SOURCE_NAME,
     label_prefix: "ds",
-    // dsh's banner carries a prerelease suffix (`-rc.N`); `doctor::parse_version`
-    // keeps only the dotted digit run, so the suffix never reaches this pin.
-    verified_version: "0.2.0",
+    verified_version: "0.2.0-rc.2",
     version_probe: Some(&["dsh", "--version"]),
     // `DSH_HOME` is honored INSTALLER-side (the plugin file + patch row live
     // under it); hook-only, so core resolves no root to relocate.

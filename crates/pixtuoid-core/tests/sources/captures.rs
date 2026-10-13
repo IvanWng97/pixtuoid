@@ -746,8 +746,9 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
             })
             .expect("non-empty")
             .1;
+        // Doctor's rule on both sides: a prerelease pin keeps its dotted run.
         assert!(
-            banner_version(highest) == Some(d.verified_version),
+            banner_version(highest) == banner_version(d.verified_version),
             "{source}: `verified_version` is {:?}, but the highest recorded capture \
              ({highest:?}) pins {:?} — the newest wire we hold is the one that counts",
             d.verified_version,
