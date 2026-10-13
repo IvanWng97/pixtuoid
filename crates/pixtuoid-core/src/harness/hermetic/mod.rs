@@ -18,6 +18,9 @@ pub mod verify;
 /// accepts any, and a real provider must refuse it.
 pub const DUMMY_KEY: &str = "hermetic-dummy-key";
 
+/// What a `system_config` path spells the operator's user name as.
+pub const USER_PLACEHOLDER: &str = "{user}";
+
 /// How users install the CLI, so the tier runs the artifact they run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Package {
@@ -79,8 +82,8 @@ pub struct Profile {
     /// Homes the registry row does not name, each pointed into the sandbox.
     pub homes: &'static [&'static str],
     /// Fixed system paths the CLI reads policy or config from, which no home
-    /// redirects: a run on a machine that has one is not hermetic. `{user}`
-    /// is the operator's user name. A macOS managed-preferences domain whose
+    /// redirects: a run on a machine that has one is not hermetic.
+    /// [`USER_PLACEHOLDER`] is the operator's user name. A macOS managed-preferences domain whose
     /// plist path upstream does not fix is not checked.
     pub system_config: &'static [&'static str],
     /// Names the CLI reads from the workspace's ancestor directories, which
@@ -495,6 +498,14 @@ mod tests {
             // would want a drive on Windows.
             for path in p.system_config {
                 assert!(path.starts_with('/'), "{}: {path}", p.source);
+                // A misspelled placeholder would be checked as a literal path
+                // that never exists.
+                assert!(
+                    path.match_indices('{')
+                        .all(|(i, _)| path[i..].starts_with(USER_PLACEHOLDER)),
+                    "{}: {path}",
+                    p.source
+                );
             }
             for name in p.ancestor_config {
                 assert_eq!(
