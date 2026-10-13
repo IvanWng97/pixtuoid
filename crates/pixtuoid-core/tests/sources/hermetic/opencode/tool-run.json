@@ -9,7 +9,7 @@
       "response": { "toolCalls": [ { "name": "read", "arguments": { "path": "NOTE.txt" } } ] }
     },
     {
-      "match": { "hasToolResult": true },
+      "match": { "toolResultContains": "{note}" },
       "response": { "content": "pong" }
     }
   ]

@@ -48,7 +48,7 @@ mod recorder {
     use pixtuoid_core::harness::hermetic::{self, MANIFEST, Manifest};
     use pixtuoid_core::harness::recorder_flag::{ENV, OUT, PROMOTE, TEE, WITHIN};
     use pixtuoid_core::harness::{
-        CAPTURE_RECORD, CaptureRecord, HOOK_PAYLOADS, PROVENANCE, jsonl_files_under,
+        CAPTURE_NOTE, CAPTURE_RECORD, CaptureRecord, HOOK_PAYLOADS, PROVENANCE, jsonl_files_under,
     };
 
     /// Where a driver names the CLI it drives, a command or the path to its
@@ -498,7 +498,7 @@ mod recorder {
         }
         let _ = std::fs::remove_dir_all(base);
         std::fs::create_dir_all(&ws)?;
-        std::fs::write(ws.join("NOTE.txt"), "pong\n")?;
+        std::fs::write(ws.join("NOTE.txt"), format!("{CAPTURE_NOTE}\n"))?;
         if let Some(seed) = std::env::var_os("CAPTURE_SEED") {
             copy_tree(Path::new(&seed), &ws)?;
         }
@@ -1010,7 +1010,7 @@ mod recorder {
             let d = tempfile::tempdir().expect("tempdir");
             let ws = d.path().join("ws");
             std::fs::create_dir(&ws).expect("mkdir");
-            std::fs::write(ws.join("NOTE.txt"), "pong\n").expect("write");
+            std::fs::write(ws.join("NOTE.txt"), format!("{CAPTURE_NOTE}\n")).expect("write");
             // An operator config whose signing and commit-msg hook both fail.
             let hooks = d.path().join("hooks");
             std::fs::create_dir(&hooks).expect("mkdir");

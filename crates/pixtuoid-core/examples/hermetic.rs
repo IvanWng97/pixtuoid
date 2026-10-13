@@ -39,10 +39,12 @@ mod run {
 
     use pixtuoid_core::harness::hermetic::verify::{self, Label, Verdict};
     use pixtuoid_core::harness::hermetic::{
-        self, DUMMY_KEY, MANIFEST, Manifest, NOT_HERMETIC, PROFILES, Package, Profile, SCENE_LOG,
-        Scenario, USER_PLACEHOLDER,
+        self, DUMMY_KEY, MANIFEST, Manifest, NOT_HERMETIC, NOTE_PLACEHOLDER, PROFILES, Package,
+        Profile, SCENE_LOG, Scenario, USER_PLACEHOLDER,
     };
-    use pixtuoid_core::harness::{CAPTURE_RECORD, CAPTURE_WORKSPACE, CaptureRecord, recorder_flag};
+    use pixtuoid_core::harness::{
+        CAPTURE_NOTE, CAPTURE_RECORD, CAPTURE_WORKSPACE, CaptureRecord, recorder_flag,
+    };
 
     /// How long a server gets to come up before the run gives up.
     const BOOT: Duration = Duration::from_secs(60);
@@ -763,8 +765,9 @@ mod run {
         args
     }
 
-    /// The scenario's script with `{workspace}` expanded: a CLI that takes an
-    /// absolute path gets the one the recorder runs it in.
+    /// The scenario's script with `{workspace}` and [`NOTE_PLACEHOLDER`]
+    /// expanded: a CLI that takes an absolute path gets the one the recorder runs
+    /// it in, and a reply waits for the note it reads.
     fn render_script(p: &Profile, scenario: &Scenario, into: &Path) -> std::io::Result<PathBuf> {
         let text = std::fs::read_to_string(scenario.script(p.source))?;
         let workspace = Path::new(CAPTURE_WORKSPACE);
@@ -773,7 +776,8 @@ mod run {
         let out = into.join("script.json");
         std::fs::write(
             &out,
-            text.replace("{workspace}", &workspace.to_string_lossy()),
+            text.replace("{workspace}", &workspace.to_string_lossy())
+                .replace(NOTE_PLACEHOLDER, CAPTURE_NOTE),
         )?;
         Ok(out)
     }

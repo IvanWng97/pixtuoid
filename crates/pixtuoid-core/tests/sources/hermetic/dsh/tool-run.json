@@ -9,7 +9,7 @@
       "response": { "reasoning": "Read the note.", "toolCalls": [ { "name": "read", "arguments": { "file_path": "NOTE.txt" } } ], "usage": { "input_tokens": 12, "output_tokens": 7 } }
     },
     {
-      "match": { "hasToolResult": true },
+      "match": { "toolResultContains": "{note}" },
       "response": { "content": "pong", "usage": { "input_tokens": 12, "output_tokens": 7 } }
     }
   ]
