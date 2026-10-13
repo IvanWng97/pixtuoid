@@ -193,13 +193,12 @@ mod run {
                     Ok(manifest) => (Some(manifest.capture.version), verify::verify(&dir)?),
                     Err(e) => (None, Verdict::new(vec![(Label::Blocked, e.to_string())])),
                 };
-                if verdict.label() != Label::Blocked {
+                if verdict.judged() {
                     ran.push(dir);
                 }
                 judged.push(Judged::new(key, version, verdict));
             }
-            // A selection of one scenario skips what spans them.
-            if args.scenario.is_none() && !ran.is_empty() {
+            if spans(args.scenario.as_deref(), &ran) {
                 let key = format!("{} (every scenario)", p.source);
                 println!("== {key}");
                 let verdict = verify::verify_source(p.source, &ran)?;
@@ -212,6 +211,12 @@ mod run {
         Ok(judged.iter().all(|j| j.verdict.label() == Label::Pass))
     }
 
+    /// Whether a source's runs are judged together: not for a selection of one
+    /// scenario, which would fail on a field another carries, nor over no run.
+    fn spans(scenario: Option<&str>, judged: &[PathBuf]) -> bool {
+        scenario.is_none() && !judged.is_empty()
+    }
+
     /// The run's report, beside the runs; its H1 is the tracking issue's title.
     const REPORT: &str = "report.md";
 
@@ -219,7 +224,7 @@ mod run {
         key: String,
         /// The CLI's `--version`, for a scenario's run.
         version: Option<String>,
-        /// Whether anything was judged: Blocked judges nothing.
+        /// Whether anything was judged (`Verdict::judged`).
         ran: bool,
         verdict: Verdict,
     }
@@ -230,7 +235,7 @@ mod run {
             Self {
                 key,
                 version,
-                ran: verdict.label() != Label::Blocked,
+                ran: verdict.judged(),
                 verdict,
             }
         }
@@ -845,6 +850,14 @@ mod run {
             assert!(pair("--tee", "/sb/pix.sock"), "{args:?}");
             let tail: Vec<OsString> = p.invocation.iter().map(OsString::from).collect();
             assert!(args.ends_with(&tail), "{args:?}");
+        }
+
+        #[test]
+        fn a_sources_runs_are_judged_together_only_unselected_and_judged() {
+            let one = [PathBuf::from("/runs/x")];
+            assert!(spans(None, &one));
+            assert!(!spans(Some("tool-run"), &one));
+            assert!(!spans(None, &[]));
         }
 
         #[test]

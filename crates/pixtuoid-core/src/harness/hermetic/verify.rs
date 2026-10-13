@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::{MANIFEST, Manifest, Profile, SCENE_LOG, Scenario, Shape, profile};
 use crate::AgentEvent;
 use crate::harness::captures::jsonl_files_under;
-use crate::harness::reads::{child_pointer, is_blank, is_hook_envelope, strips};
+use crate::harness::reads::{child_pointer, is_blank, is_hook_envelope, is_shim_stamp, strips};
 use crate::harness::{Drive, Driven, HOOK_PAYLOADS, PROVENANCE, Reach, captures};
 
 /// The tracing target every drift breadcrumb rides (`source::drift::TARGET`).
@@ -57,6 +57,12 @@ impl Verdict {
     /// Every finding, worst first.
     pub fn findings(&self) -> &[(Label, String)] {
         &self.findings
+    }
+
+    /// Whether the run was judged: a Blocked finding returns before any check,
+    /// though a Script found first may outrank it.
+    pub fn judged(&self) -> bool {
+        !self.findings.iter().any(|f| f.0 == Label::Blocked)
     }
 }
 
@@ -102,23 +108,20 @@ pub fn verify(dir: &Path) -> std::io::Result<Verdict> {
 pub fn verify_source(source: &str, dirs: &[PathBuf]) -> std::io::Result<Verdict> {
     let p = profile(source).ok_or_else(|| invalid(format!("{source}: not a profiled source")))?;
     let mut fired = BTreeSet::new();
-    let mut carried = Fields::new();
+    let mut carried = Fields::default();
     for dir in dirs {
         for file in jsonl_files_under(dir) {
-            for line in json_lines(&file)? {
+            for (i, line) in json_lines(&file)?.iter().enumerate() {
                 if is_hook_envelope(&file)
-                    && let Some(event) = (p.event_name)(&line)
+                    && let Some(event) = (p.event_name)(line)
                 {
                     fired.insert(event.to_owned());
                 }
-                carried
-                    .entry(kind_of(p, &file, &line))
-                    .or_default()
-                    .extend(leaves(&line));
+                carried.add(p, &file, i, line, true);
             }
         }
     }
-    let mut findings = Vec::new();
+    let mut findings = census(&committed_reads(p)?, &carried, p.not_yet_fields, source);
     for hook in p.not_yet {
         if fired.contains(*hook) {
             findings.push((
@@ -127,13 +130,28 @@ pub fn verify_source(source: &str, dirs: &[PathBuf]) -> std::io::Result<Verdict>
             ));
         }
     }
-    for (kind, paths) in committed_reads(p)? {
-        let Some(seen) = carried.get(&kind) else {
+    Ok(Verdict::new(findings))
+}
+
+/// The field census proper: each read field of a kind the runs produced must
+/// be carried, unless `owed`, and an owed one carried is Stale. A committed
+/// transcript line the strip left untyped has no kind to match: a head is
+/// matched as the head ([`HEAD`]), and any other line needs some run's
+/// transcript line to carry all of its read fields together.
+fn census(
+    reads: &Fields,
+    carried: &Fields,
+    owed: &[(&str, &str)],
+    source: &str,
+) -> Vec<(Label, String)> {
+    let mut findings = Vec::new();
+    for (kind, paths) in &reads.by_kind {
+        let Some(seen) = carried.by_kind.get(kind) else {
             continue;
         };
         for path in paths {
-            let owed = p.not_yet_fields.contains(&(kind.as_str(), path.as_str()));
-            match (seen.contains(&path), owed) {
+            let is_owed = owed.contains(&(kind.as_str(), path.as_str()));
+            match (seen.contains(path), is_owed) {
                 (true, true) => findings.push((
                     Label::Stale,
                     format!("{kind} {path} was carried: it leaves the profile's not_yet_fields"),
@@ -149,20 +167,83 @@ pub fn verify_source(source: &str, dirs: &[PathBuf]) -> std::io::Result<Verdict>
             }
         }
     }
-    Ok(Verdict::new(findings))
+    if carried.lines.is_empty() {
+        return findings;
+    }
+    for line in &reads.lines {
+        if !carried.lines.iter().any(|l| line.is_subset(l)) {
+            let paths: Vec<&str> = line.iter().map(String::as_str).collect();
+            findings.push((
+                Label::Fail,
+                format!(
+                    "a committed transcript line with no type reads {}, \
+                     and no run of {source} carried them in one line",
+                    paths.join(" ")
+                ),
+            ));
+        }
+    }
+    findings
 }
 
-/// The non-blank leaves of each kind of line, as JSON pointers with `*` for
-/// an array index.
-pub(crate) type Fields = BTreeMap<String, BTreeSet<String>>;
+/// The non-blank leaves a set of captures holds, for the census.
+#[derive(Debug, Default)]
+pub(crate) struct Fields {
+    /// Every leaf of each kind of line.
+    by_kind: BTreeMap<String, BTreeSet<String>>,
+    /// The leaves of each transcript line taken whole: every one of a run's,
+    /// or a committed capture's untyped ones.
+    lines: BTreeSet<BTreeSet<String>>,
+}
+
+impl Fields {
+    /// Add line `index` of `file`. A committed (`run == false`) transcript
+    /// line the strip left untyped has no kind a run's line could have: a head
+    /// goes to [`HEAD`], any other line to `lines`. A run's head goes to both
+    /// its kind and [`HEAD`].
+    fn add(&mut self, p: &Profile, file: &Path, index: usize, line: &Value, run: bool) {
+        let stamped = is_hook_envelope(file);
+        let leaves: BTreeSet<String> = leaves(line, stamped).into_iter().collect();
+        let kind = kind_of(p, file, line);
+        let untyped = !stamped && kind == TX;
+        if !stamped && index == 0 && (run || untyped) {
+            self.by_kind
+                .entry(HEAD.to_owned())
+                .or_default()
+                .extend(leaves.iter().cloned());
+        }
+        if run && !stamped || untyped && index > 0 {
+            self.lines.insert(leaves.clone());
+        }
+        if run || !untyped {
+            self.by_kind.entry(kind).or_default().extend(leaves);
+        }
+    }
+
+    /// Whether a line of `kind` carried `path`, an untyped transcript line's
+    /// included.
+    #[cfg(test)]
+    pub(crate) fn has(&self, kind: &str, path: &str) -> bool {
+        self.by_kind.get(kind).is_some_and(|p| p.contains(path))
+            || (kind == TX && self.lines.iter().any(|l| l.contains(path)))
+    }
+}
+
+/// A transcript line's kind prefix, and the whole kind of one whose `type`
+/// is blank.
+const TX: &str = "tx:";
+/// The kind of a transcript's first line, read by position where its `type`
+/// is not (codex's head carries the cwd a watcher registers by:
+/// `registry::cwd_extractor_for`).
+const HEAD: &str = "tx:#head";
 
 /// The fields a decoder reads in `p`'s committed captures: the recorder
 /// blanks every subtree no decoder reads (`reads::strip_unread`), so a
-/// stripped recording's non-blank leaves are exactly the read set. A capture
-/// not stripped (composed, or exempt) proves nothing about reads.
+/// stripped recording's non-blank leaves are exactly the read set, the
+/// shim's stamps aside. A capture the strip skips proves nothing about reads.
 pub(crate) fn committed_reads(p: &Profile) -> std::io::Result<Fields> {
     let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources");
-    let mut reads = Fields::new();
+    let mut reads = Fields::default();
     for capture in captures(&corpus) {
         if capture.source != p.source {
             continue;
@@ -173,11 +254,8 @@ pub(crate) fn committed_reads(p: &Profile) -> std::io::Result<Fields> {
             continue;
         }
         for file in capture.jsonl_files() {
-            for line in json_lines(&file)? {
-                reads
-                    .entry(kind_of(p, &file, &line))
-                    .or_default()
-                    .extend(leaves(&line));
+            for (i, line) in json_lines(&file)?.iter().enumerate() {
+                reads.add(p, &file, i, line, false);
             }
         }
     }
@@ -190,33 +268,36 @@ fn kind_of(p: &Profile, file: &Path, line: &Value) -> String {
     if is_hook_envelope(file) {
         format!("hook:{}", (p.event_name)(line).unwrap_or("?"))
     } else {
-        format!("tx:{}", line["type"].as_str().unwrap_or("?"))
+        format!("{TX}{}", line["type"].as_str().unwrap_or("?"))
     }
 }
 
 /// Every leaf of `v` the strip would not blank (`reads::is_blank`), by its
-/// pointer with `*` for an array index.
-fn leaves(v: &Value) -> Vec<String> {
-    fn walk(v: &Value, at: &str, out: &mut Vec<String>) {
+/// pointer with `*` for an array index. A `stamped` hook envelope's shim
+/// stamps are skipped, as the probe skips them (`reads::is_shim_stamp`).
+fn leaves(v: &Value, stamped: bool) -> Vec<String> {
+    fn walk(v: &Value, at: &str, stamped: bool, out: &mut Vec<String>) {
         if is_blank(v) {
             return;
         }
         match v {
             Value::Object(m) => {
                 for (k, x) in m {
-                    walk(x, &child_pointer(at, k), out);
+                    if !(stamped && is_shim_stamp(at, k)) {
+                        walk(x, &child_pointer(at, k), stamped, out);
+                    }
                 }
             }
             Value::Array(a) => {
                 for x in a {
-                    walk(x, &format!("{at}/*"), out);
+                    walk(x, &format!("{at}/*"), stamped, out);
                 }
             }
             _ => out.push(at.to_owned()),
         }
     }
     let mut out = Vec::new();
-    walk(v, "", &mut out);
+    walk(v, "", stamped, &mut out);
     out
 }
 
@@ -371,8 +452,6 @@ fn tool_run(
 /// The agent must be seen active, and gone once the CLI has exited: every
 /// profiled CLI's clean exit ends its sprite, whether by an end event or by its
 /// process's death, so one left standing is a session pixtuoid lost track of.
-/// The registry's `has_exit_signal` cannot predict this: it sets reaper policy,
-/// and codex's stays false though its exit ends the sprite (`registry.rs`).
 fn judge_scene(p: &Profile, scene: &str, findings: &mut Vec<(Label, String)>) {
     let prefix = format!("{}\u{b7}", p.descriptor().label_prefix);
     let frames: Vec<&str> = scene
@@ -627,6 +706,16 @@ mod tests {
     }
 
     #[test]
+    fn a_run_the_script_lost_before_it_blocked_is_not_judged() {
+        let v = Verdict::new(vec![
+            (Label::Blocked, "exit 1".into()),
+            (Label::Script, "1 unmatched".into()),
+        ]);
+        assert_eq!((v.label(), v.judged()), (Label::Script, false));
+        assert!(Verdict::new(vec![(Label::Script, "1 unmatched".into())]).judged());
+    }
+
+    #[test]
     fn an_unmatched_model_request_is_script_and_a_cli_that_never_ran_is_blocked() {
         let d = run_from("codex", "tool-run-recorded", CX_SCENE);
         write_manifest(d.path(), "codex", |m| m.unmatched = 1);
@@ -737,11 +826,115 @@ mod tests {
     }
 
     #[test]
+    fn a_stamped_envelope_drops_its_top_level_shim_stamps_only() {
+        let v = serde_json::json!({"_shim_ts_ms": 5, "_pid": 7, "a": {"_k": 1}});
+        assert_eq!(leaves(&v, true), ["/a/_k"]);
+        assert_eq!(leaves(&v, false).len(), 3);
+    }
+
+    fn fields(kinds: &[(&str, &[&str])], lines: &[&[&str]]) -> Fields {
+        let set = |paths: &[&str]| {
+            paths
+                .iter()
+                .map(|p| (*p).to_owned())
+                .collect::<BTreeSet<_>>()
+        };
+        Fields {
+            by_kind: kinds
+                .iter()
+                .map(|(k, p)| ((*k).to_owned(), set(p)))
+                .collect(),
+            lines: lines.iter().map(|l| set(l)).collect(),
+        }
+    }
+
+    #[test]
+    fn the_census_fails_a_read_field_not_carried_unless_owed_and_stales_one_carried() {
+        let reads = fields(
+            &[("hook:A", &["/x", "/owed", "/owed2"]), ("hook:B", &["/y"])],
+            &[],
+        );
+        let carried = fields(&[("hook:A", &["/owed2"])], &[]);
+        let owed = [("hook:A", "/owed"), ("hook:A", "/owed2")];
+        let got = census(&reads, &carried, &owed, "s");
+        assert_eq!(
+            got,
+            [
+                (Label::Stale, "hook:A /owed2 was carried: it leaves the profile's not_yet_fields".to_owned()),
+                (Label::Fail, "hook:A /x: a decoder reads it in a committed capture, and no run of s carried it".to_owned()),
+            ],
+            "an owed field not carried is silent, and kind B, which no run produced, is not judged"
+        );
+    }
+
+    #[test]
+    fn an_untyped_committed_line_needs_one_run_line_carrying_all_its_reads() {
+        let reads = fields(&[], &[&["/payload/cwd", "/payload/id"]]);
+        let split = fields(&[], &[&["/payload/cwd"], &["/payload/id"]]);
+        assert_eq!(
+            census(&reads, &split, &[], "s").len(),
+            1,
+            "two lines don't make one"
+        );
+        let whole = fields(&[], &[&["/payload/cwd", "/payload/id", "/payload/more"]]);
+        assert!(census(&reads, &whole, &[], "s").is_empty());
+        assert!(
+            census(&reads, &Fields::default(), &[], "s").is_empty(),
+            "no transcript ran"
+        );
+    }
+
+    #[test]
+    fn the_committed_corpus_is_a_legitimate_run_the_census_passes() {
+        let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources");
+        for p in super::super::PROFILES {
+            let dirs: Vec<PathBuf> = captures(&corpus)
+                .into_iter()
+                .filter(|c| c.source == p.source)
+                .map(|c| c.dir)
+                .collect();
+            let v = verify_source(p.source, &dirs).expect("verify");
+            assert!(
+                v.findings().iter().all(|f| f.0 != Label::Fail),
+                "{}: {:?}",
+                p.source,
+                v.findings()
+            );
+        }
+    }
+
+    #[test]
+    fn a_rollout_head_that_loses_its_cwd_fails_the_census() {
+        let d = run_from("codex", "tool-run-recorded", CX_SCENE);
+        for t in jsonl_files_under(d.path())
+            .into_iter()
+            .filter(|f| !is_hook_envelope(f))
+        {
+            let text = std::fs::read_to_string(&t).expect("read");
+            let mut lines: Vec<Value> = text
+                .lines()
+                .map(|l| serde_json::from_str(l).expect("json"))
+                .collect();
+            if let Some(head) = lines.first_mut().and_then(|h| h["payload"].as_object_mut()) {
+                head.remove("cwd");
+            }
+            let out: Vec<String> = lines.iter().map(Value::to_string).collect();
+            std::fs::write(&t, out.join("\n") + "\n").expect("write");
+        }
+        let v = verify_source("codex", &[d.path().to_path_buf()]).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "tx:#head /payload/cwd"),
+            "{:?}",
+            v.findings()
+        );
+    }
+
+    #[test]
     fn a_leaf_is_blank_exactly_where_the_probe_neutralizes() {
         let v = serde_json::json!({
             "s": "x", "n": 1, "f": 0.0, "b": true, "a": [{"k": "y"}], "l/m": "z", "z": null
         });
-        let got: BTreeSet<String> = leaves(&v).into_iter().collect();
+        let got: BTreeSet<String> = leaves(&v, false).into_iter().collect();
         let want: BTreeSet<String> = ["/s", "/n", "/f", "/b", "/a/*/k", "/l~1m"]
             .into_iter()
             .map(String::from)
@@ -750,7 +943,7 @@ mod tests {
         // What the probe writes over each leaf is blank to the census.
         for (_, x) in v.as_object().expect("an object") {
             if let Some(neutral) = crate::harness::reads::neutral_of(x) {
-                assert!(leaves(&neutral).is_empty(), "{neutral}");
+                assert!(leaves(&neutral, false).is_empty(), "{neutral}");
             }
         }
     }

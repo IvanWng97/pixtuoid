@@ -14,6 +14,10 @@ on:
         description: '`pinned` (each registry `verified_version`) or `latest`'
         type: string
         default: pinned
+      artifact:
+        description: 'The name the runs upload under when a verdict is not Pass, for a caller that downloads them'
+        type: string
+        default: ''
 
 env:
   CARGO_TERM_COLOR: always
@@ -45,11 +49,10 @@ jobs:
           set +e
           just hermetic --cli "$CLI"
           echo "exit=$?" >> "$GITHUB_OUTPUT"
-      # hermetic-nightly.yml files its issue from this artifact's report.md.
       - if: steps.run.outputs.exit != '0'
         uses: actions/upload-artifact@v7
         with:
-          name: hermetic-runs-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.artifact || format('hermetic-runs-{0}-{1}', github.run_id, github.run_attempt) }}
           path: target/hermetic/runs
           retention-days: 7
           if-no-files-found: error

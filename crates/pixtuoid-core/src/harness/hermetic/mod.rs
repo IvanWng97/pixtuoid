@@ -471,7 +471,7 @@ mod tests {
             let reads = verify::committed_reads(p).expect("the committed corpus reads");
             for (kind, path) in p.not_yet_fields {
                 assert!(
-                    reads.get(*kind).is_some_and(|r| r.contains(*path)),
+                    reads.has(kind, path),
                     "{}: no committed capture shows a decoder reading {kind} {path}",
                     p.source
                 );

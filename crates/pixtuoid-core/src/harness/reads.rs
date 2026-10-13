@@ -270,6 +270,12 @@ pub(crate) fn child_pointer(at: &str, key: &str) -> String {
     format!("{at}/{}", key.replace('~', "~0").replace('/', "~1"))
 }
 
+/// Whether `key` under `at` is a shim stamp: a hook envelope's top-level `_`
+/// key, kept by namespace (`probe`).
+pub(crate) fn is_shim_stamp(at: &str, key: &str) -> bool {
+    at.is_empty() && key.starts_with('_')
+}
+
 /// A hook envelope's top-level `_` keys are the shim's stamps, kept by namespace:
 /// `_shim_ts_ms` is read by no decoder, only by `tests/sources/captures.rs`,
 /// which dates a capture by it.
@@ -302,7 +308,7 @@ fn probe(
         Value::Array(a) => (0..a.len()).map(|k| format!("{at}/{k}")).collect(),
         Value::Object(m) => m
             .keys()
-            .filter(|k| !(stamped && at.is_empty() && k.starts_with('_')))
+            .filter(|k| !(stamped && is_shim_stamp(at, k)))
             .map(|k| child_pointer(at, k))
             .collect(),
         _ => Vec::new(),

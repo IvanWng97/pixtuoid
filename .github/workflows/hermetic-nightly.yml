@@ -18,6 +18,7 @@ jobs:
     with:
       full: true
       cli: latest
+      artifact: hermetic-report-${{ github.run_attempt }}
 
   file:
     name: file the hermetic report
@@ -28,10 +29,9 @@ jobs:
     permissions:
       issues: write
     steps:
-      # This run's one artifact, unnamed so its name lives only in hermetic.yml.
       - uses: actions/download-artifact@v8
         with:
-          merge-multiple: true
+          name: hermetic-report-${{ github.run_attempt }}
 
       - name: Open or update tracking issue
         env:
