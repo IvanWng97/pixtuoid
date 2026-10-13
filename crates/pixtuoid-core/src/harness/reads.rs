@@ -99,8 +99,8 @@ pub fn strip_unread(source: &str, files: &[PathBuf]) -> std::io::Result<Strip> {
 }
 
 /// Write `bytes` over `file` through a sibling and a rename, so a reader never
-/// sees a half-written capture. Std rather than `tempfile`: its dependencies are
-/// not on `deny-arch.toml`'s core allowlist (architecture invariant #1). The
+/// sees a half-written capture. Std rather than `tempfile`, which
+/// `deny-arch.toml`'s allowlist does not carry (architecture invariant #1). The
 /// sibling keeps the original's permissions and is removed if any step fails.
 fn replace_atomically(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = sibling_of(file);
