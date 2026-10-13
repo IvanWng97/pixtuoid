@@ -383,6 +383,8 @@ check() {
             grep -qx "version=$version" "$test_dir/check-output" || fail "publish took $label without naming its version"
             [[ "$(git -C "$bump_repo" diff --cached --name-only | sort)" == "$rerecorded" ]] ||
                 fail "publish took $label as other than the re-record: $(git -C "$bump_repo" diff --cached --name-only)"
+            [[ "$(awk '/^PATHS_END$/ { p = 0 } p; /^paths<<PATHS_END$/ { p = 1 }' "$test_dir/check-output" | sort)" == "$rerecorded" ]] ||
+                fail "publish would commit $label as other than the re-record: $(<"$test_dir/check-output")"
         fi
     else
         [[ "$expect" == refuse ]] || fail "publish refused $label"
@@ -413,4 +415,16 @@ check refuse "a symlink" symlink
 check refuse "a mode change" mode
 check refuse "a binary" binary
 check refuse "a rename" renamed renamed
+# A source whose fixtures live only under fixtures/<source> has no module
+# root for its pathspec to match.
+(
+    cd "$bump_repo"
+    pin 0.155.1 0.162.1
+    echo new >"$fx/fixtures/codex/run/new-session.jsonl"
+    SOURCE=codex RUNNER_TEMP="$test_dir" bash -c "$patch_script" >/dev/null 2>&1 ||
+        fail "the bump's patch step failed for a source with no module fixtures"
+    grep -qx "+++ b/$fx/fixtures/codex/run/new-session.jsonl" "$test_dir/bump.patch" ||
+        fail "the bump's patch for codex lost its new transcript"
+    git reset -q --hard && git clean -qfd
+)
 VERSION_OVERRIDE=0.2.1 check refuse "a pin other than the version plan named" rerecord honest

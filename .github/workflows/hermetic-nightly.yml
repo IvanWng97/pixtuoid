@@ -129,7 +129,9 @@ jobs:
           paths=(":(glob)$sources/fixtures/$SOURCE/**" ":(glob)$sources/*/fixtures/$SOURCE/**"
             ":(glob)$sources/snapshots/sources__conformance__${SOURCE}__*.snap"
             crates/pixtuoid-core/src/source/registry.rs)
-          git add -N -- "${paths[@]}"
+          # `add -N` fails on a pathspec that matches nothing, as a source with
+          # no module fixtures has one; `ls-files` names only what exists.
+          git ls-files -z --others --exclude-standard -- "${paths[@]}" | xargs -0 -r git add -N --
           # A re-record renames a transcript (its name carries the session
           # id): `HEAD` keeps the deletion and `--no-renames` keeps it a delete.
           git diff --binary --no-renames HEAD -- "${paths[@]}" > "$RUNNER_TEMP/bump.patch"
@@ -234,7 +236,14 @@ jobs:
               || -z "$at" || "$at" != "$want" ]]; then
             echo "::error::the registry must change by $SOURCE's one pin line, to $VERSION"; exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # The commit takes exactly what was checked. No allowed path can be
+          # the delimiter: each ends .jsonl, .json, .snap or .rs.
+          {
+            echo "version=$VERSION"
+            echo "paths<<PATHS_END"
+            git diff --cached --name-only
+            echo "PATHS_END"
+          } >> "$GITHUB_OUTPUT"
       - id: app-token
         if: steps.check.outputs.version != ''
         uses: actions/create-github-app-token@v3
@@ -250,11 +259,9 @@ jobs:
           branch: bot/bump-${{ matrix.source }}
           delete-branch: true
           sign-commits: true
-          add-paths: |
-            :(glob)crates/pixtuoid-core/tests/sources/fixtures/${{ matrix.source }}/**
-            :(glob)crates/pixtuoid-core/tests/sources/*/fixtures/${{ matrix.source }}/**
-            :(glob)crates/pixtuoid-core/tests/sources/snapshots/sources__conformance__${{ matrix.source }}__*.snap
-            crates/pixtuoid-core/src/source/registry.rs
+          # Its `git add` ignores a failure, which one pathspec matching nothing
+          # would be, so it gets the checked files themselves.
+          add-paths: ${{ steps.check.outputs.paths }}
           commit-message: "test(${{ matrix.source }}): re-record at ${{ steps.check.outputs.version }} and pin it"
           title: "test(${{ matrix.source }}): re-record at ${{ steps.check.outputs.version }} and pin it"
           body: |
