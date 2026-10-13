@@ -22,6 +22,11 @@ pub const DUMMY_KEY: &str = "hermetic-dummy-key";
 pub const USER_PLACEHOLDER: &str = "{user}";
 /// What a script spells [`CAPTURE_NOTE`](crate::harness::CAPTURE_NOTE) as.
 pub const NOTE_PLACEHOLDER: &str = "{note}";
+/// What a script spells the workspace the recorder runs the CLI in as.
+pub const WORKSPACE_PLACEHOLDER: &str = "{workspace}";
+/// What a script spells the platform's shell tool as, a profile's
+/// `script_vars` naming it.
+pub const SHELL_TOOL_PLACEHOLDER: &str = "{shell_tool}";
 
 /// A fact that differs between Unix and Windows. Both arms are plain data, so
 /// a test on any host reads both, as `platform::resolve_user_home_opt` takes
@@ -515,7 +520,7 @@ sandbox = "unelevated"
         // The shell tool win32 mounts in bash's place, which alone can
         // escalate there.
         script_vars: &[(
-            "{shell_tool}",
+            SHELL_TOOL_PLACEHOLDER,
             PerOs {
                 unix: "bash",
                 windows: "pwsh",
@@ -552,9 +557,6 @@ pub fn profile(source: &str) -> Option<&'static Profile> {
 pub fn scripts_dir() -> PathBuf {
     crate::harness::sources_root().join("hermetic")
 }
-
-/// What a script spells the workspace the recorder runs the CLI in as.
-pub const WORKSPACE_VAR: &str = "{workspace}";
 
 impl Scenario {
     /// `source`'s script for this scenario.
@@ -778,7 +780,10 @@ mod tests {
                 .script_vars
                 .iter()
                 .map(|(k, _)| (*k).to_owned())
-                .chain([WORKSPACE_VAR.to_owned(), NOTE_PLACEHOLDER.to_owned()])
+                .chain([
+                    WORKSPACE_PLACEHOLDER.to_owned(),
+                    NOTE_PLACEHOLDER.to_owned(),
+                ])
                 .collect();
             let undeclared: Vec<_> = spelled.difference(&declared).collect();
             assert!(undeclared.is_empty(), "{}: {undeclared:?}", p.source);

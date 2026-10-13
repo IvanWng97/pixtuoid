@@ -30,7 +30,7 @@ mod run {
     use pixtuoid_core::harness::hermetic::verify::{self, Label, Verdict};
     use pixtuoid_core::harness::hermetic::{
         self, DUMMY_KEY, HostConfig, MANIFEST, Manifest, NOT_HERMETIC, NOTE_PLACEHOLDER, PROFILES,
-        Package, PerOs, Profile, SCENE_LOG, Scenario, USER_PLACEHOLDER, WORKSPACE_VAR,
+        Package, PerOs, Profile, SCENE_LOG, Scenario, USER_PLACEHOLDER, WORKSPACE_PLACEHOLDER,
     };
     use pixtuoid_core::harness::tap::Endpoint;
     use pixtuoid_core::harness::{
@@ -1110,7 +1110,7 @@ mod run {
         };
         [
             (
-                WORKSPACE_VAR.to_owned(),
+                WORKSPACE_PLACEHOLDER.to_owned(),
                 workspace.to_string_lossy().into_owned(),
             ),
             (NOTE_PLACEHOLDER.to_owned(), CAPTURE_NOTE.to_owned()),
