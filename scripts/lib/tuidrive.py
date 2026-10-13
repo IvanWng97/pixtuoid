@@ -28,7 +28,8 @@ Four things here were each a lost turn before they were code:
 Per-CLI knowledge that does NOT belong here — which flag, which subcommand,
 which mode gates — lives in the caller, because a table of ten CLIs' flags in
 one file drifts silently and a drifted row captures the wrong thing while still
-looking like evidence. The callers are the `capture-*.sh` siblings here.
+looking like evidence. The callers are the `capture-*.sh` siblings here and the
+recorder itself.
 """
 
 import fcntl

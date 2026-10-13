@@ -1505,9 +1505,6 @@ mod recorder {
             assert!(dst.path().join("opencode.json").is_file());
         }
 
-        /// A driver is never run for a version: `--version` would run the whole
-        /// capture again. The CLI it names is asked instead, and a bare command
-        /// is the CLI itself.
         #[test]
         fn only_the_cli_is_asked_its_version_never_its_driver() {
             let asked = std::cell::RefCell::new(Vec::new());
@@ -1539,6 +1536,19 @@ mod recorder {
             assert_eq!(
                 *asked.borrow(),
                 ["dsh", "/tmp/oc/package/bin/opencode", "claude"]
+            );
+        }
+
+        #[test]
+        fn a_driver_names_its_cli_where_the_recorder_reads_it() {
+            let sandbox = tempfile::tempdir().expect("sandbox");
+            let ws = tempfile::tempdir().expect("workspace");
+            let sock = sandbox.path().join("capture.sock");
+            let cmd = ["sh", "-c", &format!(r#"echo dsh >"${CLI_ENV}""#)].map(String::from);
+            assert!(run_cli(&cmd, ws.path(), &sock).expect("runs").success());
+            assert_eq!(
+                std::fs::read_to_string(named_cli(&sock)).ok().as_deref(),
+                Some("dsh\n")
             );
         }
 
