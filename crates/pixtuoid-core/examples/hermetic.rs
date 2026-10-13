@@ -353,8 +353,7 @@ mod run {
     struct Sandbox {
         dir: tempfile::TempDir,
         env: Vec<(String, OsString)>,
-        /// The profile's env for the CLI alone, handed to the recorder as
-        /// `--env` pairs.
+        /// The profile's env again, as `--env` pairs the recorder sets on the CLI.
         cli_env: Vec<String>,
         sock: PathBuf,
     }
@@ -404,7 +403,7 @@ mod run {
                     .replace("{key}", DUMMY_KEY)
             };
             // Every child gets the profile's env, `connect`'s spawned CLI included;
-            // the CLI under test gets it again through the recorder's scrub.
+            // the CLI under test also gets it as `--env` (`cli_env`).
             for (k, v) in p.env {
                 env.push(((*k).to_string(), expand(v).into()));
             }
@@ -436,11 +435,15 @@ mod run {
         }
 
         fn var(&self, key: &str) -> Option<PathBuf> {
+            self.var_os(key).map(PathBuf::from)
+        }
+
+        fn var_os(&self, key: &str) -> Option<&OsString> {
             self.env
                 .iter()
                 .rev()
                 .find(|(k, _)| k == key)
-                .map(|(_, v)| PathBuf::from(v))
+                .map(|(_, v)| v)
         }
 
         /// A child of the run. Its stdin is empty: `opencode run` reads a non-TTY
@@ -800,8 +803,8 @@ mod run {
                 for (k, v) in p.env {
                     let want = v.replace("{port}", "4321").replace("{key}", DUMMY_KEY);
                     assert_eq!(
-                        sandbox.var(k),
-                        Some(PathBuf::from(&want)),
+                        sandbox.var_os(k),
+                        Some(&OsString::from(&want)),
                         "{}: {k} misses `connect`'s children",
                         p.source
                     );

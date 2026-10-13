@@ -87,25 +87,27 @@ mod recorder {
     /// and its value, then the positionals.
     fn parse_options(mut args: Vec<String>) -> Result<(Options, Vec<String>), String> {
         let mut options = Options::default();
-        while let Some(flag) = args.first().cloned() {
-            if !matches!(flag.as_str(), OUT | TEE | WITHIN | ENV) {
-                break;
-            }
+        // The flag's value, taking the pair off the front of `args`.
+        let take = |args: &mut Vec<String>, flag: &str| {
             if args.len() < 2 {
                 return Err(format!("{flag} takes a value"));
             }
-            let value = args.remove(1);
             args.remove(0);
+            Ok(args.remove(0))
+        };
+        while let Some(flag) = args.first().cloned() {
             match flag.as_str() {
-                OUT => options.out = Some(PathBuf::from(value)),
-                TEE => options.tee = Some(PathBuf::from(value)),
-                WITHIN => options.within = Some(PathBuf::from(value)),
-                _ => {
+                OUT => options.out = Some(PathBuf::from(take(&mut args, OUT)?)),
+                TEE => options.tee = Some(PathBuf::from(take(&mut args, TEE)?)),
+                WITHIN => options.within = Some(PathBuf::from(take(&mut args, WITHIN)?)),
+                ENV => {
+                    let value = take(&mut args, ENV)?;
                     let (k, v) = value
                         .split_once('=')
                         .ok_or_else(|| format!("{ENV} takes KEY=VALUE, got {value:?}"))?;
                     options.env.push((k.to_string(), v.to_string()));
                 }
+                _ => break,
             }
         }
         Ok((options, args))
@@ -852,6 +854,9 @@ mod recorder {
                 parse_options(args(&["--env", "NOEQUALS", "codex"])).is_err(),
                 "an env pair without its value"
             );
+            let (o, rest) = parse_options(args(&["--other", "x=y", "codex"])).expect("parse");
+            assert_eq!(o, Options::default(), "an unknown flag ends the options");
+            assert_eq!(rest, args(&["--other", "x=y", "codex"]));
             let (o, rest) = parse_options(args(&["codex", "tool-run", "--out"])).expect("parse");
             assert_eq!(
                 o,
