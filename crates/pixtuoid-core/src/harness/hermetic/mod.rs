@@ -224,7 +224,8 @@ wire_api = "responses"
         }],
         not_yet: &["SubagentStart", "SubagentStop", "PermissionRequest"],
     },
-    // opencode's cites are at v2.0.28.
+    // opencode's cites are at v2.0.28, npm's `latest`, the release that added
+    // the system config below.
     Profile {
         source: "opencode",
         package: Package::Npm("@opencode/cli"),
@@ -430,8 +431,7 @@ mod tests {
                 // A misspelled placeholder would be checked as a literal path
                 // that never exists.
                 assert!(
-                    path.match_indices('{')
-                        .all(|(i, _)| path[i..].starts_with(USER_PLACEHOLDER)),
+                    !path.replace(USER_PLACEHOLDER, "").contains(['{', '}']),
                     "{}: {path}",
                     p.source
                 );
