@@ -929,24 +929,6 @@ mod recorder {
             BTreeSet::from(["Ada Lovelace".to_string()])
         }
 
-        #[test]
-        fn a_capture_is_stripped_unless_its_record_is_exempt() {
-            let (_d, run, _) = promotable(serde_json::json!({"origin": "recorded"}));
-            let files = vec![run.join(HOOK_PAYLOADS)];
-            let why = "a test reads the raw bytes".to_string();
-            let kept = deidentify("dsh", &files, Some(why.clone())).expect("deidentify");
-            assert!(matches!(kept, Deidentified::Exempt(w) if w == why));
-            let raw = std::fs::read_to_string(&files[0]).expect("raw");
-            assert!(
-                raw.contains("unread"),
-                "an exempt capture is left as recorded"
-            );
-            let stripped = deidentify("dsh", &files, None).expect("deidentify");
-            assert!(matches!(stripped, Deidentified::Stripped(n) if n > 0));
-            let raw = std::fs::read_to_string(&files[0]).expect("raw");
-            assert!(!raw.contains("unread"), "the unread key is blanked");
-        }
-
         fn written(dest: &Path) -> (String, serde_json::Value) {
             let bytes = std::fs::read_to_string(dest.join(HOOK_PAYLOADS)).expect("bytes");
             let record = std::fs::read_to_string(dest.join(PROVENANCE)).expect("record");
@@ -976,6 +958,23 @@ mod recorder {
             assert!(
                 record.get("note").is_none(),
                 "the record is the run's, not the old one"
+            );
+        }
+
+        #[test]
+        fn a_promoted_run_carrying_the_operator_is_refused() {
+            let (_d, run, dest) = promotable(serde_json::json!({"origin": "recorded"}));
+            let raw = std::fs::read_to_string(run.join(HOOK_PAYLOADS)).expect("raw");
+            let planted = raw.replacen(
+                "/private/tmp/pixtuoid-capture/proj",
+                "/Users/Ada Lovelace/proj",
+                1,
+            );
+            std::fs::write(run.join(HOOK_PAYLOADS), planted).expect("plant");
+            let root = dest.ancestors().nth(3).expect("the root");
+            assert!(
+                promote(&run, root, &needles()).is_err(),
+                "the operator's name is refused"
             );
         }
 

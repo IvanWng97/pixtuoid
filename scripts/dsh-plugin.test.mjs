@@ -97,7 +97,7 @@ test("agent/created's listener returns nothing", async (t) => {
   );
 });
 
-test("forwards no prompt, message, tool argument, result or output", { skip: !POSIX }, async (t) => {
+test("forwards only the allowlist, never content", { skip: !POSIX }, async (t) => {
   const { module, outFile } = await renderPlugin(t);
   const handlers = apply(module);
   const event = (type, data) => handlers.get("session/event")(session, { type, data });
@@ -106,15 +106,34 @@ test("forwards no prompt, message, tool argument, result or output", { skip: !PO
     agent: { session: { header: { ...header, title: "SECRET_TITLE", prompt: "SECRET_PROMPT" } } },
   });
   event("tool/call", { callId: "c1", name: "bash", input: { command: "SECRET_ARGUMENT" } });
+  event("approval/asked", {
+    id: "a1",
+    callId: "c1",
+    toolName: "bash",
+    reason: "wider access",
+    input: { command: "SECRET_ARGUMENT" },
+  });
+  event("approval/decided", { id: "a1", outcome: "unavailable", note: "SECRET_NOTE" });
   event("tool/result", { message: { toolCallId: "c1", content: [{ text: "SECRET_RESULT" }] } });
   event("assistant/message", {
     content: [{ type: "text", text: "SECRET_OUTPUT" }],
     usage: { inputTokens: 1, outputTokens: 2 },
   });
   event("request/header", {
-    header: { config: { model: "m", system: "SECRET_SYSTEM" }, messages: ["SECRET_MESSAGE"] },
+    header: { config: { model: "m", system: "SECRET_SYSTEM" } },
+    messages: ["SECRET_MESSAGE"],
   });
 
-  const forwarded = (await lines(outFile, 5)).join("\n");
-  assert.ok(!forwarded.includes("SECRET"), `no content may leak: ${forwarded}`);
+  // Exact payloads: a key nobody planted fails too.
+  const at = { sessionId: "s1", cwd: "/w", _pid: process.pid };
+  const forwarded = (await lines(outFile, 7)).map((l) => JSON.parse(l));
+  assert.deepEqual(forwarded, [
+    { type: "session_start", ...at },
+    { type: "tool_call", ...at, callId: "c1", toolName: "bash" },
+    { type: "approval_asked", ...at, callId: "c1", toolName: "bash", reason: "wider access" },
+    { type: "approval_decided", ...at, outcome: "unavailable", callId: "c1", toolName: "bash" },
+    { type: "tool_result", ...at, callId: "c1" },
+    { type: "usage", ...at, inputTokens: 1, outputTokens: 2 },
+    { type: "model", ...at, model: "m" },
+  ]);
 });
