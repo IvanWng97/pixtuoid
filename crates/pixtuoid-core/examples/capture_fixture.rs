@@ -32,7 +32,9 @@ mod recorder {
 
     use pixtuoid_core::harness::hermetic::{self, MANIFEST, Manifest};
     use pixtuoid_core::harness::host::{create_private_dir, owned_by_us};
-    use pixtuoid_core::harness::recorder_flag::{CLI_VERSION, ENV, OUT, PROMOTE, TEE, WITHIN};
+    use pixtuoid_core::harness::recorder_flag::{
+        CLI_VERSION, ENV, OUT, PROMOTE, TEE, WITHIN, WORKSPACE,
+    };
     use pixtuoid_core::harness::tap::{Endpoint, Tap};
     use pixtuoid_core::harness::{
         CAPTURE_NOTE, CAPTURE_RECORD, CaptureRecord, HOOK_PAYLOADS, PROVENANCE, capture_workspace,
@@ -72,6 +74,9 @@ mod recorder {
         /// The CLI's `--version`, asked by a caller that launched it some way
         /// the recorder cannot repeat (an interpreter and an entry script).
         cli_version: Option<String>,
+        /// The workspace as the caller resolved it: Windows resolves its known
+        /// ProgramData only in an environment the sandbox's no longer holds.
+        workspace: Option<PathBuf>,
     }
 
     /// Leading option pairs, each a [`pixtuoid_core::harness::recorder_flag`]
@@ -93,6 +98,9 @@ mod recorder {
                 WITHIN => options.within = Some(PathBuf::from(take(&mut args, WITHIN)?)),
                 PROMOTE => options.promote = Some(PathBuf::from(take(&mut args, PROMOTE)?)),
                 CLI_VERSION => options.cli_version = Some(take(&mut args, CLI_VERSION)?),
+                WORKSPACE => {
+                    options.workspace = Some(PathBuf::from(take(&mut args, WORKSPACE)?));
+                }
                 ENV => {
                     let value = take(&mut args, ENV)?;
                     let (k, v) = value
@@ -184,7 +192,10 @@ mod recorder {
             std::process::exit(2);
         }
 
-        let workspace = prepare_workspace()?;
+        let workspace = prepare_workspace(match options.workspace.clone() {
+            Some(ws) => ws,
+            None => capture_workspace()?,
+        })?;
         let sandbox = tempfile::tempdir()?;
         let endpoint = Endpoint::in_dir(sandbox.path(), "capture");
         let tap = Tap::bind(&endpoint, options.tee.clone().map(Endpoint::at))?;
@@ -426,8 +437,7 @@ mod recorder {
 
     // ── plumbing ─────────────────────────────────────────────────────────────────
 
-    fn prepare_workspace() -> std::io::Result<PathBuf> {
-        let ws = capture_workspace()?;
+    fn prepare_workspace(ws: PathBuf) -> std::io::Result<PathBuf> {
         let base = ws.parent().expect("the workspace has a parent");
         // A fixed name in a shared directory is pre-plantable; a foreign owner is
         // refused, not removed — under the sticky bit the remove fails and the
@@ -1007,10 +1017,25 @@ mod recorder {
         fn leading_option_pairs_are_options_and_the_rest_is_positional() {
             let args = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
             let (o, rest) = parse_options(args(&[
-                "--tee", "/s", "--out", "/o", "--within", "/w", "--env", "A=b=c", "codex",
-                "tool-run", "codex",
+                "--tee",
+                "/s",
+                "--out",
+                "/o",
+                "--within",
+                "/w",
+                "--env",
+                "A=b=c",
+                "--cli-version",
+                "1.2",
+                "--workspace",
+                "/ws",
+                "codex",
+                "tool-run",
+                "codex",
             ]))
             .expect("parse");
+            assert_eq!(o.cli_version.as_deref(), Some("1.2"));
+            assert_eq!(o.workspace, Some(PathBuf::from("/ws")));
             assert_eq!(o.out, Some(PathBuf::from("/o")));
             assert_eq!(o.tee, Some(PathBuf::from("/s")));
             assert_eq!(o.within, Some(PathBuf::from("/w")));

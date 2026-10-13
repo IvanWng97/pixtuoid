@@ -195,13 +195,15 @@ impl Tap {
 /// in its scene log.
 async fn keep(mut conn: HookConn, sink: Arc<Mutex<Vec<String>>>, tee: Arc<Option<Endpoint>>) {
     let mut bytes = Vec::new();
-    if (&mut conn)
+    match (&mut conn)
         .take(MAX_CONN_BYTES)
         .read_to_end(&mut bytes)
         .await
-        .is_err()
     {
-        return;
+        // A pipe whose writer closed reads as `ERROR_BROKEN_PIPE`, not as an end
+        // (learn.microsoft.com, ReadFile, "Pipes"); what came before it stands.
+        Err(e) if e.kind() != std::io::ErrorKind::BrokenPipe => return,
+        _ => {}
     }
     let text = String::from_utf8_lossy(&bytes).into_owned();
     if text.trim().is_empty() {

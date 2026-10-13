@@ -900,6 +900,7 @@ mod run {
                     out: dir,
                     scene: sandbox.scene.path(),
                     within: sandbox.dir.path(),
+                    workspace: &workspace,
                     cli_env: &sandbox.cli_env(p, &cli.launch),
                     cli_version: &cli_version(&sandbox, p, &cli.launch)?,
                     launch: &cli.launch,
@@ -1048,6 +1049,8 @@ mod run {
         scene: &'a Path,
         /// Its harvest held inside this sandbox.
         within: &'a Path,
+        /// The workspace the CLI runs in, as this tier resolved it.
+        workspace: &'a Path,
         /// Set on the CLI after the recorder's scrub.
         cli_env: &'a [String],
         cli_version: &'a str,
@@ -1066,6 +1069,8 @@ mod run {
             run.within.into(),
             recorder_flag::CLI_VERSION.into(),
             run.cli_version.into(),
+            recorder_flag::WORKSPACE.into(),
+            run.workspace.into(),
         ];
         for kv in run.cli_env {
             args.extend([recorder_flag::ENV.into(), kv.into()]);
@@ -1332,6 +1337,7 @@ mod run {
                     out: Path::new("/runs/x"),
                     scene: Path::new("/sb/scene.sock"),
                     within: Path::new("/sb"),
+                    workspace: Path::new("/ws/proj"),
                     cli_env: &["A=b".to_string()],
                     cli_version: "1.2.3",
                     launch: &launch,
@@ -1346,6 +1352,7 @@ mod run {
             assert!(pair("--tee", "/sb/scene.sock"), "{args:?}");
             assert!(pair("--out", "/runs/x"), "{args:?}");
             assert!(pair("--cli-version", "1.2.3"), "{args:?}");
+            assert!(pair("--workspace", "/ws/proj"), "{args:?}");
             // The recorder reads options only before its positionals.
             let source = args.iter().position(|a| a == p.source).expect("the source");
             assert!(

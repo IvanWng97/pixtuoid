@@ -89,6 +89,8 @@ pub mod recorder_flag {
     pub const PROMOTE: &str = "--promote";
     /// `Options::cli_version`.
     pub const CLI_VERSION: &str = "--cli-version";
+    /// `Options::workspace`.
+    pub const WORKSPACE: &str = "--workspace";
 }
 
 /// What only the recorder knows about a raw (`--out`) capture.
