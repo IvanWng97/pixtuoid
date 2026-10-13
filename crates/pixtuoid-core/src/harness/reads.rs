@@ -105,11 +105,7 @@ pub fn strip_unread(source: &str, files: &[PathBuf]) -> std::io::Result<Strip> {
 /// name is unique per process and call, it keeps the original's permissions, and
 /// it is removed if any step fails.
 fn replace_atomically(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let mut name = file.as_os_str().to_owned();
-    name.push(format!(".{}-{n}.tmp", std::process::id()));
-    let tmp = PathBuf::from(name);
+    let tmp = sibling_of(file);
     let written = (|| {
         let mut f = std::fs::File::create_new(&tmp)?;
         f.write_all(bytes)?;
@@ -123,6 +119,16 @@ fn replace_atomically(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
         let _ = std::fs::remove_file(&tmp);
     }
     written
+}
+
+/// A name beside `file`, unique per process and call: two strips of one file
+/// never share a sibling.
+fn sibling_of(file: &Path) -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut name = file.as_os_str().to_owned();
+    name.push(format!(".{}-{n}.tmp", std::process::id()));
+    PathBuf::from(name)
 }
 
 /// Strip every RECORDED capture under `root` in place — local and unbilled — and
@@ -718,11 +724,13 @@ mod tests {
         let d = tempfile::tempdir().expect("tempdir");
         let file = d.path().join("payloads.jsonl");
         std::fs::write(&file, "old\n").expect("write");
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+        // Not 0o644: that is a new file's mode under the usual umask, so a
+        // rewrite that dropped the copy would still pass.
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).expect("chmod");
         replace_atomically(&file, b"new\n").expect("replace");
         assert_eq!(std::fs::read_to_string(&file).expect("read"), "new\n");
         let mode = std::fs::metadata(&file).expect("stat").permissions().mode() & 0o777;
-        assert_eq!(mode, 0o644, "the capture keeps its mode");
+        assert_eq!(mode, 0o600, "the capture keeps its mode");
         let left: Vec<_> = std::fs::read_dir(d.path())
             .expect("read")
             .flatten()
@@ -771,5 +779,25 @@ mod tests {
             vec![good],
             "the capture already rewritten was reported"
         );
+    }
+
+    #[test]
+    fn two_siblings_of_one_file_differ_and_name_the_process() {
+        let file = Path::new("/x/payloads.jsonl");
+        let (a, b) = (sibling_of(file), sibling_of(file));
+        assert_ne!(a, b, "each call gets its own sibling");
+        for s in [&a, &b] {
+            assert_eq!(
+                s.parent(),
+                file.parent(),
+                "beside the file, for an atomic rename"
+            );
+            assert!(
+                s.to_string_lossy()
+                    .contains(&format!(".{}-", std::process::id())),
+                "{} names this process",
+                s.display()
+            );
+        }
     }
 }
