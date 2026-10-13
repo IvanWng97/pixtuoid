@@ -429,10 +429,10 @@ mod recorder {
         Ok(ws)
     }
 
-    /// Make `ws` its own repository, every step of which must succeed: the
-    /// workspace being one is what stops every CLI's project-root walk there,
-    /// so a failed `git init` would let a repository above it in. The commit
-    /// does not depend on the operator's signing config.
+    /// Make `ws` its own repository, every step of which must succeed: that
+    /// stops codex's project-root walk and opencode's AGENTS.md walk there, so
+    /// a failed `git init` would let a repository above it in; the walks that
+    /// reach `/` are each profile's `ancestor_config`.
     fn init_repo(ws: &Path) -> std::io::Result<()> {
         for cmd in [
             vec!["init", "-q"],
@@ -442,8 +442,6 @@ mod recorder {
                 "user.email=fixture@pixtuoid",
                 "-c",
                 "user.name=fixture",
-                "-c",
-                "commit.gpgsign=false",
                 "commit",
                 "-qm",
                 "init",
@@ -454,8 +452,13 @@ mod recorder {
         Ok(())
     }
 
+    /// One git step, reading none of the operator's config: their hooks,
+    /// templates or signing would otherwise decide whether the workspace is made
+    /// (git(1): `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` set to `/dev/null`).
     fn git_in(ws: &Path, args: &[&str]) -> std::io::Result<()> {
         let status = std::process::Command::new("git")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
             .arg("-C")
             .arg(ws)
             .args(args)
@@ -798,11 +801,24 @@ mod recorder {
             let ws = d.path().join("ws");
             std::fs::create_dir(&ws).expect("mkdir");
             std::fs::write(ws.join("NOTE.txt"), "pong\n").expect("write");
-            // An operator config that signs every commit with a failing program.
+            // An operator config whose signing and commit-msg hook both fail.
+            let hooks = d.path().join("hooks");
+            std::fs::create_dir(&hooks).expect("mkdir");
+            let hook = hooks.join("commit-msg");
+            std::fs::write(&hook, "#!/bin/sh\nexit 1\n").expect("hook");
+            std::fs::set_permissions(
+                &hook,
+                <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755),
+            )
+            .expect("chmod");
             let config = d.path().join("gitconfig");
             std::fs::write(
                 &config,
-                "[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n",
+                format!(
+                    "[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n\
+                     [core]\n\thooksPath = {}\n",
+                    hooks.display()
+                ),
             )
             .expect("config");
             let made = temp_env::with_vars(
