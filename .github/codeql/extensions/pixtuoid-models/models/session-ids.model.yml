@@ -1,5 +1,5 @@
-# rust/cleartext-logging's name heuristic reads any `session.?(id|key)` as an
-# account credential; these return an agent CLI's local session key.
+# rust/cleartext-logging's `maybeAccountInfo` name heuristic reads each of these
+# as account info; each returns an agent CLI's local session id.
 extensions:
   - addsTo:
       pack: codeql/rust-all
