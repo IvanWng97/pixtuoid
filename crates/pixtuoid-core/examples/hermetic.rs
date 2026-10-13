@@ -765,8 +765,9 @@ mod run {
         args
     }
 
-    /// The scenario's script with `{workspace}` expanded: a CLI that takes an
-    /// absolute path gets the one the recorder runs it in.
+    /// The scenario's script with `{workspace}` and [`NOTE_PLACEHOLDER`]
+    /// expanded: a CLI that takes an absolute path gets the one the recorder runs
+    /// it in, and a reply waits for the note it reads.
     fn render_script(p: &Profile, scenario: &Scenario, into: &Path) -> std::io::Result<PathBuf> {
         let text = std::fs::read_to_string(scenario.script(p.source))?;
         let workspace = Path::new(CAPTURE_WORKSPACE);
