@@ -73,10 +73,17 @@ jobs:
     name: Raycast
     uses: ./.github/workflows/raycast.yml
 
+  hermetic:
+    name: Hermetic
+    needs: tier
+    uses: ./.github/workflows/hermetic.yml
+    with:
+      full: ${{ needs.tier.outputs.full == 'true' }}
+
   gate:
     name: ci-gate
     if: ${{ always() }}
-    needs: [lint, builds, tests, site, raycast]
+    needs: [lint, builds, tests, site, raycast, hermetic]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

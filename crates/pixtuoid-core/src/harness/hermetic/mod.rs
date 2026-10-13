@@ -7,9 +7,12 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::harness::CaptureRecord;
 use crate::source::registry;
+
+pub mod verify;
 
 /// The key every profile's CLI is handed for its scripted model: aimock
 /// accepts any, and a real provider must refuse it.
@@ -45,7 +48,7 @@ impl Shape {
 pub struct Scenario {
     /// What the run must look like.
     pub shape: Shape,
-    /// The hook events this run must fire, in the install's `registers()` terms.
+    /// The hook events this run must fire, as `Profile::event_name` reads them.
     pub expects: &'static [&'static str],
 }
 
@@ -82,6 +85,8 @@ pub struct Profile {
     /// Registered hooks no scenario fires yet. Shrink-only: recording one forces
     /// it out (the `NO_WIRE_EVIDENCE_YET` pattern).
     pub not_yet: &'static [&'static str],
+    /// The hook event a captured payload is, in `registers()` terms.
+    pub(crate) event_name: fn(&Value) -> Option<&str>,
 }
 
 impl Profile {
@@ -126,6 +131,14 @@ pub enum Absence {
     AwaitingProfile,
 }
 
+fn hook_event_name(v: &Value) -> Option<&str> {
+    v.get("hook_event_name")?.as_str()
+}
+
+fn type_field(v: &Value) -> Option<&str> {
+    v.get("type")?.as_str()
+}
+
 /// The profiled CLIs.
 pub const PROFILES: &[Profile] = &[
     Profile {
@@ -153,6 +166,7 @@ pub const PROFILES: &[Profile] = &[
             "SubagentStart",
             "SubagentStop",
         ],
+        event_name: hook_event_name,
     },
     Profile {
         source: "codex",
@@ -194,6 +208,7 @@ wire_api = "responses"
             ],
         }],
         not_yet: &["SubagentStart", "SubagentStop", "PermissionRequest"],
+        event_name: hook_event_name,
     },
     Profile {
         source: "opencode",
@@ -235,6 +250,7 @@ wire_api = "responses"
             "session.tool.failed",
             "permission.asked",
         ],
+        event_name: type_field,
     },
 ];
 

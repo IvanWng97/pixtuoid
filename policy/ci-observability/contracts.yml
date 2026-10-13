@@ -75,7 +75,9 @@
     - '.jobs.publish.steps += [{"run": "bash scripts/x.sh"}]'
 
 - id: drift-watch-files-issues-from-a-job-that-runs-no-tree-code
-  file: .github/workflows/upstream-drift.yml
+  file:
+    - .github/workflows/upstream-drift.yml
+    - .github/workflows/hermetic-nightly.yml
   why: >-
     The watch builds and runs the tree, every dependency's build script
     included, and hands its token to curl; that job's token only reads. The
@@ -142,6 +144,7 @@
     - .github/workflows/ci-tests.yml
     - .github/workflows/site.yml
     - .github/workflows/raycast.yml
+    - .github/workflows/hermetic.yml
   why: >-
     ci.yml's gate sees a group only through the call's result, and GitHub does
     not document how a called workflow's jobs roll up into it. The `required`
@@ -177,6 +180,7 @@
     - .github/workflows/ci-builds.yml
     - .github/workflows/ci-tests.yml
     - .github/workflows/site.yml
+    - .github/workflows/hermetic.yml
   why: >-
     A PR's light tier skips its full-only jobs by design and must still pass
     ci-gate to enter the queue; the full tier judges the same jobs on the
