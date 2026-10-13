@@ -81,7 +81,7 @@ pub struct Profile {
     /// Fixed system paths the CLI reads policy or config from, which no home
     /// redirects: a run on a machine that has one is not hermetic. A macOS MDM
     /// managed-preferences domain is not checked: its docs give no path.
-    pub unsandboxed: &'static [&'static str],
+    pub system_config: &'static [&'static str],
     /// Names the CLI reads from the workspace's ancestor directories, which
     /// sit outside the sandbox: a run under one that has any is not hermetic.
     pub ancestor_config: &'static [&'static str],
@@ -168,7 +168,7 @@ pub const PROFILES: &[Profile] = &[
         homes: &[],
         // Managed settings, managed MCP servers and a managed CLAUDE.md, on
         // macOS and Linux (code.claude.com/docs/en/managed-settings).
-        unsandboxed: &[
+        system_config: &[
             "/Library/Application Support/ClaudeCode",
             "/etc/claude-code",
         ],
@@ -219,7 +219,7 @@ pub const PROFILES: &[Profile] = &[
         // System config, requirements and managed config; `CODEX_HOME` never
         // reaches them (`codex-rs/config/src/loader/mod.rs:69`, `:102-107`,
         // `layer_io.rs:222-227`).
-        unsandboxed: &["/etc/codex"],
+        system_config: &["/etc/codex"],
         // Its project config and AGENTS.md stop at the project root
         // (`codex-rs/config/src/loader/mod.rs:1662`, `core/src/agents_md.rs:8-12`),
         // which the recorder's `git init` makes the workspace.
@@ -285,7 +285,7 @@ wire_api = "responses"
             ("OPENCODE_DISABLE_AUTOUPDATE", "1"),
         ],
         homes: &["OPENCODE_CONFIG_DIR"],
-        unsandboxed: &[],
+        system_config: &[],
         // Project config up to `/` (`packages/core/src/config/discovery.ts:10`,
         // `:36`); its AGENTS.md walk stops at the git worktree
         // (`config/plugin/instruction.ts:37`), the workspace the recorder inits.
@@ -480,11 +480,11 @@ mod tests {
     }
 
     #[test]
-    fn an_unsandboxed_path_is_absolute_and_an_ancestor_name_is_one_component() {
+    fn a_system_config_path_is_absolute_and_an_ancestor_config_name_is_one_component() {
         for p in PROFILES {
             // Unix paths, as the tier runs only on Unix: `Path::is_absolute`
             // would want a drive on Windows.
-            for path in p.unsandboxed {
+            for path in p.system_config {
                 assert!(path.starts_with('/'), "{}: {path}", p.source);
             }
             for name in p.ancestor_config {

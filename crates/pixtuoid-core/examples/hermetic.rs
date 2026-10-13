@@ -468,6 +468,11 @@ mod run {
                 t.replace("{port}", &port.to_string())
                     .replace("{key}", DUMMY_KEY)
             };
+            // Every child gets the profile's env, `connect`'s spawned CLI included;
+            // the CLI under test gets it again through the recorder's scrub.
+            for (k, v) in p.env {
+                env.push(((*k).to_string(), expand(v).into()));
+            }
             let cli_env = p
                 .env
                 .iter()
@@ -546,7 +551,7 @@ mod run {
             versions,
         } = ctx;
         if let Some(found) = outside_config(
-            p.unsandboxed,
+            p.system_config,
             p.ancestor_config,
             Path::new(CAPTURE_WORKSPACE),
         ) {
@@ -651,11 +656,15 @@ mod run {
     }
 
     /// Config a CLI would read that no sandbox home redirects: one of
-    /// `unsandboxed`'s system paths, or one of `names` in an ancestor of
+    /// `system_config`'s paths, or one of `ancestor_config` in an ancestor of
     /// `workspace`, which need not exist yet. An ancestor may be a symlink
     /// (macOS's `/tmp`), so the ancestors of the nearest existing one's target
     /// count too.
-    fn outside_config(unsandboxed: &[&str], names: &[&str], workspace: &Path) -> Option<PathBuf> {
+    fn outside_config(
+        system_config: &[&str],
+        ancestor_config: &[&str],
+        workspace: &Path,
+    ) -> Option<PathBuf> {
         let lexical = workspace.ancestors().skip(1);
         let real = lexical
             .clone()
@@ -665,8 +674,8 @@ mod run {
         let ancestors: Vec<PathBuf> = lexical.map(Path::to_path_buf).chain(real).collect();
         let inherited = ancestors
             .iter()
-            .flat_map(|dir| names.iter().map(move |name| dir.join(name)));
-        unsandboxed
+            .flat_map(|dir| ancestor_config.iter().map(move |name| dir.join(name)));
+        system_config
             .iter()
             .map(PathBuf::from)
             .chain(inherited)

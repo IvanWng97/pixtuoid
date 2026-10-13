@@ -83,8 +83,8 @@ mod recorder {
         env: Vec<(String, String)>,
     }
 
-    /// Leading `--out <dir>` / `--tee <socket>` / `--within <dir>` /
-    /// `--env KEY=VALUE` pairs, then the positionals.
+    /// Leading option pairs, each a [`pixtuoid_core::harness::recorder_flag`]
+    /// and its value, then the positionals.
     fn parse_options(mut args: Vec<String>) -> Result<(Options, Vec<String>), String> {
         let mut options = Options::default();
         while let Some(flag) = args.first().cloned() {
@@ -141,7 +141,7 @@ mod recorder {
         };
         if args.len() < 3 {
             eprintln!(
-                "usage: capture_fixture [--out <dir>] [--tee <socket>] [--within <dir>] [--env K=V]... \
+                "usage: capture_fixture [{OUT} <dir>] [{TEE} <socket>] [{WITHIN} <dir>] [{ENV} K=V]... \
                  <source-id> <scenario> <cmd...>   \
                  ('{{prompt}}' expands)\n       \
                  capture_fixture --strip-corpus   (strip every committed capture in place)"
@@ -824,7 +824,7 @@ mod recorder {
             let made = temp_env::with_vars(
                 [
                     ("GIT_CONFIG_GLOBAL", Some(config.as_os_str())),
-                    ("GIT_CONFIG_NOSYSTEM", Some("1".as_ref())),
+                    ("GIT_CONFIG_SYSTEM", Some(config.as_os_str())),
                 ],
                 || init_repo(&ws),
             );
