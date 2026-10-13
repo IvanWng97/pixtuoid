@@ -241,10 +241,10 @@ impl Fields {
 const TX: &str = "tx:";
 const HOOK: &str = "hook:";
 
-/// The fields a decoder reads in `p`'s committed captures: the recorder
-/// blanks every subtree no decoder reads (`reads::strip_unread`), so a
-/// stripped recording's non-blank leaves are the read fields it recorded with
-/// a value, the shim's stamps aside; one read but recorded blank is not seen.
+/// The fields a decoder reads in `p`'s committed captures: a committed
+/// recording is `reads::strip_unread`'s fixed point, so its non-blank leaves
+/// are the read fields it recorded with a value, the shim's stamps aside; one
+/// read but recorded blank is not seen.
 /// A capture the strip skips proves nothing about reads.
 pub(crate) fn committed_reads(p: &Profile) -> std::io::Result<Fields> {
     let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources");

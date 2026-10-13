@@ -7,6 +7,6 @@
   "note": "The mid-attach shape from real bytes: session_start / before_agent_run / agent_end with NO gateway_start, which is what pixtuoid sees when it attaches to a gateway that was already running. The FAILED arm is not here — `--timeout-ms 1` did not fail the run (agent_end came back success:true); provider-failed-run-recorded holds it.",
   "deidentified": {
     "method": "decoder-allowlist",
-    "blanked": 6
+    "blanked": 7
   }
 }

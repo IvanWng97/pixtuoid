@@ -132,11 +132,10 @@ fn sibling_of(file: &Path) -> PathBuf {
 /// Strip every RECORDED capture under `root` in place — local and unbilled — and
 /// record the count in its provenance. A composed capture carries no operator
 /// data by construction, and the README demo reads its bytes past the decoders.
-/// A pass that blanks nothing leaves a record that already carries a count
-/// alone, so re-running never erases history: `blanked` counts the original
-/// recording, not what a fresh capture would differ by today. `report` hears each
-/// capture as soon as its rewrite lands, so a later failure cannot hide one that
-/// already happened.
+/// `blanked` counts every subtree blanked from the original recording: a pass
+/// adds to the record's count, and one that blanks nothing leaves it alone.
+/// `report` hears each capture as soon as its rewrite lands, so a later failure
+/// cannot hide one that already happened.
 ///
 /// # Errors
 ///
@@ -156,9 +155,14 @@ pub fn strip_corpus(root: &Path, mut report: impl FnMut(&Capture, &Strip)) -> st
         if let Some(obj) = record.as_object_mut()
             && (strip.blanked > 0 || !obj.contains_key("deidentified"))
         {
+            let earlier = obj
+                .get("deidentified")
+                .and_then(|d| d["blanked"].as_u64())
+                .and_then(|n| usize::try_from(n).ok())
+                .unwrap_or(0);
             obj.insert(
                 "deidentified".into(),
-                Deidentified::Stripped(strip.blanked).record(),
+                Deidentified::Stripped(earlier + strip.blanked).record(),
             );
             std::fs::write(
                 &prov,
@@ -573,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn every_committed_scenario_decodes_the_same_once_stripped() {
+    fn stripping_a_committed_scenario_keeps_its_events_and_a_recordings_bytes() {
         let root = sources_root();
         let mut walked = BTreeSet::new();
         for capture in captures(&root) {
@@ -613,8 +617,17 @@ mod tests {
                 );
             }
             let before = scenario_events(source, &files);
-            strip_unread(source, &files).expect("strip");
+            let strip = strip_unread(source, &files).expect("strip");
             assert_eq!(scenario_events(source, &files), before, "{label}");
+            let recorded = std::fs::read_to_string(scenario.join(crate::harness::PROVENANCE))
+                .ok()
+                .and_then(|record| serde_json::from_str(&record).ok())
+                .is_some_and(|record| strips(&record));
+            assert!(
+                !recorded || strip.blanked == 0,
+                "{label}: {} subtrees no decoder reads any more; `just restrip-fixtures`",
+                strip.blanked
+            );
             walked.insert(label);
         }
         for sentinel in [
@@ -719,19 +732,25 @@ mod tests {
             "example-skill-1",
         );
         let wire = snapshot(&scenario);
+        let record = || -> serde_json::Value {
+            serde_json::from_str(
+                &std::fs::read_to_string(scenario.join("provenance.json")).expect("read"),
+            )
+            .expect("json")
+        };
+        let recorded = record()["deidentified"]["blanked"]
+            .as_u64()
+            .expect("a count");
 
         strip_corpus(d.path(), |_, _| {}).expect("strip corpus");
         let once = snapshot(&scenario);
         assert_ne!(once, wire, "the planted key is unread");
-        let prov: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(scenario.join("provenance.json")).expect("read"),
-        )
-        .expect("json");
+        let prov = record();
         assert_eq!(prov["deidentified"]["method"], "decoder-allowlist");
-        assert!(
-            prov["deidentified"]["blanked"]
-                .as_u64()
-                .is_some_and(|n| n > 0)
+        assert_eq!(
+            prov["deidentified"]["blanked"].as_u64(),
+            Some(recorded + 1),
+            "the planted key adds to the recording's count"
         );
         assert_eq!(prov["origin"], "recorded", "the rest of the record is kept");
 

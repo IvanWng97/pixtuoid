@@ -198,7 +198,7 @@ mod run {
                 }
                 entries.push(Entry::new(key, version, verdict));
             }
-            if judges_source(args.scenario.as_deref(), &judged) {
+            if judges_source(&judged, p.scenarios.len()) {
                 let key = format!("{} (every scenario)", p.source);
                 println!("== {key}");
                 let verdict = verify::verify_source(p.source, &judged)?;
@@ -211,10 +211,11 @@ mod run {
         Ok(entries.iter().all(|e| e.verdict.label() == Label::Pass))
     }
 
-    /// Whether `verify_source` takes a source's `judged` runs: not for one
-    /// selected scenario, which would fail on a field another carries, nor none.
-    fn judges_source(scenario: Option<&str>, judged: &[PathBuf]) -> bool {
-        scenario.is_none() && !judged.is_empty()
+    /// Whether `verify_source` takes a source's `judged` runs: only when they are
+    /// every one of its `scenarios`, since a subset, one selected or one Blocked,
+    /// fails on a field only another carries.
+    fn judges_source(judged: &[PathBuf], scenarios: usize) -> bool {
+        !judged.is_empty() && judged.len() == scenarios
     }
 
     /// The run's report, beside the runs; its H1 is the tracking issue's title.
@@ -929,11 +930,11 @@ mod run {
         }
 
         #[test]
-        fn a_sources_runs_are_judged_together_only_unselected_and_judged() {
+        fn a_sources_runs_are_judged_together_only_when_every_scenario_was() {
             let one = [PathBuf::from("/runs/x")];
-            assert!(judges_source(None, &one));
-            assert!(!judges_source(Some("tool-run"), &one));
-            assert!(!judges_source(None, &[]));
+            assert!(judges_source(&one, 1));
+            assert!(!judges_source(&one, 2), "a sibling selected out or Blocked");
+            assert!(!judges_source(&[], 0));
         }
 
         #[test]

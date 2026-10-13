@@ -7,6 +7,6 @@
   "note": "All SIX hooks the plugin registers, from one run through `openclaw tui`. `session_start` needs a FRESH session key; a reused one resumes and stays silent. Note the order: `session_end` lands AFTER `gateway_stop`, because shutdown is what closes the session. The turn also spawned a Claude Code backend whose own hooks reached the recorder through the inherited PIXTUOID_SOCKET; filtered out.",
   "deidentified": {
     "method": "decoder-allowlist",
-    "blanked": 10
+    "blanked": 11
   }
 }
