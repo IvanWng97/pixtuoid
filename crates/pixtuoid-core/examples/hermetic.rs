@@ -1046,7 +1046,7 @@ mod run {
         }
 
         #[test]
-        fn record_takes_whole_pinned_sources_that_record() {
+        fn record_takes_whole_pinned_sources() {
             let a = parse(&args(&["--record", "--cli", "pinned", "dsh"])).expect("parse");
             assert!(a.record);
             assert_eq!(a.versions, Versions::Pinned);
