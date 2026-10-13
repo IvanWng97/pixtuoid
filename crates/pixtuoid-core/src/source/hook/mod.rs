@@ -20,6 +20,10 @@ mod windows;
 #[cfg(windows)]
 use windows as imp;
 
+/// One accepted hook connection: a Unix stream or a named-pipe instance.
+#[cfg(feature = "harness")]
+pub(crate) type HookConn = imp::Conn;
+
 mod pid_watch;
 pub(crate) use pid_watch::HookPidWatch;
 
@@ -111,7 +115,23 @@ impl HookSocketListener {
     ///
     /// If the connection semaphore closes unexpectedly or, on Windows, the next pipe instance cannot be created.
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
-        self.inner.run(tx, self.pid_watch, self.presence_tx).await
+        let (pid_watch, presence_tx) = (self.pid_watch, self.presence_tx);
+        self.inner
+            .serve(move |conn| {
+                handle_conn(conn, tx.clone(), pid_watch.clone(), presence_tx.clone())
+            })
+            .await
+    }
+
+    /// Accept connections forever, each handed to `handle` raw, under the same
+    /// endpoint guards and per-connection budget as [`Self::run`].
+    #[cfg(feature = "harness")]
+    pub(crate) async fn serve_raw<F, Fut>(self, handle: F) -> Result<()>
+    where
+        F: Fn(HookConn) -> Fut,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.inner.serve(handle).await
     }
 }
 
@@ -119,7 +139,7 @@ impl HookSocketListener {
 /// `STAMP_HEADROOM`). `lines()` buffers until a newline, so without this
 /// an adversarial client could grow the buffer unboundedly for the whole
 /// `CONN_TIMEOUT` window × [`MAX_CONCURRENT_CONNS`] slots.
-const MAX_CONN_BYTES: u64 = 2 * 1024 * 1024;
+pub(crate) const MAX_CONN_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Breadcrumb for the silent-loss path: the per-connection budget bounds
 /// `handle_conn` by DROPPING its future, so no code after the cancelled await

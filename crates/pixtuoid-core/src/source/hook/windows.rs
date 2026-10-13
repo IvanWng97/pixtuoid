@@ -12,9 +12,7 @@ use windows_sys::Win32::Security::Authorization::{
 };
 use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 
-use crate::source::TaggedSender;
-
-use super::{CONN_TIMEOUT, MAX_CONCURRENT_CONNS, handle_conn};
+use super::{CONN_TIMEOUT, MAX_CONCURRENT_CONNS};
 
 /// Must cover the shim's whole stamped wire line — `STDIN_CAP` + the 256B
 /// `STAMP_HEADROOM` in pixtuoid-hook are test-pinned to this 1MiB quota — so
@@ -97,6 +95,9 @@ impl Drop for OwnerOnlySd {
     }
 }
 
+/// One accepted hook connection.
+pub(super) type Conn = NamedPipeServer;
+
 #[derive(Debug)]
 pub(super) struct Listener {
     server: NamedPipeServer,
@@ -142,12 +143,12 @@ impl Listener {
         Ok(Self { server, name, sd })
     }
 
-    pub(super) async fn run(
-        mut self,
-        tx: TaggedSender,
-        pid_watch: Option<super::HookPidWatch>,
-        presence_tx: Option<super::PresenceSender>,
-    ) -> Result<()> {
+    /// Accept connections forever, each handed to `handle` under [`CONN_TIMEOUT`].
+    pub(super) async fn serve<F, Fut>(mut self, handle: F) -> Result<()>
+    where
+        F: Fn(Conn) -> Fut,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
         let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNS));
         loop {
             let permit = match Arc::clone(&sem).acquire_owned().await {
@@ -171,17 +172,10 @@ impl Listener {
                 .sd
                 .create_pipe(&self.name, false)
                 .with_context(|| format!("re-creating hook pipe at {}", self.name))?;
-            let conn = std::mem::replace(&mut self.server, next);
-            let tx = tx.clone();
-            let pid_watch = pid_watch.clone();
-            let presence_tx = presence_tx.clone();
+            let handled = handle(std::mem::replace(&mut self.server, next));
             tokio::spawn(async move {
                 let _permit = permit;
-                let _ = tokio::time::timeout(
-                    CONN_TIMEOUT,
-                    handle_conn(conn, tx, pid_watch, presence_tx),
-                )
-                .await;
+                let _ = tokio::time::timeout(CONN_TIMEOUT, handled).await;
             });
         }
     }

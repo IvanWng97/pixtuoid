@@ -35,6 +35,8 @@ use crate::{AgentEvent, AgentId, Reducer, Transport};
 mod captures;
 pub mod hermetic;
 pub mod reads;
+#[cfg(feature = "native")]
+pub mod tap;
 
 pub use captures::{
     CAPTURE_NOTE, CAPTURE_RECORD, CAPTURE_WORKSPACE, Capture, CaptureRecord, HOOK_PAYLOADS,

@@ -45,7 +45,7 @@ default = ["native"]
 native  = ["dep:tokio", "dep:notify"]
 # The recorder writes captured lines back; without insertion order every
 # rewritten object would come out alphabetized, an edit past the sanctioned one.
-harness = ["serde_json/preserve_order"]
+harness = ["serde_json/preserve_order", "windows-sys/Win32_System_Pipes"]
 # What each source depends on upstream, for pixtuoid's drift watch and its
 # tests: no shipped build reads it.
 upstream = []
