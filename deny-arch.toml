@@ -27,6 +27,7 @@ allow = [
     "palette",
     "pixtuoid-lofi",
     "rustix",
+    "semver",
     "serde",
     "serde_json",
     "strum",

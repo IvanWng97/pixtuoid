@@ -143,8 +143,9 @@ pub struct SourceDescriptor {
     /// the JSONL label derivers.
     pub label_prefix: &'static str,
     /// The CLI version this build's decoder + fixtures were last verified
-    /// against. `"unknown"`, NOT `""`, where we have no fixed anchor —
-    /// `pixtuoid doctor` only flags SKEW when this parses to a version.
+    /// against, as the CLI prints it, prerelease or build suffix included.
+    /// `"unknown"`, NOT `""`, where we have no fixed anchor — `pixtuoid doctor`
+    /// only flags SKEW when [`cli_version`] reads one.
     /// Pinned to the highest recorded capture's `version` banner by
     /// `a_recorded_capture_anchors_its_sources_verified_version`, so a
     /// re-record bumps it.
@@ -357,6 +358,56 @@ pub const REGISTRY: &[SourceDescriptor] = &[
 /// saves.
 pub fn descriptor_for(name: &str) -> Option<&'static SourceDescriptor> {
     REGISTRY.iter().find(|d| d.name == name)
+}
+
+/// The version in a CLI's `--version` banner, or in a `verified_version`: the
+/// first token, split on whitespace and `/`, shaped
+/// `v?MAJOR.MINOR[.PATCH][-PRE][+BUILD]`. One grammar for every CLI, so a
+/// banner whose wording changed between releases still reads, and a
+/// parenthesized date or sha (`(2026.8.31)`, `(e178c39)`) never does. A
+/// component's leading zeros drop (CalVer `2026.09.18`), and a dot no digit
+/// follows ends the version (copilot's `1.0.62.`).
+pub fn cli_version(banner: &str) -> Option<semver::Version> {
+    banner
+        .split(|c: char| c.is_whitespace() || c == '/')
+        .find_map(version_token)
+}
+
+fn version_token(token: &str) -> Option<semver::Version> {
+    let token = token.strip_prefix(['v', 'V']).unwrap_or(token);
+    let bytes = token.as_bytes();
+    let mut end = 0;
+    while end < bytes.len()
+        && (bytes[end].is_ascii_digit()
+            || (bytes[end] == b'.' && bytes.get(end + 1).is_some_and(u8::is_ascii_digit)))
+    {
+        end += 1;
+    }
+    let mut parts = token[..end].split('.').map(str::parse::<u64>);
+    let major = parts.next()?.ok()?;
+    let minor = parts.next()?.ok()?;
+    let patch = parts.next().unwrap_or(Ok(0)).ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let mut version = semver::Version::new(major, minor, patch);
+    let rest = &token[end..];
+    if let Some(pre) = rest.strip_prefix('-') {
+        version.pre = semver::Prerelease::new(identifiers(pre)).ok()?;
+    }
+    if let Some((_, build)) = rest.split_once('+') {
+        version.build = semver::BuildMetadata::new(identifiers(build)).ok()?;
+    }
+    Some(version)
+}
+
+/// The dot-separated identifiers `s` starts with: what a prerelease or build
+/// suffix runs to before punctuation that ends the token.
+fn identifiers(s: &str) -> &str {
+    let run = s
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'))
+        .map_or(s, |end| &s[..end]);
+    run.trim_end_matches(['.', '-'])
 }
 
 /// Every registered source's stable id, in `REGISTRY` order — THE roster
@@ -589,9 +640,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
 const DSH: SourceDescriptor = SourceDescriptor {
     name: dsh::SOURCE_NAME,
     label_prefix: "ds",
-    // dsh's banner carries a prerelease suffix (`-rc.N`); `doctor::parse_version`
-    // keeps only the dotted digit run, so the suffix never reaches this pin.
-    verified_version: "0.2.0",
+    verified_version: "0.2.0-rc.2",
     version_probe: Some(&["dsh", "--version"]),
     // `DSH_HOME` is honored INSTALLER-side (the plugin file + patch row live
     // under it); hook-only, so core resolves no root to relocate.
@@ -756,7 +805,7 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
 const CURSOR: SourceDescriptor = SourceDescriptor {
     name: cursor::SOURCE_NAME,
     label_prefix: "cu",
-    verified_version: "2026.09.18",
+    verified_version: "2026.09.18-9a7762b",
     version_probe: Some(&["cursor-agent", "--version"]),
     home_env: None,
     #[cfg(any(test, feature = "upstream"))]
@@ -976,6 +1025,43 @@ const KIMI: SourceDescriptor = SourceDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_banner_reads_as_its_first_version_shaped_token() {
+        let version = |s: &str| cli_version(s).map(|v| v.to_string());
+        for (banner, want) in [
+            // Real banners, from the captures' provenance.
+            ("2.1.278 (Claude Code)", Some("2.1.278")),
+            ("codex-cli 0.155.1", Some("0.155.1")),
+            ("0.135", Some("0.135.0")),
+            ("omp/18.2.6", Some("18.2.6")),
+            ("Hermes Agent v0.21.0 (2026.8.31)", Some("0.21.0")),
+            ("grok 1.0.25 (f7e67d6988e2) [stable]", Some("1.0.25")),
+            ("2026.09.18-9a7762b", Some("2026.9.18-9a7762b")),
+            ("0.2.0-rc.2", Some("0.2.0-rc.2")),
+            ("GitHub Copilot CLI 1.0.62.", Some("1.0.62")),
+            // A parenthesized date or sha is never the version, nor a bare major.
+            ("(2026.8.31)", None),
+            ("2026", None),
+            ("no version here", None),
+            // A major no u64 holds is skipped for the next version-shaped token.
+            ("99999999999999999999999.0 v1.2.3", Some("1.2.3")),
+            ("1.2.3+build.7", Some("1.2.3+build.7")),
+        ] {
+            assert_eq!(version(banner).as_deref(), want, "{banner:?}");
+        }
+    }
+
+    #[test]
+    fn a_prerelease_orders_below_its_release_and_by_its_identifiers() {
+        let v = |s: &str| cli_version(s).expect(s);
+        assert!(v("0.2.0-rc.1") < v("0.2.0-rc.2"));
+        assert!(v("0.2.0-rc.2") < v("0.2.0"));
+        assert!(
+            v("2026.09.18") < v("2026.10.1"),
+            "CalVer orders by its numbers"
+        );
+    }
 
     #[test]
     fn daemon_sources_yields_every_daemon_row() {

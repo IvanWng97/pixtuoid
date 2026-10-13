@@ -707,11 +707,6 @@ fuzz source dir:
     cargo build --release --example decoder_fuzz -p pixtuoid-core
     find "$dir" -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz "$source"
 
-[doc('Report recorded fixtures whose CLI has moved on (advisory, exit 3 = stale)')]
-[group('rust')]
-fixture-age *args:
-    python3 scripts/fixture-age.py "$@"
-
 # Hermetic OpenClaw daemon live-e2e: drives the REAL shim with crafted gateway
 # envelopes on an isolated socket and asserts the lobster's
 # idle/busy/degraded/down via the headless `daemons=` line. Zero gateway, zero

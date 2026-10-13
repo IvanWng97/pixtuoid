@@ -341,63 +341,21 @@ pub(crate) struct DoctorSourceRow {
     pub diag: SourceDiagnostics,
 }
 
-/// A dotted-run major at or above this looks like a YEAR/date token, not a semver
-/// major — used to skip a date prefix in favor of a real version.
-const IMPLAUSIBLE_MAJOR: u64 = 1000;
-
-/// Extract a `MAJOR.MINOR[.PATCH]` tuple from a `--version` banner. Tolerant:
-/// no dotted run = None, so a skew check silently no-ops rather than alarming on
-/// garbage. Banner-order robust — a banner can print a dotted DATE/build token
-/// BEFORE the semver (`Built 2026.06.04 — v1.2.3`) — while still parsing a
-/// genuine CalVer (`2026.06.04`, e.g. cursor) rather than letting it vanish.
-pub(crate) fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
-    let bytes = s.as_bytes();
-    let mut runs: Vec<(bool, (u64, u64, u64))> = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        if !bytes[i].is_ascii_digit() {
-            i += 1;
-            continue;
-        }
-        let start = i;
-        while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
-            i += 1;
-        }
-        let run = &s[start..i];
-        if !run.contains('.') {
-            continue;
-        }
-        let mut parts = run.split('.').filter(|p| !p.is_empty());
-        if let Some(major) = parts.next().and_then(|p| p.parse().ok()) {
-            let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-            let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
-            let v_prefixed = start > 0 && matches!(bytes[start - 1], b'v' | b'V');
-            runs.push((v_prefixed, (major, minor, patch)));
-        }
-    }
-    runs.iter()
-        .find(|(vp, _)| *vp)
-        .or_else(|| runs.iter().find(|(_, (maj, ..))| *maj < IMPLAUSIBLE_MAJOR))
-        .or_else(|| runs.first())
-        .map(|(_, v)| *v)
-}
+/// A major at or above this is a CalVer year (openclaw, cursor), and a new
+/// year is no breaking major.
+const CALVER_YEAR: u64 = 1000;
 
 /// Installed-vs-verified comparison, `None` when either side can't parse or
 /// there is no anchor.
 pub(crate) fn version_cmp(installed: Option<&str>, verified: &str) -> Option<std::cmp::Ordering> {
-    if verified == "unknown" {
-        return None;
-    }
-    match (installed.and_then(parse_version), parse_version(verified)) {
-        (Some(i), Some(v)) => Some(i.cmp(&v)),
-        _ => None,
-    }
+    let installed = installed.and_then(registry::cli_version)?;
+    Some(installed.cmp_precedence(&registry::cli_version(verified)?))
 }
 
-/// The parsed `MAJOR.MINOR.PATCH` a skew verdict compared — for the `versions`
-/// category, where showing the two COMPARED values beats echoing a raw banner.
+/// The version a skew verdict compared — for the `versions` category, where
+/// showing the two COMPARED values beats echoing a raw banner.
 fn parsed_version_display(s: &str) -> Option<String> {
-    parse_version(s).map(|(major, minor, patch)| format!("{major}.{minor}.{patch}"))
+    registry::cli_version(s).map(|v| v.to_string())
 }
 
 /// A broken install outranks drift (✗ vs !); the two quiet
@@ -1044,8 +1002,11 @@ fn sources_category(rows: &[DoctorSourceRow], ink: &Ink) -> Category {
 /// release is supported, and a new major is where a wire breaks. A CalVer
 /// year is no major.
 fn below_verified_major(installed: Option<&str>, verified: &str) -> bool {
-    match (installed.and_then(parse_version), parse_version(verified)) {
-        (Some((i, ..)), Some((v, ..))) => i < v && v < IMPLAUSIBLE_MAJOR,
+    match (
+        installed.and_then(registry::cli_version),
+        registry::cli_version(verified),
+    ) {
+        (Some(i), Some(v)) => i.major < v.major && v.major < CALVER_YEAR,
         _ => false,
     }
 }
@@ -2526,28 +2487,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_version_extracts_the_dotted_run() {
-        assert_eq!(parse_version("1.0.62"), Some((1, 0, 62)));
-        assert_eq!(
-            parse_version("GitHub Copilot CLI 1.0.62."),
-            Some((1, 0, 62))
-        );
-        assert_eq!(parse_version("v2.1"), Some((2, 1, 0)));
-        assert_eq!(parse_version("codex 0.41.0 (abc)"), Some((0, 41, 0)));
-        assert_eq!(parse_version("no version here"), None);
-        assert_eq!(parse_version("2026"), None);
-    }
-
-    #[test]
-    fn parse_version_is_banner_order_robust() {
-        assert_eq!(parse_version("Built 2026.06.04 — v1.2.3"), Some((1, 2, 3)));
-        assert_eq!(parse_version("Built 2026.06.04 — 1.2.3"), Some((1, 2, 3)));
-        // A genuine CalVer with NO semver must fall back, not vanish.
-        assert_eq!(parse_version("2026.06.04-5fd875e"), Some((2026, 6, 4)));
-        assert_eq!(parse_version("GitHub Copilot CLI 1.0.62"), Some((1, 0, 62)));
-    }
-
-    #[test]
     fn version_cmp_compares_only_with_a_known_anchor() {
         use std::cmp::Ordering;
         assert_eq!(version_cmp(Some("3.4.5"), "unknown"), None);
@@ -2558,6 +2497,11 @@ mod tests {
         assert_eq!(version_cmp(Some("1.0.0"), "1.0.62"), Some(Ordering::Less));
         assert_eq!(version_cmp(Some("1.0.62"), "1.0.62"), Some(Ordering::Equal));
         assert_eq!(version_cmp(None, "1.0.62"), None);
+        assert_eq!(
+            version_cmp(Some("0.2.0-rc.3"), "0.2.0-rc.2"),
+            Some(Ordering::Greater),
+            "a prerelease past the pin runs ahead of it"
+        );
         assert_eq!(version_cmp(Some("garbage"), "1.0.62"), None);
     }
 
@@ -2644,16 +2588,6 @@ mod tests {
             r.last_ts.is_none(),
             "an ignored kind must not stamp last_ts"
         );
-    }
-
-    #[test]
-    fn parse_version_skips_a_run_with_an_overflowing_major() {
-        // The 23-digit major overflows u64, so that run is dropped.
-        assert_eq!(
-            parse_version("99999999999999999999999.0 v1.2.3"),
-            Some((1, 2, 3))
-        );
-        assert_eq!(parse_version("99999999999999999999999.0"), None);
     }
 
     #[test]
