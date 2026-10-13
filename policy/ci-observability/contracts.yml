@@ -129,12 +129,13 @@
     itself; a cache such a job saved into main's scope would reach every later
     restore there, release builds included.
   assert: |
-    [.jobs[] | select([.steps[]? | .run // "" | test("(^|\\s)just hermetic( |$)"; "m")] | any)]
+    [.jobs[] | select([.steps[]? | .run // "" | test("(^|\\s)just hermetic( |$)|examples/hermetic\\b"; "m")] | any)]
     | length > 0 and all(.["cache-mode"] == "read" or .["cache-mode"] == "none")
   break:
-    - (.jobs[] | select([.steps[]? | .run // "" | test("(^|\\s)just hermetic( |$)"; "m")] | any)) |= del(.["cache-mode"])
-    - (.jobs[] | select([.steps[]? | .run // "" | test("(^|\\s)just hermetic( |$)"; "m")] | any))["cache-mode"] = "write"
+    - (.jobs[] | select([.steps[]? | .run // "" | test("(^|\\s)just hermetic( |$)|examples/hermetic\\b"; "m")] | any)) |= del(.["cache-mode"])
+    - (.jobs[] | select([.steps[]? | .run // "" | test("(^|\\s)just hermetic( |$)|examples/hermetic\\b"; "m")] | any))["cache-mode"] = "write"
     - '.jobs.extra = {"runs-on": "macos-latest", "steps": [{"run": "just hermetic --cli latest"}]}'
+    - '.jobs.extra = {"runs-on": "macos-latest", "steps": [{"run": "target/release/examples/hermetic --cli latest"}]}'
 
 - id: hermetic-nightly-bounds-its-token
   file: .github/workflows/hermetic-nightly.yml
