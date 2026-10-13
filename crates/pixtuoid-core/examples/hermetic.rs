@@ -756,8 +756,21 @@ mod run {
             assert!(pair("--within", "/sb"), "{args:?}");
             assert!(pair("--env", "A=b"), "{args:?}");
             assert!(pair("--tee", "/sb/pix.sock"), "{args:?}");
-            let tail: Vec<OsString> = p.invocation.iter().map(OsString::from).collect();
-            assert!(args.ends_with(&tail), "{args:?}");
+            assert!(pair("--out", "/runs/x"), "{args:?}");
+            // The recorder reads options only before its positionals.
+            let source = args.iter().position(|a| a == p.source).expect("the source");
+            assert!(
+                args[..source]
+                    .chunks(2)
+                    .all(|kv| kv[0].to_str().is_some_and(|f| f.starts_with("--"))),
+                "{args:?}"
+            );
+            let positionals: Vec<OsString> = [p.source, p.scenarios[0].shape.name()]
+                .into_iter()
+                .chain(p.invocation.iter().copied())
+                .map(OsString::from)
+                .collect();
+            assert_eq!(args[source..], positionals[..], "{args:?}");
         }
 
         #[test]
