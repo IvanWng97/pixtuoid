@@ -95,6 +95,9 @@ impl Endpoint {
         #[cfg(not(windows))]
         let mut conn = tokio::net::UnixStream::connect(&self.0).await?;
         conn.write_all(bytes).await?;
+        // A pipe's write completes asynchronously: closing before it does can
+        // lose the payload when nothing else drives this runtime meanwhile.
+        conn.flush().await?;
         conn.shutdown().await
     }
 }
