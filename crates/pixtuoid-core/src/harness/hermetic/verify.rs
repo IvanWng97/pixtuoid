@@ -597,8 +597,8 @@ mod tests {
     fn recorded(source: &str, shape: Shape, scene: &str) -> tempfile::TempDir {
         let fixture = profile(source)
             .and_then(|p| p.scenarios.iter().find(|s| s.shape == shape))
-            .and_then(|s| s.fixture)
-            .expect("a scenario that records");
+            .map(|s| s.fixture)
+            .expect("a profiled scenario");
         let src = crate::harness::sources_root().join(fixture);
         run_of(&src, source, shape, scene)
     }
