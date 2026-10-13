@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Sourced by every scripts/lib/tier-*.sh. Holds what the tiers duplicated —
-# tier-replay keeps its own binary guard, whose message carries the PIXTUOID_BIN
-# override. Cleanup bodies and the expect_line pollers stay per-tier by design;
-# the WHY for the pollers is at tier-openclaw-hermetic.sh's expect_line.
+# Sourced by every scripts/lib/tier-*.sh. Holds what the tiers duplicated.
+# Cleanup bodies and the expect_line pollers stay per-tier by design; the WHY
+# for the pollers is at tier-openclaw-hermetic.sh's expect_line.
 
 e2e_repo_root() {
     (cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)

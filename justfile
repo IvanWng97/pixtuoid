@@ -751,13 +751,6 @@ openclaw-backend-e2e:
 live-sources *ids:
     scripts/lib/tier-live-sources.sh "$@"
 
-# Replays a captured rollout through the FULL headless path — real watcher, real
-# socket, only the input is fixed.
-[doc('Replay a captured rollout fixture through a hermetic headless run')]
-[group('rust')]
-replay fixture delay="3":
-    scripts/lib/tier-replay.sh "$@"
-
 # Two builds: one would unify the examples' `harness` feature into the binary
 # under test.
 [doc('Run each profiled agent CLI against a scripted model (aimock) and judge what pixtuoid made of it')]
