@@ -61,7 +61,7 @@
       and ([.jobs.publish.steps[] | select((.uses // "") | startswith("peter-evans/create-pull-request@")) | .with["add-paths"]] == ["docs/images"])
       and ((.on | keys) - ["push", "workflow_dispatch"]) == []
   break:
-    - '.jobs.render.steps += [{"env": {"T": "${{ secrets.MEDIA_APP_KEY }}"}, "run": "true"}]'
+    - '.jobs.render.steps += [{"env": {"T": "${{ secrets.BOT_APP_KEY }}"}, "run": "true"}]'
     - '.jobs.render.permissions.contents = "write"'
     - '.jobs.publish.permissions = {"contents": "write"}'
     - '.jobs.publish.steps += [{"run": "cargo build"}]'
@@ -69,7 +69,7 @@
     - '.jobs.publish.steps += [{"run": "git add -A && git commit -m x"}]'
     - .on.pull_request = {}
     - '.permissions = {"contents": "write"}'
-    - '.jobs.extra = {"runs-on": "ubuntu-latest", "steps": [{"env": {"T": "${{ secrets.MEDIA_APP_KEY }}"}, "run": "true"}]}'
+    - '.jobs.extra = {"runs-on": "ubuntu-latest", "steps": [{"env": {"T": "${{ secrets.BOT_APP_KEY }}"}, "run": "true"}]}'
     - '.jobs.publish.steps += [{"uses": "./.github/actions/setup-cargo-just"}]'
     - '.jobs.publish.steps[0].with["persist-credentials"] = true'
     - '.jobs.publish.steps += [{"run": "bash scripts/x.sh"}]'
@@ -118,6 +118,56 @@
     - |
       .jobs.file.steps |= map(
         if (.uses // "") | startswith("actions/download-artifact") then .with = {"merge-multiple": true} else . end)
+
+- id: third-party-clis-run-with-a-read-only-cache
+  file:
+    - .github/workflows/hermetic.yml
+    - .github/workflows/hermetic-nightly.yml
+  why: >-
+    A job running an agent CLI's release runs code nobody here vets, on a
+    runner holding that job's cache token. Only `cache-mode` scopes the token
+    itself; a cache such a job saved into main's scope would reach every later
+    restore there, release builds included.
+  assert: |
+    [.jobs[] | select([.steps[]? | .run // "" | test("(^|\\s)just hermetic( |$)"; "m")] | any)]
+    | length > 0 and all(.["cache-mode"] == "read" or .["cache-mode"] == "none")
+  break:
+    - (.jobs[] | select([.steps[]? | .run // "" | test("(^|\\s)just hermetic( |$)"; "m")] | any)) |= del(.["cache-mode"])
+    - (.jobs[] | select([.steps[]? | .run // "" | test("(^|\\s)just hermetic( |$)"; "m")] | any))["cache-mode"] = "write"
+    - '.jobs.extra = {"runs-on": "macos-latest", "steps": [{"run": "just hermetic --cli latest"}]}'
+
+- id: hermetic-nightly-bounds-its-token
+  file: .github/workflows/hermetic-nightly.yml
+  why: >-
+    publish holds the App's key and the write token it mints, which stay bounded
+    only while no other job can read them, publish runs nothing from the tree,
+    the bump it commits is checked and confined to its source's paths, and no
+    value a CLI could have written reaches a `run:` but through `env:`.
+  assert: |
+    ([.jobs.publish.steps[] | .run // ""] | join("\n")) as $publish
+    | .permissions == {}
+      and .jobs.publish.permissions == {"actions": "read", "pull-requests": "read"}
+      and .jobs.bump.permissions == {"contents": "read"}
+      and ([.jobs | to_entries[] | select(.key != "publish") | .value | tostring | test("secrets\\.")] | any | not)
+      and ([.jobs.publish.steps[] | .uses // empty | sub("@.*"; "")] - ["actions/checkout", "actions/download-artifact", "actions/create-github-app-token", "peter-evans/create-pull-request"]) == []
+      and ([.jobs.publish.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with["persist-credentials"]] | all(. == false))
+      and ($publish | test("\\b(cargo|just|npm|node|pip|python3?|make|bash|sh)\\b|\\./") | not)
+      and ($publish | test("\\bgit\\s+(add|commit|push)\\b") | not)
+      and (.jobs.publish.if | test("github.ref == 'refs/heads/main'"))
+      and ([.jobs.publish.steps[] | select((.uses // "") | startswith("peter-evans/create-pull-request@")) | .with["add-paths"]]
+           == [":(glob)crates/pixtuoid-core/tests/sources/**/fixtures/${{ matrix.source }}/**\n:(glob)crates/pixtuoid-core/tests/sources/snapshots/sources__conformance__${{ matrix.source }}__*.snap\ncrates/pixtuoid-core/src/source/registry.rs\n"])
+      and ([.jobs.plan, .jobs.bump, .jobs.publish | .steps[] | .run // ""] | all(test("\\$\\{\\{") | not))
+  break:
+    - '.jobs.publish.permissions.contents = "write"'
+    - '.jobs.bump.steps += [{"env": {"T": "${{ secrets.BOT_APP_KEY }}"}, "run": "true"}]'
+    - '.jobs.publish.steps += [{"run": "cargo build"}]'
+    - '.jobs.publish.steps += [{"run": "git add -A && git commit -m x"}]'
+    - '.jobs.publish.steps += [{"uses": "./.github/actions/setup-cargo-just"}]'
+    - '(.jobs.publish.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with["persist-credentials"]) = true'
+    - '.jobs.publish.if = "${{ !cancelled() }}"'
+    - '(.jobs.publish.steps[] | select((.uses // "") | startswith("peter-evans/")) | .with["add-paths"]) = "."'
+    - '.jobs.bump.steps += [{"run": "just hermetic --cli ${{ matrix.version }}"}]'
+    - '.permissions = {"contents": "write"}'
 
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml

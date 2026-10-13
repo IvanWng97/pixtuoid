@@ -2,13 +2,23 @@ name: hermetic-nightly
 
 # The drift watch: each profiled CLI's latest release against the scripted
 # model, where a CLI that renamed or reshaped what pixtuoid reads turns a
-# verdict red before a user upgrades into it.
+# verdict red before a user upgrades into it. A release every run passed above
+# its pin becomes that CLI's bump PR.
 
 on:
   schedule:
     - cron: "23 7 * * *" # daily 07:23 UTC
   workflow_dispatch:
 permissions: {}
+
+concurrency:
+  group: hermetic-nightly
+  cancel-in-progress: false
+
+env:
+  # npm publishes strict semver, so nothing else names a version here.
+  SEMVER: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'
+  BOT: pixtuoid-bot[bot]
 
 jobs:
   drift:
@@ -19,16 +29,236 @@ jobs:
       full: true
       cli: latest
 
+  plan:
+    name: plan the bumps
+    needs: drift
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      bumps: ${{ steps.plan.outputs.bumps }}
+    steps:
+      - name: Keep each moved source that no bump PR already proposes
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MOVED: ${{ needs.drift.outputs.moved }}
+        run: |
+          set -euo pipefail
+          # The latest CLIs could write MOVED: only well-formed rows pass.
+          valid=$(jq -c --arg re "$SEMVER" '
+            [ (if type == "array" then .[] else empty end)
+              | select(type == "object"
+                  and (.source | type == "string" and test("^[a-z][a-z0-9-]*$"))
+                  and (.version | type == "string" and test($re)))
+              | {source, version} ] | unique_by(.source)' <<<"${MOVED:-[]}" 2>/dev/null || echo '[]')
+          bumps='[]'
+          while IFS= read -r row; do
+            source=$(jq -r .source <<<"$row")
+            version=$(jq -r .version <<<"$row")
+            prs=$(gh pr list --head "bot/bump-$source" --state all --json title,state,mergedAt,commits)
+            # A version already proposed or declined stays as it is, and so does
+            # a branch a session has committed to.
+            if jq -e --arg t "test($source): re-record at $version and pin it" --arg bot "$BOT" '
+                any(.[]; (.title == $t and .mergedAt == null)
+                  or (.state == "OPEN" and any(.commits[].authors[]; .login != $bot)))' \
+                <<<"$prs" >/dev/null; then
+              echo "$source $version: left as it is"
+              continue
+            fi
+            bumps=$(jq -c --argjson row "$row" '. + [$row]' <<<"$bumps")
+          done < <(jq -c '.[]' <<<"$valid")
+          echo "bumps=$bumps" >> "$GITHUB_OUTPUT"
+
+  bump:
+    name: bump (${{ matrix.source }})
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.bumps != '[]' && needs.plan.outputs.bumps != '' }}
+    runs-on: macos-latest
+    timeout-minutes: 45
+    # The CLI under test runs here too.
+    cache-mode: read
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      # It shares macOS runners with the merge queue's hermetic run.
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.bumps) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          shared-key: hermetic
+      - uses: ./.github/actions/setup-npm
+        with:
+          directory: crates/pixtuoid-core/tests/sources/hermetic/aimock
+      - name: Re-record at the version the drift run passed
+        env:
+          SOURCE: ${{ matrix.source }}
+          VERSION: ${{ matrix.version }}
+        run: just hermetic --cli "$VERSION" --record "$SOURCE"
+      # A failure here is the verdict step's to report: one test loops over
+      # every scenario, so only a run that goes on rewrites every snapshot.
+      - name: Rewrite the snapshots the fixtures feed
+        continue-on-error: true
+        env:
+          INSTA_UPDATE: always
+          INSTA_FORCE_PASS: 1
+        run: just test -p pixtuoid-core --test sources --no-fail-fast
+      - name: Judge the re-recorded tree
+        run: just test -p pixtuoid-core --test sources
+      - name: Write the bump as a patch
+        run: |
+          set -euo pipefail
+          paths=(crates/pixtuoid-core/tests/sources ':(exclude,glob)**/node_modules/**'
+            crates/pixtuoid-core/src/source/registry.rs)
+          git add -N -- "${paths[@]}"
+          # A re-record renames a transcript (its name carries the session
+          # id): `HEAD` keeps the deletion and `--no-renames` keeps it a delete.
+          git diff --binary --no-renames HEAD -- "${paths[@]}" > "$RUNNER_TEMP/bump.patch"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: patch-${{ matrix.source }}
+          path: ${{ runner.temp }}/bump.patch
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    name: publish (${{ matrix.source }})
+    needs: [plan, bump]
+    # A dispatch from another branch would publish that branch's bump.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.plan.outputs.bumps != '[]' && needs.plan.outputs.bumps != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      pull-requests: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.bumps) }}
+    steps:
+      # Every leg's runner held the run's artifact token, so a later leg could
+      # replace this one's patch: take it only if its own leg passed and wrote
+      # it before finishing.
+      - name: Take the patch only from its own passed leg
+        id: leg
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN: ${{ github.run_id }}
+          SOURCE: ${{ matrix.source }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE" =~ ^[a-z][a-z0-9-]*$ ]]
+          job=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN/jobs" \
+            | jq -cs --arg n "bump ($SOURCE)" '[.[].jobs[] | select(.name == $n)] | first // {}')
+          made=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN/artifacts" \
+            | jq -rs --arg n "patch-$SOURCE" '[.[].artifacts[] | select(.name == $n) | .created_at] | first // ""')
+          prs=$(gh pr list --head "bot/bump-$SOURCE" --state open --json commits)
+          if jq -e '.conclusion == "success"' <<<"$job" >/dev/null \
+              && [[ -n "$made" && ! "$made" > "$(jq -r .completed_at <<<"$job")" ]] \
+              && jq -e --arg bot "$BOT" 'all(.[].commits[].authors[]; .login == $bot)' <<<"$prs" >/dev/null; then
+            echo "take=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::bump ($SOURCE) did not pass, its patch post-dates it, or a session committed to its PR"
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: patch-${{ matrix.source }}
+          path: ${{ runner.temp }}/patch
+      - name: Check the patch is this source's bump and nothing else
+        id: check
+        env:
+          SOURCE: ${{ matrix.source }}
+          VERSION: ${{ matrix.version }}
+          PATCH: ${{ runner.temp }}/patch/bump.patch
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE" =~ ^[a-z][a-z0-9-]*$ && "$VERSION" =~ $SEMVER ]]
+          if [[ ! -s "$PATCH" ]]; then
+            echo "$SOURCE: nothing moved since the drift run"
+            exit 0
+          fi
+          # Only new and deleted regular files: a rename, symlink or mode
+          # change shows in --summary alone, and a binary in --numstat's `-`.
+          if git apply --summary "$PATCH" | grep -v -E '^ (create|delete) mode 100644 '; then
+            echo "::error::the patch is more than new and deleted files"; exit 1
+          fi
+          if git apply --numstat "$PATCH" | awk '$1 == "-" || $2 == "-" { found = 1 } END { exit !found }'; then
+            echo "::error::the patch carries a binary"; exit 1
+          fi
+          git apply --index "$PATCH"
+          registry=crates/pixtuoid-core/src/source/registry.rs
+          allowed=(":(glob)crates/pixtuoid-core/tests/sources/**/fixtures/$SOURCE/**/*.jsonl"
+            ":(glob)crates/pixtuoid-core/tests/sources/**/fixtures/$SOURCE/**/provenance.json"
+            ":(glob)crates/pixtuoid-core/tests/sources/snapshots/sources__conformance__${SOURCE}__*.snap"
+            "$registry")
+          outside=$(comm -23 <(git diff --cached --name-only | sort) \
+            <(git diff --cached --name-only -- "${allowed[@]}" | sort))
+          if [[ -n "$outside" ]]; then
+            echo "::error::the patch touches what $SOURCE's bump never does: $outside"; exit 1
+          fi
+          # The registry changes by its one pin line, on this source's row.
+          pin='^    verified_version: "[^"]+",$'
+          diff=$(git diff --cached -U0 -- "$registry")
+          minus=$(grep -E '^-[^-]' <<<"$diff" || true)
+          plus=$(grep -E '^\+[^+]' <<<"$diff" || true)
+          row=$(tr 'a-z-' 'A-Z_' <<<"$SOURCE")
+          at=$(sed -n -E 's/^@@ -[0-9,]+ \+([0-9]+)(,1)? @@.*/\1/p' <<<"$diff")
+          want=$(awk -v row="^const $row: SourceDescriptor" '$0 ~ row { r = 1 } r && /verified_version:/ { print NR; exit }' "$registry")
+          if [[ $(grep -c . <<<"$minus") != 1 || $(grep -c . <<<"$plus") != 1 \
+              || ! "${minus:1}" =~ $pin || "${plus:1}" != "    verified_version: \"$VERSION\"," \
+              || -z "$at" || "$at" != "$want" ]]; then
+            echo "::error::the registry must change by $SOURCE's one pin line, to $VERSION"; exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - id: app-token
+        if: steps.check.outputs.version != ''
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - if: steps.check.outputs.version != ''
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: bot/bump-${{ matrix.source }}
+          delete-branch: true
+          sign-commits: true
+          add-paths: |
+            :(glob)crates/pixtuoid-core/tests/sources/**/fixtures/${{ matrix.source }}/**
+            :(glob)crates/pixtuoid-core/tests/sources/snapshots/sources__conformance__${{ matrix.source }}__*.snap
+            crates/pixtuoid-core/src/source/registry.rs
+          commit-message: "test(${{ matrix.source }}): re-record at ${{ steps.check.outputs.version }} and pin it"
+          title: "test(${{ matrix.source }}): re-record at ${{ steps.check.outputs.version }} and pin it"
+          body: |
+            ${{ matrix.source }} ${{ steps.check.outputs.version }} passed every hermetic scenario at `latest`, so its fixtures are re-recorded and its `verified_version` moves to it (`hermetic-nightly.yml`). Its snapshot diff is what this release changed in pixtuoid's decode: a session reads it, then queues the PR.
+
   file:
     name: file the hermetic report
-    needs: drift
-    if: ${{ always() && needs.drift.result == 'failure' }}
+    needs: [drift, plan, bump, publish]
+    if: ${{ always() && contains(needs.*.result, 'failure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       issues: write
     steps:
-      - uses: actions/download-artifact@v8
+      - if: needs.drift.result == 'failure'
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.drift.outputs.runs }}
 
@@ -36,19 +266,35 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          DRIFT: ${{ needs.drift.result }}
+          PLAN: ${{ needs.plan.result }}
+          BUMP: ${{ needs.bump.result }}
+          PUBLISH: ${{ needs.publish.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           gh label create hermetic --color FBCA04 \
             --description "A hermetic run's verdict on an agent CLI's latest release" 2>/dev/null || true
+          num=$(gh issue list --label hermetic --state open \
+            --json number --jq '.[0].number // empty')
           # The orchestrator owns the title, as the report's H1, and it carries
           # the disposition: retitle on the dedup path too. No report.md means
           # the tier itself could not run: red, with no verdict to file.
-          title=$(head -1 report.md | sed 's/^# //')
-          num=$(gh issue list --label hermetic --state open \
-            --json number --jq '.[0].number // empty')
-          if [ -n "$num" ]; then
-            gh issue edit "$num" --title "$title"
-            gh issue comment "$num" --body-file report.md
-          else
-            gh issue create --title "$title" --label hermetic --body-file report.md
+          if [ "$DRIFT" = failure ]; then
+            title=$(head -1 report.md | sed 's/^# //')
+            if [ -n "$num" ]; then
+              gh issue edit "$num" --title "$title"
+              gh issue comment "$num" --body-file report.md
+            else
+              url=$(gh issue create --title "$title" --label hermetic --body-file report.md)
+              num=${url##*/}
+            fi
+          fi
+          if [ "$PLAN" = failure ] || [ "$BUMP" = failure ] || [ "$PUBLISH" = failure ]; then
+            body="A pin bump failed in $RUN_URL; its plan, bump and publish job logs name the source and why."
+            if [ -n "$num" ]; then
+              gh issue comment "$num" --body "$body"
+            else
+              gh issue create --title "hermetic: a pin bump failed" --label hermetic --body "$body"
+            fi
           fi

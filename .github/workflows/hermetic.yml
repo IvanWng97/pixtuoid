@@ -18,12 +18,31 @@ on:
       runs:
         description: 'The artifact the runs upload as when `just hermetic` exits non-zero'
         value: ${{ jobs.run.outputs.runs }}
+      moved:
+        description: 'The sources every run passed above their pin, as `[{"source", "version"}]` JSON'
+        value: ${{ jobs.run.outputs.moved }}
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
+  # The cache's only writer, beside `run` rather than before it: no CLI runs
+  # here, and `run`, which reads only, restores what main's last build saved.
+  build:
+    name: hermetic build
+    if: ${{ inputs.full }}
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          shared-key: hermetic
+      - run: just hermetic-build
+
   run:
     name: hermetic (${{ inputs.cli }})
     if: ${{ inputs.full }}
@@ -31,13 +50,19 @@ jobs:
     # macOS's, the platform the corpus was recorded on.
     runs-on: macos-latest
     timeout-minutes: 30
+    # Enforced on the job's cache token, so a CLI that lifts it from the
+    # runner still cannot save (docs.github.com dependency-caching, `cache-mode`).
+    cache-mode: read
     outputs:
       runs: ${{ steps.run.outputs.runs }}
+      moved: ${{ steps.run.outputs.moved }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
+        with:
+          shared-key: hermetic
       # Node, and the repo's one npm, whose allowScripts policy the tier's CLI
       # installs rely on.
       - uses: ./.github/actions/setup-npm
@@ -50,8 +75,17 @@ jobs:
         run: |
           set +e
           just hermetic --cli "$CLI"
-          echo "exit=$?" >> "$GITHUB_OUTPUT"
-          echo "runs=hermetic-runs-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          code=$?
+          # The CLIs under test can write the file: `-s` re-reads it as one
+          # line, so it cannot add an output of its own, and anything but one
+          # array reads as nothing moved.
+          moved=$(jq -cs 'if length == 1 and (.[0] | type) == "array" then .[0] else [] end' \
+            target/hermetic/runs/moved.json 2>/dev/null || echo '[]')
+          {
+            echo "moved=$moved"
+            echo "exit=$code"
+            echo "runs=hermetic-runs-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          } >> "$GITHUB_OUTPUT"
       - if: steps.run.outputs.exit != '0'
         uses: actions/upload-artifact@v7
         with:
@@ -70,7 +104,7 @@ jobs:
   required:
     name: required-hermetic-jobs
     if: ${{ always() }}
-    needs: [run]
+    needs: [build, run]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

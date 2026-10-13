@@ -268,3 +268,135 @@ git init -q "$test_dir/no-parent" && echo a >"$test_dir/no-parent/lock" && git -
     fail "path-changed passed a diff it could not run: $(<"$test_dir/no-parent.err")"
 grep -q 'bad revision' "$test_dir/no-parent.err" ||
     fail "the parentless repo's diff did not fail on its missing parent: $(<"$test_dir/no-parent.err")"
+
+# ── hermetic-nightly.yml: a bump is proposed once, taken only from its own
+# passed leg, and published only as its source's checked fixtures and pin ──
+nightly=.github/workflows/hermetic-nightly.yml
+semver="$(yq -e -r '.env.SEMVER' "$nightly")" || fail "$nightly has no SEMVER"
+bot="$(yq -e -r '.env.BOT' "$nightly")" || fail "$nightly has no BOT"
+bump_bin="$test_dir/bump-bin"
+mkdir -p "$bump_bin"
+cat >"$bump_bin/gh" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1 ${3:-}" in
+api*/jobs) echo "$FAKE_JOBS" ;;
+api*/artifacts) echo "$FAKE_ARTIFACTS" ;;
+pr*) echo "$FAKE_PRS" ;;
+*) exit 1 ;;
+esac
+STUB
+chmod +x "$bump_bin/gh"
+
+plan_script="$(workflow_step_script "$nightly" "Keep each moved source that no bump PR already proposes")"
+plan() {
+    : >"$test_dir/plan-output"
+    PATH="$bump_bin:$PATH" GH_TOKEN=t GH_REPO=o/r MOVED="$1" FAKE_PRS="${2:-[]}" SEMVER="$semver" BOT="$bot" \
+        GITHUB_OUTPUT="$test_dir/plan-output" bash -c "$plan_script" >/dev/null 2>&1 || fail "plan exited non-zero on $1"
+    sed -n 's/^bumps=//p' "$test_dir/plan-output"
+}
+dsh_bump='[{"source":"dsh","version":"0.2.0"}]'
+dsh_pr() { jq -cn --arg s "$1" --arg m "$2" --arg l "$3" \
+    '[{title: "test(dsh): re-record at 0.2.0 and pin it", state: $s,
+       mergedAt: (if $m == "" then null else $m end), commits: [{authors: [{login: $l}]}]}]'; }
+[[ "$(plan "$dsh_bump")" == "$dsh_bump" ]] || fail "plan dropped a moved source"
+[[ "$(plan '[{"source":"Dsh","version":"0.2.0"},{"source":"dsh","version":"0.2"},{"source":"a b","version":"1.0.0"}]')" == '[]' ]] ||
+    fail "plan kept a malformed row"
+[[ "$(plan '{"source":"dsh"}')" == '[]' && "$(plan 'not json')" == '[]' ]] || fail "plan read something that is not a list"
+[[ "$(plan "$dsh_bump" "$(dsh_pr OPEN "" "$bot")")" == '[]' ]] || fail "plan re-proposed an open bump"
+[[ "$(plan "$dsh_bump" "$(dsh_pr CLOSED "" "$bot")")" == '[]' ]] || fail "plan re-proposed a declined bump"
+[[ "$(plan "$dsh_bump" "$(dsh_pr OPEN "" someone | jq -c '.[0].title = "older"')")" == '[]' ]] ||
+    fail "plan would reset a branch a session committed to"
+
+leg_script="$(workflow_step_script "$nightly" "Take the patch only from its own passed leg")"
+leg() {
+    local expect="$1" label="$2" conclusion="$3" made="$4" prs="${5:-[]}"
+    local jobs artifacts
+    jobs=$(jq -cn --arg c "$conclusion" '{jobs: [{name: "bump (dsh)", conclusion: $c, completed_at: "2026-10-13T10:00:00Z"}]}')
+    artifacts=$(jq -cn --arg m "$made" '{artifacts: [$m | select(. != "") | {name: "patch-dsh", created_at: .}]}')
+    if PATH="$bump_bin:$PATH" GH_TOKEN=t GH_REPO=o/r RUN=1 SOURCE=dsh BOT="$bot" FAKE_JOBS="$jobs" \
+        FAKE_ARTIFACTS="$artifacts" FAKE_PRS="$prs" GITHUB_OUTPUT=/dev/null bash -c "$leg_script" >/dev/null 2>&1; then
+        [[ "$expect" == take ]] || fail "publish took a patch from $label"
+    else
+        [[ "$expect" == refuse ]] || fail "publish refused a patch from $label"
+    fi
+}
+leg take "its passed leg" success 2026-10-13T09:59:00Z
+leg take "its leg, with its own open PR" success 2026-10-13T09:59:00Z "$(dsh_pr OPEN "" "$bot")"
+leg refuse "a failed leg" failure 2026-10-13T09:59:00Z
+leg refuse "a patch written after its leg ended" success 2026-10-13T10:01:00Z
+leg refuse "a leg that wrote none" success ""
+leg refuse "a PR a session committed to" success 2026-10-13T09:59:00Z "$(dsh_pr OPEN "" someone)"
+
+check_script="$(workflow_step_script "$nightly" "Check the patch is this source's bump and nothing else")"
+bump_repo="$test_dir/bump-repo"
+registry=crates/pixtuoid-core/src/source/registry.rs
+fx=crates/pixtuoid-core/tests/sources
+git init -q "$bump_repo"
+mkdir -p "$bump_repo/${registry%/*}" "$bump_repo/$fx/fixtures/dsh/run" "$bump_repo/$fx/fixtures/codex/run" \
+    "$bump_repo/$fx/delegation/fixtures/dsh" "$bump_repo/$fx/snapshots"
+printf '%s\n' 'const CODEX: SourceDescriptor = SourceDescriptor {' '    verified_version: "0.155.1",' '};' \
+    'const DSH: SourceDescriptor = SourceDescriptor {' '    verified_version: "0.2.0-rc.2",' '};' >"$bump_repo/$registry"
+for f in fixtures/dsh/run/old-session.jsonl fixtures/dsh/run/provenance.json fixtures/codex/run/hook-payloads.jsonl \
+    delegation/fixtures/dsh/hook-payloads.jsonl snapshots/sources__conformance__dsh__run.snap; do
+    echo old >"$bump_repo/$fx/$f"
+done
+echo old >"$bump_repo/${registry%/*}/lib.rs"
+git -C "$bump_repo" add -A && git -C "$bump_repo" -c user.email=t@t -c user.name=t commit -qm base
+
+pin() { perl -pi -e "s/\"$1\"/\"$2\"/" "$registry"; }
+rerecord() {
+    pin 0.2.0-rc.2 0.2.0
+    rm "$fx/fixtures/dsh/run/old-session.jsonl"
+    echo new >"$fx/fixtures/dsh/run/new-session.jsonl"
+    echo new >"$fx/fixtures/dsh/run/provenance.json"
+    echo new >"$fx/delegation/fixtures/dsh/hook-payloads.jsonl"
+    echo new >"$fx/snapshots/sources__conformance__dsh__run.snap"
+}
+# The patch the bump job writes from the working tree `edit` leaves, or, with a
+# third argument, from what `edit` staged with rename detection on.
+check() {
+    local expect="$1" label="$2" edit="$3" renames="${4:-}" version="${VERSION_OVERRIDE:-0.2.0}"
+    (
+        cd "$bump_repo"
+        "$edit"
+        if [[ -n "$renames" ]]; then
+            git diff --binary -M --cached HEAD >"$test_dir/bump.patch"
+        else
+            git add -N -- . && git diff --binary --no-renames HEAD -- . >"$test_dir/bump.patch"
+        fi
+        git reset -q --hard && git clean -qfd
+    )
+    : >"$test_dir/check-output"
+    if (cd "$bump_repo" && SOURCE=dsh VERSION="$version" PATCH="$test_dir/bump.patch" SEMVER="$semver" \
+        GITHUB_OUTPUT="$test_dir/check-output" bash -c "$check_script") >/dev/null 2>&1; then
+        [[ "$expect" != refuse ]] || fail "publish took $label"
+        [[ "$expect" != take ]] || grep -qx "version=$version" "$test_dir/check-output" ||
+            fail "publish took $label without naming its version"
+    else
+        [[ "$expect" == refuse ]] || fail "publish refused $label"
+    fi
+    (cd "$bump_repo" && git reset -q --hard && git clean -qfd)
+}
+nothing() { :; }
+outside() { rerecord && echo x >>"${registry%/*}/lib.rs"; }
+other_source() { rerecord && echo x >>"$fx/fixtures/codex/run/hook-payloads.jsonl"; }
+wrong_row() { pin 0.155.1 0.2.0; }
+both_rows() { rerecord && pin 0.155.1 0.2.0; }
+not_data() { rerecord && echo x >"$fx/fixtures/dsh/run/x.sh"; }
+symlink() { rerecord && ln -s ../../../../src/source/lib.rs "$fx/fixtures/dsh/run/link.jsonl"; }
+mode() { rerecord && chmod +x "$fx/fixtures/dsh/run/provenance.json"; }
+binary() { rerecord && printf '\0\1\2' >"$fx/fixtures/dsh/run/b.jsonl"; }
+renamed() { pin 0.2.0-rc.2 0.2.0 && git add -A && git mv "${registry%/*}/lib.rs" "$fx/fixtures/dsh/run/lib.jsonl"; }
+check take "a re-record and its pin" rerecord
+check skip "an empty patch" nothing
+check refuse "a change outside the source's fixtures" outside
+check refuse "another source's fixture" other_source
+check refuse "another row's pin" wrong_row
+check refuse "a second pin" both_rows
+check refuse "a file no decoder reads" not_data
+check refuse "a symlink" symlink
+check refuse "a mode change" mode
+check refuse "a binary" binary
+check refuse "a rename" renamed renames
+VERSION_OVERRIDE=0.2.1 check refuse "a pin other than the version plan named" rerecord
