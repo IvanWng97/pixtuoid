@@ -597,8 +597,8 @@ mod recorder {
 
     /// The library strips and records; printing the outcome is the CLI's job.
     fn strip_corpus(root: &Path) -> std::io::Result<()> {
-        for (capture, strip) in reads::strip_corpus(root)? {
-            report_not_json(&strip);
+        reads::strip_corpus(root, |capture, strip| {
+            report_not_json(strip);
             println!(
                 "{}: blanked {}",
                 capture
@@ -608,16 +608,22 @@ mod recorder {
                     .display(),
                 strip.blanked
             );
-        }
-        Ok(())
+        })
     }
 
     /// A file with a non-JSON line is left as recorded rather than half-rewritten;
     /// `refuse_on_pii` still reads it for the operator's own identity.
     fn report_not_json(strip: &reads::Strip) {
-        for file in &strip.not_json {
-            eprintln!("not stripping {}: a line is not JSON", file.display());
+        for (file, error) in &strip.not_json {
+            eprintln!("{}", not_json_notice(file, error));
         }
+    }
+
+    fn not_json_notice(file: &Path, error: &str) -> String {
+        format!(
+            "not stripping {}: a line is not JSON: {error}",
+            file.display()
+        )
     }
 
     /// Where this scenario's bytes ALREADY live, else the conformance root: a module
@@ -640,6 +646,18 @@ mod recorder {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn the_not_json_notice_names_the_file_and_the_parse_error() {
+            let notice = not_json_notice(
+                Path::new("/x/hook-payloads.jsonl"),
+                "expected value at line 2",
+            );
+            assert_eq!(
+                notice,
+                "not stripping /x/hook-payloads.jsonl: a line is not JSON: expected value at line 2"
+            );
+        }
 
         #[test]
         fn a_module_owned_scenario_is_re_recorded_where_it_lives() {

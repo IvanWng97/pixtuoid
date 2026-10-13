@@ -408,7 +408,7 @@ pub(crate) fn path_filter_for(source: &str) -> PathFilter {
 pub(crate) type PresenceDecoder = fn(&Value) -> Result<crate::source::daemon::DecodedPresence>;
 
 /// The presence decoder for a daemon source, or `None` for an agent source.
-pub fn presence_decoder_for(source: &str) -> Option<PresenceDecoder> {
+pub(crate) fn presence_decoder_for(source: &str) -> Option<PresenceDecoder> {
     descriptor_for(source).and_then(|d| d.presence_decoder())
 }
 

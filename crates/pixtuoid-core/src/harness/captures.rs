@@ -52,7 +52,7 @@ impl Capture {
     /// Every `.jsonl` under the capture, sorted. Recursive: copilot and grok keep
     /// a scenario's transcript under its session directory, beside the hook
     /// payloads at the top.
-    pub fn jsonl_files(&self) -> Vec<PathBuf> {
+    pub(crate) fn jsonl_files(&self) -> Vec<PathBuf> {
         let mut files = Vec::new();
         let mut pending = vec![self.dir.clone()];
         while let Some(d) = pending.pop() {

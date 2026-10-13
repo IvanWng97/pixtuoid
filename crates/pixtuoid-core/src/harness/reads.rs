@@ -51,10 +51,10 @@ pub fn exemption(provenance: &Path) -> Option<String> {
 pub struct Strip {
     /// Subtrees blanked across every file.
     pub blanked: usize,
-    /// Files left whole: half-rewriting one would corrupt the bytes. The
-    /// committed-tree gate refuses to skip such a line at all
-    /// (`no_identity_key_holds_a_value_outside_a_pinned_exemption`).
-    pub not_json: Vec<PathBuf>,
+    /// Files left whole, each with its first parse error: half-rewriting one
+    /// would corrupt the bytes. The committed-tree gate refuses to skip such a
+    /// line at all (`no_identity_key_holds_a_value_outside_a_pinned_exemption`).
+    pub not_json: Vec<(PathBuf, String)>,
 }
 
 /// Blank every subtree no decoder reads, so an operator's roster, instructions
@@ -73,9 +73,12 @@ pub fn strip_unread(source: &str, files: &[PathBuf]) -> std::io::Result<Strip> {
         let Some(drive) = drive_for(source, file) else {
             continue;
         };
-        let Some((raw, mut lines)) = parsed_lines(file)? else {
-            strip.not_json.push(file.clone());
-            continue;
+        let (raw, mut lines) = match parsed_lines(file)? {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                strip.not_json.push((file.clone(), e.to_string()));
+                continue;
+            }
         };
         let base = events_of(source, &drive, &lines);
         let stamped = is_hook_envelope(file);
@@ -90,15 +93,36 @@ pub fn strip_unread(source: &str, files: &[PathBuf]) -> std::io::Result<Strip> {
             }
             out.push('\n');
         }
-        // A sibling then a rename, so a reader never sees a half-written capture;
-        // std rather than `tempfile`, which is only this crate's dev-dependency.
-        let mut tmp_name = file.as_os_str().to_owned();
-        tmp_name.push(".strip-tmp");
-        let tmp = PathBuf::from(tmp_name);
-        std::fs::File::create(&tmp)?.write_all(out.as_bytes())?;
-        std::fs::rename(&tmp, file)?;
+        replace_atomically(file, out.as_bytes())?;
     }
     Ok(strip)
+}
+
+/// Write `bytes` over `file` through a sibling and a rename, so a reader never
+/// sees a half-written capture. Std rather than `tempfile`: that crate would pull
+/// `tempfile`, `fastrand`, `getrandom` and `r-efi` into `deny-arch.toml`'s core
+/// allowlist (architecture invariant #1) for one dev-only rewrite. The sibling's
+/// name is unique per process and call, it keeps the original's permissions, and
+/// it is removed if any step fails.
+fn replace_atomically(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut name = file.as_os_str().to_owned();
+    name.push(format!(".{}-{n}.tmp", std::process::id()));
+    let tmp = PathBuf::from(name);
+    let written = (|| {
+        let mut f = std::fs::File::create_new(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        if let Ok(meta) = std::fs::metadata(file) {
+            std::fs::set_permissions(&tmp, meta.permissions())?;
+        }
+        std::fs::rename(&tmp, file)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
 }
 
 /// Strip every RECORDED capture under `root` in place — local and unbilled — and
@@ -106,13 +130,14 @@ pub fn strip_unread(source: &str, files: &[PathBuf]) -> std::io::Result<Strip> {
 /// data by construction, and the README demo reads its bytes past the decoders.
 /// A pass that blanks nothing leaves a record that already carries a count
 /// alone, so re-running never erases history: `blanked` counts the original
-/// recording, not what a fresh capture would differ by today.
+/// recording, not what a fresh capture would differ by today. `report` hears each
+/// capture as soon as its rewrite lands, so a later failure cannot hide one that
+/// already happened.
 ///
 /// # Errors
 ///
 /// If a provenance or capture file cannot be read, parsed or rewritten.
-pub fn strip_corpus(root: &Path) -> std::io::Result<Vec<(Capture, Strip)>> {
-    let mut done = Vec::new();
+pub fn strip_corpus(root: &Path, mut report: impl FnMut(&Capture, &Strip)) -> std::io::Result<()> {
     for capture in captures(root) {
         let prov = capture.dir.join("provenance.json");
         let mut record: Value = serde_json::from_str(&std::fs::read_to_string(&prov)?)?;
@@ -136,13 +161,13 @@ pub fn strip_corpus(root: &Path) -> std::io::Result<Vec<(Capture, Strip)>> {
                 format!("{}\n", serde_json::to_string_pretty(&record)?),
             )?;
         }
-        done.push((capture, strip));
+        report(&capture, &strip);
     }
-    Ok(done)
+    Ok(())
 }
 
 /// A hook envelope file, by the name the recorder gives it.
-pub fn is_hook_envelope(file: &Path) -> bool {
+pub(crate) fn is_hook_envelope(file: &Path) -> bool {
     file.file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|n| n.starts_with("hook-payloads"))
@@ -156,22 +181,24 @@ fn drive_for(source: &str, file: &Path) -> Option<Drive> {
     }
 }
 
-/// `None` when a line is not JSON: the file is left as recorded rather than
-/// half-rewritten.
+/// The inner `Err` is a line that is not JSON: the file is left as recorded
+/// rather than half-rewritten.
 type Parsed = (Vec<String>, Vec<Value>);
 
-fn parsed_lines(file: &Path) -> std::io::Result<Option<Parsed>> {
+fn parsed_lines(file: &Path) -> std::io::Result<Result<Parsed, serde_json::Error>> {
     let text = std::fs::read_to_string(file)?;
     let mut raw = Vec::new();
     let mut lines = Vec::new();
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
-        let Ok(v) = serde_json::from_str(line) else {
-            return Ok(None);
-        };
-        raw.push(line.to_string());
-        lines.push(v);
+        match serde_json::from_str(line) {
+            Ok(v) => {
+                raw.push(line.to_string());
+                lines.push(v);
+            }
+            Err(e) => return Ok(Err(e)),
+        }
     }
-    Ok(Some((raw, lines)))
+    Ok(Ok((raw, lines)))
 }
 
 type Decoded = (
@@ -275,7 +302,7 @@ mod tests {
         files
             .iter()
             .filter_map(|f| {
-                let (_, lines) = parsed_lines(f).ok()??;
+                let (_, lines) = parsed_lines(f).ok()?.ok()?;
                 Some(events_of(source, &drive_for(source, f)?, &lines))
             })
             .collect()
@@ -575,7 +602,7 @@ mod tests {
             out
         };
         let before = bytes(&scenario);
-        strip_corpus(d.path()).expect("strip corpus");
+        strip_corpus(d.path(), |_, _| {}).expect("strip corpus");
         assert_eq!(
             bytes(&scenario),
             before,
@@ -610,7 +637,7 @@ mod tests {
             out
         };
         let before = bytes(&scenario);
-        strip_corpus(d.path()).expect("strip corpus");
+        strip_corpus(d.path(), |_, _| {}).expect("strip corpus");
         assert_eq!(
             bytes(&scenario),
             before,
@@ -643,7 +670,7 @@ mod tests {
         );
         let wire = snapshot(&scenario);
 
-        strip_corpus(d.path()).expect("strip corpus");
+        strip_corpus(d.path(), |_, _| {}).expect("strip corpus");
         let once = snapshot(&scenario);
         assert_ne!(once, wire, "the planted key is unread");
         let prov: serde_json::Value = serde_json::from_str(
@@ -658,11 +685,92 @@ mod tests {
         );
         assert_eq!(prov["origin"], "recorded", "the rest of the record is kept");
 
-        strip_corpus(d.path()).expect("strip corpus again");
+        strip_corpus(d.path(), |_, _| {}).expect("strip corpus again");
         assert_eq!(
             snapshot(&scenario),
             once,
             "a second pass finds nothing and rewrites nothing"
+        );
+    }
+
+    #[test]
+    fn a_file_with_a_non_json_line_is_left_whole_and_named_with_its_error() {
+        let d = tempfile::tempdir().expect("tempdir");
+        let file = d.path().join("hook-payloads.jsonl");
+        let wire = "{\"hook_event_name\":\"SessionStart\",\"stray\":1}\nnot json\n";
+        std::fs::write(&file, wire).expect("write");
+        let strip = strip_unread("claude-code", std::slice::from_ref(&file)).expect("strip");
+        assert_eq!(strip.blanked, 0, "nothing in a skipped file is blanked");
+        assert_eq!(
+            std::fs::read_to_string(&file).expect("read"),
+            wire,
+            "left as recorded"
+        );
+        let [(named, error)] = strip.not_json.as_slice() else {
+            panic!("one file named, got {:?}", strip.not_json);
+        };
+        assert_eq!(named, &file);
+        assert!(!error.is_empty(), "the parse error rides along");
+    }
+
+    #[test]
+    fn replace_atomically_leaves_no_sibling_and_keeps_the_originals_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().expect("tempdir");
+        let file = d.path().join("payloads.jsonl");
+        std::fs::write(&file, "old\n").expect("write");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+        replace_atomically(&file, b"new\n").expect("replace");
+        assert_eq!(std::fs::read_to_string(&file).expect("read"), "new\n");
+        let mode = std::fs::metadata(&file).expect("stat").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o644, "the capture keeps its mode");
+        let left: Vec<_> = std::fs::read_dir(d.path())
+            .expect("read")
+            .flatten()
+            .collect();
+        assert_eq!(left.len(), 1, "no sibling survives: {left:?}");
+    }
+
+    #[test]
+    fn replace_atomically_removes_its_sibling_when_the_rename_fails() {
+        let d = tempfile::tempdir().expect("tempdir");
+        // A directory where the file should be: the rename onto it fails.
+        let file = d.path().join("payloads.jsonl");
+        std::fs::create_dir(&file).expect("mkdir");
+        std::fs::write(file.join("inside"), "x").expect("write");
+        assert!(replace_atomically(&file, b"new\n").is_err());
+        let left: Vec<String> = std::fs::read_dir(d.path())
+            .expect("read")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            left,
+            vec!["payloads.jsonl".to_string()],
+            "the sibling is gone"
+        );
+    }
+
+    #[test]
+    fn strip_corpus_reports_each_capture_before_a_later_failure() {
+        let d = tempfile::tempdir().expect("tempdir");
+        let good = d.path().join("fixtures/codex/tool-run-recorded");
+        std::fs::create_dir_all(&good).expect("mkdir");
+        let src = sources_root().join("fixtures/codex/tool-run-recorded");
+        for from in std::fs::read_dir(&src).expect("read").flatten() {
+            std::fs::copy(from.path(), good.join(from.file_name())).expect("copy");
+        }
+        // Walked after codex (the walk sorts), and its record does not parse.
+        let broken = d.path().join("fixtures/opencode/zz-broken");
+        std::fs::create_dir_all(&broken).expect("mkdir");
+        std::fs::write(broken.join("provenance.json"), "not json").expect("write");
+        let mut heard = Vec::new();
+        let result = strip_corpus(d.path(), |c, _| heard.push(c.dir.clone()));
+        assert!(result.is_err(), "the broken record fails the pass");
+        assert_eq!(
+            heard,
+            vec![good],
+            "the capture already rewritten was reported"
         );
     }
 }
