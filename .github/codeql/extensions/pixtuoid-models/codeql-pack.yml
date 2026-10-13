@@ -1,0 +1,7 @@
+name: pixtuoid/rust-models
+version: 0.0.1
+library: true
+extensionTargets:
+  codeql/rust-all: '*'
+dataExtensions:
+  - models/**/*.yml

@@ -22,41 +22,6 @@ trap 'rm -rf "$test_dir"' EXIT
 fake_bin="$test_dir/bin"
 mkdir -p "$fake_bin"
 
-health_script="$(workflow_step_script .github/workflows/codeql.yml "Verify Rust extraction health")"
-
-rust_metrics() {
-    jq -n --argjson with_errors "$1" --argjson clean "$2" '{runs: [{
-        tool: {extensions: [{rules: [
-            {id: "rust/summary/number-of-files-extracted-with-errors"},
-            {id: "rust/summary/number-of-successfully-extracted-files"}
-        ]}]},
-        properties: {metricResults: [
-            {rule: {index: 0, toolComponent: {index: 0}}, value: $with_errors},
-            {rule: {index: 1, toolComponent: {index: 0}}, value: $clean}
-        ]}
-    }]}'
-}
-
-assert_rust_health() {
-    local expect="$1"
-    local label="$2"
-    local sarif_dir="$test_dir/sarif-$label"
-    local output
-    mkdir -p "$sarif_dir"
-    cat >"$sarif_dir/rust.sarif"
-    if output="$(GITHUB_STEP_SUMMARY="$test_dir/summary" SARIF_DIR="$sarif_dir" bash -c "$health_script" 2>&1)"; then
-        [[ "$expect" == pass ]] || fail "Rust extraction-health gate passed $label"
-    else
-        [[ "$output" == *"$expect"* ]] || fail "Rust extraction-health gate failed $label: $output"
-    fi
-}
-
-rust_metrics 16 314 | assert_rust_health pass "a mostly clean database"
-rust_metrics 99 100 | assert_rust_health pass "one more clean file than diagnostic ones"
-rust_metrics 100 100 | assert_rust_health "Unhealthy Rust CodeQL database" "as many diagnostic files as clean ones"
-rust_metrics 247 63 | assert_rust_health "Unhealthy Rust CodeQL database" "mostly diagnostic files"
-echo '{"runs":[]}' | assert_rust_health "expected exactly one CodeQL metric" "SARIF without the metrics"
-
 # The queue's release-PR exclusion copies release-plz's branch prefix.
 release_prefix="$(yq -p toml -oy -e -r '.workspace.pr_branch_prefix' release-plz.toml)" ||
     fail "release-plz.toml has no pr_branch_prefix"

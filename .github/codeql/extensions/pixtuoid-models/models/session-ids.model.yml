@@ -1,0 +1,10 @@
+# rust/cleartext-logging's name heuristic reads any `session.?(id|key)` as an
+# account credential; these return an agent CLI's local session key.
+extensions:
+  - addsTo:
+      pack: codeql/rust-all
+      extensible: barrierModel
+    data:
+      - ["pixtuoid_core::source::decoder::hook_session_id", "ReturnValue", "log-injection", "manual"]
+      - ["pixtuoid_core::source::kimi::kimi_session_id", "ReturnValue", "log-injection", "manual"]
+      - ["pixtuoid_core::source::cc_probe::live_cc_session_ids", "ReturnValue", "log-injection", "manual"]
