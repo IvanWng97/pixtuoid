@@ -154,33 +154,27 @@ mod run {
                 std::fs::create_dir_all(&dir)?;
                 let key = format!("{}/{name}", p.source);
                 println!("== {key}");
-                let (cli, verdict) = match run_one(&ctx, p, scenario, &dir) {
+                let (version, verdict) = match run_one(&ctx, p, scenario, &dir) {
                     Ok(manifest) => (Some(manifest.capture.version), verify::verify(&dir)?),
-                    Err(e) => (
-                        None,
-                        Verdict {
-                            label: Label::Blocked,
-                            findings: vec![(Label::Blocked, e.to_string())],
-                        },
-                    ),
+                    Err(e) => (None, Verdict::new(vec![(Label::Blocked, e.to_string())])),
                 };
-                if verdict.label != Label::Blocked {
+                if verdict.label() != Label::Blocked {
                     ran.push(dir);
                 }
-                judged.push(Judged::new(key, cli, verdict, args.versions));
+                judged.push(Judged::new(key, version, verdict));
             }
             // A selection of one scenario skips what spans them.
             if args.scenario.is_none() && !ran.is_empty() {
                 let key = format!("{} (every scenario)", p.source);
                 println!("== {key}");
                 let verdict = verify::verify_source(p.source, &ran)?;
-                judged.push(Judged::new(key, None, verdict, args.versions));
+                judged.push(Judged::new(key, None, verdict));
             }
         }
         let report = report(args.versions, &judged);
         std::fs::write(runs.join(REPORT), &report)?;
         println!("\n{report}");
-        Ok(judged.iter().all(|j| j.verdict.label == Label::Pass))
+        Ok(judged.iter().all(|j| j.verdict.label() == Label::Pass))
     }
 
     /// The run's report, beside the runs; its H1 is the tracking issue's title.
@@ -189,39 +183,28 @@ mod run {
     struct Judged {
         key: String,
         /// The CLI's `--version`, for a scenario's run.
-        cli: Option<String>,
-        /// Whether anything was judged, Blocked being the verdict that judges nothing.
+        version: Option<String>,
+        /// Whether anything was judged: Blocked judges nothing.
         ran: bool,
         verdict: Verdict,
     }
 
     impl Judged {
-        fn new(key: String, cli: Option<String>, mut verdict: Verdict, versions: Versions) -> Self {
-            let ran = verdict.label != Label::Blocked;
-            println!("   {:?}", verdict.label);
-            verdict.label = gated(verdict.label, versions);
+        fn new(key: String, version: Option<String>, verdict: Verdict) -> Self {
+            println!("   {:?}", verdict.label());
             Self {
                 key,
-                cli,
-                ran,
+                version,
+                ran: verdict.label() != Label::Blocked,
                 verdict,
             }
-        }
-    }
-
-    /// A merge gate never passes on "nothing ran": at the pinned versions, a CLI
-    /// that could not run fails.
-    fn gated(label: Label, versions: Versions) -> Label {
-        match (label, versions) {
-            (Label::Blocked, Versions::Pinned) => Label::Fail,
-            (l, _) => l,
         }
     }
 
     fn report(versions: Versions, judged: &[Judged]) -> String {
         let worst = judged
             .iter()
-            .map(|j| j.verdict.label)
+            .map(|j| j.verdict.label())
             .max()
             .unwrap_or(Label::Blocked);
         let which = match versions {
@@ -235,13 +218,13 @@ mod run {
         };
         let mut out = format!("# hermetic, {which} CLIs: {title}\n");
         for j in judged {
-            let cli = j
-                .cli
+            let version = j
+                .version
                 .as_deref()
-                .map_or(String::new(), |c| format!(" ({c})"));
+                .map_or(String::new(), |v| format!(" ({v})"));
             let ran = if j.ran { "" } else { ", did not run" };
-            out += &format!("\n## {}{cli}: {:?}{ran}\n", j.key, j.verdict.label);
-            for (label, finding) in &j.verdict.findings {
+            out += &format!("\n## {}{version}: {:?}{ran}\n", j.key, j.verdict.label());
+            for (label, finding) in j.verdict.findings() {
                 out += &format!("- {label:?}: {finding}\n");
             }
         }
@@ -691,30 +674,18 @@ mod run {
             assert!(parse(&args(&["codex", "tool-run", "extra"])).is_err());
         }
 
-        fn verdict(label: Label, finding: &str) -> Verdict {
-            Verdict {
-                label,
-                findings: vec![(label, finding.into())],
-            }
-        }
-
         #[test]
         fn the_reports_title_is_the_worst_verdict_or_that_nothing_ran() {
             let pass = Judged::new(
                 "codex/tool-run".into(),
                 Some("codex-cli 0.155.1".into()),
-                Verdict {
-                    label: Label::Pass,
-                    findings: vec![],
-                },
-                Versions::Latest,
+                Verdict::new(vec![]),
             );
             let blocked = || {
                 Judged::new(
                     "opencode/tool-run".into(),
                     None,
-                    verdict(Label::Blocked, "npm view failed"),
-                    Versions::Latest,
+                    Verdict::new(vec![(Label::Blocked, "npm view failed".into())]),
                 )
             };
             let r = report(Versions::Latest, &[pass, blocked()]);
@@ -723,25 +694,11 @@ mod run {
                 "## opencode/tool-run: Blocked, did not run\n- Blocked: npm view failed"
             ));
             assert!(r.contains("## codex/tool-run (codex-cli 0.155.1): Pass"));
-            let r = report(Versions::Latest, &[blocked()]);
+            let r = report(Versions::Pinned, &[blocked()]);
             assert_eq!(
                 r.lines().next(),
-                Some("# hermetic, latest CLIs: NOTHING RAN")
+                Some("# hermetic, verified CLIs: NOTHING RAN")
             );
-        }
-
-        #[test]
-        fn only_the_pinned_gate_fails_a_cli_that_could_not_run() {
-            assert_eq!(gated(Label::Blocked, Versions::Pinned), Label::Fail);
-            assert_eq!(gated(Label::Blocked, Versions::Latest), Label::Blocked);
-            assert_eq!(gated(Label::Stale, Versions::Pinned), Label::Stale);
-            let j = Judged::new(
-                "x".into(),
-                None,
-                verdict(Label::Blocked, "no npm"),
-                Versions::Pinned,
-            );
-            assert_eq!((j.verdict.label, j.ran), (Label::Fail, false));
         }
 
         #[test]

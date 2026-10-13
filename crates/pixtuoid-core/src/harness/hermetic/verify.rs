@@ -8,7 +8,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
 use serde_json::Value;
 
 use super::{MANIFEST, Manifest, Profile, SCENE_LOG, Scenario, Shape, profile};
@@ -21,7 +20,7 @@ use crate::harness::{Drive, Driven, HOOK_PAYLOADS, PROVENANCE, Reach, captures};
 const BREADCRUMB_TARGET: &str = crate::source::drift::TARGET;
 
 /// A verdict's outcome, ordered by severity: a verdict is its worst finding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Label {
     /// Every check held.
     Pass,
@@ -37,20 +36,27 @@ pub enum Label {
     Fail,
 }
 
-/// One verdict.
+/// One verdict: its findings, worst first.
 #[derive(Debug)]
 pub struct Verdict {
-    /// The worst finding's label.
-    pub label: Label,
-    /// Every finding, worst first.
-    pub findings: Vec<(Label, String)>,
+    findings: Vec<(Label, String)>,
 }
 
 impl Verdict {
-    fn of(mut findings: Vec<(Label, String)>) -> Self {
+    /// A verdict of `findings`, in any order.
+    pub fn new(mut findings: Vec<(Label, String)>) -> Self {
         findings.sort_by_key(|f| std::cmp::Reverse(f.0));
-        let label = findings.first().map_or(Label::Pass, |f| f.0);
-        Self { label, findings }
+        Self { findings }
+    }
+
+    /// The worst finding's label; Pass with none.
+    pub fn label(&self) -> Label {
+        self.findings.first().map_or(Label::Pass, |f| f.0)
+    }
+
+    /// Every finding, worst first.
+    pub fn findings(&self) -> &[(Label, String)] {
+        &self.findings
     }
 }
 
@@ -76,7 +82,7 @@ pub fn verify(dir: &Path) -> std::io::Result<Verdict> {
     let scene = std::fs::read_to_string(dir.join(SCENE_LOG)).unwrap_or_default();
     let mut findings = Vec::new();
     judge(p, scenario, &manifest, dir, &scene, &mut findings)?;
-    Ok(Verdict::of(findings))
+    Ok(Verdict::new(findings))
 }
 
 /// Judge `source`'s runs together, for what no one scenario owns: a `not_yet`
@@ -143,7 +149,7 @@ pub fn verify_source(source: &str, dirs: &[PathBuf]) -> std::io::Result<Verdict>
             }
         }
     }
-    Ok(Verdict::of(findings))
+    Ok(Verdict::new(findings))
 }
 
 /// The non-blank leaves of each kind of line, as JSON pointers with `*` for
@@ -234,6 +240,16 @@ fn judge(
     scene: &str,
     findings: &mut Vec<(Label, String)>,
 ) -> std::io::Result<()> {
+    // Before the Blocked return: a CLI the script lost may then exit non-zero.
+    if manifest.unmatched > 0 {
+        findings.push((
+            Label::Script,
+            format!(
+                "{} model request(s) matched no script line: the request flow changed",
+                manifest.unmatched
+            ),
+        ));
+    }
     // A CLI that never ran says nothing about pixtuoid, so nothing below is judged.
     if manifest.capture.exit_code != Some(0) || manifest.requests == 0 {
         findings.push((
@@ -245,18 +261,7 @@ fn judge(
         ));
         return Ok(());
     }
-    if manifest.unmatched > 0 {
-        findings.push((
-            Label::Script,
-            format!(
-                "{} model request(s) matched no script line: the request flow changed",
-                manifest.unmatched
-            ),
-        ));
-    }
 
-    // Parsed here for the event name, and again by the Drive, which takes the
-    // wire as text: the one pipeline sees the bytes the CLI sent.
     let payloads = hook_lines(dir)?;
     let observed: BTreeSet<String> = payloads
         .iter()
@@ -483,7 +488,7 @@ mod tests {
     }
 
     fn has(v: &Verdict, label: Label, text: &str) -> bool {
-        v.findings
+        v.findings()
             .iter()
             .any(|f| f.0 == label && f.1.contains(text))
     }
@@ -496,14 +501,14 @@ mod tests {
     fn a_recorded_codex_tool_run_passes() {
         let d = run_from("codex", "tool-run-recorded", CX_SCENE);
         let v = verify(d.path()).expect("verify");
-        assert_eq!(v.label, Label::Pass, "{:?}", v.findings);
+        assert_eq!(v.label(), Label::Pass, "{:?}", v.findings());
     }
 
     #[test]
     fn a_recorded_claude_code_tool_run_passes() {
         let d = run_from("claude-code", "tool-run-recorded", CC_SCENE);
         let v = verify(d.path()).expect("verify");
-        assert_eq!(v.label, Label::Pass, "{:?}", v.findings);
+        assert_eq!(v.label(), Label::Pass, "{:?}", v.findings());
     }
 
     #[test]
@@ -533,7 +538,7 @@ mod tests {
         assert!(
             has(&v, Label::Fail, "is not the workspace"),
             "{:?}",
-            v.findings
+            v.findings()
         );
     }
 
@@ -549,7 +554,7 @@ mod tests {
         assert!(
             has(&v, Label::Fail, "no SessionStart decoded"),
             "{:?}",
-            v.findings
+            v.findings()
         );
     }
 
@@ -565,7 +570,7 @@ mod tests {
         assert!(
             has(&v, Label::Fail, "the tool never ended"),
             "{:?}",
-            v.findings
+            v.findings()
         );
     }
 
@@ -584,7 +589,7 @@ mod tests {
         assert!(
             has(&v, Label::Fail, "detail naming the tool"),
             "{:?}",
-            v.findings
+            v.findings()
         );
 
         edit_hooks(d.path(), |v| {
@@ -594,7 +599,7 @@ mod tests {
         assert!(
             has(&v, Label::Fail, "never went Active"),
             "{:?}",
-            v.findings
+            v.findings()
         );
     }
 
@@ -613,7 +618,7 @@ mod tests {
                 .iter()
                 .any(|f| f.0 == Label::Fail && f.1.starts_with(HOOK_PAYLOADS)),
             "{:?}",
-            v.findings
+            v.findings()
         );
     }
 
@@ -622,18 +627,27 @@ mod tests {
         let d = run_from("codex", "tool-run-recorded", CX_SCENE);
         edit_hooks(d.path(), |v| (v["hook_event_name"] != "Stop").then_some(v));
         let v = verify(d.path()).expect("verify");
-        assert!(has(&v, Label::Fail, "must fire Stop"), "{:?}", v.findings);
+        assert!(has(&v, Label::Fail, "must fire Stop"), "{:?}", v.findings());
     }
 
     #[test]
     fn an_unmatched_model_request_is_script_and_a_cli_that_never_ran_is_blocked() {
         let d = run_from("codex", "tool-run-recorded", CX_SCENE);
         write_manifest(d.path(), "codex", |m| m.unmatched = 1);
-        assert_eq!(verify(d.path()).expect("verify").label, Label::Script);
+        assert_eq!(verify(d.path()).expect("verify").label(), Label::Script);
         write_manifest(d.path(), "codex", |m| m.capture.exit_code = Some(1));
-        assert_eq!(verify(d.path()).expect("verify").label, Label::Blocked);
+        assert_eq!(verify(d.path()).expect("verify").label(), Label::Blocked);
         write_manifest(d.path(), "codex", |m| m.requests = 0);
-        assert_eq!(verify(d.path()).expect("verify").label, Label::Blocked);
+        assert_eq!(verify(d.path()).expect("verify").label(), Label::Blocked);
+        write_manifest(d.path(), "codex", |m| {
+            m.capture.exit_code = Some(1);
+            m.unmatched = 1;
+        });
+        assert_eq!(
+            verify(d.path()).expect("verify").label(),
+            Label::Script,
+            "a CLI the script lost and that then exited is the script's finding"
+        );
     }
 
     #[test]
@@ -644,7 +658,7 @@ mod tests {
             "agents=[cx\u{b7}proj@0:idle]\nagents=[]\n",
         );
         let v = verify(d.path()).expect("verify");
-        assert!(has(&v, Label::Fail, "never showed"), "{:?}", v.findings);
+        assert!(has(&v, Label::Fail, "never showed"), "{:?}", v.findings());
     }
 
     #[test]
@@ -656,7 +670,7 @@ mod tests {
         assert!(
             has(&v, Label::Fail, "after the CLI exited"),
             "{:?}",
-            v.findings
+            v.findings()
         );
     }
 
@@ -671,7 +685,11 @@ mod tests {
             &format!("{breadcrumb}{CX_SCENE}"),
         );
         let v = verify(d.path()).expect("verify");
-        assert!(has(&v, Label::Fail, "drift breadcrumb"), "{:?}", v.findings);
+        assert!(
+            has(&v, Label::Fail, "drift breadcrumb"),
+            "{:?}",
+            v.findings()
+        );
     }
 
     #[test]
@@ -685,7 +703,7 @@ mod tests {
             Some(v)
         });
         let v = verify_source("codex", &[d.path().to_path_buf()]).expect("verify");
-        assert!(has(&v, Label::Stale, "SubagentStart"), "{:?}", v.findings);
+        assert!(has(&v, Label::Stale, "SubagentStart"), "{:?}", v.findings());
     }
 
     #[test]
@@ -701,7 +719,7 @@ mod tests {
         assert!(
             has(&v, Label::Fail, "hook:PreToolUse /tool_name"),
             "{:?}",
-            v.findings
+            v.findings()
         );
     }
 
@@ -718,7 +736,7 @@ mod tests {
         assert!(
             has(&v, Label::Stale, "hook:SessionStart /model"),
             "{:?}",
-            v.findings
+            v.findings()
         );
     }
 

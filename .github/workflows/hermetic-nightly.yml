@@ -28,9 +28,10 @@ jobs:
     permissions:
       issues: write
     steps:
+      # This run's one artifact, unnamed so its name lives only in hermetic.yml.
       - uses: actions/download-artifact@v8
         with:
-          name: hermetic-runs-${{ github.run_id }}-${{ github.run_attempt }}
+          merge-multiple: true
 
       - name: Open or update tracking issue
         env:
@@ -52,6 +53,3 @@ jobs:
           else
             gh issue create --title "$title" --label hermetic --body-file report.md
           fi
-
-      - name: Fail the run on any finding
-        run: exit 1

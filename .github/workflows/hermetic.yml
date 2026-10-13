@@ -1,8 +1,7 @@
 name: hermetic
 
 # `just hermetic`: every profiled agent CLI, run for real against a scripted
-# model with a headless pixtuoid on the same run. ci.yml's full tier calls it at
-# each CLI's `verified_version`; hermetic-nightly.yml at each CLI's latest.
+# model with a headless pixtuoid on the same run.
 
 on:
   workflow_call:
@@ -64,8 +63,6 @@ jobs:
 
   required:
     name: required-hermetic-jobs
-    # Keep the protected gate's membership explicit; GitHub otherwise reports
-    # a reusable workflow successful even after an unreferenced job is removed.
     if: ${{ always() }}
     needs: [run]
     runs-on: ubuntu-latest

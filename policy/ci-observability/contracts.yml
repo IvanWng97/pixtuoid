@@ -79,10 +79,10 @@
     - .github/workflows/upstream-drift.yml
     - .github/workflows/hermetic-nightly.yml
   why: >-
-    The watch builds and runs the tree, every dependency's build script
-    included, and hands its token to curl; that job's token only reads. The
-    token that writes issues lives in a job that checks nothing out and runs
-    no build, so no code of the tree ever holds it.
+    Each watch runs code the repo does not vet: the tree with every
+    dependency's build script, or a third-party CLI's latest release. That
+    job's token only reads. The token that writes issues lives in a job that
+    checks nothing out and runs no build, so no code of the tree ever holds it.
   assert: |
     ([.jobs.file.steps[] | .run // "" | split("\n")[] | select(test("^\\s*#") | not)]
      | join("\n")) as $file
