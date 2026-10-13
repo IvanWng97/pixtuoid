@@ -845,6 +845,12 @@ mod run {
                 std::fs::canonicalize(found).ok(),
                 std::fs::canonicalize(&planted).ok()
             );
+        }
+
+        #[test]
+        fn a_listed_system_path_is_config_outside_the_sandbox_once_it_exists() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let workspace = d.path().join("proj");
             let system = d.path().join("etc-cli");
             let listed = system.to_str().expect("utf-8");
             assert_eq!(
@@ -857,13 +863,22 @@ mod run {
                 outside_config(&[listed], &[], &workspace, None),
                 Some(PathBuf::from(listed))
             );
-            // A per-user path, as the operator's name fills it.
+        }
+
+        #[test]
+        fn a_per_user_system_path_is_the_operators_and_unchecked_with_no_user() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let workspace = d.path().join("proj");
             let per_user = d.path().join("prefs/alice/managed.plist");
-            std::fs::create_dir_all(per_user.parent().expect("parent")).expect("mkdir");
-            std::fs::write(&per_user, "").expect("plant");
             let pattern = d
                 .path()
                 .join(format!("prefs/{USER_PLACEHOLDER}/managed.plist"));
+            // The placeholder kept literal, and expanded to nothing: what the
+            // no-user arm would find if it checked anything.
+            for planted in [&per_user, &pattern, &d.path().join("prefs/managed.plist")] {
+                std::fs::create_dir_all(planted.parent().expect("parent")).expect("mkdir");
+                std::fs::write(planted, "").expect("plant");
+            }
             let pattern = pattern.to_str().expect("utf-8");
             assert_eq!(
                 outside_config(&[pattern], &[], &workspace, Some("alice")),
