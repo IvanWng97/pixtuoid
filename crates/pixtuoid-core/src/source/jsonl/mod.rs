@@ -322,8 +322,8 @@ impl JsonlWatcher {
 
     /// Attach the child-end un-claim side-channel (see [`ChildEndUnclaims`]).
     /// The watcher becomes the CONSUMER: on each pass it drains the handle's
-    /// ids that match its own claimed transcripts and releases those claims so
-    /// the next append re-registers.
+    /// ids that match its own claimed transcripts and ends those claims
+    /// (`Sight::Ended`).
     #[doc(hidden)]
     pub fn with_child_end_unclaims(mut self, unclaims: ChildEndUnclaims) -> Self {
         self.child_end_unclaims = Some(unclaims);

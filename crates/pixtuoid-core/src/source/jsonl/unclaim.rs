@@ -18,8 +18,8 @@ const CHILD_END_UNCLAIM_TTL: Duration = crate::state::reducer::CHILD_END_RELINK_
 
 /// The child-end un-claim side-channel: child ids whose hook
 /// `SessionEnd { as_child: true }` (a decoded `SubagentStop`) was observed, and
-/// whose `seen`-claimed transcript should therefore be RELEASED so the next
-/// append re-registers.
+/// whose `seen`-claimed transcript should therefore be ENDED
+/// (`Sight::Ended`).
 ///
 /// WHY a side-channel: a multi-turn Codex child gets a `SubagentStop` hook at
 /// EVERY turn end but no `SessionStart` carrier of any kind at turn N+1 —

@@ -859,7 +859,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
     let mut scene = SceneState::uniform(32);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    let mut peak = [0usize; 8];
+    let mut peak = [0usize; MAP_NAMES.len()];
 
     for i in 0..ITERS {
         let now = t0 + Duration::from_secs(i);
