@@ -102,9 +102,10 @@ mod run {
     };
 
     /// npm, which Windows installs as a batch file, spawned as one despite what
-    /// [`Launch`] says of them: its arguments here are subcommands, flags and
-    /// `<name>@<exact version>` specs, none holding a character `cmd.exe`
-    /// escapes (docs.npmjs.com: package.json `name`, semver).
+    /// [`Launch`] says of them: each argument here is a word this file writes
+    /// (a subcommand, flag, field or the `latest` tag), a package name, which
+    /// npm keeps URL-safe (docs.npmjs.com, package.json `name`), or a parsed
+    /// [`Version`], none holding a character `cmd.exe` escapes.
     const NPM: &str = if cfg!(windows) { "npm.cmd" } else { "npm" };
 
     /// Whether `name` is on `list`, as `windows` compares variable names: there
