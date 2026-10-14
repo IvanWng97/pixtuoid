@@ -479,6 +479,44 @@ wire_api = "responses"
         event_name: dsh_event,
         not_yet_fields: &[],
     },
+    // kimi's cites are `MoonshotAI/kimi-code` at `@moonshot-ai/kimi-code@2.0.1`.
+    Profile {
+        source: "kimi",
+        package: Package::Npm("@moonshot-ai/kimi-code"),
+        invocation: &["kimi", "-p", "{prompt}"],
+        // `KIMI_MODEL_NAME` builds a provider from the environment
+        // (`docs/en/configuration/env-vars.md:106-124`); the telemetry and
+        // update-check switches (`:27`, `:183`).
+        env: &[
+            ("KIMI_MODEL_NAME", "kimi-k2"),
+            ("KIMI_MODEL_BASE_URL", "http://127.0.0.1:{port}/v1"),
+            ("KIMI_MODEL_API_KEY", "{key}"),
+            ("KIMI_DISABLE_TELEMETRY", "1"),
+            ("KIMI_CODE_NO_AUTO_UPDATE", "1"),
+        ],
+        homes: &[],
+        system_config: &[],
+        // AGENTS.md and project skills stop at the git work tree
+        // (`packages/agent-core-v2/src/agent/profile/context.ts:173`,
+        // `packages/agent-core-v2/src/features/skill/catalog/skillRoots.ts:73`),
+        // which the recorder's `git init` makes the workspace.
+        ancestor_config: &[],
+        config: &[],
+        scenarios: &[Scenario {
+            shape: Shape::ToolRun,
+            expects: &["SessionStart", "PreToolUse", "PostToolUse", "Stop"],
+            fixture: "fixtures/kimi/tool-run-hermetic",
+        }],
+        not_yet: &[
+            "PostToolUseFailure",
+            "PermissionRequest",
+            "StopFailure",
+            "SessionEnd",
+        ],
+        event_name: hook_event_name,
+        // A Bash call's; the scripted turn reads a file.
+        not_yet_fields: &[("hook:PreToolUse", "/tool_input/command")],
+    },
     // grok's cites are `xai-org/grok-build` at `37949780c1`, the monorepo sync
     // nearest 1.0.25: the repo tags no release.
     Profile {
@@ -584,7 +622,6 @@ pub const NOT_HERMETIC: &[(&str, Absence)] = &[
     ("copilot", Absence::AwaitingProfile),
     ("hermes", Absence::AwaitingProfile),
     ("omp", Absence::AwaitingProfile),
-    ("kimi", Absence::AwaitingProfile),
 ];
 
 /// The profile for `source`, if it has one.
