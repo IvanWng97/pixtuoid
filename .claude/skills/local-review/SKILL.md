@@ -34,7 +34,7 @@ contract; fill briefs from them, never a paraphrase here.
    Diff: git -C <path> diff <base>..<head>.
    Read AGENTS.md, then apply the review contract (pixtuoid/.github's
    claude-review.yml prompt), REVIEW.md's <row> and its Common section.
-   <change-specific claims (from the PR body's impl-plan answers) or design
+   <change-specific claims (from the PR body) or design
    questions, one per line>
    Run the applicable gates; report each exit code as observed, never through
    a pipe. Each finding carries an integer confidence 0–100. Your final
@@ -48,8 +48,7 @@ contract; fill briefs from them, never a paraphrase here.
    review: re-run that lens alone (#455). Verify every finding's premise
    yourself before coding a fix — read the comments on the item it names
    first — and REFUTE deliberate design with its mechanism.
-4. **Fold** accepted findings into ONE commit, with a `plan-miss:` line per
-   finding the plan never named.
+4. **Fold** accepted findings into ONE commit.
 5. **Disposition** each finding in a review thread. The bots open theirs; open
    each local finding the same way, then reply and resolve:
 

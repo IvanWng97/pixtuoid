@@ -76,14 +76,18 @@ edit that would leave a copy or a comment wrong.
 
 ### Correctness
 
-Hold the diff to each claim the PR body's
-[plan answers](.github/prompts/impl-plan.prompt.md#the-contract-with-review)
-make. Name any CI-only gate the diff can turn red (`--lib` builds neither bin
+Hold the diff to each claim the PR body makes, and a fix to its REPORTED
+scenario, ordering included, never one rebuilt from the state the fix left.
+Name any CI-only gate the diff can turn red (`--lib` builds neither bin
 modules nor examples).
 
 - **Siblings** — a guard/cap/validation added to some of a sibling set
   (per-source decoders, install targets, platform arms, twin call sites) or to
   one caller of a shared fn: `rg` and verify the full set and every call site.
+  A guard protects an OUTCOME: every caller of the fn it flows through, and
+  every ordering when it is timing-dependent (boot-then-write vs
+  write-then-boot), is guarded, guarded elsewhere, or exempt with its reason
+  (`emit_first_sight`'s second caller left the first-sight gate dead).
 - **Wire format** — a decoder or drift watch vs the recorded upstream
   shape; every name a decoder reads owes a drift watch, a breadcrumb, or an
   adjudicated `EXEMPT` row (`drift_watch`'s census); `just drift-watch`
@@ -128,7 +132,8 @@ invariant-breaking sequence against:
 2. New data shapes: name the identity/key-space; consolidate shared identity,
    not shared topic; verify join keys against real production constants,
    never test fixtures.
-3. Layering: mechanism calls route through the designated orchestrator.
+3. Layering: mechanism calls route through the designated orchestrator; a
+   new `pub` seam on a lower layer names why the orchestrator can't own it.
 4. **Proportion**, each with the cheaper alternative, non-blocking
    unless it breaches AGENTS.md: **over-engineering** (YAGNI), a branch,
    helper, parameter, type, fallback arm or test machinery serving no

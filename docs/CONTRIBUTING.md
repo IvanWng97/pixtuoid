@@ -127,7 +127,10 @@ the per-crate/per-package Trusted Publishers, each naming environment
 
 ## The arc loop
 
-Non-trivial work runs as an **arc**: design → build → gate → wrap.
+Non-trivial work (a new feature, config key, flag, seam or module, a
+documented sharp edge, or 3+ source files; not a typo, a docs fix, a
+mechanical move or a one-file fix with its pinning test) runs as an **arc**:
+design → build → gate → wrap.
 
 1. **Pick** — an issue (`gh issue list`) or backlog item.
 2. **Grill the design** — decide the open questions one at a time, each with a
@@ -136,9 +139,11 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    best-practice search (confirm the idiomatic way against real docs online,
    never memory) · adversarial design review (red-team the design before code
    exists) · deepening lens (would deleting this concentrate complexity or
-   just move it? does the change deepen a module or add a shallow one?).
-4. **Spec** — synthesize into `docs/superpowers/specs/` (LOCAL, git-ignored)
-   and plan against [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md).
+   just move it? does the change deepen a module or add a shallow one? a
+   refactor it warrants is in scope).
+4. **Spec** — synthesize into `docs/superpowers/specs/` (LOCAL, git-ignored),
+   planned against [`REVIEW.md`](../REVIEW.md)'s lenses; the PR body states
+   the change's claims, which the correctness lens holds it to.
 5. **Mock gate** (taste/visual work only) — ratify the AFTER visual before code
    (`beautify-decoration` skill).
 6. **Build** — TDD: failing test → minimal impl → commit.
