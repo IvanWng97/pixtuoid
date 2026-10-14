@@ -580,7 +580,7 @@ mod run {
         }
 
         /// What npm's Windows shim runs for `name`, as cmd-shim writes it
-        /// (`npm/cmd-shim` `lib/index.js:24,50-58,73-119` @v9.0.2): a `bin`
+        /// (`npm/cmd-shim` `lib/index.js:48-58,73-119` @v9.0.2): a `bin`
         /// entry with a shebang runs under its program (the `.exe` beside the
         /// shim if there is one) with its arguments and variables, and one
         /// without (a PE) runs itself.
@@ -595,13 +595,9 @@ mod run {
                 std::io::Error::other(format!("{} has no bin {name}", package.display()))
             })?;
             let entry = package.join(rel);
-            let mut head = Vec::new();
-            std::fs::File::open(&entry)?
-                .take(SHEBANG_READ)
-                .read_to_end(&mut head)?;
-            let first = String::from_utf8_lossy(&head);
-            let first = first.trim().lines().next().unwrap_or_default();
-            Ok(match Shebang::parse(first) {
+            let text = String::from_utf8_lossy(&std::fs::read(&entry)?).into_owned();
+            let first = text.trim().lines().next().unwrap_or_default();
+            Ok(match Shebang::parse(first)? {
                 None => Self {
                     program: entry,
                     args: Vec::new(),
@@ -632,13 +628,12 @@ mod run {
         }
     }
 
-    /// How much of an entry is read for its first line: past any shebang, and
-    /// short of reading a native CLI's whole binary.
-    const SHEBANG_READ: u64 = 4096;
+    /// cmd-shim's own `shebangExpr` (`lib/index.js:24` @v9.0.2).
+    const SHEBANG: &str =
+        r"^#!\s*(?:/usr/bin/env\s+(?:-S\s+)?((?:[^ \t=]+=[^ \t=]+\s+)*))?([^ \t]+)(.*)$";
 
-    /// A `#!` line as cmd-shim's `shebangExpr` reads it: `/usr/bin/env`, an
-    /// optional `-S`, leading `VAR=value` words, then the program and its
-    /// arguments.
+    /// A `#!` line as cmd-shim reads it: `/usr/bin/env`, an optional `-S`,
+    /// leading `VAR=value` words, then the program and its arguments.
     #[derive(Debug, PartialEq, Eq)]
     struct Shebang {
         program: String,
@@ -647,29 +642,19 @@ mod run {
     }
 
     impl Shebang {
-        fn parse(line: &str) -> Option<Self> {
-            let rest = line.strip_prefix("#!")?.trim_start();
-            let mut words: Vec<&str> = rest.split_whitespace().collect();
-            let mut env = Vec::new();
-            if words.first() == Some(&"/usr/bin/env") {
-                words.remove(0);
-                if words.first() == Some(&"-S") {
-                    words.remove(0);
-                }
-                while let Some((k, v)) = words.first().and_then(|w| w.split_once('=')) {
-                    if k.is_empty() || v.is_empty() || v.contains('=') {
-                        break;
-                    }
-                    env.push((k.to_owned(), v.to_owned()));
-                    words.remove(0);
-                }
-            }
-            let (program, args) = words.split_first()?;
-            Some(Self {
-                program: (*program).to_owned(),
-                args: args.iter().map(|a| (*a).to_owned()).collect(),
-                env,
-            })
+        fn parse(line: &str) -> std::io::Result<Option<Self>> {
+            let expr = regex::Regex::new(SHEBANG).map_err(std::io::Error::other)?;
+            Ok(expr.captures(line).map(|c| Self {
+                program: c[2].to_owned(),
+                args: c[3].split_whitespace().map(str::to_owned).collect(),
+                env: c
+                    .get(1)
+                    .map_or("", |vars| vars.as_str())
+                    .split_whitespace()
+                    .filter_map(|var| var.split_once('='))
+                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                    .collect(),
+            }))
         }
     }
 
@@ -1324,6 +1309,30 @@ mod run {
             );
         }
 
+        #[cfg(windows)]
+        #[test]
+        fn a_windows_row_is_found_where_the_shell_and_the_registry_put_it() {
+            use pixtuoid_core::harness::host::{KnownFolder, known_folder};
+            for folder in KnownFolder::ALL {
+                let row = format!(r"{}\pixtuoid-row", folder.placeholder());
+                assert_eq!(
+                    known_folders_expanded(&row),
+                    Some(known_folder(folder).expect("folder").join("pixtuoid-row"))
+                );
+            }
+            assert_eq!(
+                known_folders_expanded(r"C:\etc"),
+                Some(PathBuf::from(r"C:\etc"))
+            );
+            let present = HostConfig::Registry(r"HKCU\Software");
+            assert_eq!(
+                host_config_found(&present, None).as_deref(),
+                Some(r"HKCU\Software")
+            );
+            let absent = HostConfig::Registry(r"HKCU\Software\pixtuoid-absent-row");
+            assert_eq!(host_config_found(&absent, None), None);
+        }
+
         #[test]
         fn the_recorder_is_held_to_the_sandbox_and_handed_the_clis_env() {
             let p = &PROFILES[0];
@@ -1469,7 +1478,11 @@ mod run {
 
         #[test]
         fn a_shebang_reads_as_cmd_shim_reads_it() {
-            let sb = |l: &str| Shebang::parse(l).expect("a shebang");
+            let sb = |l: &str| {
+                Shebang::parse(l)
+                    .expect("the expression")
+                    .expect("a shebang")
+            };
             assert_eq!(
                 sb("#!/usr/bin/env node"),
                 Shebang {
@@ -1498,7 +1511,11 @@ mod run {
                 }
             );
             assert_eq!(sb("#!/bin/sh").program, "/bin/sh");
-            assert_eq!(Shebang::parse("MZ\u{90}\0"), None, "a PE has none");
+            assert_eq!(
+                Shebang::parse("MZ\u{90}\0").expect("the expression"),
+                None,
+                "a PE has none"
+            );
         }
 
         /// A package as npm lays it out, its `bin` entry holding `head`.
@@ -1523,7 +1540,7 @@ mod run {
                 d.path(),
                 serde_json::json!({ "cli": "bin/cli.js" }),
                 "bin/cli.js",
-                b"#!/usr/bin/env node --no-warnings\n",
+                b"\n#!/usr/bin/env node --no-warnings\nimport './main.js';\n",
             );
             let l = Launch::from_bin_field(&node, &bin, "cli").expect("launch");
             assert_eq!(l.program, PathBuf::from("node"), "node on PATH");
