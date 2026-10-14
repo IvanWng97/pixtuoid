@@ -13,6 +13,7 @@ use serde_json::Value;
 use crate::harness::CaptureRecord;
 use crate::source::registry;
 
+pub mod pin;
 pub mod verify;
 
 /// The key every profile's CLI is handed for its scripted model: aimock
