@@ -1,6 +1,6 @@
 ---
 name: local-review
-version: 3.1.0
+version: 4.0.0
 description: "Run pixtuoid's review locally at either scope — a DIFF review (on demand, for a large or wide change: REVIEW.md's correctness and design lenses run locally, with the *(run)* checks the read-only CI review can't make) or a whole-codebase AUDIT (subsystem × factor fan-out). Use on a large or wide change before its push, on 'is this ready to merge', or on 'whole-codebase review' / pre-release / periodic audit."
 metadata:
   scope: "pixtuoid repo only"
@@ -23,34 +23,21 @@ contract; fill briefs from them, never a paraphrase here.
 
 1. **Isolate** the branch in a worktree (two sessions on one tree race on
    HEAD). Note `path`, `branch`, `base` and `head` sha.
-2. **Dispatch** the correctness and design lenses and one per matching *(run)*
-   check, in parallel, in the
-   background: `model: sonnet` for a lens that reads evidence or runs a
-   mechanical check (test lists, mutations, renders, a walk), `opus` only for
-   a design gate. Each briefed:
-
-   ```
-   You are the <lens> lens for <PR/branch> on pixtuoid.
-   Worktree: <path> (branch <name>, base <sha>, head <sha>), read-only;
-   stop if HEAD is not that head.
-   Diff: git -C <path> diff <base>..<head>.
-   Read AGENTS.md, then apply the review contract (pixtuoid/.github's
-   claude-review.yml prompt), REVIEW.md's <lens or check> and its Common
-   section.
-   <change-specific claims (from the PR body) or design
-   questions, one per line>
-   Run the applicable gates; report each exit code as observed, never through
-   a pipe. Each finding carries an integer confidence 0–100. Your final
-   message is the report, ending in one verdict: APPROVE or
-   REQUEST-CHANGES.
-   ```
-
-   The filled slots are the quality lever; a lazily filled one turns every
-   lens generic.
+2. **Run the CI review's orchestration here**, so both runners judge alike.
+   Take the review contract and the `correctness-reviewer`, `design-reviewer`
+   and `verifier` definitions verbatim from the shared workflow
+   (`gh api repos/pixtuoid/.github/contents/.github/workflows/claude-review.yml --jq .content | base64 -d`):
+   spawn the two reviewers in parallel over `<base>..<head>` in the worktree,
+   then one verifier per candidate. Add one lens per matching *(run)* check,
+   which may build, run, render or fetch, `model: sonnet` when it is
+   mechanical, and reports each exit code as observed, never through a pipe.
+   Give every brief the change's claims from the PR body: a lazily filled
+   brief turns every lens generic.
 3. **Collect and verify.** A one-word or placeholder return is a STUB, not a
-   review: re-run that lens alone (#455). Verify every finding's premise
+   review: re-run that lens alone (#455). Verify every kept finding's premise
    yourself before coding a fix — read the comments on the item it names
-   first — and REFUTE deliberate design with its mechanism.
+   first — and REFUTE one that REVIEW.md's Do not flag covers, or deliberate
+   design, with its mechanism.
 4. **Fold** accepted findings into ONE commit.
 5. **Disposition** each finding in a review thread. The bots open theirs; open
    each local finding the same way, then reply and resolve:
