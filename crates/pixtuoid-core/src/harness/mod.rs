@@ -40,8 +40,9 @@ pub mod reads;
 pub mod tap;
 
 pub use captures::{
-    CAPTURE_NOTE, CAPTURE_RECORD, Capture, CaptureRecord, HOOK_PAYLOADS, PROVENANCE,
-    capture_workspace, captures, jsonl_files_under, recorder_flag, transcripts_under,
+    CAPTURE_NOTE, CAPTURE_RECORD, CORPUS_REFUSAL, Capture, CaptureRecord, HOOK_PAYLOADS,
+    PROVENANCE, capture_workspace, captures, jsonl_files_under, recorder_flag, transcripts_under,
+    version_answer,
 };
 
 /// The committed corpus: every recorded capture, fixture and hermetic script.

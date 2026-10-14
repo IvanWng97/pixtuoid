@@ -1,10 +1,8 @@
-//! What the capture rig asks of the host: a known folder no sandbox variable
-//! moves, a directory no other local user can write into, whether this process
+//! What the capture rig asks of the host: a known folder as the shell resolves
+//! it, a directory no other local user can write into, whether this process
 //! owns a path, and whether a registry key exists.
 
-use std::path::Path;
-#[cfg(any(windows, test))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// `s` as the NUL-terminated wide string a Win32 call takes.
 #[cfg(windows)]
@@ -13,10 +11,11 @@ pub(crate) fn nul_terminated(s: &std::ffi::OsStr) -> Vec<u16> {
     s.encode_wide().chain(Some(0)).collect()
 }
 
-/// A Windows known folder, resolved through the shell rather than through an
-/// environment variable a sandbox redirects.
+/// A Windows known folder, resolved by the shell: a variable the sandbox sets
+/// cannot move it, but an environment cleared of the host's leaves it unresolved.
+#[cfg(any(windows, test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KnownFolder {
+pub(crate) enum KnownFolder {
     /// `FOLDERID_ProgramData`.
     ProgramData,
     /// `FOLDERID_Profile`: the user's home as Rust's `dirs` and the CLIs built
@@ -24,12 +23,13 @@ pub enum KnownFolder {
     Profile,
 }
 
+#[cfg(any(windows, test))]
 impl KnownFolder {
     /// Every known folder a `system_config` row may name.
-    pub const ALL: [Self; 2] = [Self::ProgramData, Self::Profile];
+    pub(crate) const ALL: [Self; 2] = [Self::ProgramData, Self::Profile];
 
     /// How a `system_config` row spells it.
-    pub const fn placeholder(self) -> &'static str {
+    pub(crate) const fn placeholder(self) -> &'static str {
         match self {
             Self::ProgramData => "{FOLDERID_ProgramData}",
             Self::Profile => "{FOLDERID_Profile}",
@@ -44,7 +44,7 @@ impl KnownFolder {
 ///
 /// If the shell has no path for it.
 #[cfg(windows)]
-pub fn known_folder(folder: KnownFolder) -> std::io::Result<PathBuf> {
+pub(crate) fn known_folder(folder: KnownFolder) -> std::io::Result<PathBuf> {
     use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Shell::{
@@ -70,6 +70,25 @@ pub fn known_folder(folder: KnownFolder) -> std::io::Result<PathBuf> {
     // not"; freeing null is a no-op.
     unsafe { CoTaskMemFree(raw.cast()) };
     path.ok_or_else(|| std::io::Error::from_raw_os_error(hr))
+}
+
+/// `path` with a leading `{FOLDERID_*}` placeholder resolved, or `None` when
+/// the shell has no such folder; any other path, and every path off Windows,
+/// as written.
+pub fn known_folders_expanded(path: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        for folder in KnownFolder::ALL {
+            if let Some(rest) = path.strip_prefix(folder.placeholder()) {
+                return Some(
+                    known_folder(folder)
+                        .ok()?
+                        .join(rest.trim_start_matches('\\')),
+                );
+            }
+        }
+    }
+    Some(PathBuf::from(path))
 }
 
 /// Owner, SYSTEM and Administrators in full, Users read and execute, nothing
@@ -339,6 +358,23 @@ mod tests {
         temp_env::with_var("ProgramData", Some(elsewhere.path()), || {
             assert_eq!(known_folder(KnownFolder::ProgramData).expect("again"), real);
         });
+    }
+
+    #[test]
+    fn a_known_folder_placeholder_is_resolved_where_the_shell_puts_it() {
+        #[cfg(windows)]
+        for folder in KnownFolder::ALL {
+            let row = format!(r"{}\pixtuoid-row", folder.placeholder());
+            assert_eq!(
+                known_folders_expanded(&row),
+                Some(known_folder(folder).expect("folder").join("pixtuoid-row"))
+            );
+        }
+        assert_eq!(
+            known_folders_expanded("/etc/pixtuoid-row"),
+            Some(PathBuf::from("/etc/pixtuoid-row")),
+            "any other path as written"
+        );
     }
 
     #[cfg(windows)]

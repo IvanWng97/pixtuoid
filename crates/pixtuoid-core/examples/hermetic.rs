@@ -29,12 +29,13 @@ mod run {
 
     use pixtuoid_core::harness::hermetic::verify::{self, Label, Verdict};
     use pixtuoid_core::harness::hermetic::{
-        self, DUMMY_KEY, HostConfig, MANIFEST, Manifest, NOT_HERMETIC, NOTE_PLACEHOLDER, PROFILES,
-        Package, PerOs, Profile, SCENE_LOG, Scenario, USER_PLACEHOLDER, WORKSPACE_PLACEHOLDER,
+        self, DUMMY_KEY, HostConfig, MANIFEST, Manifest, NOT_HERMETIC, PROFILES, Package, PerOs,
+        Profile, SCENE_LOG, Scenario, USER_PLACEHOLDER,
     };
     use pixtuoid_core::harness::tap::Endpoint;
     use pixtuoid_core::harness::{
-        CAPTURE_NOTE, CAPTURE_RECORD, CaptureRecord, capture_workspace, recorder_flag,
+        CAPTURE_RECORD, CORPUS_REFUSAL, CaptureRecord, capture_workspace, recorder_flag,
+        version_answer,
     };
 
     /// How long a server gets to come up before the run gives up.
@@ -155,11 +156,8 @@ mod run {
         /// A selection that names nothing runnable is an operator's typo, not
         /// a run where everything was blocked.
         fn check(&self) -> Result<(), String> {
-            if self.record && !cfg!(unix) {
-                return Err(
-                    "--record writes the committed corpus, which pins Unix paths: record on macOS or Linux"
-                        .into(),
-                );
+            if let Some(why) = CORPUS_REFUSAL.filter(|_| self.record) {
+                return Err(format!("--record: {why}"));
             }
             if self.record && self.versions == Versions::Latest {
                 return Err("--record writes fixtures of the pinned CLIs only".into());
@@ -357,9 +355,8 @@ mod run {
                     .arg("--version")
                     .output()
                     .ok()
-                    .filter(|o| o.status.success())
-                    .and_then(|o| String::from_utf8(o.stdout).ok())
-                    .and_then(|v| v.lines().next().map(str::trim).map(str::to_owned))
+                    .as_ref()
+                    .and_then(version_answer)
                     .unwrap_or_else(|| format!("{t}: none"))
             })
             .collect()
@@ -574,7 +571,10 @@ mod run {
         launch: Launch,
     }
 
-    /// How to start an npm-installed command.
+    /// How to start an npm-installed command; on Windows not the `.cmd` npm
+    /// writes, since std's `kill` there is `TerminateProcess`, which ends only
+    /// "the specified process": the shim's node, aimock's port with it, would
+    /// outlive the kill (learn.microsoft.com, TerminateProcess).
     #[derive(Debug, PartialEq, Eq)]
     struct Launch {
         program: PathBuf,
@@ -987,7 +987,7 @@ mod run {
                     Some(name) => path.replace(USER_PLACEHOLDER, name),
                     None => return None,
                 };
-                let path = known_folders_expanded(&path)?;
+                let path = pixtuoid_core::harness::host::known_folders_expanded(&path)?;
                 path.exists().then(|| path.display().to_string())
             }
             #[cfg(windows)]
@@ -997,22 +997,6 @@ mod run {
             #[cfg(not(windows))]
             HostConfig::Registry(_) => None,
         }
-    }
-
-    /// `path` with a leading known-folder placeholder resolved, or `None` when
-    /// the shell has no such folder.
-    fn known_folders_expanded(path: &str) -> Option<PathBuf> {
-        #[cfg(windows)]
-        {
-            use pixtuoid_core::harness::host::{KnownFolder, known_folder};
-            for folder in KnownFolder::ALL {
-                if let Some(rest) = path.strip_prefix(folder.placeholder()) {
-                    let base = known_folder(folder).ok()?;
-                    return Some(base.join(rest.trim_start_matches('\\')));
-                }
-            }
-        }
-        Some(PathBuf::from(path))
     }
 
     /// The CLI's `--version`, asked of it alone in the sandbox the run uses:
@@ -1028,17 +1012,12 @@ mod run {
             .args(&probe[1..])
             .envs(launch.env.iter().map(|(k, v)| (k, v)))
             .output()?;
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .next()
-            .map(|l| l.trim().to_owned())
-            .filter(|v| out.status.success() && !v.is_empty())
-            .ok_or_else(|| {
-                std::io::Error::other(format!(
-                    "{:?} --version answered nothing (exit {})",
-                    launch.program, out.status
-                ))
-            })
+        version_answer(&out).ok_or_else(|| {
+            std::io::Error::other(format!(
+                "{:?} --version answered nothing (exit {})",
+                launch.program, out.status
+            ))
+        })
     }
 
     /// What the tier decides about one recorder run.
@@ -1093,44 +1072,31 @@ mod run {
     ) -> std::io::Result<PathBuf> {
         let mut script: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(scenario.script(p.source))?)?;
-        expand_strings(&mut script, &script_values(p, workspace));
+        expand_strings(&mut script, &p.script_values(&reported_cwd(workspace)));
         let out = into.join("script.json");
         std::fs::write(&out, serde_json::to_string_pretty(&script)?)?;
         Ok(out)
     }
 
-    /// Each placeholder's value here. Unix's realpath is what a CLI's `getcwd`
-    /// reports (macOS's `/tmp` is `/private/tmp`); Windows' cwd reads back as
-    /// it was set, and canonicalizing would resolve a junction it never sees.
-    fn script_values(p: &Profile, workspace: &Path) -> Vec<(String, String)> {
+    /// `workspace` as a CLI's `getcwd` reports it: Unix's realpath (macOS's
+    /// `/tmp` is `/private/tmp`); Windows' cwd reads back as it was set, and
+    /// canonicalizing would resolve a junction it never sees.
+    fn reported_cwd(workspace: &Path) -> String {
         let workspace = if cfg!(windows) {
             workspace.to_path_buf()
         } else {
             std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_path_buf())
         };
-        [
-            (
-                WORKSPACE_PLACEHOLDER.to_owned(),
-                workspace.to_string_lossy().into_owned(),
-            ),
-            (NOTE_PLACEHOLDER.to_owned(), CAPTURE_NOTE.to_owned()),
-        ]
-        .into_iter()
-        .chain(
-            p.script_vars
-                .iter()
-                .map(|(k, v)| ((*k).to_owned(), (*v.here()).to_owned())),
-        )
-        .collect()
+        workspace.to_string_lossy().into_owned()
     }
 
     /// Replace every placeholder inside `v`'s strings: a raw `C:\…` spliced
     /// into JSON text would be an invalid escape.
-    fn expand_strings(v: &mut serde_json::Value, values: &[(String, String)]) {
+    fn expand_strings(v: &mut serde_json::Value, values: &[(&str, String)]) {
         match v {
             serde_json::Value::String(text) => {
                 for (k, value) in values {
-                    *text = text.replace(k.as_str(), value);
+                    *text = text.replace(k, value);
                 }
             }
             serde_json::Value::Array(items) => {
@@ -1326,19 +1292,7 @@ mod run {
 
         #[cfg(windows)]
         #[test]
-        fn a_windows_row_is_found_where_the_shell_and_the_registry_put_it() {
-            use pixtuoid_core::harness::host::{KnownFolder, known_folder};
-            for folder in KnownFolder::ALL {
-                let row = format!(r"{}\pixtuoid-row", folder.placeholder());
-                assert_eq!(
-                    known_folders_expanded(&row),
-                    Some(known_folder(folder).expect("folder").join("pixtuoid-row"))
-                );
-            }
-            assert_eq!(
-                known_folders_expanded(r"C:\etc"),
-                Some(PathBuf::from(r"C:\etc"))
-            );
+        fn a_registry_row_is_config_outside_the_sandbox_while_its_key_exists() {
             let present = HostConfig::Registry(r"HKCU\Software");
             assert_eq!(
                 host_config_found(&present, None).as_deref(),
@@ -1411,18 +1365,25 @@ mod run {
                 shim,
                 recorder: PathBuf::from("/nowhere/capture_fixture"),
             };
-            let launch = Launch::of(d.path(), d.path(), "cli").unwrap_or(Launch {
-                program: PathBuf::from("cli"),
+            // What a shebang's `env -S VAR=value` sets.
+            let launch = Launch {
+                program: PathBuf::from("node"),
                 args: Vec::new(),
-                env: Vec::new(),
-            });
+                env: vec![("NODE_OPTIONS".into(), "--no-warnings".into())],
+            };
             for p in PROFILES {
                 let sandbox =
                     Sandbox::new(p, &built, Path::new("/nowhere/bin"), 4321).expect("sandbox");
+                let cli_env = sandbox.cli_env(p, &launch);
                 assert_eq!(
-                    sandbox.cli_env(p, &launch).len(),
+                    cli_env.len(),
                     p.env.len() + launch.env.len(),
                     "{}",
+                    p.source
+                );
+                assert!(
+                    cli_env.contains(&"NODE_OPTIONS=--no-warnings".to_owned()),
+                    "{}: the launch's own env misses the CLI",
                     p.source
                 );
                 for (k, v) in p.env {
@@ -1435,7 +1396,7 @@ mod run {
                     );
                     // The only path past the recorder's `CLAUDE_CODE_*` scrub.
                     assert!(
-                        sandbox.cli_env(p, &launch).contains(&format!("{k}={want}")),
+                        cli_env.contains(&format!("{k}={want}")),
                         "{}: {k} misses the CLI's `--env`",
                         p.source
                     );
@@ -1633,10 +1594,10 @@ mod run {
             });
             let values = [
                 (
-                    "{workspace}".to_string(),
+                    "{workspace}",
                     r"C:\ProgramData\pixtuoid-capture\proj".to_string(),
                 ),
-                ("{shell_tool}".to_string(), "pwsh".to_string()),
+                ("{shell_tool}", "pwsh".to_string()),
             ];
             expand_strings(&mut script, &values);
             let text = serde_json::to_string(&script).expect("serializes");

@@ -37,8 +37,8 @@ mod recorder {
     };
     use pixtuoid_core::harness::tap::{Endpoint, Tap};
     use pixtuoid_core::harness::{
-        CAPTURE_NOTE, CAPTURE_RECORD, CaptureRecord, HOOK_PAYLOADS, PROVENANCE, capture_workspace,
-        jsonl_files_under,
+        CAPTURE_NOTE, CAPTURE_RECORD, CORPUS_REFUSAL, CaptureRecord, HOOK_PAYLOADS, PROVENANCE,
+        capture_workspace, jsonl_files_under, version_answer,
     };
 
     /// Where a driver names the CLI it drives, a command or the path to its
@@ -80,13 +80,10 @@ mod recorder {
     }
 
     impl Options {
-        /// Why this host may not run what these options ask: the committed
-        /// corpus pins Unix realpaths and cwds, so only a Unix host writes into
-        /// it; a raw `--out` capture is any host's.
+        /// Why this host may not run what these options ask: a raw `--out`
+        /// capture is any host's, the committed corpus [`CORPUS_REFUSAL`]'s.
         fn corpus_refusal(&self) -> Option<&'static str> {
-            (!cfg!(unix) && (self.promote.is_some() || self.out.is_none())).then_some(
-                "recording writes the committed corpus, which pins Unix paths: record on macOS or Linux",
-            )
+            CORPUS_REFUSAL.filter(|_| self.promote.is_some() || self.out.is_none())
         }
     }
 
@@ -634,9 +631,8 @@ mod recorder {
             .arg("--version")
             .output()
             .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .and_then(|s| s.lines().next().map(|l| l.trim().to_owned()))
+            .as_ref()
+            .and_then(version_answer)
     }
 
     fn write_provenance(

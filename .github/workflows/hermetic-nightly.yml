@@ -41,10 +41,10 @@ jobs:
           set -euo pipefail
           gh label create hermetic --color FBCA04 \
             --description "A hermetic run's verdict on an agent CLI's latest release" 2>/dev/null || true
-          # The orchestrator owns the title, as each report's H1 naming its OS,
-          # and it carries the disposition: retitle on the dedup path too. A
-          # leg with no report.md means the tier itself could not run: red,
-          # with no verdict to file.
+          # The orchestrator owns the title, as each report's H1 naming its OS
+          # and disposition: the last failed leg's titles the issue, every
+          # report is a comment. A leg with no report.md means the tier itself
+          # could not run: red, with no verdict to file.
           num=$(gh issue list --label hermetic --state open \
             --json number --jq '.[0].number // empty')
           for report in */report.md; do

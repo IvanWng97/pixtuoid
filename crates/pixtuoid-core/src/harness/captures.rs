@@ -48,7 +48,8 @@ pub fn transcripts_under(source: &str, root: &Path) -> Vec<PathBuf> {
 ///
 /// # Errors
 ///
-/// On Windows, if the shell has no ProgramData.
+/// On Windows, if the shell has no ProgramData, as in an environment cleared
+/// of the host's.
 pub fn capture_workspace() -> std::io::Result<PathBuf> {
     #[cfg(windows)]
     {
@@ -61,6 +62,26 @@ pub fn capture_workspace() -> std::io::Result<PathBuf> {
     {
         Ok(PathBuf::from("/tmp/pixtuoid-capture/proj"))
     }
+}
+
+/// Why this host may not write the committed corpus, which pins Unix
+/// realpaths and cwds; `None` on Unix.
+pub const CORPUS_REFUSAL: Option<&str> = if cfg!(unix) {
+    None
+} else {
+    Some("the committed corpus pins Unix paths: record on macOS or Linux")
+};
+
+/// What a `--version` run answered: the first non-blank line of a successful
+/// run's stdout.
+pub fn version_answer(out: &std::process::Output) -> Option<String> {
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())?
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(str::to_owned)
 }
 
 /// The `NOTE.txt` the recorder writes into the workspace: what every scripted
@@ -229,6 +250,38 @@ pub fn captures(root: &Path) -> Vec<Capture> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_version_is_the_first_line_a_successful_run_printed() {
+        let ran = |ok: bool, stdout: &str| std::process::Output {
+            status: if ok {
+                std::process::ExitStatus::default()
+            } else {
+                failed()
+            },
+            stdout: stdout.into(),
+            stderr: Vec::new(),
+        };
+        assert_eq!(
+            version_answer(&ran(true, "\n 2.0.1 \nbuilt today\n")).as_deref(),
+            Some("2.0.1")
+        );
+        assert_eq!(
+            version_answer(&ran(true, " \n")),
+            None,
+            "it printed nothing"
+        );
+        assert_eq!(version_answer(&ran(false, "2.0.1\n")), None, "it failed");
+    }
+
+    fn failed() -> std::process::ExitStatus {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
+        // Unix's raw status is a wait status: exit code 1 sits in its second byte.
+        std::process::ExitStatus::from_raw(if cfg!(unix) { 1 << 8 } else { 1 })
+    }
 
     #[test]
     fn the_walk_scales_past_the_size_that_broke_the_shell_version() {

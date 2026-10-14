@@ -124,7 +124,7 @@ impl HookSocketListener {
     }
 
     /// Accept connections forever, each handed to `handle` raw, under the same
-    /// endpoint guards and per-connection budget as [`Self::run`].
+    /// endpoint guards and [`CONN_TIMEOUT`] as [`Self::run`]; `handle` bounds its read.
     #[cfg(feature = "harness")]
     pub(crate) async fn serve_raw<F, Fut>(self, handle: F) -> Result<()>
     where

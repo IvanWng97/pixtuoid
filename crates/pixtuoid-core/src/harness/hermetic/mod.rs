@@ -25,12 +25,12 @@ const AIMOCK_V1: &str = "http://127.0.0.1:{port}/v1";
 /// What a Unix `system_config` path spells the operator's user name as.
 pub const USER_PLACEHOLDER: &str = "{user}";
 /// What a script spells [`CAPTURE_NOTE`](crate::harness::CAPTURE_NOTE) as.
-pub const NOTE_PLACEHOLDER: &str = "{note}";
+pub(crate) const NOTE_PLACEHOLDER: &str = "{note}";
 /// What a script spells the workspace the recorder runs the CLI in as.
-pub const WORKSPACE_PLACEHOLDER: &str = "{workspace}";
+pub(crate) const WORKSPACE_PLACEHOLDER: &str = "{workspace}";
 /// What a script spells the platform's shell tool as, a profile's
 /// `script_vars` naming it.
-pub const SHELL_TOOL_PLACEHOLDER: &str = "{shell_tool}";
+pub(crate) const SHELL_TOOL_PLACEHOLDER: &str = "{shell_tool}";
 
 /// A fact that differs between Unix and Windows. Both arms are plain data, so
 /// a test on any host reads both, as `platform::resolve_user_home_opt` takes
@@ -58,7 +58,7 @@ impl<T> PerOs<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostConfig {
     /// A path; a Unix one may spell [`USER_PLACEHOLDER`], a Windows one start
-    /// with a [`crate::harness::host::KnownFolder`] placeholder.
+    /// with a placeholder [`crate::harness::host::known_folders_expanded`] resolves.
     Path(&'static str),
     /// A Windows registry key, `HKLM\…` or `HKCU\…`.
     Registry(&'static str),
@@ -134,7 +134,7 @@ pub struct Profile {
     /// `{key}` expand.
     pub env: &'static [(&'static str, &'static str)],
     /// Homes the registry row does not name, each pointed into the sandbox.
-    pub homes: &'static [&'static str],
+    pub(crate) homes: &'static [&'static str],
     /// Fixed places the CLI reads policy or config from, which no home
     /// redirects: a run on a machine that has one is not hermetic. A macOS
     /// managed-preferences domain whose plist path upstream does not fix is not
@@ -148,7 +148,7 @@ pub struct Profile {
     /// The scripted turns.
     pub scenarios: &'static [Scenario],
     /// Placeholders the scenario scripts spell, each the platform's value.
-    pub script_vars: &'static [(&'static str, PerOs<&'static str>)],
+    pub(crate) script_vars: &'static [(&'static str, PerOs<&'static str>)],
     /// Registered hooks no scenario expects yet. Shrink-only: a run that fires
     /// one is Stale (`verify::verify_source`).
     pub not_yet: &'static [&'static str],
@@ -177,6 +177,22 @@ impl Profile {
             .home_env
             .into_iter()
             .chain(self.homes.iter().copied())
+    }
+
+    /// Every placeholder this profile's scripts may spell, with its value on
+    /// this platform: `workspace` as the CLI reports its cwd.
+    pub fn script_values(&self, workspace: &str) -> Vec<(&'static str, String)> {
+        [
+            (WORKSPACE_PLACEHOLDER, workspace.to_owned()),
+            (NOTE_PLACEHOLDER, crate::harness::CAPTURE_NOTE.to_owned()),
+        ]
+        .into_iter()
+        .chain(
+            self.script_vars
+                .iter()
+                .map(|(k, v)| (*k, (*v.here()).to_owned())),
+        )
+        .collect()
     }
 }
 
@@ -947,13 +963,9 @@ mod tests {
                 }
             }
             let declared: BTreeSet<String> = p
-                .script_vars
-                .iter()
-                .map(|(k, _)| (*k).to_owned())
-                .chain([
-                    WORKSPACE_PLACEHOLDER.to_owned(),
-                    NOTE_PLACEHOLDER.to_owned(),
-                ])
+                .script_values("")
+                .into_iter()
+                .map(|(k, _)| k.to_owned())
                 .collect();
             let undeclared: Vec<_> = spelled.difference(&declared).collect();
             assert!(undeclared.is_empty(), "{}: {undeclared:?}", p.source);
