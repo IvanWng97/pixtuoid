@@ -214,8 +214,9 @@ mod recorder {
         // permission gate is a hook event, so the two are harvested together.
         if let Some(root) = root.as_deref() {
             let candidates = pixtuoid_core::harness::transcripts_under(&source, root);
-            if let Some(fresh) = newest_born_after(&candidates, started) {
-                wrote.push(place_transcript(&fresh, &candidates, &dest)?);
+            let born = born_after(&candidates, started);
+            for fresh in harvested(born, options.within.is_some()) {
+                wrote.push(place_transcript(&source, &fresh, &dest)?);
             }
         }
         if !payloads.is_empty() {
@@ -360,49 +361,65 @@ mod recorder {
             .collect()
     }
 
-    /// The transcript this run CREATED: BIRTH time, not mtime. A live agent session
-    /// is appended to forever and is therefore always newest by mtime — that once
-    /// harvested the developer's own live session.
-    fn newest_born_after(candidates: &[PathBuf], after: SystemTime) -> Option<PathBuf> {
-        candidates
+    /// The transcripts born since `after`, oldest first: in a sandbox, the ones
+    /// the run created, a delegating CLI's child's beside its parent's. BIRTH
+    /// time, not mtime: a live agent session is appended to forever, which once
+    /// harvested the developer's own.
+    fn born_after(candidates: &[PathBuf], after: SystemTime) -> Vec<PathBuf> {
+        let mut born: Vec<(SystemTime, PathBuf)> = candidates
             .iter()
             .filter_map(|p| {
                 let born = std::fs::metadata(p).ok()?.created().ok()?;
-                (born >= after).then_some((born, p.clone()))
+                (born >= after).then(|| (born, p.clone()))
             })
-            .max_by_key(|(born, _)| *born)
-            .map(|(_, p)| p)
+            .collect();
+        born.sort_by_key(|(at, _)| *at);
+        born.into_iter().map(|(_, p)| p).collect()
     }
 
-    /// A source whose transcripts all share ONE basename keys its session on the
-    /// PARENT dir, so flattening would rename the session after the scenario. Asked
-    /// of the source's own file list, never a table of which sources those are.
-    fn basename_repeats(name: &std::ffi::OsStr, candidates: &[PathBuf]) -> bool {
-        candidates
-            .iter()
-            .filter(|p| p.file_name() == Some(name))
-            .count()
-            > 1
+    /// What the harvest keeps of the transcripts `born` during the run, oldest
+    /// first: every one in a sandbox, and only the newest in the operator's own
+    /// root, where another session may be born during the run.
+    fn harvested(mut born: Vec<PathBuf>, sandboxed: bool) -> Vec<PathBuf> {
+        if !sandboxed {
+            born = born.split_off(born.len().saturating_sub(1));
+        }
+        born
     }
 
-    fn place_transcript(
-        fresh: &Path,
-        candidates: &[PathBuf],
-        dest: &Path,
-    ) -> std::io::Result<PathBuf> {
+    /// Where `fresh` lands under `dest`: under as few of its own parent dirs as
+    /// keep the session `source` keys it on (grok's is the parent dir's name),
+    /// so flattening never renames the session after the scenario. Asked of the
+    /// source's own id deriver, never a table of which sources those are; one
+    /// keyed on the whole path, which any placement changes, lands flat.
+    fn placement(source: &str, fresh: &Path, dest: &Path) -> PathBuf {
+        let derive = registry::id_deriver_for(source);
         let name = fresh.file_name().expect("a walked file has a name");
-        let out = if basename_repeats(name, candidates) {
-            let parent = fresh
-                .parent()
-                .and_then(Path::file_name)
-                .expect("a transcript has a parent dir");
-            let d = dest.join(parent);
-            std::fs::create_dir_all(&d)?;
-            d.join(name)
-        } else {
-            dest.join(name)
-        };
-        let out = no_clobber(out);
+        let dirs: Vec<&std::ffi::OsStr> = fresh
+            .parent()
+            .into_iter()
+            .flat_map(Path::components)
+            .filter_map(|c| match c {
+                std::path::Component::Normal(d) => Some(d),
+                _ => None,
+            })
+            .collect();
+        (0..=dirs.len())
+            .map(|kept| {
+                dirs[dirs.len() - kept..]
+                    .iter()
+                    .fold(dest.to_path_buf(), |d, dir| d.join(dir))
+                    .join(name)
+            })
+            .find(|at| derive(at) == derive(fresh))
+            .unwrap_or_else(|| dest.join(name))
+    }
+
+    fn place_transcript(source: &str, fresh: &Path, dest: &Path) -> std::io::Result<PathBuf> {
+        let out = no_clobber(placement(source, fresh, dest));
+        if let Some(dir) = out.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
         std::fs::copy(fresh, &out)?;
         Ok(out)
     }
@@ -1242,36 +1259,61 @@ mod recorder {
             let started = SystemTime::now();
             std::thread::sleep(Duration::from_millis(1100));
             std::fs::write(&new, "{}").expect("write");
-            let candidates = vec![old.clone(), new.clone()];
-            assert_eq!(newest_born_after(&candidates, started), Some(new));
-            // The live-session trap: touching the old file must NOT make it win,
+            std::thread::sleep(Duration::from_millis(1100));
+            let newer = d.path().join("newer.jsonl");
+            std::fs::write(&newer, "{}").expect("write");
+            // Listed newest first, returned oldest first.
+            let candidates = vec![newer.clone(), old.clone(), new.clone()];
+            assert_eq!(
+                born_after(&candidates, started),
+                vec![new.clone(), newer.clone()]
+            );
+            // The live-session trap: touching the old file must NOT take it in,
             // which is the whole reason this reads birth time and not mtime.
             std::fs::write(&old, "{}{}").expect("touch");
-            assert_ne!(newest_born_after(&candidates, started), Some(old));
+            assert_eq!(born_after(&candidates, started), vec![new, newer]);
         }
 
         #[test]
-        fn no_candidate_born_after_the_run_is_none_not_a_panic() {
+        fn only_a_sandbox_harvests_every_transcript_born_during_the_run() {
+            let born = vec![PathBuf::from("parent.jsonl"), PathBuf::from("child.jsonl")];
+            assert_eq!(harvested(born.clone(), true), born);
+            assert_eq!(harvested(born, false), [PathBuf::from("child.jsonl")]);
+            assert!(harvested(Vec::new(), false).is_empty());
+        }
+
+        #[test]
+        fn no_candidate_born_after_the_run_is_nothing_not_a_panic() {
             let d = tempfile::tempdir().expect("tempdir");
             let old = d.path().join("old.jsonl");
             std::fs::write(&old, "{}").expect("write");
             std::thread::sleep(Duration::from_millis(1100));
-            assert_eq!(newest_born_after(&[old], SystemTime::now()), None);
+            assert!(born_after(&[old], SystemTime::now()).is_empty());
         }
 
         #[test]
-        fn a_repeated_basename_means_the_parent_dir_is_the_identity() {
-            let repeated = [
-                PathBuf::from("a/updates.jsonl"),
-                PathBuf::from("b/updates.jsonl"),
-            ];
-            let unique = [PathBuf::from("a/one.jsonl"), PathBuf::from("b/two.jsonl")];
-            let name = std::ffi::OsStr::new("updates.jsonl");
-            assert!(basename_repeats(name, &repeated));
-            assert!(!basename_repeats(
-                std::ffi::OsStr::new("one.jsonl"),
-                &unique
-            ));
+        fn a_harvested_transcript_keeps_the_dirs_its_session_is_keyed_on() {
+            let dest = Path::new("/fixture");
+            // grok keys its session on the parent dir's name.
+            let grok = Path::new("/sb/.grok/sessions/%2Fw/0198-abc/updates.jsonl");
+            assert_eq!(
+                placement("grok", grok, dest),
+                dest.join("0198-abc/updates.jsonl")
+            );
+            let root = "2026-07-09t08-00-00-000z_0197f0aa-0000-7000-8000-000000000001";
+            let child = PathBuf::from(format!("/sb/.omp/agent/sessions/-w/{root}/alpha.jsonl"));
+            assert_eq!(
+                placement("omp", &child, dest),
+                dest.join(root).join("alpha.jsonl")
+            );
+            let cc = Path::new("/sb/.claude/projects/-w/5f2c.jsonl");
+            assert_eq!(placement("claude-code", cc, dest), dest.join("5f2c.jsonl"));
+            // Keyed on the whole path, which any placement changes.
+            let ag = Path::new("/sb/.gemini/x/conversations/9/transcript.jsonl");
+            assert_eq!(
+                placement("antigravity", ag, dest),
+                dest.join("transcript.jsonl")
+            );
         }
 
         #[test]
@@ -1281,29 +1323,6 @@ mod recorder {
             assert_eq!(no_clobber(p.clone()), p, "a fresh path is used as-is");
             std::fs::write(&p, "{}").expect("write");
             assert!(no_clobber(p).to_string_lossy().ends_with(".new"));
-        }
-
-        #[test]
-        fn birth_time_selection_scales_past_the_size_that_broke_the_shell_version() {
-            // A pin on the SHAPE, not on a buffer size.
-            let d = tempfile::tempdir().expect("tempdir");
-            let mut all: Vec<PathBuf> = (0..1200)
-                .map(|i| {
-                    let p = d.path().join(format!("f{i}.jsonl"));
-                    std::fs::write(&p, "{}").expect("write");
-                    p
-                })
-                .collect();
-            // Created last, and placed FIRST, so returning `candidates.first()`
-            // or swapping max for min are both caught.
-            std::thread::sleep(std::time::Duration::from_millis(20));
-            let newest = d.path().join("zzz-newest.jsonl");
-            std::fs::write(&newest, "{}").expect("write");
-            all.insert(0, newest.clone());
-            assert_eq!(
-                newest_born_after(&all, SystemTime::UNIX_EPOCH),
-                Some(newest)
-            );
         }
 
         /// A link PLANTED by another user cannot be created in a unit test, so this

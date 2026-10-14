@@ -154,15 +154,14 @@ A scenario ships the transports its source actually has: both files
 (CC/Codex), transcript-only (antigravity — no hooks), or hook-payloads-only
 (reasonix — hook-only, no watchable JSONL).
 
-**A transcript whose id comes from its PARENT DIR must keep that dir.** grok and
-copilot are the two (`path.parent()` in their `*_id_from_path`); everything else
-keys on the filename. Flattened, the session id becomes the SCENARIO NAME, and
+**A transcript whose id comes from its PARENT DIR must keep that dir.**
+Flattened, the session id becomes the SCENARIO NAME, and
 the hook-vs-JSONL coalesce assertion then compares a real id against a directory
 name — `grok/permission-flow` passed for months only because its hooks were
 composed to declare `sessionId: "permission-flow"`. So a recorded grok scenario
-nests: `<scenario>/<session-uuid>/updates.jsonl`. The recorder decides this by
-asking the registry's own `path_filter_for` whether the basename repeats across
-sessions, and the harness recurses to find it.
+nests: `<scenario>/<session-uuid>/updates.jsonl`. The recorder keeps the fewest
+parent dirs that leave the registry's own `id_deriver_for` id unchanged, and the
+harness recurses to find it.
 
 (This tree is **conformance-scanned ONLY** — `conformance.rs` asserts every dir
 here is a registered source. Single-owner fixtures read by one module — decode's
