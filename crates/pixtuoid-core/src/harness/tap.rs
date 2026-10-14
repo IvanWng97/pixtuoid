@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::source::hook::{HookConn, HookSocketListener, MAX_CONN_BYTES, SocketBusy};
+use crate::source::hook::{HookConn, HookSocketListener, SocketBusy};
 
 /// A hook can still be in flight when the CLI's own process exits, so the wait
 /// is measured from the LAST PAYLOAD rather than from that exit.
@@ -164,14 +164,10 @@ impl Tap {
                 };
                 let _ = bound_tx.send(Ok(()));
                 let tee = Arc::new(tee);
-                if let Err(e) = listener
-                    .serve_raw(move |conn| keep(conn, Arc::clone(&sink), Arc::clone(&tee)))
-                    .await
-                {
-                    *why.lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                        Some(format!("{e:#}"));
-                }
+                let served = listener
+                    .serve(move |conn| keep(conn, Arc::clone(&sink), Arc::clone(&tee)))
+                    .await;
+                note_stop(&why, served);
             });
         });
         bound_rx.recv().map_err(std::io::Error::other)??;
@@ -208,25 +204,28 @@ impl Tap {
     }
 
     /// Every payload so far.
-    ///
-    /// # Errors
-    ///
-    /// If the listener stopped accepting, which loses every payload after.
-    pub fn take(&self) -> std::io::Result<Vec<String>> {
-        let stopped = self
-            .stopped
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(why) = stopped.as_ref() {
-            return Err(std::io::Error::other(format!(
-                "the tap stopped accepting: {why}"
-            )));
-        }
-        Ok(self
-            .lines
+    pub fn take(&self) -> Vec<String> {
+        self.lines
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone())
+            .clone()
+    }
+
+    /// Why the listener stopped accepting, if it has.
+    pub fn stopped(&self) -> Option<String> {
+        self.stopped
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// Keep why a listener that should serve forever returned.
+fn note_stop(slot: &Mutex<Option<String>>, served: anyhow::Result<()>) {
+    if let Err(e) = served {
+        *slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{e:#}"));
     }
 }
 
@@ -236,12 +235,7 @@ impl Tap {
 /// in its scene log.
 async fn keep(mut conn: HookConn, sink: Arc<Mutex<Vec<String>>>, tee: Arc<Option<Endpoint>>) {
     let mut bytes = Vec::new();
-    if (&mut conn)
-        .take(MAX_CONN_BYTES)
-        .read_to_end(&mut bytes)
-        .await
-        .is_err()
-    {
+    if conn.read_to_end(&mut bytes).await.is_err() {
         return;
     }
     let text = String::from_utf8_lossy(&bytes).into_owned();
@@ -290,8 +284,8 @@ mod tests {
         deliver(&at, LINE);
         tap.settle();
         tee.settle();
-        assert_eq!(tap.take().expect("accepting"), [LINE]);
-        assert_eq!(tee.take().expect("accepting"), [LINE]);
+        assert_eq!(tap.take(), [LINE]);
+        assert_eq!(tee.take(), [LINE]);
     }
 
     #[test]
@@ -307,7 +301,7 @@ mod tests {
         );
         deliver(&at, LINE);
         tap.settle();
-        assert_eq!(tap.take().expect("accepting"), [LINE]);
+        assert_eq!(tap.take(), [LINE]);
     }
 
     #[test]
@@ -320,13 +314,43 @@ mod tests {
     }
 
     #[test]
+    fn a_payload_is_cut_at_the_listeners_byte_cap() {
+        let cap = usize::try_from(crate::source::hook::MAX_CONN_BYTES).expect("fits");
+        let d = private_dir();
+        let at = Endpoint::in_dir(d.path(), "tap");
+        let tap = Tap::bind(&at, None).expect("tap");
+        deliver(&at, &"x".repeat(cap + 1));
+        tap.settle();
+        assert_eq!(
+            tap.take().iter().map(String::len).collect::<Vec<_>>(),
+            [cap]
+        );
+    }
+
+    #[test]
+    fn a_listener_that_stops_is_reported_with_its_reason() {
+        let slot = Mutex::new(None);
+        note_stop(&slot, Ok(()));
+        assert_eq!(*slot.lock().expect("slot"), None);
+        note_stop(&slot, Err(anyhow::anyhow!("re-creating the pipe failed")));
+        let d = private_dir();
+        let tap = Tap::bind(&Endpoint::in_dir(d.path(), "tap"), None).expect("tap");
+        assert_eq!(tap.stopped(), None, "a live listener");
+        *tap.stopped.lock().expect("slot") = slot.into_inner().expect("slot");
+        assert_eq!(
+            tap.stopped().as_deref(),
+            Some("re-creating the pipe failed")
+        );
+    }
+
+    #[test]
     fn a_tee_with_no_listener_costs_the_recording_nothing() {
         let d = private_dir();
         let at = Endpoint::in_dir(d.path(), "tap");
         let tap = Tap::bind(&at, Some(Endpoint::in_dir(d.path(), "absent"))).expect("tap");
         deliver(&at, LINE);
         tap.settle();
-        assert_eq!(tap.take().expect("accepting"), [LINE]);
+        assert_eq!(tap.take(), [LINE]);
     }
 
     /// The hook server always pre-creates its next instance, so only a server

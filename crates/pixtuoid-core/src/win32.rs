@@ -2,7 +2,7 @@
 //! descriptor built from SDDL for each object created under it (the hook's
 //! pipe, the capture rig's private directory).
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Security::Authorization::{
@@ -21,12 +21,13 @@ pub(crate) fn nul_terminated(s: &OsStr) -> Vec<u16> {
 /// # Safety
 ///
 /// `p` points to a live NUL-terminated UTF-16 string.
-pub(crate) unsafe fn wide_at(p: *const u16) -> OsString {
+#[cfg(any(test, feature = "harness"))]
+pub(crate) unsafe fn wide_at(p: *const u16) -> std::ffi::OsString {
     use std::os::windows::ffi::OsStringExt;
     // SAFETY: the caller's contract: every unit up to the NUL is readable.
     let units =
         unsafe { std::slice::from_raw_parts(p, (0..).take_while(|&i| *p.add(i) != 0).count()) };
-    OsString::from_wide(units)
+    std::ffi::OsString::from_wide(units)
 }
 
 /// Held alive for as long as a create call may borrow its attributes.

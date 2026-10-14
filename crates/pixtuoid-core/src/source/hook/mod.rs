@@ -20,9 +20,9 @@ mod windows;
 #[cfg(windows)]
 use windows as imp;
 
-/// One accepted hook connection: a Unix stream or a named-pipe instance.
-#[cfg(feature = "harness")]
-pub(crate) type HookConn = imp::Conn;
+/// One accepted hook connection, a Unix stream or a named-pipe instance, read
+/// through [`MAX_CONN_BYTES`].
+pub(crate) type HookConn = tokio::io::Take<imp::Conn>;
 
 mod pid_watch;
 pub(crate) use pid_watch::HookPidWatch;
@@ -115,23 +115,24 @@ impl HookSocketListener {
     ///
     /// If the connection semaphore closes unexpectedly or, on Windows, the next pipe instance cannot be created.
     pub async fn run(self, tx: TaggedSender) -> Result<()> {
-        let (pid_watch, presence_tx) = (self.pid_watch, self.presence_tx);
-        self.inner
-            .serve(move |conn| {
-                handle_conn(conn, tx.clone(), pid_watch.clone(), presence_tx.clone())
-            })
-            .await
+        let (pid_watch, presence_tx) = (self.pid_watch.clone(), self.presence_tx.clone());
+        self.serve(move |conn| {
+            handle_conn(conn, tx.clone(), pid_watch.clone(), presence_tx.clone())
+        })
+        .await
     }
 
-    /// Accept connections forever, each handed to `handle` raw, under the same
-    /// endpoint guards and [`CONN_TIMEOUT`] as [`Self::run`]; `handle` bounds its read.
-    #[cfg(feature = "harness")]
-    pub(crate) async fn serve_raw<F, Fut>(self, handle: F) -> Result<()>
+    /// Accept connections forever, each handed to `handle` under the endpoint
+    /// guards, [`CONN_TIMEOUT`] and [`MAX_CONN_BYTES`]: every handler's, so
+    /// none can read past them.
+    pub(crate) async fn serve<F, Fut>(self, handle: F) -> Result<()>
     where
         F: Fn(HookConn) -> Fut,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
-        self.inner.serve(handle).await
+        self.inner
+            .serve(move |conn| handle(conn.take(MAX_CONN_BYTES)))
+            .await
     }
 }
 
@@ -268,7 +269,7 @@ pub(crate) async fn handle_conn(
     pid_watch: Option<HookPidWatch>,
     presence_tx: Option<PresenceSender>,
 ) {
-    let reader = BufReader::new(stream.take(MAX_CONN_BYTES));
+    let reader = BufReader::new(stream);
     let mut lines = reader.lines();
     loop {
         match lines.next_line().await {

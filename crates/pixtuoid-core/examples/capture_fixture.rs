@@ -217,7 +217,12 @@ mod recorder {
             &options.env,
         )?;
         tap.settle();
-        let payloads = tap.take()?;
+        let payloads = tap.take();
+        let incomplete = tap.stopped().map(|why| {
+            std::io::Error::other(format!(
+                "the tap stopped accepting, so this capture is incomplete: {why}"
+            ))
+        });
 
         std::fs::create_dir_all(&dest)?;
         let mut wrote: Vec<PathBuf> = Vec::new();
@@ -258,7 +263,10 @@ mod recorder {
             for p in &wrote {
                 println!("wrote raw {} ({} lines)", p.display(), count_lines(p));
             }
-            return Ok(());
+            return incomplete.map_or(Ok(()), Err);
+        }
+        if let Some(e) = incomplete {
+            return Err(e);
         }
         if wrote.is_empty() {
             eprintln!(

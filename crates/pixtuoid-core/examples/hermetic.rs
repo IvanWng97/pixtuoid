@@ -572,9 +572,12 @@ mod run {
     }
 
     /// How to start an npm-installed command; on Windows not the `.cmd` npm
-    /// writes, since std's `kill` there is `TerminateProcess`, which ends only
-    /// "the specified process": the shim's node, aimock's port with it, would
-    /// outlive the kill (learn.microsoft.com, TerminateProcess).
+    /// writes. std runs a batch file's arguments through `cmd.exe` escaping,
+    /// refuses at spawn any it "might not be possible to safely escape", and
+    /// says not to rely on it (std::process, "Batch file special handling"):
+    /// a CLI's free-text prompt is one. And std's `kill` is `TerminateProcess`,
+    /// which ends only "the specified process" (learn.microsoft.com), so
+    /// aimock's node would outlive a killed shim.
     #[derive(Debug, PartialEq, Eq)]
     struct Launch {
         program: PathBuf,
@@ -930,12 +933,20 @@ mod run {
             .count();
 
         // The recorder writes its record whenever the CLI ran, so a missing
-        // one means the CLI never did.
+        // one means the CLI never did; it fails past one only on a capture it
+        // could not complete, which its log's last line names.
         let capture: CaptureRecord = match std::fs::read_to_string(dir.join(CAPTURE_RECORD)) {
-            Ok(text) => serde_json::from_str(&text)?,
-            Err(e) => {
+            Ok(text) if recorder.success() => serde_json::from_str(&text)?,
+            read => {
+                let log = std::fs::read_to_string(dir.join("recorder.log")).unwrap_or_default();
+                let last = log
+                    .lines()
+                    .rev()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or_default();
+                let record = if read.is_ok() { "after" } else { "with no" };
                 return Err(std::io::Error::other(format!(
-                    "the recorder exited {recorder} with no {CAPTURE_RECORD}: {e}"
+                    "the recorder exited {recorder} {record} {CAPTURE_RECORD}: {last}"
                 )));
             }
         };
