@@ -490,11 +490,10 @@ mod run {
         }
     }
 
-    /// The directory holding the tier's one shim, which every sandbox's PATH
-    /// names: Unix links the
-    /// built one, and Windows, where a symlink needs privilege, copies it once.
-    /// It runs once here, at no endpoint, so no run's first hook is a cold
-    /// exec of a new file: a CLI lost its first payload behind one.
+    /// The directory every sandbox's PATH names, holding the tier's one shim:
+    /// Unix links the built one, and Windows, where a symlink needs privilege,
+    /// copies it once. The shim runs once here, at no endpoint, so no run's first
+    /// hook is a cold exec of a new file: a CLI lost its first payload behind one.
     fn warmed_shim_dir(tier: &Path, shim: &Path) -> std::io::Result<PathBuf> {
         let dir = tier.join("bin");
         match std::fs::remove_dir_all(&dir) {
