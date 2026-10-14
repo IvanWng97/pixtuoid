@@ -273,7 +273,7 @@ fn jcode_env_mode_ignores_stdin_and_forwards_only_identity_metadata() {
     let listener = UnixListener::bind(&path).unwrap();
     listener.set_nonblocking(true).unwrap();
     let mut child = Command::new(BIN)
-        .args(["--source", "jcode"])
+        .args(["--source", "jcode", "--pixtuoid-managed"])
         .env("PIXTUOID_SOCKET", &path)
         .env("PIXTUOID_SOURCE", "codex")
         .env("JCODE_HOOK_EVENT", "pre_tool")
