@@ -4,6 +4,7 @@
 //! the home variable (`home_env`) and the pinned version (`verified_version`);
 //! a profile holds only what it doesn't.
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -113,7 +114,7 @@ pub struct Profile {
     /// one is Stale (`verify::verify_source`).
     pub not_yet: &'static [&'static str],
     /// The hook event a captured payload is, in `registers()` terms.
-    pub(crate) event_name: fn(&Value) -> Option<&str>,
+    pub(crate) event_name: fn(&Value) -> Option<Cow<'_, str>>,
     /// Fields a decoder reads in a committed capture that no scenario carries
     /// yet, as `(kind, path)` the field census names them. Shrink-only: a run
     /// that carries one is Stale.
@@ -174,17 +175,17 @@ pub enum Absence {
     AwaitingProfile,
 }
 
-fn hook_event_name(v: &Value) -> Option<&str> {
-    v.get("hook_event_name")?.as_str()
+fn hook_event_name(v: &Value) -> Option<Cow<'_, str>> {
+    v.get("hook_event_name")?.as_str().map(Cow::Borrowed)
 }
 
-fn type_field(v: &Value) -> Option<&str> {
-    v.get("type")?.as_str()
+fn type_field(v: &Value) -> Option<Cow<'_, str>> {
+    v.get("type")?.as_str().map(Cow::Borrowed)
 }
 
 /// The event dsh's plugin forwards as each payload `type` (`dsh_plugin.mjs`).
-fn dsh_event(v: &Value) -> Option<&str> {
-    Some(match type_field(v)? {
+fn dsh_event(v: &Value) -> Option<Cow<'_, str>> {
+    Some(Cow::Borrowed(match v.get("type")?.as_str()? {
         "session_start" => "agent/created",
         "session_end" => "agent/disposed",
         "model" => "request/header",
@@ -194,29 +195,26 @@ fn dsh_event(v: &Value) -> Option<&str> {
         "approval_asked" => "approval/asked",
         "approval_decided" => "approval/decided",
         _ => return None,
-    })
+    }))
 }
 
 /// The registration a grok envelope's `hookEventName` answers to: the wire
-/// spells each event's snake_case display, and `SubagentEnd`'s is
-/// `SubagentStop`'s (`crates/codegen/xai-grok-hooks/src/event.rs:78-180`).
-fn grok_event(v: &Value) -> Option<&str> {
-    Some(match v.get("hookEventName")?.as_str()? {
-        "session_start" => "SessionStart",
-        "user_prompt_submit" => "UserPromptSubmit",
-        "pre_tool_use" => "PreToolUse",
-        "post_tool_use" => "PostToolUse",
-        "post_tool_use_failure" => "PostToolUseFailure",
-        "permission_denied" => "PermissionDenied",
-        "notification" => "Notification",
-        "stop" => "Stop",
-        "stop_failure" => "StopFailure",
-        "stop_cancelled" => "StopCancelled",
-        "subagent_start" => "SubagentStart",
-        "subagent_stop" => "SubagentStop",
-        "session_end" => "SessionEnd",
-        _ => return None,
-    })
+/// spells each key in snake_case, `SubagentEnd`'s as `SubagentStop`'s
+/// (`crates/codegen/xai-grok-hooks/src/event.rs:78-180`).
+fn grok_event(v: &Value) -> Option<Cow<'_, str>> {
+    let wire = v.get("hookEventName")?.as_str()?;
+    let key = wire
+        .split('_')
+        .flat_map(|word| {
+            let mut chars = word.chars();
+            chars
+                .next()
+                .map(|c| c.to_ascii_uppercase())
+                .into_iter()
+                .chain(chars)
+        })
+        .collect();
+    Some(Cow::Owned(key))
 }
 
 /// The profiled CLIs.
@@ -808,6 +806,21 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_grok_event_is_the_registration_key_its_wire_name_spells() {
+        // A key `GROK_EVENTS` adds maps with no edit here, so a run that fires
+        // it reads Stale.
+        for (wire, key) in [
+            ("session_start", "SessionStart"),
+            ("post_tool_use_failure", "PostToolUseFailure"),
+            ("a_new_hook", "ANewHook"),
+        ] {
+            let v = serde_json::json!({ "hookEventName": wire });
+            assert_eq!(grok_event(&v).as_deref(), Some(key));
+        }
+        assert_eq!(grok_event(&serde_json::json!({})), None);
     }
 
     #[test]

@@ -1294,7 +1294,7 @@ mod recorder {
         #[test]
         fn a_harvested_transcript_keeps_the_dirs_its_session_is_keyed_on() {
             let dest = Path::new("/fixture");
-            // A sandbox holds one transcript, so nothing repeats to say so.
+            // grok keys its session on the parent dir's name.
             let grok = Path::new("/sb/.grok/sessions/%2Fw/0198-abc/updates.jsonl");
             assert_eq!(
                 placement("grok", grok, dest),

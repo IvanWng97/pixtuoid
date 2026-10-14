@@ -5,6 +5,7 @@
 //! nothing here compares bytes or goldens: only shapes, events and the fields
 //! a decoder reads.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -108,7 +109,7 @@ pub fn verify_source(p: &Profile, dirs: &[PathBuf]) -> std::io::Result<Verdict> 
                 if is_hook_envelope(&file)
                     && let Some(event) = (p.event_name)(&line)
                 {
-                    fired.insert(event.to_owned());
+                    fired.insert(event.into_owned());
                 }
                 carried.add(p, &file, &line, true);
             }
@@ -269,7 +270,7 @@ pub(crate) fn committed_reads(p: &Profile) -> std::io::Result<Fields> {
 /// line.
 fn kind_of(p: &Profile, file: &Path, line: &Value) -> String {
     if is_hook_envelope(file) {
-        format!("{HOOK}{}", (p.event_name)(line).unwrap_or("?"))
+        format!("{HOOK}{}", (p.event_name)(line).as_deref().unwrap_or("?"))
     } else {
         format!("{TX}{}", line["type"].as_str().unwrap_or("?"))
     }
@@ -346,7 +347,7 @@ fn judge(
     let observed: BTreeSet<String> = payloads
         .iter()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter_map(|v| (p.event_name)(&v).map(str::to_owned))
+        .filter_map(|v| (p.event_name)(&v).map(Cow::into_owned))
         .collect();
     for want in scenario.expects {
         if !observed.contains(*want) {
