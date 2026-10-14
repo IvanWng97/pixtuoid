@@ -19,36 +19,36 @@ use crate::source::Transport;
 #[doc(hidden)]
 pub const HOOK_WINS_WINDOW: Duration = Duration::from_millis(500);
 
-/// How long a hook `SessionEnd` keeps its id from being created or revived by
-/// anything but a parentless hook start (#242, either transport). Hook connections
-/// are per-connection spawned tasks, so a session's SessionEnd and a trailing
-/// Stop/ActivityEnd can be DELIVERED reordered, and the straggler would
-/// otherwise synthesize a blank Idle ghost with NO SessionEnd left to remove
-/// it. 5s covers same-machine scheduling jitter while never visibly delaying a
-/// genuine revival.
+/// How long an ended life's trailing events are refused (#242, either
+/// transport), and how long a top-level life a hook ended revives only on a
+/// hook start. Hook connections are per-connection spawned tasks, so a
+/// session's SessionEnd and a trailing Stop/ActivityEnd can be DELIVERED
+/// reordered, and the straggler would otherwise synthesize a blank Idle ghost
+/// with NO SessionEnd left to remove it. 5s covers same-machine scheduling
+/// jitter while never visibly delaying a genuine revival.
 #[doc(hidden)]
-pub const HOOK_SESSION_END_TOMBSTONE_TTL: Duration = Duration::from_secs(5);
+pub const STRAGGLER_TTL: Duration = Duration::from_secs(5);
 
-/// How long a child-ledger entry's `ended_at` keeps gating a PARENTED
-/// re-registration of that child after it ended (#244). Sized past the
+/// How long a child's end keeps gating a PARENTED re-registration of that
+/// child (#244). Sized past the
 /// watcher's poll backstop (`DEFAULT_POLL_INTERVAL`), the worst case for a late transcript
 /// first-sight; child ids are per-spawn unique, so a parented Start inside
 /// the window is never a legitimate new child, only the dead one's late echo.
 /// Parentless Starts are deliberately NOT gated — a Codex resurrect-on-prompt
-/// is a legitimate same-id new life and re-links via the ledger (#246).
+/// is a legitimate same-id new life and re-links to its remembered parent (#246).
 #[doc(hidden)]
-pub const CHILD_END_LEDGER_TTL: Duration = Duration::from_secs(90);
+pub const CHILD_END_GATE_TTL: Duration = Duration::from_secs(90);
 
-/// How long the ledger entry itself is RETAINED after the child ended — the
+/// How long a child's [`Lifecycle`] is RETAINED after it ended — the
 /// `parent_id` memory the #246 parentless-revival re-link reads.
 ///
-/// Deliberately LONGER than [`CHILD_END_LEDGER_TTL`]: the GATE is bounded by
+/// Deliberately LONGER than [`CHILD_END_GATE_TTL`]: the GATE is bounded by
 /// the watcher's poll backstop (`DEFAULT_POLL_INTERVAL`), while the MEMORY must span a TURN gap,
 /// which is unbounded. Sharing one clock meant a child idle past
-/// [`CHILD_END_LEDGER_TTL`] came back an ORPHAN, the exact phantom #246 exists
+/// [`CHILD_END_GATE_TTL`] came back an ORPHAN, the exact phantom #246 exists
 /// to eliminate. The gate is
 /// unaffected: [`Correlation::child_recently_ended`] applies its OWN
-/// freshness check, so a retained-but-stale entry gates nothing.
+/// freshness check, so a retained-but-stale record gates nothing.
 #[doc(hidden)]
 pub const CHILD_END_RELINK_TTL: Duration = Duration::from_secs(300);
 
@@ -70,20 +70,14 @@ pub(crate) const DRAINED_TASK_TOMBSTONE_TTL: Duration = Duration::from_secs(90);
 #[doc(hidden)]
 pub const PROOF_OF_LIFE_TTL: Duration = Duration::from_secs(150);
 
-/// What the reducer remembers of one id's lives past its slot: the ends that
-/// decide what may create or revive it ([`Correlation::lifecycles`]).
+/// The ends and parent link that decide what may create or revive an id.
 #[derive(Debug, Default, Clone, Copy)]
 pub(super) struct Lifecycle {
-    /// The last APPLIED parent link — `None` when the child was only ever
-    /// seen ending (a Stop-before-Start reorder blocked its Start).
+    /// The last APPLIED parent link.
     pub(super) parent_id: Option<AgentId>,
-    /// When the child ended (`as_child` SessionEnd) or its slot was removed,
-    /// whichever came first. Starts TWO clocks: the [`CHILD_END_RELINK_TTL`]
-    /// GC clock and the shorter [`CHILD_END_LEDGER_TTL`] gate.
+    /// When the child ended or its slot was removed, whichever came first.
     pub(super) child_ended_at: Option<SystemTime>,
-    /// When a hook `SessionEnd` ended this top-level life: the
-    /// [`HOOK_SESSION_END_TOMBSTONE_TTL`] clock. A child's end rides
-    /// `child_ended_at` instead, from either transport.
+    /// When a hook ended this top-level life.
     pub(super) hook_ended_at: Option<SystemTime>,
 }
 
@@ -119,12 +113,7 @@ pub(super) struct Correlation {
     /// End overwrites its tool's Start entry (kind-in-the-VALUE, not the key),
     /// which is what lets one End record cover the whole lagged JSONL pair.
     pub(super) recent_hook_tool_uses: HashMap<(AgentId, String), (SystemTime, ToolEventKind)>,
-    /// Every id's remembered ends and parent link, surviving its slot
-    /// (#242/#244/#246): ONE record per id, read by `Reducer::authorizes`.
-    /// `parent_id` is upserted whenever a parent link is APPLIED,
-    /// `child_ended_at` by an `as_child` SessionEnd (regardless of slot
-    /// existence, covering the Stop-before-Start reorder) and by `sweep_exited`
-    /// removing a child's slot, and `hook_ended_at` by any hook SessionEnd.
+    /// One record per id, outliving its slot, read by `Reducer::authorizes`.
     pub(super) lifecycles: HashMap<AgentId, Lifecycle>,
     /// Per-agent set of Task tool_use_ids currently in flight. CC's hook
     /// payload sets `transcript_path` to the PARENT'S transcript even when a
@@ -212,35 +201,33 @@ impl Correlation {
             .map(|t| Arc::<str>::from(t.as_str()))
     }
 
-    /// Whether `id` ended within [`HOOK_SESSION_END_TOMBSTONE_TTL`] by a hook
+    /// Whether `id` ended within [`STRAGGLER_TTL`] by a hook
     /// or as a child: a reordered trailing event of that life is a straggler.
     pub(super) fn ended_within_straggler_window(&self, id: AgentId, now: SystemTime) -> bool {
         self.lifecycles.get(&id).is_some_and(|l| {
             [l.hook_ended_at, l.child_ended_at]
                 .into_iter()
                 .flatten()
-                .any(|ts| is_fresh(now, ts, HOOK_SESSION_END_TOMBSTONE_TTL))
+                .any(|ts| is_fresh(now, ts, STRAGGLER_TTL))
         })
     }
 
     /// Whether only a hook start may revive `id`: a hook ended its top-level
-    /// life within [`HOOK_SESSION_END_TOMBSTONE_TTL`], and the CLI's hooks
-    /// carry a start for any new one. A child's end never stamps this clock
-    /// ([`Self::note_end`]): upstream sends no start for its next turn, which
-    /// its transcript alone announces (#246).
+    /// life within [`STRAGGLER_TTL`], and the CLI's hooks carry a start for any
+    /// new one.
     pub(super) fn hook_owns_revival(&self, id: AgentId, now: SystemTime) -> bool {
         self.lifecycles.get(&id).is_some_and(|l| {
             l.hook_ended_at
-                .is_some_and(|ts| is_fresh(now, ts, HOOK_SESSION_END_TOMBSTONE_TTL))
+                .is_some_and(|ts| is_fresh(now, ts, STRAGGLER_TTL))
         })
     }
 
-    /// Whether `id` ENDED as a child within [`CHILD_END_LEDGER_TTL`] — the
+    /// Whether `id` ENDED as a child within [`CHILD_END_GATE_TTL`] — the
     /// #244 gate's predicate.
     pub(super) fn child_recently_ended(&self, id: AgentId, now: SystemTime) -> bool {
         self.lifecycles.get(&id).is_some_and(|l| {
             l.child_ended_at
-                .is_some_and(|ts| is_fresh(now, ts, CHILD_END_LEDGER_TTL))
+                .is_some_and(|ts| is_fresh(now, ts, CHILD_END_GATE_TTL))
         })
     }
 
@@ -261,8 +248,11 @@ impl Correlation {
         l.child_ended_at = None;
     }
 
-    /// A session ended: as a child on the ledger's clock, else, when a hook
-    /// says so, on the hook's. Stamped whether or not its slot exists.
+    /// A session ended: a child's end from either transport, else a hook's end
+    /// of a top-level life. Stamped whether or not its slot exists, which
+    /// covers the Stop-before-Start reorder (#242/#244). A child's end never
+    /// stamps the hook clock: upstream sends no start for its next turn, which
+    /// its transcript alone announces (#246).
     pub(super) fn note_end(&mut self, id: AgentId, by: Transport, as_child: bool, now: SystemTime) {
         if as_child {
             self.lifecycles.entry(id).or_default().child_ended_at = Some(now);
@@ -271,9 +261,8 @@ impl Correlation {
         }
     }
 
-    /// `id`'s slot was removed: a child whose end wasn't `as_child` starts
-    /// its ledger clock here, arming #244-w2 (`get_or_insert` keeps an earlier
-    /// stamp).
+    /// `id`'s slot was removed: a child whose end wasn't `as_child` ends here,
+    /// arming #244-w2 (`get_or_insert` keeps an earlier stamp).
     pub(super) fn note_removed(&mut self, id: AgentId, now: SystemTime) {
         if let Some(l) = self.lifecycles.get_mut(&id)
             && l.is_child()
@@ -301,7 +290,7 @@ impl Correlation {
             };
             child
                 || l.hook_ended_at
-                    .is_some_and(|ts| is_fresh(now, ts, HOOK_SESSION_END_TOMBSTONE_TTL))
+                    .is_some_and(|ts| is_fresh(now, ts, STRAGGLER_TTL))
         });
     }
 
@@ -382,11 +371,11 @@ mod tests {
         let id = AgentId::from_parts("claude-code", "s1");
         let mut corr = Correlation::default();
         corr.note_end(id, Transport::Hook, false, t0());
-        let just_inside = t0() + HOOK_SESSION_END_TOMBSTONE_TTL - Duration::from_millis(1);
+        let just_inside = t0() + STRAGGLER_TTL - Duration::from_millis(1);
         assert!(corr.hook_owns_revival(id, just_inside));
         assert!(corr.ended_within_straggler_window(id, just_inside));
         assert!(
-            !corr.hook_owns_revival(id, t0() + HOOK_SESSION_END_TOMBSTONE_TTL),
+            !corr.hook_owns_revival(id, t0() + STRAGGLER_TTL),
             "freshness is strict: elapsed == TTL is expired"
         );
         assert!(
@@ -400,10 +389,10 @@ mod tests {
         let id = AgentId::from_parts("claude-code", "child");
         let mut corr = Correlation::default();
         corr.note_end(id, Transport::Hook, true, t0());
-        let just_inside = t0() + CHILD_END_LEDGER_TTL - Duration::from_millis(1);
+        let just_inside = t0() + CHILD_END_GATE_TTL - Duration::from_millis(1);
         assert!(corr.child_recently_ended(id, just_inside));
         assert!(
-            !corr.child_recently_ended(id, t0() + CHILD_END_LEDGER_TTL),
+            !corr.child_recently_ended(id, t0() + CHILD_END_GATE_TTL),
             "freshness is strict: elapsed == TTL is expired"
         );
     }
@@ -460,7 +449,7 @@ mod tests {
         let mut corr = Correlation::default();
         corr.note_end(old, Transport::Hook, false, t0());
         corr.note_end(young, Transport::Hook, false, t0() + step);
-        corr.gc(t0() + HOOK_SESSION_END_TOMBSTONE_TTL);
+        corr.gc(t0() + STRAGGLER_TTL);
         assert!(!corr.lifecycles.contains_key(&old));
         assert!(corr.lifecycles.contains_key(&young));
 
@@ -517,7 +506,7 @@ mod tests {
         corr.link_applied_parent(child, parent);
         corr.note_end(child, Transport::Hook, true, t0());
 
-        let after_gate = t0() + CHILD_END_LEDGER_TTL + Duration::from_secs(1);
+        let after_gate = t0() + CHILD_END_GATE_TTL + Duration::from_secs(1);
         corr.gc(after_gate);
         assert!(
             !corr.child_recently_ended(child, after_gate),

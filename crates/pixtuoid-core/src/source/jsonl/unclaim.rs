@@ -7,7 +7,7 @@ use tracing::debug;
 use crate::AgentId;
 
 use super::walk::{park_if_truncated_below_cursor, walk_jsonl};
-use super::{SourceDecoders, WatchCtx};
+use super::{Sight, SourceDecoders, WatchCtx};
 
 /// How long an un-drained [`ChildEndUnclaims`] entry survives. Bounds the set:
 /// an id no watcher ever matches would otherwise accrue one entry per child end
@@ -134,14 +134,14 @@ pub(super) async fn drain_child_end_unclaims(
         return;
     }
     // Snapshot under a short lock so the later walk/release loop is lock-free.
-    let claimed: Vec<(PathBuf, AgentId, bool)> = {
+    let claimed: Vec<(PathBuf, AgentId, Sight)> = {
         let seen = ctx.seen.lock().await;
         seen.iter()
-            .map(|(p, &held)| {
+            .map(|(p, &sight)| {
                 (
                     p.clone(),
                     AgentId::from_parts(ctx.source, &decoders.id_derive.id_for(p)),
-                    held,
+                    sight,
                 )
             })
             .collect()
@@ -150,8 +150,8 @@ pub(super) async fn drain_child_end_unclaims(
     // released: a duplicate stop's work is done either way.
     let matched = unclaims.take_matching(|id| claimed.iter().any(|(_, pid, _)| pid == id));
     for id in matched {
-        for (path, pid, held) in &claimed {
-            if *pid != id || !*held {
+        for (path, pid, sight) in &claimed {
+            if *pid != id || *sight != Sight::Claimed {
                 continue;
             }
             // Drain pending bytes to EOF while the claim is still held (a
@@ -165,13 +165,13 @@ pub(super) async fn drain_child_end_unclaims(
             {
                 let mut seen = ctx.seen.lock().await;
                 if seen.contains_key(path) {
-                    seen.insert(path.clone(), false);
+                    seen.insert(path.clone(), Sight::Ended);
                 }
             }
             debug!(
                 path = ?path,
-                "child-end un-claim: released first-sight claim — the next append \
-                 re-registers (#246)"
+                "child-end un-claim: ended first-sight claim — the next append \
+                 that proves life re-registers (#246)"
             );
         }
     }

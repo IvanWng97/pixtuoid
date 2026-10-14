@@ -4,9 +4,7 @@ use std::time::{Duration, SystemTime};
 use pixtuoid_core::AgentId;
 use pixtuoid_core::source::{AgentEvent, Transport};
 use pixtuoid_core::state::SceneState;
-use pixtuoid_core::state::reducer::{
-    CHILD_END_LEDGER_TTL, HOOK_SESSION_END_TOMBSTONE_TTL, Reducer,
-};
+use pixtuoid_core::state::reducer::{CHILD_END_GATE_TTL, Reducer, STRAGGLER_TTL};
 
 use crate::{act_end, act_start, sess_end, start};
 
@@ -60,7 +58,7 @@ fn hook_event_after_tombstone_ttl_synthesizes_again() {
         id,
         Some("t1"),
         None,
-        t0 + HOOK_SESSION_END_TOMBSTONE_TTL + Duration::from_secs(1),
+        t0 + STRAGGLER_TTL + Duration::from_secs(1),
         Transport::Hook,
     );
     assert!(
@@ -82,7 +80,7 @@ fn past_the_tombstone_any_hook_arm_re_registers_including_a_turn_boundary_end() 
     let mut r = Reducer::new();
     let ended = AgentId::from_parts("hermes", "turn-after-finalize");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-    let past = t0 + HOOK_SESSION_END_TOMBSTONE_TTL + Duration::from_secs(1);
+    let past = t0 + STRAGGLER_TTL + Duration::from_secs(1);
 
     sess_end(&mut r, &mut scene, ended, false, t0, Transport::Hook);
     act_end(&mut r, &mut scene, ended, None, past, Transport::Hook);
@@ -187,7 +185,7 @@ fn child_session_start_past_tombstone_ttl_registers() {
             cwd: PathBuf::from("/repo"),
             parent_id: Some(parent),
         },
-        t0 + CHILD_END_LEDGER_TTL + Duration::from_secs(1),
+        t0 + CHILD_END_GATE_TTL + Duration::from_secs(1),
         Transport::Hook,
     );
     assert!(
@@ -383,11 +381,11 @@ fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
     late_start(
         &mut r,
         &mut scene,
-        stop + CHILD_END_LEDGER_TTL + Duration::from_secs(1),
+        stop + CHILD_END_GATE_TTL + Duration::from_secs(1),
     );
     assert!(
         scene.agents.contains_key(&child),
-        "past CHILD_END_LEDGER_TTL the registration resumes"
+        "past CHILD_END_GATE_TTL the registration resumes"
     );
 }
 
@@ -529,7 +527,7 @@ fn a_multi_turn_child_idle_past_the_end_gate_still_revives_adopted_not_orphaned(
             "child GC'd ({transport:?})"
         );
 
-        let revival = stop + CHILD_END_LEDGER_TTL + Duration::from_secs(1);
+        let revival = stop + CHILD_END_GATE_TTL + Duration::from_secs(1);
         let start = |agent_id| AgentEvent::SessionStart {
             agent_id,
             source: "codex".into(),

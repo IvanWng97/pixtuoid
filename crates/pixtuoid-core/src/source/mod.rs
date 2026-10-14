@@ -268,6 +268,25 @@ impl AgentEvent {
             AgentEvent::Usage { agent_id, .. } => *agent_id,
         }
     }
+
+    /// Whether this event shows its session working now: the creation
+    /// polarity's proof of life, for a slot no start announced. A start carries
+    /// its own authority, and an end, a model, usage or title line proves
+    /// nothing.
+    pub(crate) fn proves_life(&self) -> bool {
+        match self {
+            AgentEvent::ActivityStart { .. }
+            | AgentEvent::ActivityEnd { .. }
+            | AgentEvent::Waiting { .. } => true,
+            AgentEvent::SessionStart { .. }
+            | AgentEvent::Rename { .. }
+            | AgentEvent::SessionEnd { .. }
+            | AgentEvent::ProofOfLife { .. }
+            | AgentEvent::Identity { .. }
+            | AgentEvent::ModelInfo { .. }
+            | AgentEvent::Usage { .. } => false,
+        }
+    }
 }
 
 /// The PRIMARY on-disk root a source resolves, through the SAME

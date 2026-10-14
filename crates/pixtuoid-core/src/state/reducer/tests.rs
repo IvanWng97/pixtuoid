@@ -262,6 +262,299 @@ fn gated_before_waiting_evicted_on_apply_path_sweep() {
 /// The exit's own authority decides what may undo it: a session a hook ended
 /// resurrects only on a hook start (proof of life), while one its transcript
 /// ended may still resume from that transcript.
+/// Every claim against every end it can meet, on both sides of each window.
+#[test]
+fn authorizes_decides_each_claim_by_the_end_it_meets() {
+    use super::{Claim, Refusal, Verdict};
+    use crate::AgentId;
+    use crate::source::{AgentEvent, Transport};
+    use crate::state::SceneState;
+    use crate::state::correlation::{CHILD_END_GATE_TTL, STRAGGLER_TTL};
+    use std::path::PathBuf;
+    use std::time::{Duration, SystemTime};
+
+    let id = AgentId::from_parts("codex", "s");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let ms = Duration::from_millis(1);
+    let (root, child) = (
+        Claim::Start { parented: false },
+        Claim::Start { parented: true },
+    );
+    let (hook, jsonl) = (Transport::Hook, Transport::Jsonl);
+    use Verdict::{Create, Refuse};
+
+    // No slot: the claim meets only the recorded end.
+    for (end, rows) in [
+        (
+            None,
+            vec![
+                (root, jsonl, t0, Create),
+                (child, jsonl, t0, Create),
+                (Claim::Identity, hook, t0, Create),
+                (Claim::HookActivity, hook, t0, Create),
+            ],
+        ),
+        (
+            Some(false),
+            vec![
+                (root, hook, t0 + STRAGGLER_TTL - ms, Create),
+                (
+                    root,
+                    jsonl,
+                    t0 + STRAGGLER_TTL - ms,
+                    Refuse(Refusal::HookOwnsRevival),
+                ),
+                (root, jsonl, t0 + STRAGGLER_TTL, Create),
+                (
+                    child,
+                    jsonl,
+                    t0 + STRAGGLER_TTL - ms,
+                    Refuse(Refusal::Straggler),
+                ),
+                (
+                    Claim::Identity,
+                    hook,
+                    t0 + STRAGGLER_TTL - ms,
+                    Refuse(Refusal::Straggler),
+                ),
+                (
+                    Claim::HookActivity,
+                    hook,
+                    t0 + STRAGGLER_TTL - ms,
+                    Refuse(Refusal::Straggler),
+                ),
+                (Claim::HookActivity, hook, t0 + STRAGGLER_TTL, Create),
+                (Claim::Identity, hook, t0 + STRAGGLER_TTL, Create),
+            ],
+        ),
+        (
+            Some(true),
+            vec![
+                (root, jsonl, t0 + STRAGGLER_TTL - ms, Create),
+                (
+                    Claim::HookActivity,
+                    hook,
+                    t0 + STRAGGLER_TTL - ms,
+                    Refuse(Refusal::Straggler),
+                ),
+                (Claim::HookActivity, hook, t0 + STRAGGLER_TTL, Create),
+                (
+                    child,
+                    jsonl,
+                    t0 + STRAGGLER_TTL,
+                    Refuse(Refusal::ChildEnded),
+                ),
+                (
+                    Claim::Identity,
+                    hook,
+                    t0 + CHILD_END_GATE_TTL - ms,
+                    Refuse(Refusal::ChildEnded),
+                ),
+                (child, jsonl, t0 + CHILD_END_GATE_TTL, Create),
+            ],
+        ),
+    ] {
+        let mut r = super::Reducer::new();
+        let scene = SceneState::uniform(4);
+        if let Some(as_child) = end {
+            r.corr.note_end(id, Transport::Hook, as_child, t0);
+        }
+        for (claim, from, now, want) in rows {
+            assert_eq!(
+                r.authorizes(&scene, id, claim, from, now),
+                want,
+                "end {end:?}, {from:?} at +{:?}",
+                now.duration_since(t0)
+            );
+        }
+    }
+
+    // A slot: only a parentless start of an exiting root revives it, and a
+    // transcript's only while no hook end owns its revival.
+    let start = |parent_id| AgentEvent::SessionStart {
+        agent_id: id,
+        source: "codex".into(),
+        session_id: "s".into(),
+        cwd: PathBuf::from("/repo"),
+        parent_id,
+    };
+    let end = AgentEvent::SessionEnd {
+        agent_id: id,
+        as_child: false,
+    };
+    let enrich = |revive| Verdict::Enrich { revive };
+    for (ended_by, rows) in [
+        (
+            None,
+            vec![(root, hook, enrich(false)), (root, jsonl, enrich(false))],
+        ),
+        (
+            Some(hook),
+            vec![
+                (root, hook, enrich(true)),
+                (root, jsonl, enrich(false)),
+                (child, hook, enrich(false)),
+            ],
+        ),
+        (Some(jsonl), vec![(root, jsonl, enrich(true))]),
+    ] {
+        let mut r = super::Reducer::new();
+        let mut scene = SceneState::uniform(4);
+        r.apply(&mut scene, start(None), t0, hook);
+        if let Some(from) = ended_by {
+            r.apply(&mut scene, end.clone(), t0, from);
+        }
+        for (claim, from, want) in rows {
+            assert_eq!(
+                r.authorizes(&scene, id, claim, from, t0 + ms),
+                want,
+                "ended by {ended_by:?}, {from:?}"
+            );
+        }
+    }
+    let mut r = super::Reducer::new();
+    let mut scene = SceneState::uniform(4);
+    r.apply(&mut scene, start(None), t0, hook);
+    let child_id = AgentId::from_parts("codex", "child");
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child_id,
+            source: "codex".into(),
+            session_id: "c".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(id),
+        },
+        t0,
+        hook,
+    );
+    r.apply(&mut scene, end, t0, hook);
+    assert_eq!(
+        r.authorizes(&scene, child_id, root, hook, t0 + ms),
+        enrich(false),
+        "a cascaded subagent never revives in place"
+    );
+}
+
+/// A parentless start that adopts its remembered parent makes the slot a
+/// child again, which leaves with its parent's cascade, never in place (#246).
+#[test]
+fn an_exiting_root_that_adopts_its_remembered_parent_does_not_revive() {
+    use crate::AgentId;
+    use crate::source::{AgentEvent, Transport};
+    use crate::state::SceneState;
+    use std::path::PathBuf;
+    use std::time::{Duration, SystemTime};
+
+    let id = AgentId::from_parts("codex", "orphaned-child");
+    let parent = AgentId::from_parts("codex", "parent");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let start = AgentEvent::SessionStart {
+        agent_id: id,
+        source: "codex".into(),
+        session_id: "c".into(),
+        cwd: PathBuf::from("/repo"),
+        parent_id: None,
+    };
+    let mut r = super::Reducer::new();
+    let mut scene = SceneState::uniform(4);
+    r.apply(&mut scene, start.clone(), t0, Transport::Hook);
+    r.corr.link_applied_parent(id, parent);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionEnd {
+            agent_id: id,
+            as_child: false,
+        },
+        t0,
+        Transport::Hook,
+    );
+    r.apply(
+        &mut scene,
+        start,
+        t0 + Duration::from_millis(1),
+        Transport::Hook,
+    );
+    let slot = &scene.agents[&id];
+    assert_eq!(
+        slot.parent_id,
+        Some(parent),
+        "the remembered parent is adopted"
+    );
+    assert!(
+        slot.exiting_at.is_some(),
+        "an adopted child does not revive in place"
+    );
+}
+
+/// #242 on a slot that existed: its hook end refuses the life's stragglers
+/// past the sweep, for the window and no longer.
+#[test]
+fn a_known_slots_hook_end_refuses_its_stragglers_past_the_sweep() {
+    use crate::AgentId;
+    use crate::source::{AgentEvent, Transport};
+    use crate::state::SceneState;
+    use crate::state::correlation::STRAGGLER_TTL;
+    use std::path::PathBuf;
+    use std::time::{Duration, SystemTime};
+
+    let id = AgentId::from_parts("claude-code", "known");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let ms = Duration::from_millis(1);
+    let straggle = |r: &mut super::Reducer, scene: &mut SceneState, at| {
+        r.apply(
+            scene,
+            AgentEvent::identity(id, "claude-code", "known", Some(PathBuf::from("/repo"))),
+            at,
+            Transport::Hook,
+        );
+        r.apply(
+            scene,
+            AgentEvent::ActivityStart {
+                agent_id: id,
+                tool_use_id: Some("t".into()),
+                detail: None,
+            },
+            at,
+            Transport::Hook,
+        );
+    };
+    for (at, registers) in [(t0 + STRAGGLER_TTL - ms, false), (t0 + STRAGGLER_TTL, true)] {
+        let mut r = super::Reducer::new();
+        let mut scene = SceneState::uniform(4);
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionStart {
+                agent_id: id,
+                source: "claude-code".into(),
+                session_id: "known".into(),
+                cwd: PathBuf::from("/repo"),
+                parent_id: None,
+            },
+            t0 - Duration::from_secs(1),
+            Transport::Hook,
+        );
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionEnd {
+                agent_id: id,
+                as_child: false,
+            },
+            t0,
+            Transport::Hook,
+        );
+        r.tick(&mut scene, t0 + super::EXIT_GRACE_WINDOW + ms);
+        assert!(!scene.agents.contains_key(&id), "fixture: swept");
+        straggle(&mut r, &mut scene, at);
+        assert_eq!(
+            scene.agents.contains_key(&id),
+            registers,
+            "at +{:?}",
+            at.duration_since(t0)
+        );
+    }
+}
+
 #[test]
 fn a_transcript_first_sight_resurrects_only_what_a_transcript_ended() {
     use crate::AgentId;
@@ -284,9 +577,10 @@ fn a_transcript_first_sight_resurrects_only_what_a_transcript_ended() {
         as_child: false,
     };
     let exiting = |scene: &SceneState| scene.agents.get(&id).map(|s| s.exiting_at.is_some());
-    // The watcher's first sight lands right after the hook end (codex writes
-    // its rollout at exit; grok's trailer follows its end line).
-    let sight = t0 + Duration::from_millis(1_040);
+    // The watcher's first sight lands inside the walkout (codex writes its
+    // rollout at exit; grok's trailer follows its end line): its last instant.
+    let end_at = t0 + Duration::from_secs(1);
+    let sight = end_at + super::EXIT_GRACE_WINDOW - Duration::from_millis(1);
 
     let mut r = super::Reducer::new();
     let mut scene = SceneState::uniform(4);
@@ -447,7 +741,7 @@ fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
     );
 }
 
-/// Past the GATE's `CHILD_END_LEDGER_TTL` the entry is deliberately RETAINED:
+/// Past the GATE's `CHILD_END_GATE_TTL` the entry is deliberately RETAINED:
 /// a parentless revival re-links through its `parent_id` across an unbounded
 /// turn gap, so the link rides the longer relink budget. (Pruning at the gate's
 /// TTL is what made a multi-turn child idle >90s come back an orphan.)
@@ -514,7 +808,7 @@ fn child_lifecycle_is_stamped_on_sweep_and_pruned_by_gc() {
 
     r.tick(
         &mut scene,
-        swept + super::CHILD_END_LEDGER_TTL + Duration::from_secs(1),
+        swept + super::CHILD_END_GATE_TTL + Duration::from_secs(1),
     );
     assert_eq!(
         r.corr.lifecycles.get(&child).and_then(|e| e.parent_id),

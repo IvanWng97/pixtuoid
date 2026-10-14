@@ -15,7 +15,7 @@ use crate::source::{AgentEvent, TaggedSender, Transport};
 use super::health::FailureLatch;
 use super::liveness::{probe_admits, revouch_gated_files};
 use super::{
-    ActivityRecency, HeadLabel, SessionEndChecker, SourceDecoders, TailActivity, WatchCtx,
+    ActivityRecency, HeadLabel, SessionEndChecker, Sight, SourceDecoders, TailActivity, WatchCtx,
 };
 
 /// Oversized-span skip threshold: a pending span past this is never replayed.
@@ -260,16 +260,16 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
                     },
                 ))
                 .await;
-            // Released AFTER the terminator, as a decoded end releases below: a
-            // pinned claim kept the path "registered" until a watcher restart.
-            seen.lock().await.insert(path.to_path_buf(), false);
+            // Ended AFTER the terminator, as a decoded end is below: a pinned
+            // claim kept the path "registered" until a watcher restart.
+            seen.lock().await.insert(path.to_path_buf(), Sight::Ended);
             return;
         }
         // #204: register even on an oversized first sight, or a >1 MB transcript
         // stays invisible until its next small append; the backlog is not replayed.
         // Keys on `seen`, NOT `!known` — a first-sight-GATED file is already `known`,
         // and keying on `!known` left it invisible until a later ≤1 MiB append.
-        let registered = seen.lock().await.get(path) == Some(&true);
+        let registered = seen.lock().await.get(path) == Some(&Sight::Claimed);
         // The span is too big to hold, so the tail is the instrument — a
         // metadata run always lands at the end.
         let metadata_only = matches!(
@@ -292,7 +292,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         }
         // #222: the skipped span may bury an IN-FLIGHT Task dispatch. Only when
         // registered — JSONL events for an unknown id are reducer no-ops.
-        if seen.lock().await.get(path) == Some(&true) {
+        if seen.lock().await.get(path) == Some(&Sight::Claimed) {
             scan_pending_tasks(path, decoders, ctx).await;
         }
         return;
@@ -341,7 +341,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     let mut first_sight_cwd = extract_cwd(new_bytes, extract);
     let mut head_label = None;
     if first_sight_cwd.is_none()
-        && seen.lock().await.get(path) != Some(&true)
+        && seen.lock().await.get(path) != Some(&Sight::Claimed)
         && let Some(head) = read_head(path, MAX_PENDING_BYTES).await
     {
         (first_sight_cwd, head_label) = extract_head_fields(&head, extract, decoders.head_label);
@@ -374,11 +374,10 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         }
     }
 
-    // An ENDED transcript re-registers only on bytes that decode to more than
-    // its own end: a trailer flushed after the end line (grok's
-    // `hook_execution{stop}`) decodes to nothing and proves no revival.
-    let ended = seen.lock().await.get(path) == Some(&false);
-    if (!ended || decoded.iter().any(|ev| !ends_this_agent(ev)))
+    // A trailer flushed after the end line (grok's `hook_execution{stop}`)
+    // proves no revival.
+    let ended = seen.lock().await.get(path) == Some(&Sight::Ended);
+    if (!ended || decoded.iter().any(|ev| ev.proves_life()))
         && !matches!(
             (decoders.activity_recency)(new_bytes),
             super::TailActivity::SidecarOnly
@@ -403,10 +402,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         }
     }
     if session_ended {
-        // RELEASED (`false`), not removed: `emit_first_sight` treats `Some(false)`
-        // like an absent entry, while `revouch_gated_files` keys on `contains_key`
-        // and would otherwise replay the whole transcript once per scan pass.
-        seen.lock().await.insert(path.to_path_buf(), false);
+        seen.lock().await.insert(path.to_path_buf(), Sight::Ended);
     }
 }
 
@@ -438,14 +434,15 @@ async fn emit_first_sight(
     path: &Path,
     source: &Arc<str>,
     decoders: SourceDecoders,
-    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+    seen: &Arc<Mutex<HashMap<PathBuf, Sight>>>,
     tx: &TaggedSender,
     cwd: Option<PathBuf>,
     head_label: Option<String>,
 ) {
-    // `Some(false)` — released by the child-end un-claim (#246) — registers like
-    // an absent entry: that next append IS the revival the release exists for.
-    let already_claimed = seen.lock().await.insert(path.to_path_buf(), true) == Some(true);
+    // An `Ended` claim registers like an absent one: the walk calls here for it
+    // only on an append that proves life.
+    let already_claimed =
+        seen.lock().await.insert(path.to_path_buf(), Sight::Claimed) == Some(Sight::Claimed);
     if already_claimed {
         return;
     }

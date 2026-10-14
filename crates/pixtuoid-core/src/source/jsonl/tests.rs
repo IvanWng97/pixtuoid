@@ -359,14 +359,19 @@ fn t_decode_lifecycle(
             as_child: false,
         }]);
     }
-    if v.get("type").and_then(|x| x.as_str()) == Some("tool_use") {
-        return Ok(vec![AgentEvent::ActivityStart {
-            agent_id: AgentId::from_parts(s, t),
+    let agent_id = AgentId::from_parts(s, t);
+    Ok(match v.get("type").and_then(|x| x.as_str()) {
+        Some("tool_use") => vec![AgentEvent::ActivityStart {
+            agent_id,
             tool_use_id: None,
             detail: None,
-        }]);
-    }
-    Ok(vec![])
+        }],
+        Some("usage") => vec![AgentEvent::Usage {
+            agent_id,
+            fresh_tokens: 1,
+        }],
+        _ => vec![],
+    })
 }
 fn t_label(_p: &Path, _s: &str, _c: &Path) -> String {
     "t".to_string()
@@ -381,7 +386,7 @@ async fn walk_once_with(
     decode_line: LineDecoder,
     check_ended: SessionEndChecker,
     cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+    seen: &Arc<Mutex<HashMap<PathBuf, Sight>>>,
 ) -> Vec<(Transport, AgentEvent)> {
     walk_once_with_recency(
         path,
@@ -402,7 +407,7 @@ async fn walk_once_with_recency(
     check_ended: SessionEndChecker,
     activity_recency: super::ActivityRecency,
     cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+    seen: &Arc<Mutex<HashMap<PathBuf, Sight>>>,
 ) -> Vec<(Transport, AgentEvent)> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(32);
     let source: Arc<str> = Arc::from("test");
@@ -491,7 +496,7 @@ async fn walk_once_live(
     window: Duration,
     live_ids: &[&str],
     cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+    seen: &Arc<Mutex<HashMap<PathBuf, Sight>>>,
 ) -> Vec<(Transport, AgentEvent)> {
     let live: Arc<Mutex<HashSet<String>>> =
         Arc::new(Mutex::new(live_ids.iter().map(|s| s.to_string()).collect()));
@@ -539,7 +544,7 @@ async fn walk_once(
     window: Duration,
     check_ended: SessionEndChecker,
     cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+    seen: &Arc<Mutex<HashMap<PathBuf, Sight>>>,
 ) -> Vec<(Transport, AgentEvent)> {
     walk_once_with(path, window, t_decode, check_ended, cursors, seen).await
 }
@@ -765,7 +770,7 @@ async fn gated_fixture(
     initial: &str,
 ) -> (
     Arc<Mutex<HashMap<PathBuf, u64>>>,
-    Arc<Mutex<HashMap<PathBuf, bool>>>,
+    Arc<Mutex<HashMap<PathBuf, Sight>>>,
 ) {
     tokio::fs::write(path, initial).await.unwrap();
     backdate_one_hour(path);
@@ -904,7 +909,7 @@ fn a_head_read_yields_cwd_and_the_optional_title_in_one_pass() {
 async fn walk_once_with_head_label(
     path: &Path,
     cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+    seen: &Arc<Mutex<HashMap<PathBuf, Sight>>>,
 ) -> Vec<(Transport, AgentEvent)> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(64);
     let source: Arc<str> = Arc::from("test");
@@ -1126,7 +1131,7 @@ async fn session_end_unclaims_seen_so_a_later_append_re_registers() {
     );
     assert_eq!(
         seen.lock().await.get(&path),
-        Some(&false),
+        Some(&Sight::Ended),
         "SessionEnd must RELEASE `seen` (not remove it) so a revival can \
          re-register while the re-vouch sweep still skips the path"
     );
@@ -1177,18 +1182,25 @@ async fn a_post_end_trailer_that_decodes_to_nothing_never_re_registers() {
     walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
     append(b"{\"type\":\"system\",\"subtype\":\"session_end\"}\n");
     walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
-    assert_eq!(seen.lock().await.get(&path), Some(&false), "fixture: ended");
+    assert_eq!(
+        seen.lock().await.get(&path),
+        Some(&Sight::Ended),
+        "fixture: ended"
+    );
 
     // grok flushes `hook_execution{stop}` after its end line; it decodes to nothing.
-    append(b"{\"type\":\"system\",\"subtype\":\"hook_trailer\"}\n");
+    // Nor does one that decodes to usage, which proves no life either.
+    append(b"{\"type\":\"system\",\"subtype\":\"hook_trailer\"}\n{\"type\":\"usage\"}\n");
     let events = walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
     assert!(
-        events.is_empty(),
-        "a trailer that decodes to nothing must not resurrect the ended session, got {events:?}"
+        !events
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+        "a trailer that proves no life must not resurrect the ended session, got {events:?}"
     );
     assert_eq!(
         seen.lock().await.get(&path),
-        Some(&false),
+        Some(&Sight::Ended),
         "the claim stays released, so a real revival still re-registers"
     );
 
@@ -1442,7 +1454,7 @@ async fn child_end_unclaim_drains_stragglers_then_releases_without_session_end()
     );
     assert_eq!(
         seen.lock().await.get(&path),
-        Some(&false),
+        Some(&Sight::Ended),
         "the claim must be RELEASED (kept known, so the re-vouch sweep \
          cannot replay it)"
     );
@@ -1505,7 +1517,7 @@ async fn released_claim_is_not_revouched_into_a_full_replay() {
     assert!(events.is_empty(), "release emits nothing, got {events:?}");
     assert_eq!(
         seen.lock().await.get(&path),
-        Some(&false),
+        Some(&Sight::Ended),
         "the claim must be RELEASED (false), not removed — removal is \
          exactly what would expose the path to the re-vouch replay below"
     );
@@ -1558,7 +1570,7 @@ async fn decoded_terminator_release_is_not_revouched_into_a_full_replay() {
     );
     assert_eq!(
         seen.lock().await.get(&path),
-        Some(&false),
+        Some(&Sight::Ended),
         "the claim must be RELEASED (false), not removed — removal is exactly \
          what exposes the path to the re-vouch replay below"
     );
@@ -1606,7 +1618,7 @@ async fn unclaim_for_foreign_id_stays_pending_and_leaves_local_claims_alone() {
     let cursors = Arc::new(Mutex::new(HashMap::new()));
     let seen = Arc::new(Mutex::new(HashMap::new()));
     walk_once(&path, Duration::from_secs(3600), t_ended, &cursors, &seen).await;
-    assert_eq!(seen.lock().await.get(&path), Some(&true));
+    assert_eq!(seen.lock().await.get(&path), Some(&Sight::Claimed));
 
     let unclaims = ChildEndUnclaims::new();
     let foreign = AgentId::from_parts("codex", "not-claimed-here");
@@ -1625,7 +1637,7 @@ async fn unclaim_for_foreign_id_stays_pending_and_leaves_local_claims_alone() {
     drain_child_end_unclaims(Some(&unclaims), t_decoders(), &ctx).await;
     assert_eq!(
         seen.lock().await.get(&path),
-        Some(&true),
+        Some(&Sight::Claimed),
         "a foreign id must not release this watcher's claims"
     );
     assert_eq!(
@@ -1670,7 +1682,11 @@ async fn child_end_unclaim_releases_only_the_matched_ids_own_path() {
     for p in [&ended_child, &sibling] {
         std::fs::write(p, "{\"type\":\"assistant\"}\n").unwrap();
         walk_once(p, Duration::from_secs(3600), t_ended, &cursors, &seen).await;
-        assert_eq!(seen.lock().await.get(p), Some(&true), "fixture: registered");
+        assert_eq!(
+            seen.lock().await.get(p),
+            Some(&Sight::Claimed),
+            "fixture: registered"
+        );
     }
 
     let unclaims = ChildEndUnclaims::new();
@@ -1692,12 +1708,12 @@ async fn child_end_unclaim_releases_only_the_matched_ids_own_path() {
     drain_child_end_unclaims(Some(&unclaims), t_decoders(), &ctx).await;
     assert_eq!(
         seen.lock().await.get(&ended_child),
-        Some(&false),
+        Some(&Sight::Ended),
         "the ended child's claim is released"
     );
     assert_eq!(
         seen.lock().await.get(&sibling),
-        Some(&true),
+        Some(&Sight::Claimed),
         "the sibling session's claim must survive another child's un-claim"
     );
 }
@@ -1732,7 +1748,7 @@ async fn oversized_ended_skip_releases_seen_so_a_later_append_re_registers() {
         "the buried terminator must emit SessionEnd, got {events:?}"
     );
     assert!(
-        seen.lock().await.get(&path) == Some(&false),
+        seen.lock().await.get(&path) == Some(&Sight::Ended),
         "the oversized-ended skip must release `seen`"
     );
 
@@ -2365,7 +2381,7 @@ async fn walk_oversized_cc(
     path: &Path,
     window: Duration,
     cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+    seen: &Arc<Mutex<HashMap<PathBuf, Sight>>>,
 ) -> Vec<(Transport, AgentEvent)> {
     walk_once_with(
         path,
@@ -2833,7 +2849,7 @@ async fn child_end_unclaim_parks_truncated_transcript_before_release() {
     );
     assert_eq!(
         seen.lock().await.get(&path),
-        Some(&false),
+        Some(&Sight::Ended),
         "the claim must still be RELEASED (kept known)"
     );
 
@@ -3099,7 +3115,7 @@ async fn walk_jsonl_resets_cursor_to_zero_when_known_file_truncated_below_cursor
     // `seen` is pre-claimed so this takes the normal-walk truncation arm (the
     // first-sight gate is skipped for a known file).
     let cursors = Arc::new(Mutex::new(HashMap::from([(path.clone(), 999u64)])));
-    let seen = Arc::new(Mutex::new(HashMap::from([(path.clone(), true)])));
+    let seen = Arc::new(Mutex::new(HashMap::from([(path.clone(), Sight::Claimed)])));
 
     let events = walk_once(&path, Duration::from_secs(3600), t_ended, &cursors, &seen).await;
     assert!(
