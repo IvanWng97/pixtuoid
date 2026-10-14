@@ -261,7 +261,7 @@ fn gated_before_waiting_evicted_on_apply_path_sweep() {
 
 /// Every attempt against every end it can meet, on both sides of each window.
 #[test]
-fn authorizes_decides_each_claim_by_the_end_it_meets() {
+fn authorizes_decides_each_attempt_by_the_end_it_meets() {
     use super::{Attempt, Refusal, Verdict};
     use crate::AgentId;
     use crate::source::{AgentEvent, Transport};
@@ -698,7 +698,7 @@ fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
     );
     assert!(
         r.corr.active_tasks.contains_key(&id),
-        "ledger entry populated"
+        "active task populated"
     );
     assert!(
         r.corr.gated_before_waiting.contains_key(&id),
@@ -767,8 +767,8 @@ fn child_lifecycle_is_stamped_on_sweep_and_pruned_by_gc() {
 
     let mut r = super::Reducer::new();
     let mut scene = SceneState::uniform(4);
-    let parent = AgentId::from_parts("codex", "ledger-parent");
-    let child = AgentId::from_parts("codex", "ledger-child");
+    let parent = AgentId::from_parts("codex", "lifecycle-parent");
+    let child = AgentId::from_parts("codex", "lifecycle-child");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let session_start = |agent_id, sid: &str, parent_id| AgentEvent::SessionStart {
         agent_id,
@@ -779,13 +779,13 @@ fn child_lifecycle_is_stamped_on_sweep_and_pruned_by_gc() {
     };
     r.apply(
         &mut scene,
-        session_start(parent, "ledger-parent", None),
+        session_start(parent, "lifecycle-parent", None),
         t0,
         Transport::Hook,
     );
     r.apply(
         &mut scene,
-        session_start(child, "ledger-child", Some(parent)),
+        session_start(child, "lifecycle-child", Some(parent)),
         t0,
         Transport::Hook,
     );

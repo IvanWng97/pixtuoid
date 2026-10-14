@@ -410,7 +410,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     }
 }
 
-/// Whether `tail`'s whole lines decode to an event that proves life: the
+/// Whether `tail`'s whole lines decode to an event that shows activity: the
 /// evidence an ended claim's oversized append is judged on, since its skipped
 /// span is never decoded.
 fn tail_shows_activity(
@@ -464,7 +464,7 @@ async fn emit_first_sight(
     head_label: Option<String>,
 ) {
     // An `Ended` claim registers like an absent one: the walk calls here for it
-    // only on an append that proves life.
+    // only on an append that shows activity.
     let already_claimed =
         seen.lock().await.insert(path.to_path_buf(), Sight::Claimed) == Some(Sight::Claimed);
     if already_claimed {

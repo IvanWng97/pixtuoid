@@ -1186,7 +1186,7 @@ async fn session_end_unclaims_seen_so_a_later_append_re_registers() {
     assert_eq!(
         seen.lock().await.get(&path),
         Some(&Sight::Ended),
-        "SessionEnd must RELEASE `seen` (not remove it) so a revival can \
+        "SessionEnd must END `seen` (not remove it) so a revival can \
          re-register while the re-vouch sweep still skips the path"
     );
 
@@ -1255,7 +1255,7 @@ async fn a_post_end_trailer_that_decodes_to_nothing_never_re_registers() {
     assert_eq!(
         seen.lock().await.get(&path),
         Some(&Sight::Ended),
-        "the claim stays released, so a real revival still re-registers"
+        "the claim stays ended, so a real revival still re-registers"
     );
 
     append(b"{\"type\":\"tool_use\"}\n");
@@ -1452,7 +1452,7 @@ fn drain_events(
 }
 
 #[tokio::test]
-async fn child_end_unclaim_drains_stragglers_then_releases_without_session_end() {
+async fn child_end_unclaim_drains_stragglers_then_ends_the_claim_without_session_end() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("child.jsonl");
     std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
@@ -1504,19 +1504,19 @@ async fn child_end_unclaim_drains_stragglers_then_releases_without_session_end()
     assert_eq!(
         cursors.lock().await.get(&path).copied(),
         Some(file_len),
-        "stragglers must be drained to EOF BEFORE the release (#228)"
+        "stragglers must be drained to EOF BEFORE the end (#228)"
     );
     assert_eq!(
         seen.lock().await.get(&path),
         Some(&Sight::Ended),
-        "the claim must be RELEASED (kept known, so the re-vouch sweep \
+        "the claim must be ENDED (kept known, so the re-vouch sweep \
          cannot replay it)"
     );
 
     let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
     assert!(
         events.is_empty(),
-        "a straggler walk after the release must not resurrect, got {events:?}"
+        "a straggler walk after the end must not resurrect, got {events:?}"
     );
 
     std::fs::OpenOptions::new()
@@ -1536,7 +1536,7 @@ async fn child_end_unclaim_drains_stragglers_then_releases_without_session_end()
 }
 
 #[tokio::test]
-async fn released_claim_is_not_revouched_into_a_full_replay() {
+async fn an_ended_claim_is_not_revouched_into_a_full_replay() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("child.jsonl");
     std::fs::write(&path, "{\"type\":\"assistant\"}\n").unwrap();
@@ -1568,7 +1568,7 @@ async fn released_claim_is_not_revouched_into_a_full_replay() {
     };
     drain_child_end_unclaims(Some(&unclaims), t_decoders(), &ctx).await;
     let events = drain_events(&mut rx);
-    assert!(events.is_empty(), "release emits nothing, got {events:?}");
+    assert!(events.is_empty(), "the end emits nothing, got {events:?}");
     assert_eq!(
         seen.lock().await.get(&path),
         Some(&Sight::Ended),
@@ -1581,17 +1581,17 @@ async fn released_claim_is_not_revouched_into_a_full_replay() {
     let events = drain_events(&mut rx);
     assert!(
         events.is_empty(),
-        "a re-vouch sweep over a RELEASED claim must not replay/re-register, got {events:?}"
+        "a re-vouch sweep over an ENDED claim must not replay/re-register, got {events:?}"
     );
     assert_eq!(
         cursors.lock().await.get(&path).copied(),
         Some(file_len),
-        "the released path's cursor must stay parked at EOF (no reset-to-0 replay)"
+        "the ended path's cursor must stay parked at EOF (no reset-to-0 replay)"
     );
 }
 
 #[tokio::test]
-async fn decoded_terminator_release_is_not_revouched_into_a_full_replay() {
+async fn a_decoded_terminators_ended_claim_is_not_revouched_into_a_full_replay() {
     fn never_ended(_tail: &[u8]) -> bool {
         false
     }
@@ -1655,12 +1655,12 @@ async fn decoded_terminator_release_is_not_revouched_into_a_full_replay() {
     let events = drain_events(&mut rx);
     assert!(
         events.is_empty(),
-        "a re-vouch sweep over an ENDED, released path must not replay it, got {events:?}"
+        "a re-vouch sweep over an ENDED path must not replay it, got {events:?}"
     );
     assert_eq!(
         cursors.lock().await.get(&path).copied(),
         Some(file_len),
-        "the released path's cursor must stay parked at EOF (no reset-to-0 replay)"
+        "the ended path's cursor must stay parked at EOF (no reset-to-0 replay)"
     );
 }
 
@@ -1692,7 +1692,7 @@ async fn unclaim_for_foreign_id_stays_pending_and_leaves_local_claims_alone() {
     assert_eq!(
         seen.lock().await.get(&path),
         Some(&Sight::Claimed),
-        "a foreign id must not release this watcher's claims"
+        "a foreign id must not end this watcher's claims"
     );
     assert_eq!(
         unclaims.take_matching(|x| *x == foreign),
@@ -1727,7 +1727,7 @@ async fn child_end_unclaims_ttl_prunes_unmatched_entries() {
 }
 
 #[tokio::test]
-async fn child_end_unclaim_releases_only_the_matched_ids_own_path() {
+async fn child_end_unclaim_ends_only_the_matched_ids_own_path() {
     let dir = tempfile::tempdir().unwrap();
     let ended_child = dir.path().join("ended-child.jsonl");
     let sibling = dir.path().join("live-sibling.jsonl");
@@ -1763,7 +1763,7 @@ async fn child_end_unclaim_releases_only_the_matched_ids_own_path() {
     assert_eq!(
         seen.lock().await.get(&ended_child),
         Some(&Sight::Ended),
-        "the ended child's claim is released"
+        "the ended child's claim is ended"
     );
     assert_eq!(
         seen.lock().await.get(&sibling),
@@ -1773,7 +1773,7 @@ async fn child_end_unclaim_releases_only_the_matched_ids_own_path() {
 }
 
 #[tokio::test]
-async fn oversized_ended_skip_releases_seen_so_a_later_append_re_registers() {
+async fn oversized_ended_skip_ends_its_claim_so_a_later_append_re_registers() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("big-resumed.jsonl");
     let initial = "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n";
@@ -1803,7 +1803,7 @@ async fn oversized_ended_skip_releases_seen_so_a_later_append_re_registers() {
     );
     assert!(
         seen.lock().await.get(&path) == Some(&Sight::Ended),
-        "the oversized-ended skip must release `seen`"
+        "the oversized-ended skip must end `seen`"
     );
 
     let mut f = tokio::fs::OpenOptions::new()
@@ -2849,7 +2849,7 @@ async fn session_exit_parks_truncated_transcript_so_a_straggler_walk_cannot_resu
 }
 
 #[tokio::test]
-async fn child_end_unclaim_parks_truncated_transcript_before_release() {
+async fn child_end_unclaim_parks_truncated_transcript_before_the_end() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("child.jsonl");
     std::fs::write(
@@ -2899,18 +2899,18 @@ async fn child_end_unclaim_parks_truncated_transcript_before_release() {
     assert_eq!(
         cursors.lock().await.get(&path).copied(),
         Some(new_len),
-        "a truncated rollout must be PARKED at the new EOF before release"
+        "a truncated rollout must be PARKED at the new EOF before the end"
     );
     assert_eq!(
         seen.lock().await.get(&path),
         Some(&Sight::Ended),
-        "the claim must still be RELEASED (kept known)"
+        "the claim must still be ENDED (kept known)"
     );
 
     let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
     assert!(
         events.is_empty(),
-        "a straggler walk after the release must not resurrect, got {events:?}"
+        "a straggler walk after the end must not resurrect, got {events:?}"
     );
 
     std::fs::OpenOptions::new()

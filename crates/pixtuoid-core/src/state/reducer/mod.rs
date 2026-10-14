@@ -151,7 +151,7 @@ enum Attempt {
     Start { parented: bool },
     /// A hook `Identity` (#221), which names no parent.
     Identity,
-    /// A hook tool or permission event, synthesizing a slot (proof of life).
+    /// A hook tool or permission event that shows activity, synthesizing a slot.
     HookActivity,
 }
 

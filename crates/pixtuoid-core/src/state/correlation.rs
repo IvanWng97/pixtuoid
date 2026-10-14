@@ -19,13 +19,13 @@ use crate::source::Transport;
 #[doc(hidden)]
 pub const HOOK_WINS_WINDOW: Duration = Duration::from_millis(500);
 
-/// How long an ended life's trailing events are refused (#242, either
-/// transport), and how long a top-level life a hook ended revives only on a
-/// hook start. Hook connections are per-connection spawned tasks, so a
-/// session's SessionEnd and a trailing Stop/ActivityEnd can be DELIVERED
-/// reordered, and the straggler would otherwise synthesize a blank Idle ghost
-/// with NO SessionEnd left to remove it. 5s covers same-machine scheduling
-/// jitter while never visibly delaying a genuine revival.
+/// How long the trailing events of a life a hook ended, or of any child's end,
+/// are refused (#242, either transport), and how long a top-level life a hook
+/// ended revives only on a hook start. Hook connections are per-connection
+/// spawned tasks, so a session's SessionEnd and a trailing Stop/ActivityEnd can
+/// be DELIVERED reordered, and the straggler would otherwise synthesize a blank
+/// Idle ghost with NO SessionEnd left to remove it. 5s covers same-machine
+/// scheduling jitter while never visibly delaying a genuine revival.
 #[doc(hidden)]
 pub const STRAGGLER_TTL: Duration = Duration::from_secs(5);
 

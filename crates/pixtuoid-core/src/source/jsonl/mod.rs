@@ -126,7 +126,7 @@ pub(super) enum Sight {
     /// its `SessionEndChecker` matches, or a child-end un-claim:
     /// the path stays KNOWN, so `revouch_gated_files` won't replay it however
     /// live the probe says the (still-open) rollout is, and only an append that
-    /// proves life re-registers it.
+    /// shows activity re-registers it.
     Ended,
 }
 

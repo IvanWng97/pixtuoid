@@ -109,11 +109,11 @@ impl Default for ChildEndUnclaims {
 /// WHY). For every pending id matching one of THIS watcher's `seen` paths: walk
 /// the path's pending bytes to EOF FIRST — a pre-stop straggler that re-entered
 /// as a first-sight would resurrect the just-ended child as a ghost — then
-/// RELEASE the claim. Two deliberate differences from `emit_session_exit`:
+/// END the claim. Two deliberate differences from `emit_session_exit`:
 ///
 /// * **No `SessionEnd` is emitted** — the reducer already ended the slot from
 ///   the hook `SubagentStop`.
-/// * **Release = `seen` → `Sight::Ended`, not removal.** The path must stay KNOWN: the
+/// * **`seen` → `Sight::Ended`, not removal.** The path must stay KNOWN: the
 ///   Codex FD probe keeps vouching an in-flight child's still-open rollout, so a
 ///   removed claim would let `revouch_gated_files` reset the cursor to 0 on the
 ///   next scan — a full stale-activity replay plus an instant re-registration
@@ -133,7 +133,7 @@ pub(super) async fn drain_child_end_unclaims(
     if unclaims.is_empty() {
         return;
     }
-    // Snapshot under a short lock so the later walk/release loop is lock-free.
+    // Snapshot under a short lock so the later walk/end loop is lock-free.
     let claimed: Vec<(PathBuf, AgentId, Sight)> = {
         let seen = ctx.seen.lock().await;
         seen.iter()
@@ -147,7 +147,7 @@ pub(super) async fn drain_child_end_unclaims(
             .collect()
     };
     // Consume ids matching ANY of this watcher's known paths, held or already
-    // released: a duplicate stop's work is done either way.
+    // ended: a duplicate stop's work is done either way.
     let matched = unclaims.take_matching(|id| claimed.iter().any(|(_, pid, _)| pid == id));
     for id in matched {
         for (path, pid, sight) in &claimed {
@@ -156,10 +156,9 @@ pub(super) async fn drain_child_end_unclaims(
             }
             // Drain pending bytes to EOF while the claim is still held (a
             // straggler decodes as an already-claimed walk, registering
-            // nothing), THEN release. The release only DOWNGRADES an entry that
-            // still exists: if the drained chunk decoded this path's own
-            // terminator, walk_jsonl fully retired the claim, and a blind
-            // insert would resurrect it as merely-released.
+            // nothing), THEN end it. The end only DOWNGRADES an entry that
+            // still exists: a drain that met NotFound retired the claim, and a
+            // blind insert would bring it back as ended.
             park_if_truncated_below_cursor(path, ctx).await;
             walk_jsonl(path, decoders, ctx).await;
             {
