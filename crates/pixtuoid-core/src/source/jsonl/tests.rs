@@ -1145,7 +1145,7 @@ async fn gated_file_oversized_metadata_only_append_stays_unregistered() {
 }
 
 #[tokio::test]
-async fn session_end_unclaims_seen_so_a_later_append_re_registers() {
+async fn session_end_ends_its_claim_so_later_activity_re_registers() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("resumed.jsonl");
     tokio::fs::write(&path, "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n")
@@ -1773,7 +1773,7 @@ async fn child_end_unclaim_ends_only_the_matched_ids_own_path() {
 }
 
 #[tokio::test]
-async fn oversized_ended_skip_ends_its_claim_so_a_later_append_re_registers() {
+async fn oversized_ended_skip_ends_its_claim_so_later_activity_re_registers() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("big-resumed.jsonl");
     let initial = "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n";
@@ -1821,7 +1821,7 @@ async fn oversized_ended_skip_ends_its_claim_so_a_later_append_re_registers() {
         events
             .iter()
             .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
-        "a post-end append must re-register the agent, got {events:?}"
+        "post-end activity must re-register the agent, got {events:?}"
     );
 }
 
