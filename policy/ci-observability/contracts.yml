@@ -286,6 +286,7 @@
     - (.jobs[] | select(has("if")) | .if) |= sub("github.repository_id == '[0-9]+'"; "github.repository == 'pixtuoid/pixtuoid'")
     - (.jobs[] | select(has("if")) | .if) |= sub("( && )?github.repository_id == '[0-9]+'"; "")
     - '.jobs.ungated = {"runs-on": "ubuntu-latest", "steps": [{"run": "true"}]}'
+    - .jobs |= with_entries(.value.needs = ["x"])
 
 - id: publishers-need-the-release-environment
   file: [.github/workflows/release-plz.yml, .github/workflows/release.yml]
@@ -301,6 +302,7 @@
   break:
     - del(.jobs[].environment)
     - (.jobs[] | select(has("environment")) | .environment) = "staging"
+    - del(.jobs[].permissions["id-token"])
 
 - id: credential-jobs-restore-no-cache
   file: .github/workflows/release-plz.yml
@@ -315,6 +317,7 @@
   break:
     - (.jobs.release.steps[] | select((.uses // "") == "./.github/actions/setup-cargo-just") | .with) |= del(.["enable-cache"])
     - (.jobs["release-pr"].steps[] | select((.uses // "") == "./.github/actions/setup-cargo-just") | .with["enable-cache"]) = "true"
+    - .jobs |= map_values(.steps |= map(select((.uses // "") != "./.github/actions/setup-cargo-just")))
 
 - id: release-attests-before-publishing
   file: .github/workflows/release.yml
@@ -326,7 +329,7 @@
     .jobs.release.steps as $steps
     | ([$steps | to_entries[] | select((.value.uses // "") | startswith("actions/attest")) | .key] | min) as $attest
     | ([$steps | to_entries[] | select((.value.uses // "") | startswith("softprops/action-gh-release@")) | .key] | min) as $publish
-    | $attest != null and $publish != null and $attest < $publish
+    | $attest != null and $attest < $publish
   break:
     - .jobs.release.steps |= ([.[] | select((.uses // "") | startswith("actions/attest") | not)] + [.[] | select((.uses // "") | startswith("actions/attest"))])
     - .jobs.release.steps |= map(select((.uses // "") | startswith("actions/attest") | not))
@@ -358,6 +361,7 @@
     - .jobs["ci-passed"].steps[0].env.CHECK_NAME = "lint"
     - .jobs["ci-passed"].steps[0]["continue-on-error"] = true
     - .jobs["ci-passed"].steps[0].if = "${{ false }}"
+    - .jobs.dup = .jobs.release
 
 - id: every-main-push-gets-its-ci-gate
   file: .github/workflows/ci.yml
@@ -407,6 +411,8 @@
     - del(.jobs["release-merge"].steps[0].env.PR_BRANCH_PREFIX)
     - del(.jobs["version-tagged"].if)
     - .jobs["version-tagged"].if = "${{ !cancelled() && needs.release-merge.outputs.release == 'true' }}"
+    - .jobs.dup = .jobs["ci-passed"]
+    - .jobs.dup = .jobs["version-tagged"]
 
 - id: release-plz-publishes-only-release-prs
   file: release-plz.toml

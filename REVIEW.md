@@ -208,8 +208,8 @@ runs it again, a merge of `main` or a comment-only change does not. The
 [`local-review`](.claude/skills/local-review/SKILL.md) skill runs them.
 
 - **Render and look**: generated art and clips (extract frames and READ them;
-  census the money shot; a PR's media diff is the smoke job's
-  `gen-check-diffs` overlays); motion, pose, walk-leg
+  census the money shot; a PR's media diff is `just gen-media-check`'s
+  `target/gen-check-diff/` overlays); motion, pose, walk-leg
   (`crates/pixtuoid-scene/src/` `walk/`, `pose/`, `pathfind/`, `physics.rs`:
   the snapshot example, or a `just hermetic` run's scene log for lifecycle,
   #61); a string or layout a painter frames (the COMPOSED frame;
