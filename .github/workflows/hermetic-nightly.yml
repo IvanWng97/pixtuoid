@@ -9,8 +9,28 @@ on:
     - cron: "23 7 * * *" # daily 07:23 UTC
   workflow_dispatch:
 permissions: {}
+# `drift` executes third-party CLIs, so only `build` saves a cache.
+cache-mode: read
 
 jobs:
+  # Runs no CLI, so nothing it saves came from one; every `run`, here and in
+  # CI, restores main's last save.
+  build:
+    name: hermetic build
+    runs-on: macos-latest
+    timeout-minutes: 30
+    cache-mode: write
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          shared-key: hermetic
+      - run: just hermetic-build
+
   drift:
     permissions:
       contents: read
@@ -22,7 +42,8 @@ jobs:
   file:
     name: file the hermetic report
     needs: drift
-    if: ${{ always() && needs.drift.result == 'failure' }}
+    # A dispatch on a branch is a pre-merge proof, not the watch.
+    if: ${{ always() && github.ref == 'refs/heads/main' && needs.drift.result == 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
