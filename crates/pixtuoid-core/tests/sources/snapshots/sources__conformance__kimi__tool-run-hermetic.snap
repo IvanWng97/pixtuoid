@@ -1,0 +1,36 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 10407091503203428178
+    source: kimi
+    session_id: session_fc550fcd-ce56-42db-91ab-1347d25f7473
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- ModelInfo:
+    agent_id: 10407091503203428178
+    model: __kimi_env_model__
+    effort: ~
+- Identity:
+    agent_id: 10407091503203428178
+    source: kimi
+    session_id: session_fc550fcd-ce56-42db-91ab-1347d25f7473
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 10407091503203428178
+    tool_use_id: call_D7rLIHQEu6w53APh
+    detail:
+      Generic:
+        display: Read
+- Identity:
+    agent_id: 10407091503203428178
+    source: kimi
+    session_id: session_fc550fcd-ce56-42db-91ab-1347d25f7473
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 10407091503203428178
+    tool_use_id: call_D7rLIHQEu6w53APh
+- ActivityEnd:
+    agent_id: 10407091503203428178
+    tool_use_id: ~
