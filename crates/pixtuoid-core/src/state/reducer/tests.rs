@@ -259,6 +259,70 @@ fn gated_before_waiting_evicted_on_apply_path_sweep() {
     );
 }
 
+/// The exit's own authority decides what may undo it: a session a hook ended
+/// resurrects only on a hook start (proof of life), while one its transcript
+/// ended may still resume from that transcript.
+#[test]
+fn a_transcript_first_sight_resurrects_only_what_a_transcript_ended() {
+    use crate::AgentId;
+    use crate::source::{AgentEvent, Transport};
+    use crate::state::SceneState;
+    use std::path::PathBuf;
+    use std::time::{Duration, SystemTime};
+
+    let id = AgentId::from_transcript_path("/p/ended.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let start = AgentEvent::SessionStart {
+        agent_id: id,
+        source: "codex".into(),
+        session_id: "s".into(),
+        cwd: PathBuf::from("/repo"),
+        parent_id: None,
+    };
+    let end = AgentEvent::SessionEnd {
+        agent_id: id,
+        as_child: false,
+    };
+    let exiting = |scene: &SceneState| scene.agents.get(&id).map(|s| s.exiting_at.is_some());
+    // The watcher's first sight lands right after the hook end (codex writes
+    // its rollout at exit; grok's trailer follows its end line).
+    let sight = t0 + Duration::from_millis(1_040);
+
+    let mut r = super::Reducer::new();
+    let mut scene = SceneState::uniform(4);
+    r.apply(&mut scene, start.clone(), t0, Transport::Hook);
+    r.apply(
+        &mut scene,
+        end.clone(),
+        t0 + Duration::from_secs(1),
+        Transport::Hook,
+    );
+    r.apply(&mut scene, start.clone(), sight, Transport::Jsonl);
+    assert_eq!(
+        exiting(&scene),
+        Some(true),
+        "a file's first sight proves no life"
+    );
+    r.apply(&mut scene, start.clone(), sight, Transport::Hook);
+    assert_eq!(exiting(&scene), Some(false), "a hook start resurrects");
+
+    let mut r = super::Reducer::new();
+    let mut scene = SceneState::uniform(4);
+    r.apply(&mut scene, start.clone(), t0, Transport::Jsonl);
+    r.apply(
+        &mut scene,
+        end,
+        t0 + Duration::from_secs(1),
+        Transport::Jsonl,
+    );
+    r.apply(&mut scene, start, sight, Transport::Jsonl);
+    assert_eq!(
+        exiting(&scene),
+        Some(false),
+        "a transcript-ended session resumes from its transcript"
+    );
+}
+
 #[test]
 fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
     use crate::AgentId;
@@ -355,7 +419,7 @@ fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
         &mut scene,
         session_start("s2"),
         t0 + Duration::from_millis(4_500),
-        Transport::Jsonl,
+        Transport::Hook,
     );
 
     assert!(
@@ -488,9 +552,10 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
     /// state proves nothing about a slow leak.
     const MAX_CORR_ENTRIES: usize = 1024;
     const ITERS: u64 = 3_000;
-    const MAP_NAMES: [&str; 8] = [
+    const MAP_NAMES: [&str; 9] = [
         "recent_hook_tool_uses",
         "recent_hook_session_ends",
+        "hook_ended",
         "active_tasks",
         "recent_task_drains",
         "child_ledger",
@@ -609,6 +674,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
         let lens = [
             r.corr.recent_hook_tool_uses.len(),
             r.corr.recent_hook_session_ends.len(),
+            r.corr.hook_ended.len(),
             r.corr.active_tasks.len(),
             r.corr.recent_task_drains.len(),
             r.corr.child_ledger.len(),

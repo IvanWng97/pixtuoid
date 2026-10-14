@@ -257,6 +257,7 @@ impl Reducer {
                     cwd: &cwd,
                 },
                 parent_id,
+                from,
                 now,
             ),
             // The tracker owns every Task-dispatch Start, replays included.
@@ -286,7 +287,7 @@ impl Reducer {
                 Self::apply_rename(scene, agent_id, &label, now);
             }
             AgentEvent::SessionEnd { agent_id, as_child } => {
-                self.apply_session_end(scene, agent_id, as_child, now);
+                self.apply_session_end(scene, agent_id, as_child, from, now);
             }
             AgentEvent::ProofOfLife { agent_id } => {
                 self.apply_proof_of_life(scene, agent_id, now);
@@ -602,8 +603,12 @@ impl Reducer {
         scene: &mut SceneState,
         agent_id: AgentId,
         as_child: bool,
+        from: Transport,
         now: SystemTime,
     ) {
+        if from == Transport::Hook && scene.agents.contains_key(&agent_id) {
+            self.corr.hook_ended.insert(agent_id);
+        }
         // Stamped REGARDLESS of slot existence (#244): a Stop-before-Start
         // reorder has none, and for a known slot it outlives the exit-grace GC.
         if as_child {
@@ -712,13 +717,14 @@ impl Reducer {
         agent_id: AgentId,
         ctx: IdentityCtx,
         parent_id: Option<AgentId>,
+        from: Transport,
         now: SystemTime,
     ) {
         if self.late_child_start_refused(scene, agent_id, ctx, parent_id, now) {
             return;
         }
         let parent_id = self.resolve_parent_link(scene, agent_id, ctx, parent_id);
-        if self.enrich_existing_start(scene, agent_id, ctx, parent_id, now) {
+        if self.enrich_existing_start(scene, agent_id, ctx, parent_id, from, now) {
             return;
         }
         if self.register_slot(scene, agent_id, ctx, parent_id, now) {
@@ -829,6 +835,7 @@ impl Reducer {
         agent_id: AgentId,
         ctx: IdentityCtx,
         parent_id: Option<AgentId>,
+        from: Transport,
         now: SystemTime,
     ) -> bool {
         let Some(slot) = scene.agents.get_mut(&agent_id) else {
@@ -858,7 +865,11 @@ impl Reducer {
             ));
         }
         slot.last_event_at = now;
-        if slot.exiting_at.is_some() && slot.parent_id.is_none() && parent_id.is_none() {
+        if slot.exiting_at.is_some()
+            && slot.parent_id.is_none()
+            && parent_id.is_none()
+            && (from == Transport::Hook || !self.corr.hook_ended.contains(&agent_id))
+        {
             // Route through fsm so an in-flight Active span folds into
             // `active_ms` — a direct `state = Idle` here silently dropped it.
             fsm::resurrect_in_place(slot, now);
@@ -1230,6 +1241,7 @@ impl Reducer {
     /// (`recent_proof_of_life`, the `child_ledger` stamp) deliberately stays at
     /// the sweep site — it must NOT run on a resurrect.
     fn remove_agent_correlation(&mut self, id: &AgentId) {
+        self.corr.hook_ended.remove(id);
         self.corr.active_tasks.remove(id);
         self.corr.gated_before_waiting.remove(id);
         self.corr.counted_calls.remove(id);

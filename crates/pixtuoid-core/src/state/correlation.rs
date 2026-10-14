@@ -111,6 +111,10 @@ pub(super) struct Correlation {
     /// trailing hook event must not re-synthesize the session, and a reordered
     /// CHILD `SessionStart` must not register it (#242, both transports).
     pub(super) recent_hook_session_ends: HashMap<AgentId, SystemTime>,
+    /// Slots a hook `SessionEnd` put exiting: only a hook start, proof of
+    /// life, resurrects one. A transcript's first sight is a file's presence,
+    /// and lands after the end whenever the CLI writes at exit.
+    pub(super) hook_ended: HashSet<AgentId>,
     /// Per-agent set of Task tool_use_ids currently in flight. CC's hook
     /// payload sets `transcript_path` to the PARENT'S transcript even when a
     /// subagent is the actor, so subagent hook events hash to the parent's
