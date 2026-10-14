@@ -25,7 +25,8 @@ permissions:
 jobs:
   # Two-step CI (docs.mergify.com/merge-queue/two-step): a PR's pushes run the
   # light tier and pass ci-gate on it; the full tier runs on the merge queue's
-  # draft PR, where .mergify.yml's merge_conditions read ci-gate, and on main.
+  # draft PR, whose ci-gate-full .mergify.yml's merge_conditions read, and on
+  # main.
   tier:
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -93,3 +94,18 @@ jobs:
         with:
           results: ${{ toJSON(needs) }}
           label: "CI group failed"
+
+  # The queue's merge condition, which only a full-tier run passes: a skipped
+  # check is not a success (docs.mergify.com/configuration/conditions), so a
+  # PR's own light-tier run can never satisfy it.
+  full-gate:
+    name: ci-gate-full
+    if: ${{ always() && needs.tier.outputs.full == 'true' }}
+    needs: [tier, gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: pixtuoid/.github/.github/actions/require-jobs@main
+        with:
+          results: ${{ toJSON(needs) }}
+          label: "full tier failed"

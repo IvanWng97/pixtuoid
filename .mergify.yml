@@ -27,8 +27,8 @@ queue_rules:
     # `none` requires an account that satisfies the protections itself
     # (docs.mergify.com/configuration/file-format); enforce_admins holds it to them.
     merge_bot_account: IvanWng97
-    # The PR itself: branch protection's required checks (here the light-tier
-    # ci-gate) and conversation resolution, restated since nothing is injected.
+    # The PR itself: branch protection's required checks and conversation
+    # resolution, restated since nothing is injected.
     queue_conditions:
       # A stacked PR waits until its base lands and GitHub retargets it.
       - base = main
@@ -43,6 +43,8 @@ queue_rules:
           - check-success = claude-review / claude-review
           - check-skipped = claude-review / claude-review
       - "#review-threads-unresolved = 0"
-    # The queue's draft PR, where ci-gate is the full tier.
+    # A check the queue conditions lack makes the queue two-step, so Mergify
+    # never merges an up-to-date PR on its own light-tier CI
+    # (docs.mergify.com/merge-queue/direct-merge).
     merge_conditions:
-      - check-success = ci-gate
+      - check-success = ci-gate-full
