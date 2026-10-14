@@ -509,10 +509,9 @@ mod run {
         }
     }
 
-    /// How much of npm's output a report, a public issue in the nightly,
-    /// carries: its first `npm error` lines, or a non-release answer, cut.
+    /// How many of npm's `npm error` lines a report carries: its code and
+    /// summary, not the operator's log path that follows.
     const NPM_ERROR_LINES: usize = 2;
-    const NPM_ERROR_CHARS: usize = 200;
 
     /// The release `npm view <spec> version` answered, strict, or why there is
     /// none: an absent `latest` tag exits 0 with nothing on stdout
@@ -523,13 +522,12 @@ mod run {
         stdout: &[u8],
         stderr: &[u8],
     ) -> Result<Version, String> {
-        let cut = |l: &str| l.chars().take(NPM_ERROR_CHARS).collect::<String>();
         if !status.success() {
-            let why: Vec<String> = String::from_utf8_lossy(stderr)
+            let stderr = String::from_utf8_lossy(stderr);
+            let why: Vec<&str> = stderr
                 .lines()
                 .filter(|l| l.starts_with("npm error"))
                 .take(NPM_ERROR_LINES)
-                .map(|l| format!("{:?}", cut(l)))
                 .collect();
             return Err(match why.as_slice() {
                 [] => format!("npm view {spec} exited {status}"),
@@ -540,7 +538,7 @@ mod run {
         if v.is_empty() {
             return Err(format!("npm gave no version for {spec}"));
         }
-        Version::parse(&v).map_err(|_| format!("npm view {spec} gave {:?}, not a release", cut(&v)))
+        Version::parse(&v).map_err(|_| format!("npm view {spec} gave {v:?}, not a release"))
     }
 
     /// The CLI at the version this run tests, installed into its own project the
@@ -1202,32 +1200,20 @@ mod run {
                 npm_release(spec, ok, b"\n", b"").is_err_and(|why| why.contains("no version")),
                 "an absent `latest` exits 0 with nothing on stdout"
             );
-            let long = format!("npm error 404 {}", "x".repeat(NPM_ERROR_CHARS));
-            let stderr = format!(
-                "npm warn config ignoring a setting\nnpm error code E404\n{long}\nnpm error A complete log of this run can be found in: /Users/op/x.log\n"
-            );
-            let why = npm_release(spec, failed, b"", stderr.as_bytes()).expect_err("npm failed");
-            assert!(why.contains("E404"), "{why}");
+            let stderr = b"npm warn config ignoring a setting\nnpm error code E404\n\
+                           npm error 404 Not Found - GET https://registry.npmjs.org/nope - Not found\n\
+                           npm error A complete log of this run can be found in: /Users/op/x.log\n";
+            let why = npm_release(spec, failed, b"", stderr).expect_err("npm failed");
+            assert!(why.contains("E404") && why.contains("Not Found"), "{why}");
             assert!(!why.contains("warn"), "npm's errors alone: {why}");
             assert!(
                 !why.contains("/Users/op"),
                 "the code and summary alone: {why}"
             );
-            let carried = NPM_ERROR_CHARS - "npm error 404 ".len();
-            assert!(
-                why.contains(&"x".repeat(carried)) && !why.contains(&"x".repeat(carried + 1)),
-                "a line is cut at NPM_ERROR_CHARS: {why}"
-            );
             assert!(
                 npm_release(spec, failed, b"", b"\x1b[31mERR!\x1b[0m\n")
                     .is_err_and(|why| why.contains(&format!("exited {failed}"))),
                 "no npm error line still says why"
-            );
-            let answer = "x".repeat(NPM_ERROR_CHARS + 1);
-            let why = npm_release(spec, ok, answer.as_bytes(), b"").expect_err("not a release");
-            assert!(
-                why.contains(&answer[1..]) && !why.contains(&answer),
-                "a non-release answer is cut at NPM_ERROR_CHARS: {why}"
             );
         }
     }
