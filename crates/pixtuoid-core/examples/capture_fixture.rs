@@ -38,7 +38,7 @@ mod recorder {
     use pixtuoid_core::harness::tap::{Endpoint, Tap};
     use pixtuoid_core::harness::{
         CAPTURE_NOTE, CAPTURE_RECORD, CORPUS_REFUSAL, CaptureRecord, HOOK_PAYLOADS, PROVENANCE,
-        capture_base, capture_workspace, jsonl_files_under, version_answer,
+        capture_base, capture_workspace, capture_workspace_tail, jsonl_files_under, version_answer,
     };
 
     /// Where a driver names the CLI it drives, a command or the path to its
@@ -84,13 +84,13 @@ mod recorder {
     }
 
     impl Options {
-        /// Why this host may not run what these options ask: a raw `--out`
+        /// Why this host may not run what these options ask: a raw [`OUT`]
         /// capture is any host's, the committed corpus [`CORPUS_REFUSAL`]'s.
         fn corpus_refusal(&self) -> Option<&'static str> {
             CORPUS_REFUSAL.filter(|_| self.promote.is_some() || self.out.is_none())
         }
 
-        /// `--prepare-root` runs no CLI, so it takes `--within` and nothing else:
+        /// [`PREPARE_ROOT`] runs no CLI, so it takes [`WITHIN`] and nothing else:
         /// any other option asks for a run or a write this mode never makes.
         fn prepare_root_alone(&self, positionals: &[String]) -> Result<(), String> {
             let alone = Options {
@@ -129,26 +129,12 @@ mod recorder {
                 WORKSPACE => {
                     let ws = PathBuf::from(take(&mut args, WORKSPACE)?);
                     if capture_base(&ws).is_none() {
-                        // The two components `capture_base` checks, not the root.
-                        let tail = capture_workspace().map(|cw| {
-                            let n = cw.components().count();
-                            cw.components()
-                                .skip(n.saturating_sub(2))
-                                .collect::<PathBuf>()
-                        });
-                        return Err(match tail {
-                            Ok(tail) => format!(
-                                "{WORKSPACE} {} must be absolute and end in {}: the recorder \
-                                 clears its parent",
-                                ws.display(),
-                                tail.display()
-                            ),
-                            Err(e) => format!(
-                                "{WORKSPACE} {} can't be judged: the capture workspace does not \
-                                 resolve: {e}",
-                                ws.display()
-                            ),
-                        });
+                        return Err(format!(
+                            "{WORKSPACE} {} must be absolute and end in {}: the recorder clears \
+                             its parent",
+                            ws.display(),
+                            capture_workspace_tail().display()
+                        ));
                     }
                     options.workspace = Some(ws);
                 }
@@ -1125,10 +1111,15 @@ mod recorder {
                 parse_options(args(&root.join("proj"))).is_err(),
                 "its parent is the operator's"
             );
-            let relative = Path::new("pixtuoid-capture").join("proj");
+            let tail = capture_workspace_tail();
+            let why = parse_options(args(&tail)).expect_err("a relative path with the right tail");
             assert!(
-                parse_options(args(&relative)).is_err_and(|why| why.contains("absolute")),
-                "a relative path with the right tail is refused for being relative"
+                why.contains("absolute"),
+                "refused for being relative: {why}"
+            );
+            assert!(
+                why.contains(&format!("end in {}:", tail.display())),
+                "names the tail it checks, never a root any absolute one may have: {why}"
             );
             let ws = root.join("pixtuoid-capture").join("proj");
             let (o, _) = parse_options(args(&ws)).expect("a capture workspace");

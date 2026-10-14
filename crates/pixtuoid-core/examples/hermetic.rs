@@ -876,7 +876,7 @@ mod run {
         }
 
         /// The profile's pairs as this sandbox holds them, then what the CLI's
-        /// launch sets, for the recorder to set on the CLI as `--env`.
+        /// launch sets, for the recorder to set on the CLI as [`recorder_flag::ENV`].
         fn cli_env(&self, p: &Profile, launch: &Launch) -> Vec<String> {
             p.env
                 .iter()

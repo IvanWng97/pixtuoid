@@ -55,7 +55,13 @@ pub fn capture_workspace() -> std::io::Result<PathBuf> {
     let root = crate::harness::host::known_folder(crate::harness::host::KnownFolder::ProgramData)?;
     #[cfg(not(windows))]
     let root = PathBuf::from("/tmp");
-    Ok(root.join(CAPTURE_BASE).join(CAPTURE_PROJ))
+    Ok(root.join(capture_workspace_tail()))
+}
+
+/// The end every [`capture_workspace`] path has, whatever the host's root: the
+/// part [`capture_base`] checks.
+pub fn capture_workspace_tail() -> PathBuf {
+    Path::new(CAPTURE_BASE).join(CAPTURE_PROJ)
 }
 
 /// The directory a capture workspace sits in, which a recorder clears and
@@ -64,10 +70,10 @@ const CAPTURE_BASE: &str = "pixtuoid-capture";
 const CAPTURE_PROJ: &str = "proj";
 
 /// The base a recorder may clear for the workspace `ws`: only that of an
-/// absolute path ending as [`capture_workspace`]'s does, so no path an operator
+/// absolute path ending in [`capture_workspace_tail`], so no path an operator
 /// names can make it clear a directory of theirs.
 pub fn capture_base(ws: &Path) -> Option<&Path> {
-    (ws.is_absolute() && ws.ends_with(Path::new(CAPTURE_BASE).join(CAPTURE_PROJ)))
+    (ws.is_absolute() && ws.ends_with(capture_workspace_tail()))
         .then(|| ws.parent())
         .flatten()
 }
