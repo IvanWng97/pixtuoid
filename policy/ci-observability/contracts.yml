@@ -492,3 +492,28 @@
     - .queue_rules[0].branch_protection_injection_mode = "queue"
     - del(.queue_rules[0].merge_bot_account)
     - .queue_rules[0].merge_conditions = []
+
+- id: focused-reviews-only-reads-a-same-repo-pr
+  file: .github/workflows/focused-reviews.yml
+  why: >-
+    The check runs the PR's own script to read the PR's comments, so it runs
+    under pull_request, never pull_request_target (which hands PR code the
+    base's write token), with a read-only token, no secret and no persisted
+    credential; a fork's or a bot's PR skips it. Branch protection and
+    .mergify.yml name the check, so its name holds.
+  assert: |
+    (.on | keys) == ["pull_request"]
+    and .permissions == {}
+    and .jobs["focused-reviews"].name == "focused-reviews"
+    and .jobs["focused-reviews"].permissions == {"contents": "read", "pull-requests": "read"}
+    and (tostring | test("secrets\\.") | not)
+    and ([.jobs[].steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with["persist-credentials"]] | all(. == false))
+    and (.jobs["focused-reviews"].if | test("head\\.repo\\.full_name == github\\.repository") and test("user\\.type != 'Bot'"))
+  break:
+    - '.on = {"pull_request_target": {"types": ["opened"]}}'
+    - '.permissions = {"contents": "write"}'
+    - '.jobs["focused-reviews"].name = "reviews"'
+    - '.jobs["focused-reviews"].permissions["pull-requests"] = "write"'
+    - '.jobs["focused-reviews"].steps[0].with["persist-credentials"] = true'
+    - '.jobs["focused-reviews"].steps += [{"env": {"T": "${{ secrets.X }}"}, "run": "true"}]'
+    - '.jobs["focused-reviews"].if = "github.event.pull_request.user.type != ''Bot''"'

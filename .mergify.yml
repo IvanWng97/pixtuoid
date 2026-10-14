@@ -1,5 +1,5 @@
 # A PR enters by `@mergifyio queue` once docs/CONTRIBUTING.md#the-merge-gate
-# holds: its local rows are a judgement no condition can make.
+# holds: confirming a finding is a judgement no condition can make.
 #
 # Two-step CI (docs.mergify.com/merge-queue/two-step): a PR's pushes run the
 # light tier, and the queue's draft PR (`mergify/merge-queue/…`) runs the full
@@ -10,7 +10,7 @@
 # evaluated against the temporary pull request"), would never pass there.
 merge_queue:
   max_parallel_checks: 1
-  # Its "ready to queue" box cannot see the local rows.
+  # Its "ready to queue" box cannot confirm a finding.
   queue_controls_comment: false
 
 queue_rules:
@@ -42,6 +42,10 @@ queue_rules:
       - or:
           - check-success = claude-review / claude-review
           - check-skipped = claude-review / claude-review
+      # Skipped on a fork's or a bot's PR, as the review is.
+      - or:
+          - check-success = focused-reviews
+          - check-skipped = focused-reviews
       - "#review-threads-unresolved = 0"
     # The queue's draft PR, where ci-gate is the full tier.
     merge_conditions:

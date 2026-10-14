@@ -148,7 +148,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    line, gets its whole comment population re-read against `AGENTS.md`'s comment
    rules; the cleanup rides the same PR ([`REVIEW.md`](../REVIEW.md#every-changed-file)'s comment audit). Not the merge gate.
 8. **Merge gate** — [the gate](#the-merge-gate); the `local-review` skill
-   runs its local rows; merging is `@mergifyio queue`, a release PR by hand.
+   runs its focused reviews; merging is `@mergifyio queue`, a release PR by hand.
 9. **Wrap** — retro; a durable lesson becomes a mechanism (a test, a gate) or
    a line on the narrowest rule it amends — never an agent's private memory,
    which nobody reviews and nothing executes.
@@ -176,27 +176,22 @@ run in no CI: `just openclaw-e2e` · `just openclaw-multi-e2e`
 
 ### The merge gate
 
-Green `ci-gate`; the required `claude-review / claude-review` check green at
-the final head; every finding's review thread resolved by its
-disposition; zero open confirmed blocking finding; each matching
-[local row](../REVIEW.md#escalation)'s run recorded as a PR comment starting
-`<!-- local-row:<row>:<head sha> -->`, where `<row>` is the row's first column
-up to any colon or parenthesis, lowercased, each run of non-alphanumerics one
-`-`, leading and trailing `-` dropped, and the sha is the head the run judged;
-an update that only merges `main` in, or whose every changed line is a comment
-or prose, leaves the record standing. After any other update, the re-run judges
-the change from the head the last record names to the new head, over the files
-the PR changes at either head, reading each file that change touches whole at
-the new head, or at the old one when the change deletes it; its marker names
-the new head and its text the old one. When that old head is no longer an
-ancestor of the new one (a rebase), the re-run judges the whole PR. The
+Green `ci-gate` and `focused-reviews`; the required `claude-review /
+claude-review` check green at the final head; every finding's review thread
+resolved by its disposition; zero open confirmed blocking finding.
+`focused-reviews` holds each [focused review](../REVIEW.md#focused-reviews)
+whose Paths the PR touches to a maintainer's comment at the current head
+opening `<!-- focused-review:<row>:<head sha> -->` (`<row>` as
+[`scripts/focused-reviews.py`](../scripts/focused-reviews.py)'s `row_id`
+derives it), then the review or `does not match: <why>`. Each push needs its
+own records, and a re-run judges the change since the head the last record
+names; post them, then `gh run rerun <id>` the check. The
 [`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
-rows. A refuted blocking finding clears without a push: once its thread is
+reviews. A refuted blocking finding clears without a push: once its thread is
 resolved with the disposition, re-run the review (`gh run rerun <id> --failed`).
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
-entry is a command because no queue condition can confirm a finding or match a
-local row. The queue tests up to `batch_size` PRs together on a draft PR
+entry is a command because no queue condition can confirm a finding. The queue tests up to `batch_size` PRs together on a draft PR
 (`mergify/merge-queue/…`) running the full tier, then merges the PRs
 themselves; it never updates a PR's own branch
 ([batches](https://docs.mergify.com/merge-queue/batches/): "the original PRs
@@ -222,7 +217,7 @@ change, and bigger than the PR: split it off into #N; a redesign that brings
 the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
 and not FIXED in place
 — in place fits a small defect inside code this change already touches,
-adding no local row — so it is fixed in #N; a defect in another session's
+adding no focused review — so it is fixed in #N; a defect in another session's
 tree cites that session's PR). A
 disposition is the reply that resolves the thread, STARTING with its state:
 `FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …` ·
