@@ -54,25 +54,6 @@ check's label decides when it applies; its paths are where it usually fires.
   measurable (the TUI repaints at `anim::PAINT_FPS`).
 - A missing comment ([comment audit](#every-changed-file) owns the rest).
 
-## Every changed file
-
-Read each changed file whole at the head (a removed file has only its hunks),
-against the base tree. A defect anywhere in it is in scope, pre-existing when
-the diff did not introduce it; a maintenance defect's failure scenario is the
-edit that would leave a copy or a comment wrong.
-
-1. **Comment audit**: for every file, a one-line change included, read its
-   entire comment population against the code and AGENTS.md's comment rules
-   (accuracy, value, rot, vestigial, self-repetition).
-2. **DRY** — every new fn/type/helper/const gets a whole-tree search for an
-   existing implementation, weighted by divergence risk; every value a new line
-   reads is the authority its consumer uses, not a sibling's (#1042, #1155).
-   Test fixtures stay inline.
-3. **Drift** — docs naming a moved file/fn/flag/count, searched including
-   `.github/` and `.claude/`.
-4. **Test teeth** for every test the file holds, as [Correctness](#correctness)
-   defines it.
-
 ## Lenses
 
 ### Correctness
@@ -100,8 +81,9 @@ modules nor examples).
 - **Population** — a gate, build flag or config key that selects a set
   (crates, features, targets, jobs, a gate's own tests): name the set before
   and after; a silent shrink is a defect (#1012, #1101, #1103, #1123).
-- **Test teeth** — every new or changed test, and every test asserting an
-  effect the diff removes or reroutes, fails when the code it names is wrong
+- **Test teeth** — every new or changed test, every test a changed file holds,
+  and every test asserting an effect the diff removes or reroutes, fails when
+  the code it names is wrong
   (#889 left `occupied_floor_stays_lit` unable to). Refusal paths are pinned on
   both sides of every window, offsets derived from the constant under test; a
   new gate fires on the violation, stays silent on the legitimate case, and
@@ -162,10 +144,9 @@ invariant-breaking sequence against:
    `exit(0)` (#198).
 2. Socket / named pipe: no path traversal, symlink attack, unbounded read or
    unsafe ownership assumption. On the hook's daemon side
-   (`crates/pixtuoid-core/src/source/hook/`), the endpoint is never looser than
-   owner-only, arbitration cannot steal a live owner's socket, both
-   `unix.rs`/`windows.rs` arms hold (Windows runs only in CI, outside mutation
-   testing), and each guard is PINNED.
+   (`crates/pixtuoid-core/src/source/hook/`), arbitration cannot steal a live
+   owner's socket, both `unix.rs`/`windows.rs` arms hold (Windows runs only in
+   CI, outside mutation testing), and each guard is PINNED.
 3. Untrusted input (hook payloads, transcripts, JSONL, paths, pack data):
    bounded, validated, skipped without panicking.
 4. Credentials and subprocesses: no secret in a command or log, no untrusted
@@ -215,5 +196,21 @@ invariant-breaking sequence against:
    (`Cargo.toml`, `crates/*/Cargo.toml`, `api/`; a version bump of an existing
    dependency aside): justify every crate `cargo tree -e normal` adds at head,
    transitive ones included; every new workspace edge follows
-   [AGENTS.md](AGENTS.md#layout)'s crate DAG; every item made `pub` has a
-   consumer outside its crate.
+   [AGENTS.md](AGENTS.md#layout)'s crate DAG.
+
+#### Every changed file
+
+Read each changed file whole at the head (a removed file has only its hunks),
+against the base tree. A defect anywhere in it is in scope, pre-existing when
+the diff did not introduce it; a maintenance defect's failure scenario is the
+edit that would leave a copy or a comment wrong.
+
+1. **Comment audit**: for every file, a one-line change included, read its
+   entire comment population against the code and AGENTS.md's comment rules
+   (accuracy, value, rot, vestigial, self-repetition).
+2. **DRY** — every new fn/type/helper/const gets a whole-tree search for an
+   existing implementation, weighted by divergence risk; every value a new line
+   reads is the authority its consumer uses, not a sibling's (#1042, #1155).
+   Test fixtures stay inline.
+3. **Drift** — docs naming a moved file/fn/flag/count, searched including
+   `.github/` and `.claude/`.

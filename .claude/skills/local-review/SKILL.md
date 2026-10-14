@@ -35,8 +35,8 @@ contract; fill briefs from them, never a paraphrase here.
    stop if HEAD is not that head.
    Diff: git -C <path> diff <base>..<head>.
    Read AGENTS.md, then apply the review contract (pixtuoid/.github's
-   claude-review.yml prompt), REVIEW.md's <lens or check>, its Common and
-   Every changed file sections.
+   claude-review.yml prompt), REVIEW.md's <lens or check> and its Common
+   section.
    <change-specific claims (from the PR body) or design
    questions, one per line>
    Run the applicable gates; report each exit code as observed, never through
