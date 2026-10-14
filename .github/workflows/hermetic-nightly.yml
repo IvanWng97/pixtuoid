@@ -28,9 +28,10 @@ jobs:
     permissions:
       issues: write
     steps:
+      # Each failed leg's runs, in a directory named after its artifact.
       - uses: actions/download-artifact@v8
         with:
-          name: ${{ needs.drift.outputs.runs }}
+          pattern: ${{ needs.drift.outputs.runs }}-*
 
       - name: Open or update tracking issue
         env:
@@ -40,15 +41,19 @@ jobs:
           set -euo pipefail
           gh label create hermetic --color FBCA04 \
             --description "A hermetic run's verdict on an agent CLI's latest release" 2>/dev/null || true
-          # The orchestrator owns the title, as the report's H1, and it carries
-          # the disposition: retitle on the dedup path too. No report.md means
-          # the tier itself could not run: red, with no verdict to file.
-          title=$(head -1 report.md | sed 's/^# //')
+          # The orchestrator owns the title, as each report's H1 naming its OS,
+          # and it carries the disposition: retitle on the dedup path too. A
+          # leg with no report.md means the tier itself could not run: red,
+          # with no verdict to file.
           num=$(gh issue list --label hermetic --state open \
             --json number --jq '.[0].number // empty')
-          if [ -n "$num" ]; then
-            gh issue edit "$num" --title "$title"
-            gh issue comment "$num" --body-file report.md
-          else
-            gh issue create --title "$title" --label hermetic --body-file report.md
-          fi
+          for report in */report.md; do
+            title=$(head -1 "$report" | sed 's/^# //')
+            if [ -n "$num" ]; then
+              gh issue edit "$num" --title "$title"
+              gh issue comment "$num" --body-file "$report"
+            else
+              url=$(gh issue create --title "$title" --label hermetic --body-file "$report")
+              num=${url##*/}
+            fi
+          done

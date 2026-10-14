@@ -16,7 +16,7 @@ on:
         default: pinned
     outputs:
       runs:
-        description: 'The artifact the runs upload as when `just hermetic` exits non-zero'
+        description: 'The prefix each OS leg uploads its runs under, as `<runs>-<os>`, when `just hermetic` exits non-zero'
         value: ${{ jobs.run.outputs.runs }}
 
 env:
@@ -25,12 +25,25 @@ env:
 
 jobs:
   run:
-    name: hermetic (${{ inputs.cli }})
+    name: hermetic (${{ inputs.cli }}, ${{ matrix.os }})
     if: ${{ inputs.full }}
-    # The recorded workspace's realpath (`/private/tmp`) and kqueue liveness are
-    # macOS's, the platform the corpus was recorded on.
-    runs-on: macos-latest
-    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The recorded workspace's realpath (`/private/tmp`) and kqueue
+          # liveness are macOS's, the platform the corpus was recorded on.
+          - { os: macos, runner: macos-latest, timeout: 30 }
+          - { os: windows, runner: windows-latest, timeout: 45 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    defaults:
+      run:
+        # Windows' default is pwsh.
+        shell: bash
+    # Every leg writes the same `runs`: a matrix job's output is the last leg's
+    # to finish (docs.github.com workflow-syntax, "Using job outputs in a
+    # matrix job").
     outputs:
       runs: ${{ steps.run.outputs.runs }}
     steps:
@@ -55,7 +68,7 @@ jobs:
       - if: steps.run.outputs.exit != '0'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.run.outputs.runs }}
+          name: ${{ steps.run.outputs.runs }}-${{ matrix.os }}
           path: target/hermetic/runs
           retention-days: 7
           if-no-files-found: error

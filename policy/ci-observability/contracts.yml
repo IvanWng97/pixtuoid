@@ -105,19 +105,23 @@
 - id: hermetic-nightly-files-the-runs-the-tier-named
   file: .github/workflows/hermetic-nightly.yml
   why: >-
-    The issue is filed from the runs the tier uploaded, under the name its
-    upload chose and its `runs` output hands on. A name rebuilt here can
-    disagree with it and find nothing.
+    The issue is filed from the runs each OS leg uploaded, under the prefix the
+    tier's `runs` output hands on, each leg's in its own directory: a name
+    rebuilt here can disagree with it and find nothing, and merged legs would
+    overwrite one report with the other.
   assert: |
-    [.jobs.file.steps[] | select((.uses // "") | startswith("actions/download-artifact")) | .with.name]
-    == ["${{ needs.drift.outputs.runs }}"]
+    [.jobs.file.steps[] | select((.uses // "") | startswith("actions/download-artifact")) | .with]
+    == [{"pattern": "${{ needs.drift.outputs.runs }}-*"}]
   break:
     - |
       .jobs.file.steps |= map(
-        if (.uses // "") | startswith("actions/download-artifact") then .with.name = "hermetic-runs-${{ github.run_id }}" else . end)
+        if (.uses // "") | startswith("actions/download-artifact") then .with.pattern = "hermetic-runs-${{ github.run_id }}-*" else . end)
     - |
       .jobs.file.steps |= map(
-        if (.uses // "") | startswith("actions/download-artifact") then .with = {"merge-multiple": true} else . end)
+        if (.uses // "") | startswith("actions/download-artifact") then .with["merge-multiple"] = true else . end)
+    - |
+      .jobs.file.steps |= map(
+        if (.uses // "") | startswith("actions/download-artifact") then .with = {"name": "${{ needs.drift.outputs.runs }}"} else . end)
 
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml
