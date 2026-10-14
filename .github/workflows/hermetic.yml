@@ -16,7 +16,7 @@ on:
         default: pinned
     outputs:
       runs:
-        description: 'The prefix each OS leg uploads its runs under, as `<runs>-<os>`, when `just hermetic` exits non-zero'
+        description: 'The stem each OS leg uploads its runs under, as `<runs><os>`, when `just hermetic` exits non-zero'
         value: ${{ jobs.run.outputs.runs }}
 
 env:
@@ -41,11 +41,14 @@ jobs:
       run:
         # Windows' default is pwsh.
         shell: bash
-    # Every leg writes the same `runs`: a matrix job's output is the last leg's
-    # to finish (docs.github.com workflow-syntax, "Using job outputs in a
-    # matrix job").
+    # Every leg's artifact is `<RUNS><os>`. A matrix job's output is the last
+    # leg's to finish (docs.github.com workflow-syntax, "Using job outputs in a
+    # matrix job"), so it comes from env, which every leg sets whatever step
+    # it stopped at.
+    env:
+      RUNS: hermetic-runs-${{ github.run_id }}-${{ github.run_attempt }}-
     outputs:
-      runs: ${{ steps.run.outputs.runs }}
+      runs: ${{ env.RUNS }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -64,11 +67,10 @@ jobs:
           set +e
           just hermetic --cli "$CLI"
           echo "exit=$?" >> "$GITHUB_OUTPUT"
-          echo "runs=hermetic-runs-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
       - if: steps.run.outputs.exit != '0'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.run.outputs.runs }}-${{ matrix.os }}
+          name: ${{ env.RUNS }}${{ matrix.os }}
           path: target/hermetic/runs
           retention-days: 7
           if-no-files-found: error

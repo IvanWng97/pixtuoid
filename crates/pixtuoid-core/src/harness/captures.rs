@@ -52,16 +52,24 @@ pub fn transcripts_under(source: &str, root: &Path) -> Vec<PathBuf> {
 /// of the host's.
 pub fn capture_workspace() -> std::io::Result<PathBuf> {
     #[cfg(windows)]
-    {
-        use crate::harness::host::{KnownFolder, known_folder};
-        Ok(known_folder(KnownFolder::ProgramData)?
-            .join("pixtuoid-capture")
-            .join("proj"))
-    }
+    let root = crate::harness::host::known_folder(crate::harness::host::KnownFolder::ProgramData)?;
     #[cfg(not(windows))]
-    {
-        Ok(PathBuf::from("/tmp/pixtuoid-capture/proj"))
-    }
+    let root = PathBuf::from("/tmp");
+    Ok(root.join(CAPTURE_BASE).join(CAPTURE_PROJ))
+}
+
+/// The directory a capture workspace sits in, which a recorder clears and
+/// recreates, and the workspace's own name inside it.
+const CAPTURE_BASE: &str = "pixtuoid-capture";
+const CAPTURE_PROJ: &str = "proj";
+
+/// The base a recorder may clear for the workspace `ws`: only that of an
+/// absolute `<root>/pixtuoid-capture/proj`, so no path an operator names can
+/// make it clear a directory of theirs.
+pub fn capture_base(ws: &Path) -> Option<&Path> {
+    (ws.is_absolute() && ws.ends_with(Path::new(CAPTURE_BASE).join(CAPTURE_PROJ)))
+        .then(|| ws.parent())
+        .flatten()
 }
 
 /// Why this host may not write the committed corpus, which pins Unix
@@ -250,6 +258,28 @@ pub fn captures(root: &Path) -> Vec<Capture> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_capture_workspace_names_a_base_to_clear() {
+        let ws = capture_workspace().expect("the workspace");
+        assert_eq!(capture_base(&ws), ws.parent());
+        let root = std::env::temp_dir();
+        let named = root.join(CAPTURE_BASE).join(CAPTURE_PROJ);
+        assert_eq!(
+            capture_base(&named),
+            Some(root.join(CAPTURE_BASE).as_path())
+        );
+        assert_eq!(
+            capture_base(&root.join("proj")),
+            None,
+            "its parent is the operator's"
+        );
+        assert_eq!(
+            capture_base(&Path::new(CAPTURE_BASE).join(CAPTURE_PROJ)),
+            None,
+            "relative"
+        );
+    }
 
     #[test]
     fn a_version_is_the_first_line_a_successful_run_printed() {

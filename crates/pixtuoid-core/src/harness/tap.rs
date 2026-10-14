@@ -53,7 +53,7 @@ impl Endpoint {
         Self(path.into())
     }
 
-    /// What `PIXTUOID_SOCKET` and `pixtuoid run --socket` take.
+    /// What [`Self::ENV`] and `pixtuoid run --socket` take.
     pub fn path(&self) -> &Path {
         &self.0
     }
@@ -118,8 +118,15 @@ fn pipe_accepting(name: &Path) -> bool {
 #[derive(Debug)]
 pub struct Tap {
     lines: Arc<Mutex<Vec<String>>>,
-    /// Why the listener stopped accepting, once it has: every later payload is lost.
-    stopped: Arc<Mutex<Option<String>>>,
+    serving: Mutex<Serving>,
+}
+
+/// The listener's thread, which returns only once the listener stops, with
+/// why: every later payload is lost.
+#[derive(Debug)]
+struct Serving {
+    thread: Option<std::thread::JoinHandle<String>>,
+    stopped: Option<String>,
 }
 
 impl Tap {
@@ -136,20 +143,19 @@ impl Tap {
     pub fn bind(at: &Endpoint, tee: Option<Endpoint>) -> std::io::Result<Self> {
         let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&lines);
-        let stopped: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let why = Arc::clone(&stopped);
         let ready = at.clone();
         let at = at.path().to_path_buf();
         let (bound_tx, bound_rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
+        let thread = std::thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
             {
                 Ok(rt) => rt,
                 Err(e) => {
+                    let why = e.to_string();
                     let _ = bound_tx.send(Err(e));
-                    return;
+                    return why;
                 }
             };
             rt.block_on(async move {
@@ -161,17 +167,21 @@ impl Tap {
                         } else {
                             std::io::ErrorKind::Other
                         };
-                        let _ = bound_tx.send(Err(std::io::Error::new(kind, format!("{e:#}"))));
-                        return;
+                        let why = format!("{e:#}");
+                        let _ = bound_tx.send(Err(std::io::Error::new(kind, why.clone())));
+                        return why;
                     }
                 };
                 let _ = bound_tx.send(Ok(()));
                 let tee = Arc::new(tee);
-                let served = listener
+                match listener
                     .serve(move |conn| keep(conn, Arc::clone(&sink), Arc::clone(&tee)))
-                    .await;
-                note_stop(&why, served);
-            });
+                    .await
+                {
+                    Ok(()) => "the listener returned".to_owned(),
+                    Err(e) => format!("{e:#}"),
+                }
+            })
         });
         bound_rx.recv().map_err(std::io::Error::other)??;
         let started = std::time::Instant::now();
@@ -184,7 +194,18 @@ impl Tap {
             }
             std::thread::sleep(READY_POLL);
         }
-        Ok(Self { lines, stopped })
+        Ok(Self::watching(lines, thread))
+    }
+
+    /// A tap over `lines` whose listener runs on `thread`.
+    fn watching(lines: Arc<Mutex<Vec<String>>>, thread: std::thread::JoinHandle<String>) -> Self {
+        Self {
+            lines,
+            serving: Mutex::new(Serving {
+                thread: Some(thread),
+                stopped: None,
+            }),
+        }
     }
 
     fn len(&self) -> usize {
@@ -216,19 +237,18 @@ impl Tap {
 
     /// Why the listener stopped accepting, if it has.
     pub fn stopped(&self) -> Option<String> {
-        self.stopped
+        let mut serving = self
+            .serving
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-}
-
-/// Keep why a listener that should serve forever returned.
-fn note_stop(slot: &Mutex<Option<String>>, served: anyhow::Result<()>) {
-    if let Err(e) = served {
-        *slot
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{e:#}"));
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(thread) = serving.thread.take_if(|t| t.is_finished()) {
+            serving.stopped = Some(
+                thread
+                    .join()
+                    .unwrap_or_else(|_| "the listener panicked".to_owned()),
+            );
+        }
+        serving.stopped.clone()
     }
 }
 
@@ -337,16 +357,19 @@ mod tests {
 
     #[test]
     fn a_listener_that_stops_is_reported_with_its_reason() {
-        let slot = Mutex::new(None);
-        note_stop(&slot, Ok(()));
-        assert_eq!(*slot.lock().expect("slot"), None);
-        note_stop(&slot, Err(anyhow::anyhow!("re-creating the pipe failed")));
         let d = private_dir();
-        let tap = Tap::bind(&Endpoint::in_dir(d.path(), "tap"), None).expect("tap");
-        assert_eq!(tap.stopped(), None, "a live listener");
-        *tap.stopped.lock().expect("slot") = slot.into_inner().expect("slot");
+        let live = Tap::bind(&Endpoint::in_dir(d.path(), "tap"), None).expect("tap");
+        assert_eq!(live.stopped(), None, "a live listener");
+        let gone = Tap::watching(
+            Arc::default(),
+            std::thread::spawn(|| "re-creating the pipe failed".to_owned()),
+        );
+        let started = std::time::Instant::now();
+        while gone.stopped().is_none() && started.elapsed() < READY_BOUND {
+            std::thread::sleep(READY_POLL);
+        }
         assert_eq!(
-            tap.stopped().as_deref(),
+            gone.stopped().as_deref(),
             Some("re-creating the pipe failed")
         );
     }

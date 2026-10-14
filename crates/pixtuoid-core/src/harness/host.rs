@@ -14,8 +14,9 @@ use crate::win32::nul_terminated;
 pub(crate) enum KnownFolder {
     /// `FOLDERID_ProgramData`.
     ProgramData,
-    /// `FOLDERID_Profile`: the user's home as Rust's `dirs` and the CLIs built
-    /// on it resolve `~`, whatever `USERPROFILE` says.
+    /// `FOLDERID_Profile`: `~` as the `dirs` crate resolves it on Windows,
+    /// whatever `USERPROFILE` says (dirs `src/win.rs:5` @00511bdc25, through
+    /// dirs-sys `src/lib.rs:172-173` @8bcd4aa2c3).
     Profile,
 }
 
@@ -84,8 +85,8 @@ pub fn known_folders_expanded(path: &str) -> Option<PathBuf> {
 
 /// Owner, SYSTEM and Administrators in full, Users read and execute, nothing
 /// inherited: a parent like ProgramData would otherwise pass every local user
-/// its create right. Users must keep read: codex's unelevated sandbox token
-/// cannot enter a workspace without it.
+/// its create right. Users must keep read: on windows-latest, codex's
+/// unelevated sandbox token could not read the workspace without it.
 #[cfg(windows)]
 const PRIVATE_DIR: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)(A;OICI;FRFX;;;BU)";
 

@@ -38,7 +38,7 @@ mod recorder {
     use pixtuoid_core::harness::tap::{Endpoint, Tap};
     use pixtuoid_core::harness::{
         CAPTURE_NOTE, CAPTURE_RECORD, CORPUS_REFUSAL, CaptureRecord, HOOK_PAYLOADS, PROVENANCE,
-        capture_workspace, jsonl_files_under, version_answer,
+        capture_base, capture_workspace, jsonl_files_under, version_answer,
     };
 
     /// Where a driver names the CLI it drives, a command or the path to its
@@ -58,7 +58,7 @@ mod recorder {
         /// exactly where a renamed upstream field lands, so drift evidence must
         /// keep it; these bytes are never committed.
         out: Option<PathBuf>,
-        /// Forward each payload, as received, to this socket: a headless pixtuoid
+        /// Forward each payload, as received, to this endpoint: a headless pixtuoid
         /// renders the same run the recorder records.
         tee: Option<PathBuf>,
         /// Refuse a harvest root outside this directory, a sandbox the caller
@@ -107,7 +107,15 @@ mod recorder {
                 PROMOTE => options.promote = Some(PathBuf::from(take(&mut args, PROMOTE)?)),
                 CLI_VERSION => options.cli_version = Some(take(&mut args, CLI_VERSION)?),
                 WORKSPACE => {
-                    options.workspace = Some(PathBuf::from(take(&mut args, WORKSPACE)?));
+                    let ws = PathBuf::from(take(&mut args, WORKSPACE)?);
+                    if capture_base(&ws).is_none() {
+                        return Err(format!(
+                            "{WORKSPACE} {} is not an absolute .../pixtuoid-capture/proj: \
+                             the recorder clears its parent",
+                            ws.display()
+                        ));
+                    }
+                    options.workspace = Some(ws);
                 }
                 ENV => {
                     let value = take(&mut args, ENV)?;
@@ -246,7 +254,7 @@ mod recorder {
         }
 
         let (cli, version) = match options.cli_version {
-            Some(version) => (registered_cli(descriptor), version),
+            Some(version) => (registered_cli(descriptor)?, version),
             None => {
                 let named = std::fs::read_to_string(named_cli(sandbox.path())).ok();
                 identity(&cmd[0], named.as_deref(), probe_version)
@@ -469,7 +477,9 @@ mod recorder {
     // ── plumbing ─────────────────────────────────────────────────────────────────
 
     fn prepare_workspace(ws: PathBuf) -> std::io::Result<PathBuf> {
-        let base = ws.parent().expect("the workspace has a parent");
+        let base = capture_base(&ws).ok_or_else(|| {
+            std::io::Error::other(format!("{} is not a capture workspace", ws.display()))
+        })?;
         // A fixed name in a shared directory is pre-plantable; a foreign owner is
         // refused, not removed — under the sticky bit the remove fails and the
         // capture lands in theirs. Asked of the entry, so a dangling planted link
@@ -606,11 +616,14 @@ mod recorder {
     }
 
     /// The CLI's own name, as its registry row asks it its version.
-    fn registered_cli(descriptor: &registry::SourceDescriptor) -> String {
+    fn registered_cli(descriptor: &registry::SourceDescriptor) -> std::io::Result<String> {
         descriptor
             .version_probe
             .and_then(|probe| probe.first())
-            .map_or_else(|| descriptor.name.to_owned(), |cli| (*cli).to_owned())
+            .map(|cli| (*cli).to_owned())
+            .ok_or_else(|| {
+                std::io::Error::other(format!("{} has no version probe", descriptor.name))
+            })
     }
 
     /// The CLI a capture ran, and its version, asked of that CLI alone: a
@@ -1044,6 +1057,19 @@ mod recorder {
         }
 
         #[test]
+        fn a_workspace_whose_parent_is_not_a_capture_base_is_refused() {
+            let args = |ws: &Path| vec![WORKSPACE.to_owned(), ws.display().to_string()];
+            let root = std::env::temp_dir();
+            assert!(
+                parse_options(args(&root.join("proj"))).is_err(),
+                "its parent is the operator's"
+            );
+            let ws = root.join("pixtuoid-capture").join("proj");
+            let (o, _) = parse_options(args(&ws)).expect("a capture workspace");
+            assert_eq!(o.workspace, Some(ws));
+        }
+
+        #[test]
         fn only_a_unix_host_writes_the_corpus() {
             let raw = Options {
                 out: Some(PathBuf::from("raw")),
@@ -1062,6 +1088,7 @@ mod recorder {
         #[test]
         fn leading_option_pairs_are_options_and_the_rest_is_positional() {
             let args = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+            let ws = capture_workspace().expect("the workspace");
             let (o, rest) = parse_options(args(&[
                 "--tee",
                 "/s",
@@ -1074,14 +1101,14 @@ mod recorder {
                 "--cli-version",
                 "1.2",
                 "--workspace",
-                "/ws",
+                &ws.display().to_string(),
                 "codex",
                 "tool-run",
                 "codex",
             ]))
             .expect("parse");
             assert_eq!(o.cli_version.as_deref(), Some("1.2"));
-            assert_eq!(o.workspace, Some(PathBuf::from("/ws")));
+            assert_eq!(o.workspace, Some(ws));
             assert_eq!(o.out, Some(PathBuf::from("/o")));
             assert_eq!(o.tee, Some(PathBuf::from("/s")));
             assert_eq!(o.within, Some(PathBuf::from("/w")));

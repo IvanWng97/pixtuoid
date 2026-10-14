@@ -105,17 +105,17 @@
 - id: hermetic-nightly-files-the-runs-the-tier-named
   file: .github/workflows/hermetic-nightly.yml
   why: >-
-    The issue is filed from the runs each OS leg uploaded, under the prefix the
+    The issue is filed from the runs each OS leg uploaded, under the stem the
     tier's `runs` output hands on, each leg's in its own directory: a name
     rebuilt here can disagree with it and find nothing, and merged legs would
     overwrite one report with the other.
   assert: |
     [.jobs.file.steps[] | select((.uses // "") | startswith("actions/download-artifact")) | .with]
-    == [{"pattern": "${{ needs.drift.outputs.runs }}-*"}]
+    == [{"pattern": "${{ needs.drift.outputs.runs }}*"}]
   break:
     - |
       .jobs.file.steps |= map(
-        if (.uses // "") | startswith("actions/download-artifact") then .with.pattern = "hermetic-runs-${{ github.run_id }}-*" else . end)
+        if (.uses // "") | startswith("actions/download-artifact") then .with.pattern = "hermetic-runs-${{ github.run_id }}*" else . end)
     - |
       .jobs.file.steps |= map(
         if (.uses // "") | startswith("actions/download-artifact") then .with["merge-multiple"] = true else . end)

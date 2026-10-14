@@ -31,7 +31,7 @@ jobs:
       # Each failed leg's runs, in a directory named after its artifact.
       - uses: actions/download-artifact@v8
         with:
-          pattern: ${{ needs.drift.outputs.runs }}-*
+          pattern: ${{ needs.drift.outputs.runs }}*
 
       - name: Open or update tracking issue
         env:
