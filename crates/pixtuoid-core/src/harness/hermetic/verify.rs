@@ -425,15 +425,24 @@ fn started_in(
         ));
     }
     let want = canonical(workspace);
-    let cwds: Vec<PathBuf> = events
+    let starts: Vec<&Path> = events
         .iter()
         .filter_map(|e| match e {
-            AgentEvent::SessionStart { cwd, .. } => Some(canonical(cwd)),
+            AgentEvent::SessionStart { cwd, .. } => Some(cwd.as_path()),
             _ => None,
         })
         .collect();
-    if cwds.is_empty() {
+    // An empty one is a line that carries no cwd, which a later event back-fills
+    // (grok's spawn line).
+    let cwds: Vec<PathBuf> = starts
+        .iter()
+        .filter(|c| !c.as_os_str().is_empty())
+        .map(|c| canonical(c))
+        .collect();
+    if starts.is_empty() {
         findings.push((Label::Fail, "no SessionStart decoded".into()));
+    } else if cwds.is_empty() {
+        findings.push((Label::Fail, "no SessionStart named a cwd".into()));
     } else if let Some(bad) = cwds.iter().find(|c| **c != want) {
         findings.push((
             Label::Fail,
@@ -677,6 +686,9 @@ mod tests {
         "agents=[ds\u{b7}proj@0:waiting(bash: escalate)]\nagents=[] daemons=[]\n";
     const DS_DELEGATE_SCENE: &str = "agents=[ds\u{b7}proj@0:active(Delegating), \
                                      ds\u{b7}proj@1:active(read)]\nagents=[] daemons=[]\n";
+    const GK_SCENE: &str = "agents=[gk\u{b7}proj@0:active(read_file)]\nagents=[] daemons=[]\n";
+    const GK_DELEGATE_SCENE: &str = "agents=[gk\u{b7}proj@0:active(Delegating), \
+                                     Read the note@1:active(read_file)]\nagents=[] daemons=[]\n";
 
     #[test]
     fn a_recorded_dsh_permission_run_passes() {
@@ -847,6 +859,24 @@ mod tests {
     }
 
     #[test]
+    fn a_recorded_grok_run_passes_each_scenario() {
+        for (shape, scene) in [
+            (Shape::ToolRun, GK_SCENE),
+            (Shape::Subagent, GK_DELEGATE_SCENE),
+        ] {
+            let d = recorded("grok", shape, scene);
+            let v = verify(d.path()).expect("verify");
+            assert_eq!(
+                v.label(),
+                Label::Pass,
+                "{}: {:?}",
+                shape.name(),
+                v.findings()
+            );
+        }
+    }
+
+    #[test]
     fn a_recorded_claude_code_tool_run_passes() {
         let d = run_from("claude-code", "tool-run-recorded", CC_SCENE);
         let v = verify(d.path()).expect("verify");
@@ -881,6 +911,28 @@ mod tests {
             has(&v, Label::Fail, "is not the workspace"),
             "{:?}",
             v.findings()
+        );
+    }
+
+    #[test]
+    fn a_session_start_naming_no_cwd_is_judged_by_the_ones_that_do() {
+        let start = |id: &str, cwd: &str| AgentEvent::SessionStart {
+            agent_id: crate::AgentId::from_parts("grok", id),
+            source: "grok".into(),
+            session_id: id.into(),
+            cwd: cwd.into(),
+            parent_id: None,
+        };
+        let ws = Path::new("/w");
+        let mut f = Vec::new();
+        // grok's spawn line registers the child before anything names its cwd.
+        started_in(&[start("p", "/w"), start("c", "")], ws, 2, &mut f);
+        assert!(f.is_empty(), "{f:?}");
+        started_in(&[start("p", ""), start("c", "")], ws, 2, &mut f);
+        assert!(
+            f.iter()
+                .any(|(l, m)| *l == Label::Fail && m.contains("named a cwd")),
+            "{f:?}"
         );
     }
 

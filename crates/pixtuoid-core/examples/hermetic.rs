@@ -383,7 +383,7 @@ mod run {
             for f in ["package.json", "package-lock.json"] {
                 std::fs::copy(src.join(f), dir.join(f))?;
             }
-            npm(&dir, &["ci", "--ignore-scripts"])?;
+            succeed(npm(&dir, &["ci", "--ignore-scripts"]))?;
             Ok(Self {
                 bin: dir.join("node_modules/.bin/llmock"),
                 version,
@@ -413,19 +413,39 @@ mod run {
         std::fs::write(dir.join(INSTALLED), "")
     }
 
-    fn npm(dir: &Path, args: &[&str]) -> std::io::Result<()> {
-        let status = tool("npm")
-            .args(args)
+    fn npm(dir: &Path, args: &[&str]) -> Command {
+        let mut c = tool("npm");
+        c.args(args)
             .args(["--no-audit", "--no-fund"])
-            .current_dir(dir)
-            .status()?;
+            .current_dir(dir);
+        c
+    }
+
+    /// Run `c` to success. Its error names the program and arguments alone: a
+    /// `Command`'s `Debug` prints its environment, npm's credentials included.
+    fn succeed(mut c: Command) -> std::io::Result<()> {
+        let status = c.status()?;
         if status.success() {
-            Ok(())
-        } else {
-            Err(std::io::Error::other(format!(
-                "npm {args:?} exited {status}"
-            )))
+            return Ok(());
         }
+        let args: Vec<_> = c.get_args().collect();
+        Err(std::io::Error::other(format!(
+            "{} {args:?} exited {status}",
+            c.get_program().to_string_lossy()
+        )))
+    }
+
+    /// `npm install <pinned>` into `dir`. An install script writes where its
+    /// CLI's home variables point: grok's extracts the binary into
+    /// `$GROK_HOME/bin` and repoints the `grok` there
+    /// (`crates/codegen/xai-grok-pager/npm/grok/bin/postinstall.js:26-27`), so
+    /// each points into the install, never at the operator's.
+    fn npm_install(p: &Profile, dir: &Path, pinned: &str) -> Command {
+        let mut c = npm(dir, &["install", pinned]);
+        for var in p.home_vars() {
+            c.env(var, dir.join("homes").join(var));
+        }
+        c
     }
 
     /// The CLI at the version this run tests, installed into its own project the
@@ -452,7 +472,7 @@ mod run {
                 "allowScripts": { &pinned: true },
             });
             std::fs::write(dir.join("package.json"), project.to_string())?;
-            npm(dir, &["install", &pinned])
+            succeed(npm_install(p, dir, &pinned))
         })?;
         Ok(prefix.join("node_modules/.bin"))
     }
@@ -497,12 +517,7 @@ mod run {
             ] {
                 env.push((var.into(), at(rel)?.into()));
             }
-            let homes = p
-                .descriptor()
-                .home_env
-                .into_iter()
-                .chain(p.homes.iter().copied());
-            for var in homes {
+            for var in p.home_vars() {
                 env.push((var.into(), at(&format!("homes/{var}"))?.into()));
             }
             let expand = |t: &str| {
@@ -1014,6 +1029,24 @@ mod run {
                         "{}: {k} misses the CLI's `--env`",
                         p.source
                     );
+                }
+            }
+        }
+
+        #[test]
+        fn an_install_points_every_home_its_cli_reads_into_the_install() {
+            let dir = Path::new("/tier/cli/x-1.0.0");
+            for p in PROFILES {
+                let install = npm_install(p, dir, "x@1.0.0");
+                let homes: Vec<(&std::ffi::OsStr, Option<&std::ffi::OsStr>)> =
+                    install.get_envs().collect();
+                for var in p.home_vars() {
+                    let at = homes
+                        .iter()
+                        .find(|(k, _)| *k == var)
+                        .and_then(|(_, v)| *v)
+                        .unwrap_or_else(|| panic!("{}: {var} is the operator's", p.source));
+                    assert!(Path::new(at).starts_with(dir), "{}: {var}", p.source);
                 }
             }
         }

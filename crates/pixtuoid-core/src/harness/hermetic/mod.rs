@@ -18,6 +18,9 @@ pub mod verify;
 /// accepts any, and a real provider must refuse it.
 pub const DUMMY_KEY: &str = "hermetic-dummy-key";
 
+/// The scripted model's `/v1` base, as a profile's env spells it.
+const AIMOCK_V1: &str = "http://127.0.0.1:{port}/v1";
+
 /// What a `system_config` path spells the operator's user name as.
 pub const USER_PLACEHOLDER: &str = "{user}";
 /// What a script spells [`CAPTURE_NOTE`](crate::harness::CAPTURE_NOTE) as.
@@ -126,6 +129,15 @@ impl Profile {
     pub fn descriptor(&self) -> &'static registry::SourceDescriptor {
         registry::descriptor_for(self.source).expect("a profile names a registered source")
     }
+
+    /// Every home variable the CLI reads that the tier points into its own
+    /// directories: the registry row's and the profile's.
+    pub fn home_vars(&self) -> impl Iterator<Item = &'static str> {
+        self.descriptor()
+            .home_env
+            .into_iter()
+            .chain(self.homes.iter().copied())
+    }
 }
 
 /// A run directory's manifest, beside the raw capture.
@@ -181,6 +193,28 @@ fn dsh_event(v: &Value) -> Option<&str> {
         "tool_result" => "tool/result",
         "approval_asked" => "approval/asked",
         "approval_decided" => "approval/decided",
+        _ => return None,
+    })
+}
+
+/// The registration a grok envelope's `hookEventName` answers to: the wire
+/// spells each event's snake_case display, and `SubagentEnd`'s is
+/// `SubagentStop`'s (`crates/codegen/xai-grok-hooks/src/event.rs:78-180`).
+fn grok_event(v: &Value) -> Option<&str> {
+    Some(match v.get("hookEventName")?.as_str()? {
+        "session_start" => "SessionStart",
+        "user_prompt_submit" => "UserPromptSubmit",
+        "pre_tool_use" => "PreToolUse",
+        "post_tool_use" => "PostToolUse",
+        "post_tool_use_failure" => "PostToolUseFailure",
+        "permission_denied" => "PermissionDenied",
+        "notification" => "Notification",
+        "stop" => "Stop",
+        "stop_failure" => "StopFailure",
+        "stop_cancelled" => "StopCancelled",
+        "subagent_start" => "SubagentStart",
+        "subagent_stop" => "SubagentStop",
+        "session_end" => "SessionEnd",
         _ => return None,
     })
 }
@@ -447,6 +481,98 @@ wire_api = "responses"
         event_name: dsh_event,
         not_yet_fields: &[],
     },
+    // grok's cites are `xai-org/grok-build` at `37949780c1`, the monorepo sync
+    // nearest 1.0.25: the repo tags no release.
+    Profile {
+        source: "grok",
+        package: Package::Npm("@xai-official/grok"),
+        // Headless automation runs always-approve
+        // (`crates/codegen/xai-grok-pager/docs/user-guide/22-permissions-and-safety.md:76-94`),
+        // which a blocking spawn needs: `-p` cancels every prompt
+        // (`crates/codegen/xai-grok-pager/src/headless.rs:1882-1901`).
+        invocation: &["grok", "--always-approve", "-p", "{prompt}"],
+        // What upstream's own run against a mock server sets: every service
+        // URL on it, and the telemetry, feedback, update and unscripted
+        // side-request switches
+        // (`crates/codegen/xai-grok-test-support/src/sandbox.rs:275-288`, `:329-348`).
+        env: &[
+            ("XAI_API_KEY", "{key}"),
+            ("GROK_XAI_API_BASE_URL", AIMOCK_V1),
+            ("GROK_CLI_CHAT_PROXY_BASE_URL", AIMOCK_V1),
+            ("GROK_MODELS_BASE_URL", AIMOCK_V1),
+            ("GROK_FEEDBACK_BASE_URL", AIMOCK_V1),
+            ("GROK_TRACE_UPLOAD_URL", AIMOCK_V1),
+            ("GROK_MANAGED_CONFIG_URL", AIMOCK_V1),
+            ("GROK_CODE_WEB_URL", AIMOCK_V1),
+            ("GROK_CONVERSATIONS_BASE_URL", AIMOCK_V1),
+            ("GROK_TELEMETRY_ENABLED", "false"),
+            ("GROK_TELEMETRY_MIXPANEL_ENABLED", "false"),
+            ("GROK_TELEMETRY_MIXPANEL_TOKEN", ""),
+            ("GROK_TELEMETRY_EVENTS_URL", ""),
+            ("GROK_TELEMETRY_EVENTS_API_KEY", ""),
+            ("GROK_TELEMETRY_TRACE_UPLOAD", "false"),
+            ("GROK_FEEDBACK_ENABLED", "false"),
+            ("GROK_TRACE_UPLOAD", "false"),
+            ("GROK_INSTRUMENTATION", "disabled"),
+            ("OTEL_SDK_DISABLED", "true"),
+            ("DISABLE_TELEMETRY", "1"),
+            ("GROK_DISABLE_AUTOUPDATER", "1"),
+            ("GROK_PROMPT_SUGGESTIONS", "false"),
+            ("GROK_TURN_SUMMARY", "0"),
+        ],
+        homes: &[],
+        // Its system config, and the Claude Code managed settings it imports
+        // (`crates/codegen/xai-grok-config/src/paths.rs:5-9`, `:23-29`).
+        system_config: &[
+            "/etc/grok",
+            "/Library/Application Support/ClaudeCode/managed-settings.json",
+            "/etc/claude-code/managed-settings.json",
+        ],
+        // Instructions, rules and project config stop at the git work tree
+        // (`crates/codegen/xai-grok-agent/src/repo.rs:23-52`), which the
+        // recorder's `git init` makes the workspace.
+        ancestor_config: &[],
+        config: &[],
+        scenarios: &[
+            Scenario {
+                shape: Shape::ToolRun,
+                expects: &[
+                    "SessionStart",
+                    "UserPromptSubmit",
+                    "PreToolUse",
+                    "PostToolUse",
+                    "Stop",
+                    "SessionEnd",
+                ],
+                fixture: "fixtures/grok/tool-run-hermetic",
+            },
+            Scenario {
+                shape: Shape::Subagent,
+                expects: &[
+                    "SessionStart",
+                    "UserPromptSubmit",
+                    "PreToolUse",
+                    "SubagentStart",
+                    "PostToolUse",
+                    "SubagentStop",
+                    "Stop",
+                    "SessionEnd",
+                ],
+                fixture: "grok/fixtures/subagent-hermetic",
+            },
+        ],
+        not_yet: &[
+            "PostToolUseFailure",
+            "PermissionDenied",
+            "Notification",
+            "StopFailure",
+            "StopCancelled",
+            "SubagentEnd",
+        ],
+        event_name: grok_event,
+        // A shell call's; the scripted turns read a file and spawn a child.
+        not_yet_fields: &[("hook:PreToolUse", "/toolInput/command")],
+    },
 ];
 
 /// Every registered source without a profile, and why.
@@ -459,7 +585,6 @@ pub const NOT_HERMETIC: &[(&str, Absence)] = &[
     ("openclaw", Absence::AwaitingProfile),
     ("copilot", Absence::AwaitingProfile),
     ("hermes", Absence::AwaitingProfile),
-    ("grok", Absence::AwaitingProfile),
     ("omp", Absence::AwaitingProfile),
     ("kimi", Absence::AwaitingProfile),
 ];
@@ -562,7 +687,7 @@ mod tests {
     fn a_config_file_lives_under_a_home_the_sandbox_owns() {
         for p in PROFILES {
             for c in p.config {
-                let owned = p.homes.contains(&c.home) || p.descriptor().home_env == Some(c.home);
+                let owned = p.home_vars().any(|h| h == c.home);
                 assert!(owned, "{}: {} is not a sandboxed home", p.source, c.home);
             }
         }

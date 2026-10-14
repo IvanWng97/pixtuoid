@@ -1,0 +1,13 @@
+{
+  "origin": "recorded",
+  "cli": "grok",
+  "version": "grok 1.0.25 (f7e67d6988e2)",
+  "captured": "2026-10-14",
+  "command": "just hermetic --record grok",
+  "deidentified": {
+    "method": "decoder-allowlist",
+    "blanked": 237
+  },
+  "aimock": "1.43.0",
+  "script": "tests/sources/hermetic/grok/subagent.json"
+}
