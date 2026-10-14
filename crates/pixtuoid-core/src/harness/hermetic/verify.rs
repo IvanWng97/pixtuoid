@@ -12,10 +12,10 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::{MANIFEST, Manifest, Profile, SCENE_LOG, Scenario, Shape, profile};
-use crate::AgentEvent;
 use crate::harness::captures::jsonl_files_under;
 use crate::harness::reads::{blank_of, child_pointer, is_hook_envelope, is_shim_stamp, strips};
 use crate::harness::{Drive, Driven, HOOK_PAYLOADS, PROVENANCE, Reach, captures};
+use crate::{AgentEvent, AgentId};
 
 /// The tracing target every drift breadcrumb rides (`source::drift::TARGET`).
 const BREADCRUMB_TARGET: &str = crate::source::drift::TARGET;
@@ -426,26 +426,54 @@ fn started_in(
         ));
     }
     let want = canonical(workspace);
-    let starts: Vec<(&Path, bool)> = events
-        .iter()
-        .filter_map(|e| match e {
-            AgentEvent::SessionStart { cwd, parent_id, .. } => {
-                Some((cwd.as_path(), parent_id.is_some()))
-            }
-            _ => None,
-        })
-        .collect();
-    // A child's registration may carry no cwd, which a later event back-fills
-    // (grok's spawn line).
-    let cwds: Vec<PathBuf> = starts
-        .iter()
-        .filter(|(cwd, child)| !(*child && cwd.as_os_str().is_empty()))
-        .map(|(cwd, _)| canonical(cwd))
-        .collect();
-    if starts.is_empty() {
+    // Every cwd each agent's events name, an empty one included.
+    let named = |agent: &AgentId| -> Vec<&Path> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::SessionStart { agent_id, cwd, .. } if agent_id == agent => {
+                    Some(cwd.as_path())
+                }
+                AgentEvent::Identity {
+                    agent_id,
+                    cwd: Some(cwd),
+                    ..
+                } if agent_id == agent => Some(cwd.as_path()),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut cwds: Vec<PathBuf> = Vec::new();
+    let mut started = false;
+    for e in events {
+        let AgentEvent::SessionStart {
+            agent_id,
+            cwd,
+            parent_id,
+            ..
+        } = e
+        else {
+            continue;
+        };
+        started = true;
+        if parent_id.is_none() || !cwd.as_os_str().is_empty() {
+            cwds.push(canonical(cwd));
+            continue;
+        }
+        // A child's registration may carry no cwd when its own later event
+        // names it (grok's spawn line, back-filled by the child's prompt hook).
+        let later: Vec<PathBuf> = named(agent_id)
+            .into_iter()
+            .filter(|c| !c.as_os_str().is_empty())
+            .map(canonical)
+            .collect();
+        if later.is_empty() {
+            findings.push((Label::Fail, "a child's cwd was never named".into()));
+        }
+        cwds.extend(later);
+    }
+    if !started {
         findings.push((Label::Fail, "no SessionStart decoded".into()));
-    } else if cwds.is_empty() {
-        findings.push((Label::Fail, "no SessionStart named a cwd".into()));
     } else if let Some(bad) = cwds.iter().find(|c| **c != want) {
         findings.push((
             Label::Fail,
@@ -918,35 +946,50 @@ mod tests {
     }
 
     #[test]
-    fn only_a_childs_registration_may_name_no_cwd() {
-        let start = |id: &str, cwd: &str, parent: Option<&str>| AgentEvent::SessionStart {
-            agent_id: crate::AgentId::from_parts("grok", id),
+    fn only_a_childs_registration_may_name_no_cwd_and_its_own_event_must() {
+        let id = |id: &str| crate::AgentId::from_parts("grok", id);
+        let start = |agent: &str, cwd: &str, parent: Option<&str>| AgentEvent::SessionStart {
+            agent_id: id(agent),
             source: "grok".into(),
-            session_id: id.into(),
+            session_id: agent.into(),
             cwd: cwd.into(),
-            parent_id: parent.map(|p| crate::AgentId::from_parts("grok", p)),
+            parent_id: parent.map(id),
+        };
+        let backfill = |agent: &str, cwd: &str| AgentEvent::Identity {
+            agent_id: id(agent),
+            source: "grok".into(),
+            session_id: agent.into(),
+            cwd: Some(cwd.into()),
+            pid: None,
         };
         let ws = Path::new("/w");
-        let mut f = Vec::new();
+        let judged = |events: &[AgentEvent]| {
+            let mut f = Vec::new();
+            started_in(events, ws, 2, &mut f);
+            Verdict::new(f)
+        };
+        let root = start("p", "/w", None);
         // grok's spawn line registers the child before anything names its cwd.
         let child = start("c", "", Some("p"));
-        started_in(&[start("p", "/w", None), child.clone()], ws, 2, &mut f);
-        assert!(f.is_empty(), "{f:?}");
-        // A root that loses its cwd is no child awaiting one.
-        started_in(
-            &[start("p", "", None), start("c", "/w", Some("p"))],
-            ws,
-            2,
-            &mut f,
-        );
-        let judged = |f: &[(Label, String)]| Verdict::new(f.to_vec());
+        let v = judged(&[root.clone(), child.clone(), backfill("c", "/w")]);
+        assert_eq!(v.label(), Label::Pass, "{:?}", v.findings());
+        // The root naming the workspace does not stand in for the child.
+        let v = judged(&[root.clone(), child.clone()]);
+        assert!(has(&v, Label::Fail, "never named"), "{:?}", v.findings());
+        // A back-filled cwd is held to the workspace too.
+        let v = judged(&[root, child, backfill("c", "/elsewhere")]);
         assert!(
-            has(&judged(&f), Label::Fail, "is not the workspace"),
-            "{f:?}"
+            has(&v, Label::Fail, "is not the workspace"),
+            "{:?}",
+            v.findings()
         );
-        f.clear();
-        started_in(&[child], ws, 1, &mut f);
-        assert!(has(&judged(&f), Label::Fail, "named a cwd"), "{f:?}");
+        // A root that loses its cwd is no child awaiting one.
+        let v = judged(&[start("p", "", None), start("c", "/w", Some("p"))]);
+        assert!(
+            has(&v, Label::Fail, "is not the workspace"),
+            "{:?}",
+            v.findings()
+        );
     }
 
     #[test]
