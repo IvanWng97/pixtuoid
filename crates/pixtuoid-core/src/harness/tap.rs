@@ -322,7 +322,12 @@ mod tests {
         let d = private_dir();
         let at = Endpoint::in_dir(d.path(), "tap");
         let tap = Tap::bind(&at, None).expect("tap");
-        deliver(&at, &"x".repeat(cap + 1));
+        // The tap closes once it holds the cap, so the write past it may break.
+        let _ = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(at.send("x".repeat(cap + 1).as_bytes()));
         tap.settle();
         assert_eq!(
             tap.take().iter().map(String::len).collect::<Vec<_>>(),
