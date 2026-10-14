@@ -183,22 +183,13 @@ scenario dir's relative path), so a CC hook (which coalesces on
 `transcript_path`) lines up with its JSONL file. Codex carries it too — to
 prove Codex *ignores* it and still coalesces on `session_id`.
 
-**Adding a CLI:** drop a new `fixtures/<source>/<scenario>/` dir — the decoder
-comes from the source's `SourceDescriptor` row in `source/registry.rs` (a
-hook-only row, `transcript: None`, ships only `hook-payloads.jsonl` instead
-of a transcript). Run `cargo insta review` to accept the generated snapshot.
-No harness edit, no other test code.
+**Adding a CLI:** [the test steps](../../AGENTS.md#adding-a-new-agent-cli--the-test-steps).
 
 ## Where a scenario's own story lives
 
-Each scenario declares itself in its `provenance.json` `note` — that is the
-single place, and it sits beside the bytes it describes. This section used to
-carry a per-scenario catalogue plus one blanket claim that everything here was
-"derived from real sessions, then sanitized"; both are retired. The blanket
-claim was the thing the provenance rule replaced (it could not distinguish a
-capture from a composition, which is the whole problem), and the catalogue
-described five scenarios that no longer exist — a list of directories rots the
-moment one is re-recorded under a better name.
+Each scenario declares itself in its `provenance.json` `note`, the single
+place, beside the bytes it describes: a catalogue of directories here would rot
+the moment one is re-recorded under a better name.
 
 Two scenarios carry a fact BEYOND their own decode, so they are named here where
 someone changing the tree will see it:
