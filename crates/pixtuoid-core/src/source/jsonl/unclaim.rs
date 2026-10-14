@@ -109,7 +109,8 @@ impl Default for ChildEndUnclaims {
 /// WHY). For every pending id matching one of THIS watcher's `seen` paths: walk
 /// the path's pending bytes to EOF FIRST — a pre-stop straggler that re-entered
 /// as a first-sight would resurrect the just-ended child as a ghost — then
-/// END the claim. Two deliberate differences from [`emit_session_exit`](super::liveness::emit_session_exit):
+/// END the claim. Two deliberate differences from
+/// [`emit_session_exit`](super::liveness::emit_session_exit):
 ///
 /// * **No `SessionEnd` is emitted** — the reducer already ended the slot from
 ///   the hook `SubagentStop`.

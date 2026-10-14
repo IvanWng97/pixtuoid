@@ -113,7 +113,8 @@ pub(super) struct Correlation {
     /// End overwrites its tool's Start entry (kind-in-the-VALUE, not the key),
     /// which is what lets one End record cover the whole lagged JSONL pair.
     pub(super) recent_hook_tool_uses: HashMap<(AgentId, String), (SystemTime, ToolEventKind)>,
-    /// One record per id, outliving its slot, read by [`Reducer::authorizes`](super::reducer::Reducer::authorizes).
+    /// One record per id, outliving its slot, read by
+    /// [`Reducer::authorizes`](super::reducer::Reducer::authorizes).
     pub(super) lifecycles: HashMap<AgentId, Lifecycle>,
     /// Per-agent set of Task tool_use_ids currently in flight. CC's hook
     /// payload sets `transcript_path` to the PARENT'S transcript even when a

@@ -885,7 +885,7 @@ async fn an_oversized_append_revives_an_ended_transcript_only_on_proof_of_life()
                 .iter()
                 .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
             revives,
-            "an oversized {filler:?} span ending {:?} revives only on proof of life, got {events:?}",
+            "an oversized {filler:?} span ending {:?} revives only on activity: {events:?}",
             last.get(..24)
         );
     }

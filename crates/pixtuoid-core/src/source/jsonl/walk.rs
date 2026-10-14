@@ -352,7 +352,9 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     }
 
     let path_agent_id = AgentId::from_parts(source, &decoders.id_derive.id_for(path));
-    let ends_this_agent = |ev: &AgentEvent| matches!(ev, AgentEvent::SessionEnd { agent_id, .. } if *agent_id == path_agent_id);
+    let ends_this_agent = |ev: &AgentEvent| {
+        matches!(ev, AgentEvent::SessionEnd { .. }) && ev.agent_id() == path_agent_id
+    };
     let mut decoded = Vec::new();
     for line in new_bytes.split(|b| *b == b'\n') {
         if line.is_empty() {
