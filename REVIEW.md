@@ -8,8 +8,9 @@ diff touches, first; these rules add to generic defect hunting.
 The org's [shared review](https://github.com/pixtuoid/.github/blob/main/.github/workflows/claude-review.yml)
 runs a correctness and a design lens, each over this file but the other's
 section, so [Correctness](#correctness) and [Design](#design) keep those
-headings, and both apply each [high-risk change](#high-risk-changes) the diff
-matches.
+headings. It only reads, so a check marked *(run)*, a build, run, render or
+fetch, is what a [local review](.claude/skills/local-review/SKILL.md) adds. A
+check's label decides when it applies; its paths are where it usually fires.
 
 ## Common
 
@@ -106,6 +107,45 @@ modules nor examples).
   new gate fires on the violation, stays silent on the legitimate case, and
   names the real requirement. No test reads ambient state: the local time
   zone, `HOME`, the developer's config, a fixed temp path (#1023, #1048).
+- **Reducer, liveness, sweeps** (`crates/pixtuoid-core/src/state/`,
+  `source/jsonl/liveness.rs`, `source/exit_watch.rs`, `source/daemon.rs`) —
+  trace the downstream interaction graph (rebind, sweeps, TTLs, cascade,
+  dedup, polarity) and the provenance of every newly keyed signal.
+- **Domain math**: geometry, sky, lighting (`crates/pixtuoid-scene/src/`
+  `sky/`, `celestial.rs`, `lighting/`, `layout/`) — enumerate the domain
+  invariants and re-derive each across the parameter space, edges included
+  (#471, #1049, #1053).
+- **A refactor**: a `refactor` PR, or a move or dedup across modules —
+  adversarial toward revert, per consolidation: one reason-to-change per call
+  site; name the conversions that moved semantics, since a batch hides exactly
+  one (#461). *(run)* No test leaves `cargo nextest list` at head unless the
+  PR body names it.
+- **CI, the merge gate or release tooling** (`.github/workflows/`,
+  `.github/actions/`, `.github/dependabot.yml`, `.mergify.yml`, `policy/`,
+  `release-plz.toml`, `justfile`, `REVIEW.md`; a Dependabot `uses:` pin bump
+  aside) — name every check, contract or rule the diff loosens; trace each
+  trigger (fork, bot actor, cancelled or superseded run) to a gate that fails
+  closed.
+- *(run)* **Another CLI's config** (`crates/pixtuoid/src/install/`) —
+  enumerate every resolution axis and re-verify each against that CLI's
+  upstream in-session; write ⊆ verify (#338).
+- *(run)* **A new source or hook integration** (`source/registry.rs`) — a live
+  run or hermetic replay without capture-rig convenience flags; event shapes
+  from canonical upstream docs, never a fork.
+- *(run)* **Generated art and clips** — extract frames and READ them; census
+  the money shot. A PR's media diff is the smoke job's `gen-check-diffs`
+  overlays.
+- *(run)* **Motion, pose, walk-leg** (`crates/pixtuoid-scene/src/` `walk/`,
+  `pose/`, `pathfind/`, `physics.rs`) — render and WATCH it (the snapshot
+  example, or a `just hermetic` run's scene log for lifecycle) before the
+  verdict (#61).
+- *(run)* **A string or layout a painter frames** — render the COMPOSED frame;
+  string-equality tests are blind to framing (#308).
+- *(run)* **An interactive TUI flow** — WALK each user path end-to-end: first
+  run, failure branches, the no-CLI user (#359).
+- *(run)* **A public rendered artifact** (`site/src/`,
+  `integrations/raycast/src/`) — DRIVE the built page and MEASURE: WCAG in
+  every interactive state, mobile pan, no-JS (#455).
 
 #### Security
 
@@ -116,9 +156,16 @@ touches none, the summary says so. Otherwise report only a concrete attack or
 invariant-breaking sequence against:
 
 1. The shim and config writes: AGENTS.md invariants 4–5 and `install/io.rs`'s
-   lock, atomic-write and permission authority.
+   lock, atomic-write and permission authority. A shim change
+   (`crates/pixtuoid-hook/`) audits the WHOLE shim for never-panic:
+   `args_os()`, no slicing of untrusted bytes, bounded reads, every error path
+   `exit(0)` (#198).
 2. Socket / named pipe: no path traversal, symlink attack, unbounded read or
-   unsafe ownership assumption.
+   unsafe ownership assumption. On the hook's daemon side
+   (`crates/pixtuoid-core/src/source/hook/`), the endpoint is never looser than
+   owner-only, arbitration cannot steal a live owner's socket, both
+   `unix.rs`/`windows.rs` arms hold (Windows runs only in CI, outside mutation
+   testing), and each guard is PINNED.
 3. Untrusted input (hook payloads, transcripts, JSONL, paths, pack data):
    bounded, validated, skipped without panicking.
 4. Credentials and subprocesses: no secret in a command or log, no untrusted
@@ -164,28 +211,9 @@ invariant-breaking sequence against:
      never a placeholder.
 6. **Sourced practice**: [AGENTS.md](AGENTS.md#conventions)'s fetched-claims
    rule; a claim with no fetched source, or one that contradicts it, breaches it.
-
-## High-risk changes
-
-Each row is a kind of change that gets a check beyond the rest of this file;
-the first column decides, and Paths (globs, `*` crossing `/`) are where it
-usually fires. A check that
-needs the head built or run, or an upstream fetched, is what a
-[local review](.claude/skills/local-review/SKILL.md) adds.
-
-| A change to… | Paths | The review also must… |
-|---|---|---|
-| Generated art / clips |  | Extract frames and READ them; census the money shot. A PR's media diff is the smoke job's `gen-check-diffs` overlays. |
-| Reducer / liveness / sweeps | `crates/pixtuoid-core/src/state/*`, `crates/pixtuoid-core/src/source/jsonl/liveness.rs`, `crates/pixtuoid-core/src/source/exit_watch.rs`, `crates/pixtuoid-core/src/source/daemon.rs` | Trace the downstream interaction graph (rebind, sweeps, TTLs, cascade, dedup, polarity) and the provenance of every newly keyed signal. |
-| A public rendered artifact | `site/src/*`, `integrations/raycast/src/*` | DRIVE the built page and MEASURE: WCAG in every interactive state, mobile pan, no-JS (#455). |
-| An interactive TUI flow |  | WALK each user path end-to-end: first run, failure branches, the no-CLI user (#359). |
-| The shim | `crates/pixtuoid-hook/*` | Audit the WHOLE shim for never-panic: `args_os()`, no slicing of untrusted bytes, bounded reads, every error path `exit(0)` (#198). |
-| The hook's daemon side | `crates/pixtuoid-core/src/source/hook/*` | The endpoint is never looser than owner-only, arbitration cannot steal a live owner's socket, both `unix.rs`/`windows.rs` arms hold (Windows runs only in CI, outside mutation testing), and each guard is PINNED. |
-| Motion / pose / walk-leg | `crates/pixtuoid-scene/src/walk/*`, `crates/pixtuoid-scene/src/pose/*`, `crates/pixtuoid-scene/src/pathfind/*`, `crates/pixtuoid-scene/src/physics.rs` | Render and WATCH it (the snapshot example, or a `just hermetic` run's scene log for lifecycle) before the verdict (#61). |
-| A string/layout a painter frames |  | Render the COMPOSED frame; string-equality tests are blind to framing (#308). |
-| Another CLI's config | `crates/pixtuoid/src/install/*` | Enumerate every resolution axis and re-verify each against that CLI's upstream in-session; write ⊆ verify (#338). |
-| A new source / hook integration | `crates/pixtuoid-core/src/source/registry.rs` | LIVE run or hermetic replay without capture-rig convenience flags; event shapes from canonical upstream docs, never a fork. |
-| A refactor: a `refactor` PR, or a move or dedup across modules |  | Adversarial toward revert, per consolidation: one reason-to-change per call site; name the conversions that moved semantics — a batch hides exactly one (#461). No test leaves `cargo nextest list` at head unless the PR body names it. |
-| Geometry, sky, lighting or other domain math | `crates/pixtuoid-scene/src/sky/*`, `crates/pixtuoid-scene/src/celestial.rs`, `crates/pixtuoid-scene/src/lighting/*`, `crates/pixtuoid-scene/src/layout/*` | Enumerate the domain invariants and re-derive each across the parameter space, edges included (#471, #1049, #1053). |
-| A crate edge, new dependency or widened public API (a version bump of an existing dependency doesn't match) | `Cargo.toml`, `crates/*/Cargo.toml`, `api/*` | Justify every crate `cargo tree -e normal` adds at head, transitive ones included; every new workspace edge follows [AGENTS.md](AGENTS.md#layout)'s crate DAG; every item made `pub` has a consumer outside its crate. |
-| CI, the merge gate or release tooling (a Dependabot `uses:` pin bump doesn't match) | `.github/workflows/*`, `.github/actions/*`, `.github/dependabot.yml`, `.mergify.yml`, `policy/*`, `release-plz.toml`, `justfile`, `REVIEW.md` | Name every check, contract or row the diff loosens; trace each trigger (fork, bot actor, cancelled or superseded run) to a gate that fails closed. |
+7. *(run)* **A crate edge, new dependency or widened public API**
+   (`Cargo.toml`, `crates/*/Cargo.toml`, `api/`; a version bump of an existing
+   dependency aside): justify every crate `cargo tree -e normal` adds at head,
+   transitive ones included; every new workspace edge follows
+   [AGENTS.md](AGENTS.md#layout)'s crate DAG; every item made `pub` has a
+   consumer outside its crate.

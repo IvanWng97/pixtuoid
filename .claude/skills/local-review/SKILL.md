@@ -1,7 +1,7 @@
 ---
 name: local-review
 version: 3.1.0
-description: "Run pixtuoid's review locally at either scope — a DIFF review (on demand, for a large or wide change: one lens per matching REVIEW.md high-risk change; the correctness and design lenses are the automatic CI review's, never re-run locally) or a whole-codebase AUDIT (subsystem × factor fan-out). Use on a large or wide change before its push, on 'is this ready to merge', or on 'whole-codebase review' / pre-release / periodic audit."
+description: "Run pixtuoid's review locally at either scope — a DIFF review (on demand, for a large or wide change: REVIEW.md's correctness and design lenses run locally, with the *(run)* checks the read-only CI review can't make) or a whole-codebase AUDIT (subsystem × factor fan-out). Use on a large or wide change before its push, on 'is this ready to merge', or on 'whole-codebase review' / pre-release / periodic audit."
 metadata:
   scope: "pixtuoid repo only"
 ---
@@ -14,27 +14,29 @@ contract; fill briefs from them, never a paraphrase here.
 ## When to run
 
 - **Diff scope**, on demand: a change large or wide enough that a CI review
-  round is the expensive way to learn its findings, one lens per matching
-  [high-risk change](../../../REVIEW.md#high-risk-changes). The correctness and
-  design lenses are the automatic review's; never re-run them here.
+  round is the expensive way to learn its findings. It runs the same
+  [`REVIEW.md`](../../../REVIEW.md) the CI review applies, plus the *(run)*
+  checks the diff matches.
 - **Whole-codebase scope**: "audit the repo", a pre-release or periodic sweep.
 
 ## Diff scope
 
 1. **Isolate** the branch in a worktree (two sessions on one tree race on
    HEAD). Note `path`, `branch`, `base` and `head` sha.
-2. **Dispatch** one lens per matching high-risk change, in parallel, in the
+2. **Dispatch** the correctness and design lenses and one per matching *(run)*
+   check, in parallel, in the
    background: `model: sonnet` for a lens that reads evidence or runs a
    mechanical check (test lists, mutations, renders, a walk), `opus` only for
    a design gate. Each briefed:
 
    ```
-   You are the <row> lens for <PR/branch> on pixtuoid.
+   You are the <lens> lens for <PR/branch> on pixtuoid.
    Worktree: <path> (branch <name>, base <sha>, head <sha>), read-only;
    stop if HEAD is not that head.
    Diff: git -C <path> diff <base>..<head>.
    Read AGENTS.md, then apply the review contract (pixtuoid/.github's
-   claude-review.yml prompt), REVIEW.md's <row> and its Common section.
+   claude-review.yml prompt), REVIEW.md's <lens or check>, its Common and
+   Every changed file sections.
    <change-specific claims (from the PR body) or design
    questions, one per line>
    Run the applicable gates; report each exit code as observed, never through
@@ -93,7 +95,7 @@ the owner keeps becomes a FOLLOW-UP PR.
 | Thought | Reality |
 |---------|---------|
 | "CI is green, that's enough" | CI can't see design, blast radius, drift, or a deliberate-looking real bug. |
-| "The bots will render it" | A bot reads the diff and the base tree; building, running or rendering a row's lens is yours. |
+| "The bots will render it" | A bot reads the diff and the base tree; a *(run)* check is yours. |
 | "I'll note the finding and move on" | Every finding needs a terminal state. |
 | "The diff looks clean, we're done" (audit) | Drift, debt accretion and erosion accumulate between PRs; only the audit sees them. |
 | "The finder found it, report it" (audit) | A separate skeptic tries to REFUTE each survivor first. |

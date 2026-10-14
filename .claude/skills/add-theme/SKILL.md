@@ -25,6 +25,6 @@ metadata:
 6. Run `just test`; update insta snapshots if the theme list changed.
 7. Visually verify with the **beautify-decoration** skill's snapshot loop — a
    palette that passes the legibility guards can still read badly.
-8. A new look is REVIEW.md's "Generated art / clips" row, judged on the smoke
+8. A new look is REVIEW.md's *(run)* generated-art check, judged on the smoke
    job's overlays, which the CI review can't see: read them yourself (the
    **local-review** skill).
