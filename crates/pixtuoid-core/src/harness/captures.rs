@@ -64,8 +64,8 @@ const CAPTURE_BASE: &str = "pixtuoid-capture";
 const CAPTURE_PROJ: &str = "proj";
 
 /// The base a recorder may clear for the workspace `ws`: only that of an
-/// absolute `<root>/pixtuoid-capture/proj`, so no path an operator names can
-/// make it clear a directory of theirs.
+/// absolute path ending as [`capture_workspace`]'s does, so no path an operator
+/// names can make it clear a directory of theirs.
 pub fn capture_base(ws: &Path) -> Option<&Path> {
     (ws.is_absolute() && ws.ends_with(Path::new(CAPTURE_BASE).join(CAPTURE_PROJ)))
         .then(|| ws.parent())

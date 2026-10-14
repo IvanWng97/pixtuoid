@@ -41,10 +41,10 @@ jobs:
       run:
         # Windows' default is pwsh.
         shell: bash
-    # Every leg's artifact is `<RUNS><os>`. A matrix job's output is the last
-    # leg's to finish (docs.github.com workflow-syntax, "Using job outputs in a
-    # matrix job"), so it comes from env, which every leg sets whatever step
-    # it stopped at.
+    # A matrix job's output is the last leg's to finish (docs.github.com
+    # workflow-syntax, "Using job outputs in a matrix job"), so it comes from
+    # job-level env, which `jobs.<id>.outputs` can read (docs.github.com
+    # contexts, "Context availability") and no step has to reach.
     env:
       RUNS: hermetic-runs-${{ github.run_id }}-${{ github.run_attempt }}-
     outputs:

@@ -16,10 +16,6 @@ const SETTLE: Duration = Duration::from_millis(500);
 const QUIET_ROUNDS: u32 = 4;
 const MAX_ROUNDS: u32 = 40;
 
-/// How long a bound tap may take to start accepting.
-const READY_BOUND: Duration = Duration::from_secs(5);
-const READY_POLL: Duration = Duration::from_millis(10);
-
 /// How long a send waits out a pipe whose every instance is mid-handshake.
 #[cfg(windows)]
 const PIPE_BUSY_BOUND: Duration = Duration::from_secs(2);
@@ -131,19 +127,15 @@ struct Serving {
 
 impl Tap {
     /// Listen at `at` on a runtime of its own, keeping each payload and teeing
-    /// it to `tee`; returns once it accepts. A pipe accepts only once its server
-    /// waits in `ConnectNamedPipe`, which fails with `ERROR_NO_DATA` for a client
-    /// that already closed (learn.microsoft.com, ConnectNamedPipe): its payload
-    /// is lost.
+    /// it to `tee`; returns once the endpoint takes connections.
     ///
     /// # Errors
     ///
     /// `AddrInUse` if a live listener holds `at` (a squatted pipe name is one);
-    /// any other bind failure as itself, or one that never starts accepting.
+    /// any other bind failure as itself.
     pub fn bind(at: &Endpoint, tee: Option<Endpoint>) -> std::io::Result<Self> {
         let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&lines);
-        let ready = at.clone();
         let at = at.path().to_path_buf();
         let (bound_tx, bound_rx) = std::sync::mpsc::channel();
         let thread = std::thread::spawn(move || {
@@ -184,16 +176,6 @@ impl Tap {
             })
         });
         bound_rx.recv().map_err(std::io::Error::other)??;
-        let started = std::time::Instant::now();
-        while !ready.accepting() {
-            if started.elapsed() > READY_BOUND {
-                return Err(std::io::Error::other(format!(
-                    "{} never started accepting",
-                    ready.path().display()
-                )));
-            }
-            std::thread::sleep(READY_POLL);
-        }
         Ok(Self::watching(lines, thread))
     }
 
@@ -280,6 +262,9 @@ mod tests {
     use super::*;
 
     const LINE: &str = "{\"hook_event_name\":\"SessionStart\"}\n";
+    /// How long a test waits on a thread it started, and how often it looks.
+    const PATIENCE: Duration = Duration::from_secs(5);
+    const POLL: Duration = Duration::from_millis(10);
 
     fn private_dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("tempdir")
@@ -365,8 +350,8 @@ mod tests {
             std::thread::spawn(|| "re-creating the pipe failed".to_owned()),
         );
         let started = std::time::Instant::now();
-        while gone.stopped().is_none() && started.elapsed() < READY_BOUND {
-            std::thread::sleep(READY_POLL);
+        while gone.stopped().is_none() && started.elapsed() < PATIENCE {
+            std::thread::sleep(POLL);
         }
         assert_eq!(
             gone.stopped().as_deref(),

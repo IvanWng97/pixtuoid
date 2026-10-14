@@ -109,9 +109,10 @@ mod recorder {
                 WORKSPACE => {
                     let ws = PathBuf::from(take(&mut args, WORKSPACE)?);
                     if capture_base(&ws).is_none() {
+                        let like = capture_workspace()
+                            .map_or_else(|e| e.to_string(), |cw| cw.display().to_string());
                         return Err(format!(
-                            "{WORKSPACE} {} is not an absolute .../pixtuoid-capture/proj: \
-                             the recorder clears its parent",
+                            "{WORKSPACE} {} must end as {like} does: the recorder clears its parent",
                             ws.display()
                         ));
                     }
