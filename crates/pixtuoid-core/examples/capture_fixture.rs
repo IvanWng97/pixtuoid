@@ -224,6 +224,11 @@ mod recorder {
             ))
         });
 
+        // A committed capture is complete or not written at all.
+        let incomplete = match incomplete {
+            Some(e) if options.out.is_none() => return Err(e),
+            kept => kept,
+        };
         std::fs::create_dir_all(&dest)?;
         let mut wrote: Vec<PathBuf> = Vec::new();
 
@@ -264,9 +269,6 @@ mod recorder {
                 println!("wrote raw {} ({} lines)", p.display(), count_lines(p));
             }
             return incomplete.map_or(Ok(()), Err);
-        }
-        if let Some(e) = incomplete {
-            return Err(e);
         }
         if wrote.is_empty() {
             eprintln!(
