@@ -31,6 +31,9 @@ const PIPE_BUSY_BACKOFF: Duration = Duration::from_millis(10);
 pub struct Endpoint(PathBuf);
 
 impl Endpoint {
+    /// The variable a shim reads its endpoint from.
+    pub const ENV: &str = "PIXTUOID_SOCKET";
+
     /// The endpoint `name` private to `dir`: a socket inside it, or on Windows a
     /// pipe named after it, since the pipe namespace is machine-wide.
     pub fn in_dir(dir: &Path, name: &str) -> Self {

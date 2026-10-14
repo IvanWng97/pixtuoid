@@ -240,8 +240,10 @@ mod run {
             _ => {}
         }
         std::fs::create_dir_all(&runs)?;
+        let built = Built::find()?;
         let ctx = Ctx {
-            built: Built::find()?,
+            shims: shim_dir(&tier, &built.shim)?,
+            built,
             aimock: Aimock::install(&tier)?,
             tier,
             versions: args.versions,
@@ -436,6 +438,36 @@ mod run {
             }
             Ok(found)
         }
+    }
+
+    /// The tier's one shim, which every sandbox's PATH names: Unix links the
+    /// built one, and Windows, where a symlink needs privilege, copies it once.
+    /// It runs once here, at no endpoint, so no run's first hook is a cold
+    /// exec of a new file: a CLI lost its first payload behind one.
+    fn shim_dir(tier: &Path, shim: &Path) -> std::io::Result<PathBuf> {
+        let dir = tier.join("bin");
+        match std::fs::remove_dir_all(&dir) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+        std::fs::create_dir_all(&dir)?;
+        let name = shim
+            .file_name()
+            .ok_or_else(|| std::io::Error::other("the shim has no file name"))?;
+        let placed = dir.join(name);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(shim, &placed)?;
+        #[cfg(windows)]
+        std::fs::copy(shim, &placed)?;
+        let mut warm = tool(&placed)
+            .env(Endpoint::ENV, dir.join("nothing-listens"))
+            .stdin(Stdio::piped())
+            .spawn()?;
+        if let Some(mut stdin) = warm.stdin.take() {
+            stdin.write_all(b"{}")?;
+        }
+        warm.wait()?;
+        Ok(dir)
     }
 
     /// The scripted model, installed from the committed lockfile, scripts off.
@@ -705,29 +737,20 @@ mod run {
     ];
 
     impl Sandbox {
-        fn new(p: &Profile, built: &Built, cli_bin: &Path, port: u16) -> std::io::Result<Self> {
+        fn new(p: &Profile, shims: &Path, cli_bin: &Path, port: u16) -> std::io::Result<Self> {
             let dir = tempfile::tempdir()?;
             let at = |rel: &str| -> std::io::Result<PathBuf> {
                 let d = dir.path().join(rel);
                 std::fs::create_dir_all(&d)?;
                 Ok(d)
             };
-            let bin = at("bin")?;
-            // The built shim itself, warm across runs: a fresh copy's first run
-            // is a cold exec, and a CLI's first hook went missing behind one.
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(&built.shim, bin.join("pixtuoid-hook"))?;
-            // A copy: a Windows symlink needs privilege, and a hard link cannot
-            // cross from the build's volume to the temp one.
-            #[cfg(windows)]
-            std::fs::copy(&built.shim, bin.join("pixtuoid-hook.exe"))?;
             let mut env: Vec<(String, OsString)> = inherited()
                 .filter(|k| *k != "PATH")
                 .filter_map(|k| std::env::var_os(k).map(|v| (k.to_string(), v)))
                 .collect();
             let host_path = std::env::var_os("PATH").unwrap_or_default();
             let path = std::env::join_paths(
-                [bin, cli_bin.to_path_buf()]
+                [shims.to_path_buf(), cli_bin.to_path_buf()]
                     .into_iter()
                     .chain(std::env::split_paths(&host_path)),
             )
@@ -820,6 +843,8 @@ mod run {
     struct Ctx {
         tier: PathBuf,
         built: Built,
+        /// The tier's one shim, on every sandbox's PATH.
+        shims: PathBuf,
         aimock: Aimock,
         versions: Versions,
     }
@@ -833,6 +858,7 @@ mod run {
         let Ctx {
             tier,
             built,
+            shims,
             aimock,
             versions,
         } = ctx;
@@ -850,7 +876,7 @@ mod run {
         }
         let cli = install_cli(tier, p, *versions)?;
         let port = free_port()?;
-        let sandbox = Sandbox::new(p, built, &cli.bin, port)?;
+        let sandbox = Sandbox::new(p, shims, &cli.bin, port)?;
 
         let connect = sandbox
             .command(&built.pixtuoid)
@@ -1370,14 +1396,6 @@ mod run {
 
         #[test]
         fn every_child_of_a_run_gets_the_profiles_env_expanded() {
-            let d = tempfile::tempdir().expect("tempdir");
-            let shim = d.path().join("pixtuoid-hook");
-            std::fs::write(&shim, "").expect("a shim");
-            let built = Built {
-                pixtuoid: PathBuf::from("/nowhere/pixtuoid"),
-                shim,
-                recorder: PathBuf::from("/nowhere/capture_fixture"),
-            };
             // What a shebang's `env -S VAR=value` sets.
             let launch = Launch {
                 program: PathBuf::from("node"),
@@ -1385,8 +1403,13 @@ mod run {
                 env: vec![("NODE_OPTIONS".into(), "--no-warnings".into())],
             };
             for p in PROFILES {
-                let sandbox =
-                    Sandbox::new(p, &built, Path::new("/nowhere/bin"), 4321).expect("sandbox");
+                let sandbox = Sandbox::new(
+                    p,
+                    Path::new("/nowhere/shims"),
+                    Path::new("/nowhere/bin"),
+                    4321,
+                )
+                .expect("sandbox");
                 let cli_env = sandbox.cli_env(p, &launch);
                 assert_eq!(
                     cli_env.len(),
@@ -1418,15 +1441,37 @@ mod run {
                     let home = sandbox.var(var).expect("set");
                     assert!(home.starts_with(sandbox.dir.path()), "{var} escapes");
                 }
-                #[cfg(unix)]
-                assert!(
-                    std::fs::symlink_metadata(sandbox.dir.path().join("bin/pixtuoid-hook"))
-                        .expect("the shim")
-                        .file_type()
-                        .is_symlink(),
-                    "the shim is the built one, not a cold copy"
+                let path = sandbox.var_os("PATH").expect("PATH");
+                assert_eq!(
+                    std::env::split_paths(path).next(),
+                    Some(PathBuf::from("/nowhere/shims")),
+                    "{}: the tier's shim comes first",
+                    p.source
                 );
             }
+        }
+
+        /// The built shim itself, run once before any CLI: a fresh copy, or a
+        /// first exec, is cold.
+        #[cfg(unix)]
+        #[test]
+        fn a_tier_links_the_built_shim_and_runs_it_once() {
+            use std::os::unix::fs::PermissionsExt;
+            let d = tempfile::tempdir().expect("tempdir");
+            let shim = d.path().join("pixtuoid-hook");
+            let ran = d.path().join("ran");
+            std::fs::write(&shim, format!("#!/bin/sh\ncat > '{}'\n", ran.display()))
+                .expect("a shim");
+            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755))
+                .expect("executable");
+            let shims = shim_dir(&d.path().join("tier"), &shim).expect("placed");
+            let placed = shims.join("pixtuoid-hook");
+            assert_eq!(std::fs::read_link(&placed).ok(), Some(shim), "not a copy");
+            assert_eq!(
+                std::fs::read_to_string(&ran).ok().as_deref(),
+                Some("{}"),
+                "it ran"
+            );
         }
 
         #[test]

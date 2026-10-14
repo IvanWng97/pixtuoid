@@ -573,7 +573,7 @@ mod recorder {
         let mut c = std::process::Command::new(&cmd[0]);
         c.args(&cmd[1..])
             .current_dir(ws)
-            .env("PIXTUOID_SOCKET", run.endpoint.path());
+            .env(Endpoint::ENV, run.endpoint.path());
         // A driver's transcript goes in this run's private scratch: a fixed
         // shared-temp name is symlink-followable and two concurrent captures interleave.
         c.env("TUIDRIVE_LOG", run.scratch.join("tuidrive.log"));
