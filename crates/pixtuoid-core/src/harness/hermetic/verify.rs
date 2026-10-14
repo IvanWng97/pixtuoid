@@ -404,7 +404,7 @@ fn judge(
         Shape::ToolRun | Shape::Subagent => "active",
         Shape::Permission => "waiting",
     };
-    judge_scene(p, scene, shown, findings);
+    judge_scene(p, &events, scene, shown, findings);
     Ok(())
 }
 
@@ -529,17 +529,35 @@ fn subagent(events: &[AgentEvent], reached: &[Reach], findings: &mut Vec<(Label,
 /// the CLI has exited: every profiled CLI's clean exit ends its sprite, whether
 /// by an end event or by its process's death, so one left standing is a session
 /// pixtuoid lost track of.
-fn judge_scene(p: &Profile, scene: &str, shown: &str, findings: &mut Vec<(Label, String)>) {
+fn judge_scene(
+    p: &Profile,
+    events: &[AgentEvent],
+    scene: &str,
+    shown: &str,
+    findings: &mut Vec<(Label, String)>,
+) {
     let prefix = format!("{}\u{b7}", p.descriptor().label_prefix);
+    let names: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::Rename { label, .. } => Some(label.as_str()),
+            _ => None,
+        })
+        .collect();
     let frames: Vec<&str> = scene
         .lines()
         .filter_map(|l| l.split_once("agents=[").map(|(_, agents)| agents))
         .collect();
     let state = format!(":{shown}");
     let shows = |frame: &str, in_state: bool| {
-        frame
-            .split(", ")
-            .any(|a| a.starts_with(&prefix) && (!in_state || a.contains(&state)))
+        frame.split(", ").any(|a| {
+            (a.starts_with(&prefix)
+                || names.iter().any(|name| {
+                    a.strip_prefix(name)
+                        .is_some_and(|tail| tail.starts_with('@'))
+                }))
+                && (!in_state || a.contains(&state))
+        })
     };
     if !frames.iter().any(|f| shows(f, true)) {
         findings.push((
@@ -555,6 +573,38 @@ fn judge_scene(p: &Profile, scene: &str, shown: &str, findings: &mut Vec<(Label,
     }
     for line in scene.lines().filter(|l| l.contains(BREADCRUMB_TARGET)) {
         findings.push((Label::Fail, format!("drift breadcrumb: {}", line.trim())));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn scene_judging_follows_decoded_names_without_losing_lifecycle_guards() {
+    let p = super::profile("codex").unwrap();
+    let events = [AgentEvent::Rename {
+        agent_id: crate::AgentId::from_parts("codex", "named"),
+        label: "🦊 fox".into(),
+    }];
+    let mut findings = Vec::new();
+    judge_scene(
+        p,
+        &events,
+        "agents=[🦊 fox@0:active(read)]\nagents=[]",
+        "active",
+        &mut findings,
+    );
+    assert!(findings.is_empty());
+    for bad in [
+        "agents=[]",
+        "agents=[🦊 foxes@0:active(read)]\nagents=[]",
+        "agents=[🦊 fox@0:idle]\nagents=[]",
+        "agents=[🦊 fox@0:active(read)]\nagents=[🦊 fox@0:idle]",
+    ] {
+        findings.clear();
+        judge_scene(p, &events, bad, "active", &mut findings);
+        assert!(
+            findings.iter().any(|(label, _)| *label == Label::Fail),
+            "{bad}"
+        );
     }
 }
 

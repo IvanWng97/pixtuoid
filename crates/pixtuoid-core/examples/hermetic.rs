@@ -433,7 +433,12 @@ mod run {
     /// binary: npm 12 blocks a dependency's unless the project's `allowScripts`
     /// names it (`npm help install-scripts`), and older npm ignores the field.
     fn install_cli(tier: &Path, p: &Profile, versions: Versions) -> std::io::Result<PathBuf> {
-        let Package::Npm(package) = p.package;
+        let package = match p.package {
+            Package::Npm(package) => package,
+            Package::GithubRelease { repo, binary } => {
+                return install_release(tier, p, versions, repo, binary);
+            }
+        };
         let version = match versions {
             Versions::Pinned => p.descriptor().verified_version.to_string(),
             Versions::Latest => {
@@ -455,6 +460,177 @@ mod run {
             npm(dir, &["install", &pinned])
         })?;
         Ok(prefix.join("node_modules/.bin"))
+    }
+
+    fn checked_output(command: &mut Command) -> std::io::Result<Vec<u8>> {
+        let out = command.output()?;
+        if !out.status.success() {
+            return Err(std::io::Error::other(format!(
+                "{command:?}: {}: {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        Ok(out.stdout)
+    }
+
+    fn download(url: &str, destination: &Path) -> std::io::Result<()> {
+        checked_output(
+            tool("curl")
+                .args([
+                    "--disable",
+                    "--fail",
+                    "--location",
+                    "--silent",
+                    "--show-error",
+                    "--proto",
+                    "=https",
+                    "--proto-redir",
+                    "=https",
+                    "--output",
+                ])
+                .arg(destination)
+                .arg(url),
+        )?;
+        Ok(())
+    }
+
+    fn release_checksum<'a>(sums: &'a str, asset: &str) -> std::io::Result<&'a str> {
+        const SHA256_HEX_LEN: usize = 64;
+        let mut matches = sums.lines().filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let digest = fields.next()?;
+            let name = fields.next()?;
+            (name == asset && fields.next().is_none()).then_some(digest)
+        });
+        let digest = matches
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing asset checksum"))?;
+        if matches.next().is_some()
+            || digest.len() != SHA256_HEX_LEN
+            || !digest.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(std::io::Error::other("ambiguous or invalid asset checksum"));
+        }
+        Ok(digest)
+    }
+
+    fn extract_release(archive: &Path, member: &str, executable: &Path) -> std::io::Result<()> {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        const EXECUTABLE_MODE: u32 = 0o755;
+        let names = checked_output(tool("tar").arg("-tzf").arg(archive))?;
+        let names = String::from_utf8_lossy(&names);
+        let names: Vec<_> = names.lines().collect();
+        let details = checked_output(tool("tar").arg("-tvzf").arg(archive))?;
+        let details = String::from_utf8_lossy(&details);
+        let companion = format!("{member}.bin");
+        let expected = names == [member]
+            || (names.len() == 2 && names.contains(&member) && names.contains(&companion.as_str()));
+        if !expected
+            || details.lines().count() != names.len()
+            || !details.lines().all(|line| line.starts_with('-'))
+        {
+            return Err(std::io::Error::other(
+                "release archive must contain only its regular executable and optional companion",
+            ));
+        }
+        // Stream each member into our own file: tar never installs paths,
+        // links, ownership or setuid bits supplied by an archive.
+        for name in names {
+            let target = if name == member {
+                executable.to_path_buf()
+            } else {
+                executable.with_file_name(&companion)
+            };
+            let file = std::fs::File::create_new(&target)?;
+            let owner = file.metadata()?.uid();
+            let status = tool("tar")
+                .arg("-xOzf")
+                .arg(archive)
+                .arg(name)
+                .stdout(file)
+                .status()?;
+            let metadata = std::fs::symlink_metadata(&target)?;
+            if !status.success()
+                || !metadata.is_file()
+                || metadata.len() == 0
+                || metadata.uid() != owner
+            {
+                return Err(std::io::Error::other(
+                    "release executable extraction failed",
+                ));
+            }
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(EXECUTABLE_MODE))?;
+        }
+        Ok(())
+    }
+
+    fn install_release(
+        tier: &Path,
+        p: &Profile,
+        versions: Versions,
+        repo: &str,
+        binary: &str,
+    ) -> std::io::Result<PathBuf> {
+        let version = match versions {
+            Versions::Pinned => p.descriptor().verified_version.to_string(),
+            Versions::Latest => {
+                let out = checked_output(tool("curl").args([
+                    "--disable",
+                    "--fail",
+                    "--silent",
+                    "--show-error",
+                    "--proto",
+                    "=https",
+                    &format!("https://api.github.com/repos/{repo}/releases/latest"),
+                ]))?;
+                let release: serde_json::Value = serde_json::from_slice(&out)?;
+                release["tag_name"]
+                    .as_str()
+                    .and_then(|tag| tag.strip_prefix('v'))
+                    .ok_or_else(|| std::io::Error::other("release has no v-prefixed tag"))?
+                    .to_string()
+            }
+        };
+        if version.is_empty()
+            || !version
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b".-".contains(&b))
+        {
+            return Err(std::io::Error::other("invalid release version"));
+        }
+        let os = match std::env::consts::OS {
+            "macos" => "macos",
+            "linux" => "linux",
+            other => {
+                return Err(std::io::Error::other(format!(
+                    "unsupported release OS: {other}"
+                )));
+            }
+        };
+        let arch = std::env::consts::ARCH;
+        let member = format!("{binary}-{os}-{arch}");
+        let asset = format!("{member}.tar.gz");
+        let prefix = tier.join("cli").join(format!("{}-{version}", p.source));
+        install_once(&prefix, |dir| {
+            let base = format!("https://github.com/{repo}/releases/download/v{version}");
+            let archive = dir.join(&asset);
+            let sums = dir.join("SHA256SUMS");
+            download(&format!("{base}/{asset}"), &archive)?;
+            download(&format!("{base}/SHA256SUMS"), &sums)?;
+            let sums = std::fs::read_to_string(sums)?;
+            let expected = release_checksum(&sums, &asset)?;
+            let actual = checked_output(tool("shasum").args(["-a", "256"]).arg(&archive))?;
+            let actual = String::from_utf8_lossy(&actual);
+            if actual.split_whitespace().next() != Some(expected) {
+                return Err(std::io::Error::other("release checksum mismatch"));
+            }
+            let bin = dir.join("bin");
+            std::fs::create_dir(&bin)?;
+            extract_release(&archive, &member, &bin.join(binary))?;
+            std::fs::remove_file(archive)
+        })?;
+        Ok(prefix.join("bin"))
     }
 
     /// One sandbox: every home a CLI or pixtuoid resolves points inside it, so
@@ -826,6 +1002,89 @@ mod run {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn release_checksums_require_one_exact_asset() {
+            let hash = "a".repeat(64);
+            let row = format!("{hash}  jcode.tar.gz\n");
+            assert_eq!(release_checksum(&row, "jcode.tar.gz").unwrap(), hash);
+            for bad in [
+                String::new(),
+                format!("{row}{row}"),
+                "abc  jcode.tar.gz".into(),
+                format!("{hash}  other.tar.gz"),
+            ] {
+                assert!(release_checksum(&bad, "jcode.tar.gz").is_err());
+            }
+        }
+
+        #[test]
+        fn release_extraction_preserves_linux_launchers_companion_name() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("jcode-linux-x86_64"), "launcher").unwrap();
+            std::fs::write(dir.path().join("jcode-linux-x86_64.bin"), "binary").unwrap();
+            let archive = dir.path().join("cli.tar.gz");
+            checked_output(
+                tool("tar")
+                    .arg("-czf")
+                    .arg(&archive)
+                    .arg("-C")
+                    .arg(dir.path())
+                    .args(["jcode-linux-x86_64", "jcode-linux-x86_64.bin"]),
+            )
+            .unwrap();
+            let bin = dir.path().join("bin");
+            std::fs::create_dir(&bin).unwrap();
+            extract_release(&archive, "jcode-linux-x86_64", &bin.join("jcode")).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(bin.join("jcode")).unwrap(),
+                "launcher"
+            );
+            assert_eq!(
+                std::fs::read_to_string(bin.join("jcode-linux-x86_64.bin")).unwrap(),
+                "binary"
+            );
+        }
+
+        #[test]
+        fn release_extraction_owns_executable_and_rejects_links_or_extra_members() {
+            use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+            let dir = tempfile::tempdir().unwrap();
+            let member = dir.path().join("jcode-test");
+            std::fs::write(&member, "test executable").unwrap();
+            std::fs::set_permissions(&member, std::fs::Permissions::from_mode(0o4755)).unwrap();
+            let archive = dir.path().join("cli.tar.gz");
+            let pack = |members: &[&str]| {
+                checked_output(
+                    tool("tar")
+                        .arg("-czf")
+                        .arg(&archive)
+                        .arg("-C")
+                        .arg(dir.path())
+                        .args(members),
+                )
+                .unwrap();
+            };
+            pack(&["jcode-test"]);
+            let executable = dir.path().join("installed");
+            extract_release(&archive, "jcode-test", &executable).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(&executable).unwrap(),
+                "test executable"
+            );
+            let metadata = executable.metadata().unwrap();
+            assert_eq!(metadata.uid(), dir.path().metadata().unwrap().uid());
+            assert_eq!(metadata.permissions().mode() & 0o7777, 0o755);
+            assert!(extract_release(&archive, "jcode-test", &executable).is_err());
+            std::fs::remove_file(&executable).unwrap();
+            pack(&["jcode-test", "jcode-test"]);
+            assert!(extract_release(&archive, "jcode-test", &executable).is_err());
+            std::fs::remove_file(&member).unwrap();
+            symlink("outside", &member).unwrap();
+            pack(&["jcode-test"]);
+            assert!(extract_release(&archive, "jcode-test", &executable).is_err());
+            assert!(!executable.exists());
+        }
 
         fn args(v: &[&str]) -> Vec<String> {
             v.iter().map(|s| (*s).to_string()).collect()

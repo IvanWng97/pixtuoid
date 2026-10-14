@@ -28,6 +28,13 @@ pub const NOTE_PLACEHOLDER: &str = "{note}";
 pub enum Package {
     /// An npm package; the tier installs `<name>@<version>` into its own prefix.
     Npm(&'static str),
+    /// A checksummed `<binary>-<os>-<arch>.tar.gz` GitHub release asset.
+    GithubRelease {
+        /// GitHub `owner/repository` publishing `v<version>` and `SHA256SUMS`.
+        repo: &'static str,
+        /// Installed command and the archive member's platform-independent prefix.
+        binary: &'static str,
+    },
 }
 
 /// What a scenario's script drives a CLI through. Shared by every CLI, so one CLI
