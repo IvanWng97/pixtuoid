@@ -367,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn session_end_tombstone_expires_at_exactly_its_ttl() {
+    fn straggler_window_expires_at_exactly_its_ttl() {
         let id = AgentId::from_parts("claude-code", "s1");
         let mut corr = Correlation::default();
         corr.note_end(id, Transport::Hook, false, t0());
@@ -385,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn child_ledger_end_gate_expires_at_exactly_its_ttl() {
+    fn child_end_gate_expires_at_exactly_its_ttl() {
         let id = AgentId::from_parts("claude-code", "child");
         let mut corr = Correlation::default();
         corr.note_end(id, Transport::Hook, true, t0());

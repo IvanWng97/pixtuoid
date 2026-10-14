@@ -122,7 +122,8 @@ mod folded {
 pub(super) enum Sight {
     /// Registered: appends decode without re-registering.
     Claimed,
-    /// Its session ended, by a DECODED terminator or a child-end un-claim:
+    /// Its session ended: a DECODED terminator, an oversized span whose tail
+    /// its `SessionEndChecker` matches, or a child-end un-claim:
     /// the path stays KNOWN, so `revouch_gated_files` won't replay it however
     /// live the probe says the (still-open) rollout is, and only an append that
     /// proves life re-registers it.

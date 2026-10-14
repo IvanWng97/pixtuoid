@@ -273,7 +273,7 @@ impl AgentEvent {
     /// polarity's proof of life, for a slot no start announced. A start carries
     /// its own authority, and an end, a model, usage or title line proves
     /// nothing.
-    pub(crate) fn proves_life(&self) -> bool {
+    pub(crate) fn shows_activity(&self) -> bool {
         match self {
             AgentEvent::ActivityStart { .. }
             | AgentEvent::ActivityEnd { .. }

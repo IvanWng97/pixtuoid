@@ -334,6 +334,18 @@ fn authorizes_decides_each_claim_by_the_end_it_meets() {
                     t0 + STRAGGLER_TTL - ms,
                     Refuse(Refusal::Straggler),
                 ),
+                (
+                    child,
+                    jsonl,
+                    t0 + STRAGGLER_TTL - ms,
+                    Refuse(Refusal::Straggler),
+                ),
+                (
+                    Claim::Identity,
+                    hook,
+                    t0 + STRAGGLER_TTL - ms,
+                    Refuse(Refusal::Straggler),
+                ),
                 (Claim::HookActivity, hook, t0 + STRAGGLER_TTL, Create),
                 (
                     child,

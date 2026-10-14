@@ -926,7 +926,7 @@ impl Reducer {
     /// A hook event is PROOF OF LIFE, so a tool/permission event whose id has no
     /// slot registers one — that session's transcript was gated at first sight.
     /// JSONL must NOT synthesize: a transcript line can be a historical replay.
-    /// Only an event that [`AgentEvent::proves_life`] qualifies. Since #221 decoders
+    /// Only an event that [`AgentEvent::shows_activity`] qualifies. Since #221 decoders
     /// attach an `Identity` ahead, leaving this the identity-less fallback.
     fn synthesize_hook_registration(
         &mut self,
@@ -936,7 +936,7 @@ impl Reducer {
         now: SystemTime,
     ) {
         // A blank Idle ghost of a DEAD session is unremovable.
-        if !event.proves_life()
+        if !event.shows_activity()
             || self.authorizes(scene, id, Claim::HookActivity, Transport::Hook, now)
                 != Verdict::Create
         {

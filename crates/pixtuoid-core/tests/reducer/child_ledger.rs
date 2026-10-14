@@ -9,7 +9,7 @@ use pixtuoid_core::state::reducer::{CHILD_END_GATE_TTL, Reducer, STRAGGLER_TTL};
 use crate::{act_end, act_start, sess_end, start};
 
 #[test]
-fn hook_session_end_tombstone_blocks_reordered_trailing_event_synthesis() {
+fn hook_session_end_blocks_reordered_trailing_event_synthesis() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let id = AgentId::from_parts("claude-code", "exited-invisible");
@@ -27,7 +27,7 @@ fn hook_session_end_tombstone_blocks_reordered_trailing_event_synthesis() {
     );
     assert!(
         !scene.agents.contains_key(&id),
-        "a reordered trailing event must not resurrect a tombstoned session"
+        "a reordered trailing event must not resurrect a session that just ended"
     );
 
     act_end(
@@ -40,12 +40,12 @@ fn hook_session_end_tombstone_blocks_reordered_trailing_event_synthesis() {
     );
     assert!(
         scene.agents.contains_key(&other),
-        "the tombstone must be per-id, not a global synthesis gate"
+        "the straggler window must be per-id, not a global synthesis gate"
     );
 }
 
 #[test]
-fn hook_event_after_tombstone_ttl_synthesizes_again() {
+fn hook_event_after_the_straggler_window_synthesizes_again() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let id = AgentId::from_parts("claude-code", "revived-later");
@@ -67,7 +67,7 @@ fn hook_event_after_tombstone_ttl_synthesizes_again() {
     );
 }
 
-/// Past the tombstone the 5 s window is the ONLY guard, and it does not care
+/// The 5 s straggler window is the ONLY guard, and past it nothing cares
 /// which arm arrives: a turn-boundary `ActivityEnd` re-registers exactly as an
 /// `Identity` does. hermes has no other reaper (`resurrects_on_prompt: false`),
 /// so a turn finishing after the user rotates with `/new` leaves the outgoing id
@@ -75,7 +75,7 @@ fn hook_event_after_tombstone_ttl_synthesizes_again() {
 /// life" for a source with no short reap, NOT something the `identity()` on that
 /// arm introduced.
 #[test]
-fn past_the_tombstone_any_hook_arm_re_registers_including_a_turn_boundary_end() {
+fn past_the_straggler_window_any_hook_arm_re_registers_including_a_turn_boundary_end() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let ended = AgentId::from_parts("hermes", "turn-after-finalize");
@@ -110,7 +110,7 @@ fn past_the_tombstone_any_hook_arm_re_registers_including_a_turn_boundary_end() 
 }
 
 #[test]
-fn jsonl_child_session_start_within_tombstone_is_gated_too() {
+fn jsonl_child_session_start_within_the_straggler_window_is_gated_too() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let parent = AgentId::from_parts("claude-code", "parent-sess");
@@ -138,7 +138,7 @@ fn jsonl_child_session_start_within_tombstone_is_gated_too() {
 }
 
 #[test]
-fn non_child_session_end_tombstone_alone_gates_a_parented_start() {
+fn non_child_session_end_alone_gates_a_parented_start() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let parent = AgentId::from_parts("claude-code", "parent-sess");
@@ -161,13 +161,13 @@ fn non_child_session_end_tombstone_alone_gates_a_parented_start() {
     );
     assert!(
         !scene.agents.contains_key(&child),
-        "an as_child: false end arms ONLY the 5s #242 tombstone — that gate \
+        "an as_child: false end arms ONLY the 5s #242 straggler window — that gate \
          alone must block the parented Start inside the TTL"
     );
 }
 
 #[test]
-fn child_session_start_past_tombstone_ttl_registers() {
+fn child_session_start_past_the_straggler_window_registers() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let parent = AgentId::from_parts("claude-code", "parent-sess");
@@ -190,12 +190,12 @@ fn child_session_start_past_tombstone_ttl_registers() {
     );
     assert!(
         scene.agents.contains_key(&child),
-        "past the ledger TTL a child SessionStart is a fresh registration"
+        "past the end gate a child SessionStart is a fresh registration"
     );
 }
 
 #[test]
-fn tombstoned_parentless_session_start_still_registers() {
+fn a_parentless_session_start_inside_the_straggler_window_still_registers() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let id = AgentId::from_parts("reasonix", "/Users/dev/proj");
@@ -217,7 +217,7 @@ fn tombstoned_parentless_session_start_still_registers() {
     assert!(
         scene.agents.contains_key(&id),
         "a parentless SessionStart must register straight through a fresh \
-         tombstone (the Reasonix resurrect)"
+         straggler window (the Reasonix resurrect)"
     );
 }
 
@@ -233,8 +233,8 @@ fn apply_hook_payload(
 }
 
 /// omp's session batches trail an Identity behind the parented Start; when
-/// the child ledger refuses that Start, the parent-less Identity one event
-/// later must not re-register the ended child as an orphan (the ledger's
+/// the child end gate refuses that Start, the parent-less Identity one event
+/// later must not re-register the ended child as an orphan (the gate's
 /// window would otherwise be one event wide for omp).
 #[test]
 fn a_trailing_identity_cannot_revive_the_child_its_start_was_refused_for() {
@@ -288,7 +288,7 @@ fn a_trailing_identity_cannot_revive_the_child_its_start_was_refused_for() {
     );
     assert!(!scene.agents.contains_key(&child), "child GC'd");
 
-    // Within the ledger window, PAST the 5s tombstone: the batch's Start is
+    // Within the end gate, PAST the 5s straggler window: the batch's Start is
     // refused, and the trailing Identity must be refused with it.
     apply_hook_payload(
         &mut r,
@@ -301,12 +301,12 @@ fn a_trailing_identity_cannot_revive_the_child_its_start_was_refused_for() {
     );
     assert!(
         !scene.agents.contains_key(&child),
-        "the parent-less trailing Identity revived the ledger-refused child"
+        "the parent-less trailing Identity revived the gate-refused child"
     );
 }
 
 #[test]
-fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
+fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_end_gate() {
     use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     use serde_json::json;
     let mut scene = SceneState::uniform(4);
@@ -374,7 +374,7 @@ fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
     late_start(&mut r, &mut scene, stop + Duration::from_secs(30));
     assert!(
         !scene.agents.contains_key(&child),
-        "a late parented restart of an ENDED child inside the ledger TTL \
+        "a late parented restart of an ENDED child inside the end gate \
          must not re-register a phantom (#244-w2)"
     );
 
@@ -390,7 +390,7 @@ fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
 }
 
 #[test]
-fn parentless_revival_start_of_an_ended_codex_child_relinks_via_ledger() {
+fn parentless_revival_start_of_an_ended_codex_child_relinks_to_its_remembered_parent() {
     use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     use serde_json::json;
     for transport in [Transport::Jsonl, Transport::Hook] {
@@ -465,7 +465,7 @@ fn parentless_revival_start_of_an_ended_codex_child_relinks_via_ledger() {
         assert_eq!(
             scene.agents.get(&child).map(|s| s.parent_id),
             Some(Some(parent)),
-            "the parentless revival start must re-link to the ledger's \
+            "the parentless revival start must re-link to its \
              remembered parent, not register as an orphan ({transport:?})"
         );
     }
@@ -598,7 +598,7 @@ fn a_multi_turn_child_idle_past_the_end_gate_still_revives_adopted_not_orphaned(
 }
 
 #[test]
-fn parentless_session_start_enriching_a_parentless_child_slot_adopts_ledger_parent() {
+fn parentless_session_start_enriching_a_parentless_child_slot_adopts_its_remembered_parent() {
     use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
@@ -662,13 +662,13 @@ fn parentless_session_start_enriching_a_parentless_child_slot_adopts_ledger_pare
     assert_eq!(
         scene.agents.get(&child).map(|s| s.parent_id),
         Some(Some(parent)),
-        "the enrichment path must adopt the ledger's remembered parent for a \
+        "the enrichment path must adopt its remembered parent for a \
          parentless child slot"
     );
 }
 
 #[test]
-fn tombstoned_codex_child_flat_first_sight_relinks_within_ledger_ttl() {
+fn an_ended_codex_childs_flat_first_sight_relinks_inside_the_end_gate() {
     use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     use serde_json::json;
     let mut scene = SceneState::uniform(4);
@@ -733,13 +733,13 @@ fn tombstoned_codex_child_flat_first_sight_relinks_within_ledger_ttl() {
     assert_eq!(
         scene.agents.get(&child).map(|s| s.parent_id),
         Some(Some(parent)),
-        "the tombstoned child's parentless flat first-sight must register \
-         parent-LINKED via the ledger (#244-w1), not as an orphan phantom"
+        "the ended child's parentless flat first-sight must register \
+         parent-LINKED to its remembered parent (#244-w1), not as an orphan phantom"
     );
 }
 
 #[test]
-fn adopted_ledger_parent_still_runs_the_cycle_filter() {
+fn an_adopted_remembered_parent_still_runs_the_cycle_filter() {
     use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
@@ -801,13 +801,13 @@ fn adopted_ledger_parent_still_runs_the_cycle_filter() {
     let slot = scene.agents.get(&x).expect("X re-registers");
     assert_eq!(
         slot.parent_id, None,
-        "an adopted ledger parent that would close a cycle must degrade to \
+        "an adopted remembered parent that would close a cycle must degrade to \
          parentless (the #240 filter runs on adopted links too)"
     );
 }
 
 #[test]
-fn reasonix_resurrect_is_unaffected_by_a_ledger_entry_for_another_id() {
+fn reasonix_resurrect_is_unaffected_by_another_ids_lifecycle() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let codex_parent = AgentId::from_parts("codex", "parent-sess");
@@ -862,7 +862,7 @@ fn reasonix_resurrect_is_unaffected_by_a_ledger_entry_for_another_id() {
         .expect("the Reasonix resurrect registers");
     assert_eq!(
         slot.parent_id, None,
-        "a ledger entry for a DIFFERENT id must never re-parent a Reasonix \
-         session (its ids never enter the ledger by construction)"
+        "a lifecycle record for a DIFFERENT id must never re-parent a Reasonix \
+         session (its ids never get a parent link by construction)"
     );
 }

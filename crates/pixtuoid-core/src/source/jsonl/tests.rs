@@ -839,9 +839,15 @@ async fn walk_jsonl_honors_the_path_filter() {
 
 #[tokio::test]
 async fn an_oversized_append_revives_an_ended_transcript_only_on_proof_of_life() {
-    for (filler, revives) in [
-        ("{\"type\":\"usage\"}\n", false),
-        ("{\"type\":\"tool_use\"}\n", true),
+    // The last row's final line is longer than the activity tail's window.
+    let long_tool = format!(
+        "{{\"type\":\"tool_use\",\"pad\":\"{}\"}}\n",
+        "x".repeat(super::walk::TAIL_BYTES as usize * 2)
+    );
+    for (filler, last, revives) in [
+        ("{\"type\":\"usage\"}\n", "", false),
+        ("{\"type\":\"tool_use\"}\n", "", true),
+        ("{\"type\":\"usage\"}\n", long_tool.as_str(), true),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ended-big.jsonl");
@@ -866,7 +872,7 @@ async fn an_oversized_append_revives_an_ended_transcript_only_on_proof_of_life()
             "fixture: ended"
         );
 
-        let span = filler.repeat(70_000);
+        let span = filler.repeat(70_000) + last;
         assert!(
             span.len() as u64 > super::walk::MAX_PENDING_BYTES,
             "fixture: oversized"
@@ -879,7 +885,8 @@ async fn an_oversized_append_revives_an_ended_transcript_only_on_proof_of_life()
                 .iter()
                 .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
             revives,
-            "an oversized {filler:?} span revives only on proof of life, got {events:?}"
+            "an oversized {filler:?} span ending {:?} revives only on proof of life, got {events:?}",
+            last.get(..24)
         );
     }
 }

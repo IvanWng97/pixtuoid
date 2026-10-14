@@ -277,10 +277,12 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             tail.as_deref().map(decoders.activity_recency),
             Some(super::TailActivity::SidecarOnly)
         );
+        // Judged on the window `scan_pending_tasks` reads, wide enough to hold a
+        // tool result's whole line.
         let revives = sight != Some(Sight::Ended)
-            || tail
-                .as_deref()
-                .is_some_and(|t| tail_proves_life(t, path, source, decoders.decode_line));
+            || read_tail(path, TASK_SCAN_BYTES)
+                .await
+                .is_some_and(|t| tail_shows_activity(&t, path, source, decoders.decode_line));
         if sight != Some(Sight::Claimed) && !metadata_only && revives {
             // The decoder never reaches a head-borne title once the backlog is
             // skipped, so this bounded read is its only carrier.
@@ -379,7 +381,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     // A trailer flushed after the end line (grok's `hook_execution{stop}`)
     // proves no revival.
     let ended = seen.lock().await.get(path) == Some(&Sight::Ended);
-    if (!ended || decoded.iter().any(|ev| ev.proves_life()))
+    if (!ended || decoded.iter().any(|ev| ev.shows_activity()))
         && !matches!(
             (decoders.activity_recency)(new_bytes),
             super::TailActivity::SidecarOnly
@@ -411,7 +413,12 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
 /// Whether `tail`'s whole lines decode to an event that proves life: the
 /// evidence an ended claim's oversized append is judged on, since its skipped
 /// span is never decoded.
-fn tail_proves_life(tail: &[u8], path: &Path, source: &Arc<str>, decode_line: LineDecoder) -> bool {
+fn tail_shows_activity(
+    tail: &[u8],
+    path: &Path,
+    source: &Arc<str>,
+    decode_line: LineDecoder,
+) -> bool {
     let transcript = crate::id::normalize_path_key(&path.to_string_lossy());
     // The window starts mid-file, so its first chunk is a partial line.
     tail.split(|b| *b == b'\n')
@@ -420,7 +427,7 @@ fn tail_proves_life(tail: &[u8], path: &Path, source: &Arc<str>, decode_line: Li
         .filter_map(|line| serde_json::from_str(line).ok())
         .filter_map(|v| decode_line(&transcript, source, v).ok())
         .flatten()
-        .any(|ev| ev.proves_life())
+        .any(|ev| ev.shows_activity())
 }
 
 /// Pre-drain guard for the exit-path drains: a transcript truncated/recreated
