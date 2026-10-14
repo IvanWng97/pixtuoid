@@ -4,10 +4,12 @@
 //!
 //! `--cli pinned` (the default) installs each CLI at its registry
 //! `verified_version`, the merge queue's end-to-end gate; `--cli latest` installs
-//! what npm's `latest` tag points at, the nightly drift run.
+//! what npm's `latest` tag points at, the nightly drift run. `--record` writes a
+//! source's fixtures, and with `latest` moves its pin up to the release recorded.
 //!
-//! Exits 0 when every run passed, 1 on any other verdict, and anything else
-//! when the tier itself could not run.
+//! Exits 0 when every run passed, 1 on any other verdict (a run's CLI reporting
+//! a release npm did not install included), and anything else when the tier
+//! itself could not run or refused a recording before any CLI ran.
 
 #[cfg(not(unix))]
 fn main() {
@@ -30,6 +32,7 @@ fn main() {
 
 #[cfg(unix)]
 mod run {
+    use std::cmp::Ordering;
     use std::ffi::OsString;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
@@ -37,6 +40,7 @@ mod run {
     use std::process::{Child, Command, Stdio};
     use std::time::{Duration, Instant};
 
+    use pixtuoid_core::harness::hermetic::pin;
     use pixtuoid_core::harness::hermetic::verify::{self, Label, Verdict};
     use pixtuoid_core::harness::hermetic::{
         self, DUMMY_KEY, MANIFEST, Manifest, NOT_HERMETIC, NOTE_PLACEHOLDER, PROFILES, Package,
@@ -45,6 +49,7 @@ mod run {
     use pixtuoid_core::harness::{
         CAPTURE_NOTE, CAPTURE_RECORD, CAPTURE_WORKSPACE, CaptureRecord, recorder_flag,
     };
+    use semver::Version;
 
     /// How long a server gets to come up before the run gives up.
     const BOOT: Duration = Duration::from_secs(60);
@@ -111,8 +116,8 @@ mod run {
         /// A selection that names nothing runnable is an operator's typo, not
         /// a run where everything was blocked.
         fn check(&self) -> Result<(), String> {
-            if self.record && self.versions == Versions::Latest {
-                return Err("--record writes fixtures of the pinned CLIs only".into());
+            if self.record && self.versions == Versions::Latest && self.source.is_none() {
+                return Err("--record with latest moves one source's pin: name it".into());
             }
             if self.record && self.scenario.is_some() {
                 return Err("--record writes a whole source: its census judges every run".into());
@@ -196,47 +201,102 @@ mod run {
             built: Built::find()?,
             aimock: Aimock::install(&tier)?,
             tier,
-            versions: args.versions,
         };
 
         let mut entries = Vec::new();
         for p in PROFILES {
-            let mut judged = Vec::new();
-            let mut passed = true;
-            for scenario in p.scenarios {
-                let name = scenario.shape.name();
-                if !args.selects(p.source, name) {
-                    continue;
-                }
-                let dir = run_dir(&runs, p, scenario);
-                std::fs::create_dir_all(&dir)?;
-                let key = format!("{}/{name}", p.source);
-                println!("== {key}");
-                let (version, verdict) = match run_one(&ctx, p, scenario, &dir) {
-                    Ok(manifest) => (Some(manifest.capture.version), verify::verify(&dir)?),
-                    Err(e) => (None, Verdict::new(vec![(Label::Blocked, e.to_string())])),
-                };
-                if verdict.judged() {
-                    judged.push(dir);
-                }
-                passed &= verdict.label() == Label::Pass;
-                entries.push(Entry::new(key, version, verdict));
-            }
-            if judges_source(&judged, p.scenarios.len()) {
-                let key = format!("{} (every scenario)", p.source);
-                println!("== {key}");
-                let verdict = verify::verify_source(p, &judged)?;
-                passed &= verdict.label() == Label::Pass;
-                entries.push(Entry::new(key, None, verdict));
-                if args.record && passed {
-                    record(&ctx, p, &runs)?;
-                }
-            }
+            entries.extend(run_source(&ctx, &args, p, &runs)?);
         }
         let report = report(args.versions, &entries);
         std::fs::write(runs.join(REPORT), &report)?;
         println!("\n{report}");
         Ok(entries.iter().all(|e| e.verdict.label() == Label::Pass))
+    }
+
+    /// `p`'s selected runs, then, once every scenario ran, its census and the
+    /// recording `args` asks for.
+    fn run_source(ctx: &Ctx, args: &Args, p: &Profile, runs: &Path) -> std::io::Result<Vec<Entry>> {
+        let selected: Vec<&Scenario> = p
+            .scenarios
+            .iter()
+            .filter(|s| args.selects(p.source, s.shape.name()))
+            .collect();
+        let mut entries = Vec::new();
+        if selected.is_empty() {
+            return Ok(entries);
+        }
+        // Once per source, so every scenario runs, and records, one release.
+        let installed = resolve(p, args.versions);
+        let registry = match (&installed, args.record) {
+            (Ok(v), true) => {
+                let pin = pin::pinned(p.descriptor()).map_err(std::io::Error::other)?;
+                let src = std::fs::read_to_string(pin::registry_path())?;
+                repinned_registry(&src, p.source, &pin, v).map_err(std::io::Error::other)?
+            }
+            _ => None,
+        };
+        let (mut judged, mut banners, mut passed) = (Vec::new(), Vec::new(), true);
+        for scenario in selected {
+            let dir = run_dir(runs, p, scenario);
+            std::fs::create_dir_all(&dir)?;
+            let key = format!("{}/{}", p.source, scenario.shape.name());
+            println!("== {key}");
+            let ran = match &installed {
+                Ok(v) => run_one(ctx, p, scenario, v, &dir),
+                Err(e) => Err(std::io::Error::other(e.clone())),
+            };
+            let (banner, verdict) = match ran {
+                Ok(manifest) => (Some(manifest.capture.version), verify::verify(&dir)?),
+                Err(e) => (None, Verdict::new(vec![(Label::Blocked, e.to_string())])),
+            };
+            if verdict.judged() {
+                judged.push(dir);
+            }
+            passed &= verdict.label() == Label::Pass;
+            banners.extend(banner.clone());
+            entries.push(Entry::new(key, banner, verdict));
+        }
+        if !judges_source(&judged, p.scenarios.len()) {
+            return Ok(entries);
+        }
+        let key = format!("{} (every scenario)", p.source);
+        println!("== {key}");
+        let verdict = verify::verify_source(p, &judged)?;
+        passed &= verdict.label() == Label::Pass;
+        entries.push(Entry::new(key, None, verdict));
+        if let (Ok(installed), true, true) = (&installed, args.record, passed) {
+            match pin::every_run_reported(installed, p.descriptor().version_hyphen, &banners) {
+                Ok(()) => {
+                    record(ctx, p, runs)?;
+                    if let Some(text) = registry {
+                        std::fs::write(pin::registry_path(), text)?;
+                    }
+                }
+                Err(why) => entries.push(Entry::new(
+                    format!("{} (recording)", p.source),
+                    None,
+                    Verdict::new(vec![(Label::Fail, why)]),
+                )),
+            }
+        }
+        Ok(entries)
+    }
+
+    /// The registry a recording of `source` at `installed` leaves: `None` while
+    /// the pin stays. Worked out before any CLI runs, so a refusal writes nothing.
+    fn repinned_registry(
+        registry: &str,
+        source: &str,
+        pin: &Version,
+        installed: &Version,
+    ) -> Result<Option<String>, String> {
+        match installed.cmp_precedence(pin) {
+            Ordering::Less => Err(format!(
+                "{source}: {installed} is below its pin {pin}, so nothing is recorded"
+            )),
+            Ordering::Equal => Ok(None),
+            Ordering::Greater => pin::repin(registry, source, installed).map(Some),
+        }
     }
 
     fn run_dir(runs: &Path, p: &Profile, scenario: &Scenario) -> PathBuf {
@@ -448,22 +508,54 @@ mod run {
         c
     }
 
+    /// The release `versions` names for `p`.
+    fn resolve(p: &Profile, versions: Versions) -> Result<Version, String> {
+        let Package::Npm(package) = p.package;
+        match versions {
+            Versions::Pinned => pin::pinned(p.descriptor()),
+            Versions::Latest => {
+                // A bare name reads npm's `tag` config, which an operator's
+                // `.npmrc` can point at another dist-tag (npm/cli lib/commands/view.js).
+                let spec = format!("{package}@latest");
+                let out = tool("npm")
+                    .args(["view", &spec, "version"])
+                    .output()
+                    .map_err(|e| format!("npm view {spec}: {e}"))?;
+                npm_release(&spec, out.status.success(), &out.stdout, &out.stderr)
+            }
+        }
+    }
+
+    /// How much of npm's error a report, a public issue in the nightly, carries:
+    /// its code and summary lines, cut.
+    const NPM_ERROR_LINES: usize = 2;
+    const NPM_ERROR_CHARS: usize = 200;
+
+    /// The release `npm view <spec> version` answered, strict, or why there is
+    /// none. An unresolvable tag exits 0 with nothing on stdout.
+    fn npm_release(spec: &str, ok: bool, stdout: &[u8], stderr: &[u8]) -> Result<Version, String> {
+        if !ok {
+            let why: Vec<String> = String::from_utf8_lossy(stderr)
+                .lines()
+                .filter(|l| l.starts_with("npm error"))
+                .take(NPM_ERROR_LINES)
+                .map(|l| l.chars().take(NPM_ERROR_CHARS).collect())
+                .collect();
+            return Err(format!("npm view {spec} failed: {}", why.join("; ")));
+        }
+        let v = String::from_utf8_lossy(stdout).trim().to_string();
+        if v.is_empty() {
+            return Err(format!("npm gave no version for {spec}"));
+        }
+        Version::parse(&v).map_err(|_| format!("npm view {spec} gave {v:?}, not a release"))
+    }
+
     /// The CLI at the version this run tests, installed into its own project the
     /// way users install it. Its own install scripts run, since they link the
     /// binary: npm 12 blocks a dependency's unless the project's `allowScripts`
     /// names it (`npm help install-scripts`), and older npm ignores the field.
-    fn install_cli(tier: &Path, p: &Profile, versions: Versions) -> std::io::Result<PathBuf> {
+    fn install_cli(tier: &Path, p: &Profile, version: &Version) -> std::io::Result<PathBuf> {
         let Package::Npm(package) = p.package;
-        let version = match versions {
-            Versions::Pinned => p.descriptor().verified_version.to_string(),
-            Versions::Latest => {
-                let out = tool("npm").args(["view", package, "version"]).output()?;
-                if !out.status.success() {
-                    return Err(std::io::Error::other(format!("npm view {package} failed")));
-                }
-                String::from_utf8_lossy(&out.stdout).trim().to_string()
-            }
-        };
         let prefix = tier.join("cli").join(format!("{}-{version}", p.source));
         let pinned = format!("{package}@{version}");
         install_once(&prefix, |dir| {
@@ -601,20 +693,19 @@ mod run {
         tier: PathBuf,
         built: Built,
         aimock: Aimock,
-        versions: Versions,
     }
 
     fn run_one(
         ctx: &Ctx,
         p: &Profile,
         scenario: &Scenario,
+        version: &Version,
         dir: &Path,
     ) -> std::io::Result<Manifest> {
         let Ctx {
             tier,
             built,
             aimock,
-            versions,
         } = ctx;
         if let Some(found) = outside_config(
             p.system_config,
@@ -630,7 +721,7 @@ mod run {
                 p.source
             )));
         }
-        let cli_bin = install_cli(tier, p, *versions)?;
+        let cli_bin = install_cli(tier, p, version)?;
         let port = free_port()?;
         let sandbox = Sandbox::new(p, built, &cli_bin, port)?;
 
@@ -1083,22 +1174,69 @@ mod run {
         }
 
         #[test]
-        fn record_takes_whole_pinned_sources() {
+        fn record_takes_whole_sources() {
             let a = parse(&args(&["--record", "--cli", "pinned", "dsh"])).expect("parse");
             assert!(a.record);
             assert_eq!(a.versions, Versions::Pinned);
             let check = |v: &[&str]| parse(&args(v)).expect("parse").check();
             assert!(check(&["--record"]).is_ok());
             assert!(check(&["--record", "dsh"]).is_ok());
+            assert!(check(&["--cli", "latest", "--record", "dsh"]).is_ok());
             assert!(
                 check(&["--cli", "latest", "--record"]).is_err(),
-                "fixtures track the pin"
+                "a later source's refusal would strand an earlier one's repin"
             );
             assert!(
                 check(&["--record", "dsh", "tool-run"]).is_err(),
                 "the census needs all"
             );
             assert!(!parse(&args(&["dsh"])).expect("parse").record);
+        }
+
+        #[test]
+        fn npm_answers_a_release_or_says_why_not() {
+            let spec = "@openai/codex@latest";
+            assert_eq!(
+                npm_release(spec, true, b"0.162.1\n", b""),
+                Ok(Version::new(0, 162, 1))
+            );
+            for bad in [&b"0.162.1\""[..], b"latest", b"", b"  \n"] {
+                assert!(npm_release(spec, true, bad, b"").is_err(), "{bad:?}");
+            }
+            assert!(
+                npm_release(spec, true, b"\n", b"").is_err_and(|why| why.contains("no version")),
+                "an unresolvable tag exits 0 with nothing on stdout"
+            );
+            let stderr = b"npm error code E404\nnpm error 404 No match found for version latest\n\
+                           npm error 404\nnpm error A complete log of this run can be found in: /Users/op/x.log\n";
+            let why = npm_release(spec, false, b"", stderr).expect_err("npm failed");
+            assert!(
+                why.contains("E404") && why.contains("No match found"),
+                "{why}"
+            );
+            assert!(
+                !why.contains("/Users/op"),
+                "the code and summary alone: {why}"
+            );
+        }
+
+        #[test]
+        fn a_recording_moves_the_pin_only_up() {
+            let registry = "const A: D = D {\n    name: a_cli::SOURCE_NAME,\n    verified_version: \"1.0.0\",\n};\n";
+            let pin = Version::new(1, 0, 0);
+            assert_eq!(repinned_registry(registry, "a-cli", &pin, &pin), Ok(None));
+            assert_eq!(
+                repinned_registry(registry, "a-cli", &pin, &Version::new(1, 1, 0)),
+                Ok(Some(registry.replace("1.0.0", "1.1.0")))
+            );
+            assert!(
+                repinned_registry(registry, "a-cli", &pin, &Version::new(0, 9, 0)).is_err(),
+                "a `latest` tag moved back"
+            );
+            assert!(
+                repinned_registry(registry, "b-cli", &pin, &Version::new(1, 1, 0)).is_err(),
+                "no row to move, refused before any CLI runs"
+            );
         }
     }
 }
