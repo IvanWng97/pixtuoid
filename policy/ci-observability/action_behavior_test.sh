@@ -303,3 +303,12 @@ log="$(filed 7)"
 if ! { grep -qxF "issue edit 7 --title $title" <<<"$log" && [[ $(grep -c '^issue comment 7 --body-file' <<<"$log") == 2 ]]; }; then
     fail "an open issue is not retitled with both legs' reports added: $log"
 fi
+# A leg that could not run uploads runs with no report.md: the others still file, and the step goes red.
+mkdir -p "$file_runs/hermetic-runs-1-1-linux"
+: >"$test_dir/gh.log"
+if (cd "$file_runs" && PATH="$file_bin:$PATH" GH_LOG="$test_dir/gh.log" FAKE_OPEN=7 GH_TOKEN=t GH_REPO=o/r \
+    bash -c "$file_script") >/dev/null 2>&1; then
+    fail "the file step passed with a leg that wrote no report"
+fi
+[[ $(grep -c '^issue comment 7 --body-file' "$test_dir/gh.log") == 2 ]] ||
+    fail "a leg with no report kept the others' reports off the issue: $(<"$test_dir/gh.log")"
