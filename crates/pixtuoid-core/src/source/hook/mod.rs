@@ -30,6 +30,9 @@ pub(crate) use pid_watch::HookPidWatch;
 mod router;
 pub use router::HookRouter;
 
+/// The variable naming the hook endpoint, read here and, as its parity-pinned
+/// twin, by the shim (`tests/socket_path_parity.rs`).
+pub(crate) const SOCKET_ENV: &str = "PIXTUOID_SOCKET";
 pub(crate) const MAX_CONCURRENT_CONNS: usize = 128;
 pub(crate) const CONN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 

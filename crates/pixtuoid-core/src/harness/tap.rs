@@ -32,7 +32,7 @@ pub struct Endpoint(PathBuf);
 
 impl Endpoint {
     /// The variable a shim reads its endpoint from.
-    pub const ENV: &str = "PIXTUOID_SOCKET";
+    pub const ENV: &str = crate::source::hook::SOCKET_ENV;
 
     /// The endpoint `name` private to `dir`: a socket inside it, or on Windows a
     /// pipe named after it, since the pipe namespace is machine-wide.
