@@ -41,19 +41,22 @@ jobs:
           set -euo pipefail
           gh label create hermetic --color FBCA04 \
             --description "A hermetic run's verdict on an agent CLI's latest release" 2>/dev/null || true
-          # The orchestrator owns the title, as each report's H1 naming its OS
-          # and disposition: the last failed leg's titles the issue, every
-          # report is a comment. A leg with no report.md means the tier itself
-          # could not run: red, with no verdict to file.
+          # The orchestrator owns the title, as each failed leg's report H1
+          # naming its OS, and they carry the disposition: retitle on the dedup
+          # path too. A leg with no report.md means the tier itself could not
+          # run: red, with no verdict to file.
+          reports=(*/report.md)
+          title=$(for r in "${reports[@]}"; do head -1 "$r" | sed 's/^# //'; done | paste -sd ';' - | sed 's/;/; /g')
           num=$(gh issue list --label hermetic --state open \
             --json number --jq '.[0].number // empty')
-          for report in */report.md; do
-            title=$(head -1 "$report" | sed 's/^# //')
-            if [ -n "$num" ]; then
-              gh issue edit "$num" --title "$title"
-              gh issue comment "$num" --body-file "$report"
-            else
-              url=$(gh issue create --title "$title" --label hermetic --body-file "$report")
-              num=${url##*/}
-            fi
+          if [ -n "$num" ]; then
+            gh issue edit "$num" --title "$title"
+            filed=0
+          else
+            url=$(gh issue create --title "$title" --label hermetic --body-file "${reports[0]}")
+            num=${url##*/}
+            filed=1
+          fi
+          for r in "${reports[@]:filed}"; do
+            gh issue comment "$num" --body-file "$r"
           done
