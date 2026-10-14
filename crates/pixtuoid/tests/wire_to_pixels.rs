@@ -237,7 +237,7 @@ fn agent_cases() -> Vec<WireCase> {
         WireCase {
             name: "reasonix",
             source: "reasonix",
-            fixture: "fixtures/reasonix/delegation-recorded/hook-payloads.jsonl",
+            fixture: "reasonix/fixtures/subagent-hermetic/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Delegating],
         },

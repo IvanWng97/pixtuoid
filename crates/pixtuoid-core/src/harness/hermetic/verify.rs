@@ -535,24 +535,17 @@ fn permission(events: &[AgentEvent], reached: &[Reach], findings: &mut Vec<(Labe
 
 fn subagent(events: &[AgentEvent], reached: &[Reach], findings: &mut Vec<(Label, String)>) {
     let ids: BTreeSet<_> = events.iter().map(AgentEvent::agent_id).collect();
-    let child = events.iter().find_map(|e| match e {
-        AgentEvent::SessionStart {
+    // The child's end is the scene's (`judge_scene`): it walks out on its own
+    // end event, or on the drain of the call that spawned it.
+    let child = events.iter().any(|e| {
+        matches!(e, AgentEvent::SessionStart {
             agent_id,
             parent_id: Some(parent),
             ..
-        } if parent != agent_id && ids.contains(parent) => Some(*agent_id),
-        _ => None,
+        } if parent != agent_id && ids.contains(parent))
     });
-    match child {
-        None => findings.push((Label::Fail, "no session started as another's child".into())),
-        Some(child) => {
-            let ended = events.iter().any(
-                |e| matches!(e, AgentEvent::SessionEnd { agent_id, .. } if *agent_id == child),
-            );
-            if !ended {
-                findings.push((Label::Fail, "the child session never ended".into()));
-            }
-        }
+    if !child {
+        findings.push((Label::Fail, "no session started as another's child".into()));
     }
     if !reached.contains(&Reach::Delegating) {
         findings.push((Label::Fail, "the parent never went Delegating".into()));
@@ -563,10 +556,11 @@ fn subagent(events: &[AgentEvent], reached: &[Reach], findings: &mut Vec<(Label,
 }
 
 /// The scene a headless pixtuoid painted, and every drift breadcrumb it logged.
-/// The agent must be seen in the `shown` state its shape is about, and gone once
-/// the CLI has exited: every profiled CLI's clean exit ends its sprite, whether
-/// by an end event or by its process's death, so one left standing is a session
-/// pixtuoid lost track of.
+/// The agent must be seen in the `shown` state its shape is about, and every
+/// agent, a child under its own label included, gone once the CLI has exited:
+/// every profiled CLI's clean exit ends its sprites, whether by an end event,
+/// a drain or its process's death, so one left standing is a session pixtuoid
+/// lost track of.
 fn judge_scene(p: &Profile, scene: &str, shown: &str, findings: &mut Vec<(Label, String)>) {
     let prefix = format!("{}\u{b7}", p.descriptor().label_prefix);
     let frames: Vec<&str> = scene
@@ -574,21 +568,21 @@ fn judge_scene(p: &Profile, scene: &str, shown: &str, findings: &mut Vec<(Label,
         .filter_map(|l| l.split_once("agents=[").map(|(_, agents)| agents))
         .collect();
     let state = format!(":{shown}");
-    let shows = |frame: &str, in_state: bool| {
+    let shown_in = |frame: &str| {
         frame
             .split(", ")
-            .any(|a| a.starts_with(&prefix) && (!in_state || a.contains(&state)))
+            .any(|a| a.starts_with(&prefix) && a.contains(&state))
     };
-    if !frames.iter().any(|f| shows(f, true)) {
+    if !frames.iter().any(|f| shown_in(f)) {
         findings.push((
             Label::Fail,
             format!("the scene never showed a {prefix} agent {shown}"),
         ));
     }
-    if frames.last().is_some_and(|last| shows(last, false)) {
+    if frames.last().is_some_and(|last| !last.starts_with(']')) {
         findings.push((
             Label::Fail,
-            format!("the {prefix} agent was still in the scene after the CLI exited"),
+            "an agent was still in the scene after the CLI exited".into(),
         ));
     }
     for line in scene.lines().filter(|l| l.contains(BREADCRUMB_TARGET)) {
@@ -855,17 +849,8 @@ mod tests {
     }
 
     #[test]
-    fn a_child_that_names_no_parent_or_never_ends_fails() {
+    fn a_child_that_names_no_parent_fails() {
         let d = recorded("dsh", Shape::Subagent, DS_DELEGATE_SCENE);
-        edit_hooks(d.path(), |v| {
-            (!(v["type"] == "session_end" && v.get("parentSession").is_some())).then_some(v)
-        });
-        let v = verify(d.path()).expect("verify");
-        assert!(
-            has(&v, Label::Fail, "child session never ended"),
-            "{:?}",
-            v.findings()
-        );
         edit_hooks(d.path(), |mut v| {
             if let Some(o) = v.as_object_mut() {
                 o.remove("parentSession");
@@ -875,6 +860,21 @@ mod tests {
         let v = verify(d.path()).expect("verify");
         assert!(
             has(&v, Label::Fail, "as another's child"),
+            "{:?}",
+            v.findings()
+        );
+    }
+
+    #[test]
+    fn a_child_still_in_the_scene_after_the_cli_exited_fails() {
+        // A child renamed after its task carries no source prefix (grok's).
+        let scene = "agents=[ds\u{b7}proj@0:active(Delegating), \
+                     Read the note@1:active(read)]\n\
+                     agents=[Read the note@1:idle] daemons=[]\n";
+        let d = recorded("dsh", Shape::Subagent, scene);
+        let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "after the CLI exited"),
             "{:?}",
             v.findings()
         );

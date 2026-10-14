@@ -307,19 +307,18 @@ fn a_trailing_identity_cannot_revive_the_child_its_start_was_refused_for() {
     );
 }
 
-#[test]
-fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
+/// A claude-code child that started under its parent, stopped, and was GC'd:
+/// the child ledger holds it. Returns the parent, the child and the stop.
+fn ended_child(r: &mut Reducer, scene: &mut SceneState) -> (AgentId, AgentId, SystemTime) {
     use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     use serde_json::json;
-    let mut scene = SceneState::uniform(4);
-    let mut r = Reducer::new();
     let parent = AgentId::from_parts("claude-code", "01000000-0000-7000-8000-0000000000cc");
     let child = AgentId::from_parts("claude-code", "agent-a0000000000000001");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
     apply_hook_payload(
-        &mut r,
-        &mut scene,
+        r,
+        scene,
         json!({
             "hook_event_name": "SessionStart",
             "session_id": "01000000-0000-7000-8000-0000000000cc",
@@ -329,8 +328,8 @@ fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
         t0,
     );
     apply_hook_payload(
-        &mut r,
-        &mut scene,
+        r,
+        scene,
         json!({
             "hook_event_name": "SubagentStart",
             "session_id": "01000000-0000-7000-8000-0000000000cc",
@@ -343,8 +342,8 @@ fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
     assert!(scene.agents.contains_key(&child), "child registered");
     let stop = t0 + Duration::from_secs(2);
     apply_hook_payload(
-        &mut r,
-        &mut scene,
+        r,
+        scene,
         json!({
             "hook_event_name": "SubagentStop",
             "session_id": "01000000-0000-7000-8000-0000000000cc",
@@ -353,11 +352,16 @@ fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
         }),
         stop,
     );
-    r.tick(
-        &mut scene,
-        stop + EXIT_GRACE_WINDOW + Duration::from_secs(1),
-    );
+    r.tick(scene, stop + EXIT_GRACE_WINDOW + Duration::from_secs(1));
     assert!(!scene.agents.contains_key(&child), "child GC'd");
+    (parent, child, stop)
+}
+
+#[test]
+fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let (parent, child, stop) = ended_child(&mut r, &mut scene);
 
     let late_start = |r: &mut Reducer, scene: &mut SceneState, at: SystemTime| {
         r.apply(
@@ -388,6 +392,51 @@ fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
     assert!(
         scene.agents.contains_key(&child),
         "past CHILD_END_LEDGER_TTL the registration resumes"
+    );
+}
+
+#[test]
+fn a_refused_child_start_takes_the_activity_paired_with_it() {
+    // reasonix pairs a parented start with each child event, so a child its
+    // parent's drain walked out arrives as start-then-activity: the activity
+    // must not synthesize it back blank and parentless.
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let (parent, child, stop) = ended_child(&mut r, &mut scene);
+    let at = stop + Duration::from_secs(30);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: child,
+            source: "claude-code".into(),
+            session_id: "agent-a0000000000000001".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: Some(parent),
+        },
+        at,
+        Transport::Hook,
+    );
+    let straggle = |r: &mut Reducer, scene: &mut SceneState, at: SystemTime| {
+        act_start(
+            r,
+            scene,
+            child,
+            None,
+            Some("read_file"),
+            at,
+            Transport::Hook,
+        );
+    };
+    straggle(&mut r, &mut scene, at + Duration::from_millis(1));
+    assert!(
+        !scene.agents.contains_key(&child),
+        "the activity paired with a refused start synthesized the ended child"
+    );
+    // One-shot: a bare straggler after it is #244's, and still registers.
+    straggle(&mut r, &mut scene, at + Duration::from_secs(1));
+    assert!(
+        scene.agents.contains_key(&child),
+        "the refusal outlived the activity paired with it"
     );
 }
 

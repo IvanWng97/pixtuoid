@@ -715,8 +715,10 @@ impl Reducer {
         now: SystemTime,
     ) {
         if self.late_child_start_refused(scene, agent_id, ctx, parent_id, now) {
+            self.corr.refused_child_starts.insert(agent_id, now);
             return;
         }
+        self.corr.refused_child_starts.remove(&agent_id);
         let parent_id = self.resolve_parent_link(scene, agent_id, ctx, parent_id);
         if self.enrich_existing_start(scene, agent_id, ctx, parent_id, now) {
             return;
@@ -893,7 +895,9 @@ impl Reducer {
         }
         // A tombstoned id's hook SessionEnd already arrived slot-less: this is a
         // straggler from the DEAD session, and a blank Idle ghost is unremovable.
-        if self.corr.hook_session_end_tombstoned(id, now) {
+        if self.corr.hook_session_end_tombstoned(id, now)
+            || self.corr.refused_child_starts.remove(&id).is_some()
+        {
             return;
         }
         if self.register_slot(

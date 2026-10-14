@@ -45,6 +45,8 @@ pub(crate) const REASONIX_EVENTS: &[&str] = &[
     "Stop",
     "Notification",
     "SessionEnd",
+    "SubagentStart",
+    "SubagentStop",
 ];
 
 /// `reasonix plugin install`'s flags: link in place, re-link over an existing
@@ -582,6 +584,8 @@ mod tests {
                 "Stop",
                 "Notification",
                 "SessionEnd",
+                "SubagentStart",
+                "SubagentStop",
             ],
         );
     }

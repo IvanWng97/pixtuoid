@@ -132,6 +132,12 @@ pub(super) struct Correlation {
     /// `ended_at` gates a PARENTED re-registration (the dead child's late
     /// echo), while a PARENTLESS start ADOPTS the remembered parent.
     pub(super) child_ledger: HashMap<AgentId, ChildLedgerEntry>,
+    /// Ids whose PARENTED `SessionStart` the child ledger just refused. A
+    /// decoder that pairs one with each event of a child (reasonix) sends the
+    /// event's activity next, which must not synthesize the ended child back
+    /// blank and parentless; that activity consumes the entry, and an accepted
+    /// start clears it, so a bare #244 straggler still registers.
+    pub(super) refused_child_starts: HashMap<AgentId, SystemTime>,
     /// Sweep-exemption timestamps from [`AgentEvent::ProofOfLife`](crate::AgentEvent::ProofOfLife) (#220):
     /// a slot vouched for within [`PROOF_OF_LIFE_TTL`] is skipped by
     /// `sweep_stale`'s candidate collection.
@@ -246,6 +252,8 @@ impl Correlation {
             .retain(|_, ts| is_fresh(now, *ts, PROOF_OF_LIFE_TTL));
         self.recent_task_drains
             .retain(|_, ts| is_fresh(now, *ts, DRAINED_TASK_TOMBSTONE_TTL));
+        self.refused_child_starts
+            .retain(|_, ts| is_fresh(now, *ts, CHILD_END_LEDGER_TTL));
         self.child_ledger.retain(|_, e| match e.ended_at {
             None => true,
             Some(ts) => is_fresh(now, ts, CHILD_END_RELINK_TTL),
@@ -424,6 +432,13 @@ mod tests {
         corr.gc(t0() + PROOF_OF_LIFE_TTL);
         assert!(!corr.recent_proof_of_life.contains_key(&old));
         assert!(corr.recent_proof_of_life.contains_key(&young));
+
+        let mut corr = Correlation::default();
+        corr.refused_child_starts.insert(old, t0());
+        corr.refused_child_starts.insert(young, t0() + step);
+        corr.gc(t0() + CHILD_END_LEDGER_TTL);
+        assert!(!corr.refused_child_starts.contains_key(&old));
+        assert!(corr.refused_child_starts.contains_key(&young));
 
         let mut corr = Correlation::default();
         corr.recent_task_drains.insert((old, "t1".into()), t0());
