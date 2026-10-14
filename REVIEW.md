@@ -61,8 +61,7 @@ edit that would leave a copy or a comment wrong.
 
 1. **Comment audit**: for every file, a one-line change included, read its
    entire comment population against the code and AGENTS.md's comment rules
-   (accuracy, value, rot, vestigial, self-repetition); a story told twice keeps
-   the copy on the narrowest thing it constrains.
+   (accuracy, value, rot, vestigial, self-repetition).
 2. **DRY** — every new fn/type/helper/const gets a whole-tree search for an
    existing implementation, weighted by divergence risk; every value a new line
    reads is the authority its consumer uses, not a sibling's (#1042, #1155).

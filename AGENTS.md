@@ -73,12 +73,11 @@ cargo run --profile release-local --example snapshot -- /tmp/snap.png   # the sa
 
 ## Workflow
 
-Non-trivial work runs as an arc — pick → grill the design → design gate →
-spec → build (TDD) → self-review → merge gate → wrap. Per-step detail:
-[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-arc-loop). The merge gate is
-[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-merge-gate); the `local-review`
-skill runs its focused reviews. Merging is `@mergifyio queue`, which a session
-comments itself once that gate holds; a release PR merges by hand.
+Non-trivial work runs as [an arc](docs/CONTRIBUTING.md#the-arc-loop): read
+each step there before taking it, never from recall. Merging is
+`@mergifyio queue`, which a session comments itself once
+[the merge gate](docs/CONTRIBUTING.md#the-merge-gate) holds; the
+`local-review` skill runs its focused reviews, and a release PR merges by hand.
 
 **At most 6 open PRs across the sessions** (bots' and outside contributors'
 aside), the owner's cap: the runners take
@@ -143,10 +142,9 @@ taller-cell terminals; bundled base character sprites max at 8×12 px (their
 
 ## Things NOT to do
 
-- No `ratatui`/`crossterm`/terminal anything in `pixtuoid-core` or `pixtuoid-scene`.
 - No write to another CLI's config outside `install/io.rs` (`write_config_atomic` / `ConfigLock`).
 - No `println!`/`eprintln!` on production paths — a print macro panics when its reader leaves (`| head`), so CLI and headless output goes through a `CliOut` (a command's is `crate::cli_stdout()`) and a stderr notice is a `let _ = writeln!`. Diagnostics are `tracing`, with a constant message and every value as a field (`error = %e`, `path = ?path`, `pid`): the constant message is a stable grep key and a field is filterable; a value baked into the format string is neither. Every path, session id and cwd rides a `?` field, never `%`, whatever its provenance, and so does an error chain that can embed one (`SourceDeath.error`, `SocketBusy`): `str`'s `Debug` escapes control and bidi chars, while under the default `fmt` layer a Display field writes them raw and `EscapeGuard` covers the message and error text only (`test_capture`'s `debug_fields_escape_control_and_bidi_chars`). Core logs under whatever subscriber hosts it, so the rule is primary; the binary's `EscapedFields` (`app/logging.rs`) escapes every value only as a backstop. Only a whole-message relay re-emitting an already-sanitized user-facing string (`config::warn_user`, the `read_log` warning in `sources_cli`) interpolates.
-- Never relax the shim's always-exit-0 contract; never add `--no-verify`/hook-skipping flags.
+- Never add `--no-verify`/hook-skipping flags.
 - No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — the owner reviews every doc change directly, so propose the diff rather than adding a generator or a cap. A session pushes its own PR branches freely; never force-push or push to `main`.
 - No stale `Closes #N` on a re-scope (fires from commit body or PR text, even conditional).
 - No merging past the review gate (PR #23 merged unreviewed with a path traversal), and no reviewer finding accepted before its premise is checked against the item it names.
@@ -156,4 +154,4 @@ taller-cell terminals; bundled base character sprites max at 8×12 px (their
 - Tool call → sprite: `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → watch channel → `TuiRenderer::render` → `pixtuoid_scene::floor::OfficeSession::render` → `pixtuoid_scene::look::render` → `tui::renderer::flush_classic`.
 - Architecture + data flow: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - Refactoring the channel type, `Source` trait, `AgentEvent`, or reducer signature touches all four test areas (`tests/reducer/`, `tests/e2e.rs`, `tests/transport/socket.rs`, `tests/watcher/`) + `runtime/driver.rs`; a new `AgentEvent` variant needs an `agent_id()` arm.
-- Adding an agent CLI: source module + `SourceDescriptor` row (`source/registry.rs`) + `runtime/driver.rs` wiring + `site/src/sources.json` row; full checklist in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#adding-a-new-agent-cli); `add-source` skill drives it.
+- Adding an agent CLI: [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#adding-a-new-agent-cli)'s checklist, which the `add-source` skill drives.

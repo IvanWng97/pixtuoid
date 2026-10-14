@@ -183,11 +183,9 @@ scenario dir's relative path), so a CC hook (which coalesces on
 `transcript_path`) lines up with its JSONL file. Codex carries it too — to
 prove Codex *ignores* it and still coalesces on `session_id`.
 
-**Adding a CLI:** drop a new `fixtures/<source>/<scenario>/` dir — the decoder
-comes from the source's `SourceDescriptor` row in `source/registry.rs` (a
-hook-only row, `transcript: None`, ships only `hook-payloads.jsonl` instead
-of a transcript). Run `cargo insta review` to accept the generated snapshot.
-No harness edit, no other test code.
+**Adding a CLI:** [the test steps](../../AGENTS.md#adding-a-new-agent-cli--the-test-steps);
+a hook-only row (`transcript: None`) ships `hook-payloads.jsonl` in place of
+a transcript, and no harness edit or other test code is needed.
 
 ## Where a scenario's own story lives
 

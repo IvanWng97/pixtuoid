@@ -6,9 +6,8 @@ decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
 
 Before you start, read [`AGENTS.md`](../AGENTS.md) at the repo root (and the
 nested `crates/*/AGENTS.md` for the crate you touch). It holds the load-bearing
-architecture invariants and conventions. Many things that look like bugs are
-documented, intentional design: read the whole item, its doc comment and the
-comments on the lines it governs, before changing it.
+architecture invariants and conventions, and why much that looks like a bug
+is deliberate.
 
 ## Build & test
 
@@ -33,6 +32,12 @@ just test -p pixtuoid --features upstream drift_watch   # the drift watch's test
 
 Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 (`pre-commit` = `just fmt-check`; `pre-push` = `just preflight`).
+
+`just hermetic [--cli pinned|latest] [--record] [source [scenario]]` runs each profiled CLI against a
+scripted model (aimock) with a headless pixtuoid: the full tier gates on it at
+each `verified_version`, the nightly runs it at latest. `scripts/lib/`'s tiers
+run in no CI: `just openclaw-e2e` · `just openclaw-multi-e2e`
+· `just openclaw-backend-e2e` (BILLED) · `just live-sources [id ...]` (BILLED).
 
 ## Releasing
 
@@ -147,22 +152,18 @@ design → build → gate → wrap.
 5. **Mock gate** (taste/visual work only) — ratify the AFTER visual before code
    (`beautify-decoration` skill).
 6. **Build** — TDD: failing test → minimal impl → commit.
-7. **Self-review** — a standards+spec pass before EVERY push, a review fold's
-   included, over everything the PR adds, not only the lines a finding names,
-   with the whole-file comment audit: every file the PR touches, by even one
-   line, gets its whole comment population re-read against `AGENTS.md`'s comment
-   rules; the cleanup rides the same PR ([`REVIEW.md`](../REVIEW.md#every-changed-file)'s comment audit). Not the merge gate.
-8. **Merge gate** — [the gate](#the-merge-gate); the `local-review` skill
-   runs its focused reviews; merging is `@mergifyio queue`, a release PR by hand.
+7. **Self-review** — before EVERY push, a review fold's included:
+   [`REVIEW.md`](../REVIEW.md#every-changed-file)'s Every changed file, the
+   comment audit too, over everything the PR adds, not only the lines a
+   finding names; the cleanup rides the same PR. Not the merge gate.
+8. **Merge gate** — [the gate](#the-merge-gate).
 9. **Wrap** — retro; a durable lesson becomes a mechanism (a test, a gate) or
    a line on the narrowest rule it amends — never an agent's private memory,
    which nobody reviews and nothing executes.
 
-`just hermetic [--cli pinned|latest] [--record] [source [scenario]]` runs each profiled CLI against a
-scripted model (aimock) with a headless pixtuoid: the full tier gates on it at
-each `verified_version`, the nightly runs it at latest. `scripts/lib/`'s tiers
-run in no CI: `just openclaw-e2e` · `just openclaw-multi-e2e`
-· `just openclaw-backend-e2e` (BILLED) · `just live-sources [id ...]` (BILLED).
+Checks hold only the merge gate (`ci-gate`, `claude-review`,
+`focused-reviews`, resolved threads) and step 6's tests (the review's test
+teeth); every other step is the session's to keep.
 
 ### Parallel sessions
 
@@ -253,7 +254,8 @@ before re-litigating.
   it; the rest of a fold is a revert, a deletion, a
   comment or doc change, or a refactor the existing tests cover. Anything
   else reverts the fold.
-- **A fix round adds no new gate** — a wanted check is its own PR, asserting
+- **A fix round adds no gate** beyond a refutation's mechanism — any other
+  wanted check is its own PR, asserting
   facts in its own layer (a Rust fact from Rust, never a Python regex over
   `.rs`).
 

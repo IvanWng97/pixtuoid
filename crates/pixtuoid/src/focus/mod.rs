@@ -2,7 +2,6 @@
 //! foreground. `resolve_pid` (slot cache → per-source probe) → `ancestor_walk`
 //! (pid → the first *focusable* ancestor, i.e. the terminal GUI app) → per-OS
 //! `activate`. App-level only by design — no tab/pane precision.
-//! Spec: docs/superpowers/specs/2026-07-10-focus-jump-design.md.
 //!
 //! ONE failure rule (user-directed, no fallbacks): any miss — no pid, walk
 //! reaches pid 1, remote agent, activation denied, unsupported compositor — is a
