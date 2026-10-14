@@ -19,7 +19,7 @@ const CHILD: &str = "01a006a6-0659-7690-a9cc-20da7c827b72";
 fn lines(name: &str) -> Vec<String> {
     super::captures::fixture_lines(
         &super::captures::sources_root()
-            .join("grok/fixtures")
+            .join("grok/fixtures/subagent-recorded")
             .join(name),
     )
 }

@@ -4,6 +4,7 @@
 //! the home variable (`home_env`) and the pinned version (`verified_version`);
 //! a profile holds only what it doesn't.
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,9 @@ pub mod verify;
 /// The key every profile's CLI is handed for its scripted model: aimock
 /// accepts any, and a real provider must refuse it.
 pub const DUMMY_KEY: &str = "hermetic-dummy-key";
+
+/// The scripted model's `/v1` base, as a profile's env spells it.
+const AIMOCK_V1: &str = "http://127.0.0.1:{port}/v1";
 
 /// What a Unix `system_config` path spells the operator's user name as.
 pub const USER_PLACEHOLDER: &str = "{user}";
@@ -149,7 +153,7 @@ pub struct Profile {
     /// one is Stale (`verify::verify_source`).
     pub not_yet: &'static [&'static str],
     /// The hook event a captured payload is, in `registers()` terms.
-    pub(crate) event_name: fn(&Value) -> Option<&str>,
+    pub(crate) event_name: fn(&Value) -> Option<Cow<'_, str>>,
     /// Fields a decoder reads in a committed capture that no scenario carries
     /// yet, as `(kind, path)` the field census names them. Shrink-only: a run
     /// that carries one is Stale.
@@ -164,6 +168,15 @@ impl Profile {
     /// If the profile names an unregistered source, which the roster test refuses.
     pub fn descriptor(&self) -> &'static registry::SourceDescriptor {
         registry::descriptor_for(self.source).expect("a profile names a registered source")
+    }
+
+    /// Every home variable the CLI reads that the tier points into its own
+    /// directories: the registry row's and the profile's.
+    pub fn home_vars(&self) -> impl Iterator<Item = &'static str> {
+        self.descriptor()
+            .home_env
+            .into_iter()
+            .chain(self.homes.iter().copied())
     }
 }
 
@@ -201,17 +214,17 @@ pub enum Absence {
     AwaitingProfile,
 }
 
-fn hook_event_name(v: &Value) -> Option<&str> {
-    v.get("hook_event_name")?.as_str()
+fn hook_event_name(v: &Value) -> Option<Cow<'_, str>> {
+    v.get("hook_event_name")?.as_str().map(Cow::Borrowed)
 }
 
-fn type_field(v: &Value) -> Option<&str> {
-    v.get("type")?.as_str()
+fn type_field(v: &Value) -> Option<Cow<'_, str>> {
+    v.get("type")?.as_str().map(Cow::Borrowed)
 }
 
 /// The event dsh's plugin forwards as each payload `type` (`dsh_plugin.mjs`).
-fn dsh_event(v: &Value) -> Option<&str> {
-    Some(match type_field(v)? {
+fn dsh_event(v: &Value) -> Option<Cow<'_, str>> {
+    Some(Cow::Borrowed(match v.get("type")?.as_str()? {
         "session_start" => "agent/created",
         "session_end" => "agent/disposed",
         "model" => "request/header",
@@ -221,7 +234,26 @@ fn dsh_event(v: &Value) -> Option<&str> {
         "approval_asked" => "approval/asked",
         "approval_decided" => "approval/decided",
         _ => return None,
-    })
+    }))
+}
+
+/// The registration a grok envelope's `hookEventName` answers to: the wire
+/// spells each key in snake_case, `SubagentEnd`'s as `SubagentStop`'s
+/// (`crates/codegen/xai-grok-hooks/src/event.rs:78-180`).
+fn grok_event(v: &Value) -> Option<Cow<'_, str>> {
+    let wire = v.get("hookEventName")?.as_str()?;
+    let key = wire
+        .split('_')
+        .flat_map(|word| {
+            let mut chars = word.chars();
+            chars
+                .next()
+                .map(|c| c.to_ascii_uppercase())
+                .into_iter()
+                .chain(chars)
+        })
+        .collect();
+    Some(Cow::Owned(key))
 }
 
 /// The profiled CLIs.
@@ -572,6 +604,104 @@ sandbox = "unelevated"
         // A Bash call's; the scripted turn reads a file.
         not_yet_fields: &[("hook:PreToolUse", "/tool_input/command")],
     },
+    // grok's cites are `xai-org/grok-build` at `37949780c1`, the monorepo sync
+    // nearest 1.0.25: the repo tags no release.
+    Profile {
+        source: "grok",
+        package: Package::Npm("@xai-official/grok"),
+        // Headless automation runs always-approve
+        // (`crates/codegen/xai-grok-pager/docs/user-guide/22-permissions-and-safety.md:76-94`),
+        // which a blocking spawn needs: `-p` cancels every prompt
+        // (`crates/codegen/xai-grok-pager/src/headless.rs:1882-1901`).
+        invocation: &["grok", "--always-approve", "-p", "{prompt}"],
+        // What upstream's own run against a mock server sets: every service
+        // URL on it, and the telemetry, feedback, update and unscripted
+        // side-request switches
+        // (`crates/codegen/xai-grok-test-support/src/sandbox.rs:275-288`, `:329-348`).
+        env: &[
+            ("XAI_API_KEY", "{key}"),
+            ("GROK_XAI_API_BASE_URL", AIMOCK_V1),
+            ("GROK_CLI_CHAT_PROXY_BASE_URL", AIMOCK_V1),
+            ("GROK_MODELS_BASE_URL", AIMOCK_V1),
+            ("GROK_FEEDBACK_BASE_URL", AIMOCK_V1),
+            ("GROK_TRACE_UPLOAD_URL", AIMOCK_V1),
+            ("GROK_MANAGED_CONFIG_URL", AIMOCK_V1),
+            ("GROK_CODE_WEB_URL", AIMOCK_V1),
+            ("GROK_CONVERSATIONS_BASE_URL", AIMOCK_V1),
+            ("GROK_TELEMETRY_ENABLED", "false"),
+            ("GROK_TELEMETRY_MIXPANEL_ENABLED", "false"),
+            ("GROK_TELEMETRY_MIXPANEL_TOKEN", ""),
+            ("GROK_TELEMETRY_EVENTS_URL", ""),
+            ("GROK_TELEMETRY_EVENTS_API_KEY", ""),
+            ("GROK_TELEMETRY_TRACE_UPLOAD", "false"),
+            ("GROK_FEEDBACK_ENABLED", "false"),
+            ("GROK_TRACE_UPLOAD", "false"),
+            ("GROK_INSTRUMENTATION", "disabled"),
+            ("OTEL_SDK_DISABLED", "true"),
+            ("DISABLE_TELEMETRY", "1"),
+            ("GROK_DISABLE_AUTOUPDATER", "1"),
+            ("GROK_PROMPT_SUGGESTIONS", "false"),
+            ("GROK_TURN_SUMMARY", "0"),
+        ],
+        homes: &[],
+        // Its system config, and the Claude Code managed settings it imports
+        // (`crates/codegen/xai-grok-config/src/paths.rs:5-9`, `:23-29`): none
+        // on Windows, where every home path is std's, which reads USERPROFILE
+        // (`crates/codegen/xai-dirs/src/lib.rs:32-36`).
+        system_config: PerOs {
+            unix: &[
+                HostConfig::Path("/etc/grok"),
+                HostConfig::Path("/Library/Application Support/ClaudeCode/managed-settings.json"),
+                HostConfig::Path("/etc/claude-code/managed-settings.json"),
+            ],
+            windows: &[],
+        },
+        // Instructions, rules and project config stop at the git work tree
+        // (`crates/codegen/xai-grok-agent/src/repo.rs:23-52`), which the
+        // recorder's `git init` makes the workspace.
+        ancestor_config: &[],
+        config: &[],
+        scenarios: &[
+            Scenario {
+                shape: Shape::ToolRun,
+                expects: &[
+                    "SessionStart",
+                    "UserPromptSubmit",
+                    "PreToolUse",
+                    "PostToolUse",
+                    "Stop",
+                    "SessionEnd",
+                ],
+                fixture: "fixtures/grok/tool-run-hermetic",
+            },
+            Scenario {
+                shape: Shape::Subagent,
+                expects: &[
+                    "SessionStart",
+                    "UserPromptSubmit",
+                    "PreToolUse",
+                    "SubagentStart",
+                    "PostToolUse",
+                    "SubagentStop",
+                    "Stop",
+                    "SessionEnd",
+                ],
+                fixture: "grok/fixtures/subagent-hermetic",
+            },
+        ],
+        script_vars: &[],
+        not_yet: &[
+            "PostToolUseFailure",
+            "PermissionDenied",
+            "Notification",
+            "StopFailure",
+            "StopCancelled",
+            "SubagentEnd",
+        ],
+        event_name: grok_event,
+        // A shell call's; the scripted turns read a file and spawn a child.
+        not_yet_fields: &[("hook:PreToolUse", "/toolInput/command")],
+    },
 ];
 
 /// Every registered source without a profile, and why.
@@ -584,7 +714,6 @@ pub const NOT_HERMETIC: &[(&str, Absence)] = &[
     ("openclaw", Absence::AwaitingProfile),
     ("copilot", Absence::AwaitingProfile),
     ("hermes", Absence::AwaitingProfile),
-    ("grok", Absence::AwaitingProfile),
     ("omp", Absence::AwaitingProfile),
 ];
 
@@ -686,7 +815,7 @@ mod tests {
     fn a_config_file_lives_under_a_home_the_sandbox_owns() {
         for p in PROFILES {
             for c in p.config {
-                let owned = p.homes.contains(&c.home) || p.descriptor().home_env == Some(c.home);
+                let owned = p.home_vars().any(|h| h == c.home);
                 assert!(owned, "{}: {} is not a sandboxed home", p.source, c.home);
             }
         }
@@ -866,6 +995,21 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_grok_event_is_the_registration_key_its_wire_name_spells() {
+        // A key `GROK_EVENTS` adds maps with no edit here, so a run that fires
+        // it reads Stale.
+        for (wire, key) in [
+            ("session_start", "SessionStart"),
+            ("post_tool_use_failure", "PostToolUseFailure"),
+            ("a_new_hook", "ANewHook"),
+        ] {
+            let v = serde_json::json!({ "hookEventName": wire });
+            assert_eq!(grok_event(&v).as_deref(), Some(key));
+        }
+        assert_eq!(grok_event(&serde_json::json!({})), None);
     }
 
     #[test]
