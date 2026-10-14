@@ -59,8 +59,8 @@ pub fn every_run_reported(
 ///
 /// # Errors
 ///
-/// When `installed` is below the pin, the pin is not a release, or [`repin`]
-/// refuses.
+/// When `installed` is below the pin, the pin is not a release, or the row or
+/// its pin line can't be found exactly.
 pub fn repinned(
     registry: &str,
     d: &SourceDescriptor,
@@ -90,7 +90,7 @@ const PIN_FIELD: &str = "verified_version: ";
 ///
 /// When the row's anchor or its pin line is not exactly one line, or the pin
 /// line holds no string literal.
-pub fn repin(registry: &str, source: &str, new: &Version) -> Result<String, String> {
+fn repin(registry: &str, source: &str, new: &Version) -> Result<String, String> {
     let anchor = format!("name: {}::SOURCE_NAME,", source.replace('-', "_"));
     let mut lines = Vec::new();
     let mut at = 0;
@@ -183,6 +183,12 @@ mod tests {
             "no run, no report"
         );
         assert!(every_run_reported(&v("0.2.0-rc.2"), pre, &ran(&["dsh 0.2.0"])).is_err());
+        let build_id = ran(&["cli 1.0.0-abc"]);
+        assert!(
+            every_run_reported(&v("1.0.0"), Hyphen::Build, &build_id).is_ok(),
+            "a build id is the same release"
+        );
+        assert!(every_run_reported(&v("1.0.0"), pre, &build_id).is_err());
     }
 
     #[test]

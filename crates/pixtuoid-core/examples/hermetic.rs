@@ -497,7 +497,8 @@ mod run {
             Versions::Pinned => pin::pinned(p.descriptor()),
             Versions::Latest => {
                 // A bare name reads npm's `tag` config, which an operator's
-                // `.npmrc` can point at another dist-tag (npm/cli lib/commands/view.js).
+                // `.npmrc` can point at another dist-tag
+                // (https://github.com/npm/cli/blob/83ea1a1c19648a6b4f5e52a498d8a6aaaf60e52b/lib/commands/view.js#L141-L145).
                 let spec = format!("{package}@latest");
                 let out = tool("npm")
                     .args(["view", &spec, "version"])
@@ -515,7 +516,7 @@ mod run {
 
     /// The release `npm view <spec> version` answered, strict, or why there is
     /// none: an absent `latest` tag exits 0 with nothing on stdout
-    /// (npm/cli lib/commands/view.js).
+    /// (https://github.com/npm/cli/blob/83ea1a1c19648a6b4f5e52a498d8a6aaaf60e52b/lib/commands/view.js#L190).
     fn npm_release(
         spec: &str,
         status: ExitStatus,
