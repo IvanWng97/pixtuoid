@@ -329,32 +329,35 @@ mod tests {
     #[tokio::test]
     async fn a_send_waits_out_a_pipe_whose_one_instance_is_taken() {
         use tokio::net::windows::named_pipe::{ClientOptions, ServerOptions};
+        const INSTANCES: usize = 2;
         let d = private_dir();
         let at = Endpoint::in_dir(d.path(), "busy");
-        let mut server = ServerOptions::new()
+        let first = ServerOptions::new()
             .first_pipe_instance(true)
-            .max_instances(1)
+            .max_instances(INSTANCES)
             .create(at.path())
             .expect("server");
-        let holder = ClientOptions::new().open(at.path()).expect("holder");
-        server.connect().await.expect("held");
+        let _holder = ClientOptions::new().open(at.path()).expect("holder");
+        first.connect().await.expect("held");
         let send = tokio::spawn({
             let at = at.clone();
             async move { at.send(LINE.as_bytes()).await }
         });
         tokio::time::sleep(PIPE_BUSY_BACKOFF * 5).await;
-        drop(holder);
-        server.disconnect().expect("freed");
+        let mut second = ServerOptions::new()
+            .max_instances(INSTANCES)
+            .create(at.path())
+            .expect("a free instance");
         let (connected, sent) = tokio::join!(
-            tokio::time::timeout(PIPE_BUSY_BOUND, server.connect()),
+            tokio::time::timeout(PIPE_BUSY_BOUND, second.connect()),
             send
         );
         connected
-            .expect("the send connects once the pipe frees")
+            .expect("the send connects once an instance frees")
             .expect("connected");
         sent.expect("joined").expect("sent");
         let mut got = String::new();
-        server.read_to_string(&mut got).await.expect("read");
+        second.read_to_string(&mut got).await.expect("read");
         assert_eq!(got, LINE);
     }
 }
