@@ -124,8 +124,9 @@ pub fn owned_by_us(path: &Path) -> bool {
     }
 }
 
-/// The entry's owner against the token's default owner, not its user: an
-/// elevated administrator's new objects are owned by Administrators.
+/// The entry's owner against the SID this token gives each object it creates,
+/// which may be one of its groups rather than its user (learn.microsoft.com,
+/// TOKEN_OWNER).
 #[cfg(windows)]
 fn windows_owned(path: &Path) -> Option<bool> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE, LocalFree};
