@@ -194,7 +194,7 @@ impl Tap {
             .len()
     }
 
-    /// Wait until no payload has arrived for [`QUIET_ROUNDS`] × [`SETTLE`].
+    /// Wait until no payload has arrived for `QUIET_ROUNDS` × `SETTLE`.
     pub fn settle(&self) {
         let (mut prev, mut quiet, mut round) = (usize::MAX, 0, 0);
         while quiet < QUIET_ROUNDS && round < MAX_ROUNDS {
