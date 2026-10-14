@@ -275,7 +275,7 @@ impl Correlation {
     ///
     /// A [`Lifecycle`] lives while any clock it carries does: a linked live
     /// child's memory, a child end under [`CHILD_END_RELINK_TTL`] (not the
-    /// gate's TTL), or a hook end under its tombstone TTL.
+    /// gate's TTL), or a hook end under [`STRAGGLER_TTL`].
     pub(super) fn gc(&mut self, now: SystemTime) {
         self.recent_hook_tool_uses
             .retain(|_, (ts, _)| is_fresh(now, *ts, HOOK_WINS_WINDOW));

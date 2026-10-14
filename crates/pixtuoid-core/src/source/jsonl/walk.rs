@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
 use crate::AgentId;
-use crate::source::decoder::{CwdExtractor, SUBAGENTS_DIR};
+use crate::source::decoder::{CwdExtractor, LineDecoder, SUBAGENTS_DIR};
 use crate::source::registry::cwd_extractor_for;
 use crate::source::{AgentEvent, TaggedSender, Transport};
 
@@ -269,17 +269,19 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         // stays invisible until its next small append; the backlog is not replayed.
         // Keys on `seen`, NOT `!known` — a first-sight-GATED file is already `known`,
         // and keying on `!known` left it invisible until a later ≤1 MiB append.
-        let registered = seen.lock().await.get(path) == Some(&Sight::Claimed);
+        let sight = seen.lock().await.get(path).copied();
         // The span is too big to hold, so the tail is the instrument — a
         // metadata run always lands at the end.
+        let tail = read_tail(path, TAIL_BYTES).await;
         let metadata_only = matches!(
-            read_tail(path, TAIL_BYTES)
-                .await
-                .as_deref()
-                .map(decoders.activity_recency),
+            tail.as_deref().map(decoders.activity_recency),
             Some(super::TailActivity::SidecarOnly)
         );
-        if !registered && !metadata_only {
+        let revives = sight != Some(Sight::Ended)
+            || tail
+                .as_deref()
+                .is_some_and(|t| tail_proves_life(t, path, source, decoders.decode_line));
+        if sight != Some(Sight::Claimed) && !metadata_only && revives {
             // The decoder never reaches a head-borne title once the backlog is
             // skipped, so this bounded read is its only carrier.
             let (head_cwd, head_label) = match read_head(path, MAX_PENDING_BYTES).await {
@@ -404,6 +406,21 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     if session_ended {
         seen.lock().await.insert(path.to_path_buf(), Sight::Ended);
     }
+}
+
+/// Whether `tail`'s whole lines decode to an event that proves life: the
+/// evidence an ended claim's oversized append is judged on, since its skipped
+/// span is never decoded.
+fn tail_proves_life(tail: &[u8], path: &Path, source: &Arc<str>, decode_line: LineDecoder) -> bool {
+    let transcript = crate::id::normalize_path_key(&path.to_string_lossy());
+    // The window starts mid-file, so its first chunk is a partial line.
+    tail.split(|b| *b == b'\n')
+        .skip(1)
+        .filter_map(|line| std::str::from_utf8(line).ok())
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .filter_map(|v| decode_line(&transcript, source, v).ok())
+        .flatten()
+        .any(|ev| ev.proves_life())
 }
 
 /// Pre-drain guard for the exit-path drains: a transcript truncated/recreated

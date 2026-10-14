@@ -113,7 +113,7 @@ impl Default for ChildEndUnclaims {
 ///
 /// * **No `SessionEnd` is emitted** — the reducer already ended the slot from
 ///   the hook `SubagentStop`.
-/// * **Release = `seen` → `false`, not removal.** The path must stay KNOWN: the
+/// * **Release = `seen` → `Sight::Ended`, not removal.** The path must stay KNOWN: the
 ///   Codex FD probe keeps vouching an in-flight child's still-open rollout, so a
 ///   removed claim would let `revouch_gated_files` reset the cursor to 0 on the
 ///   next scan — a full stale-activity replay plus an instant re-registration

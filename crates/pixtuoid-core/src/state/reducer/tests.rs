@@ -259,9 +259,6 @@ fn gated_before_waiting_evicted_on_apply_path_sweep() {
     );
 }
 
-/// The exit's own authority decides what may undo it: a session a hook ended
-/// resurrects only on a hook start (proof of life), while one its transcript
-/// ended may still resume from that transcript.
 /// Every claim against every end it can meet, on both sides of each window.
 #[test]
 fn authorizes_decides_each_claim_by_the_end_it_meets() {
@@ -555,6 +552,9 @@ fn a_known_slots_hook_end_refuses_its_stragglers_past_the_sweep() {
     }
 }
 
+/// The exit's own authority decides what may undo it: within the straggler
+/// window a session a hook ended resurrects only on a hook start, while one
+/// its transcript ended may still resume from that transcript.
 #[test]
 fn a_transcript_first_sight_resurrects_only_what_a_transcript_ended() {
     use crate::AgentId;
@@ -933,7 +933,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             now,
             Transport::Hook,
         );
-        // An UNREGISTERED id (fresh each iter) is what mints a tombstone.
+        // An UNREGISTERED id (fresh each iter) stamps a hook end.
         r.apply(
             &mut scene,
             AgentEvent::SessionEnd {

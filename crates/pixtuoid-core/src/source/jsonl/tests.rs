@@ -838,6 +838,53 @@ async fn walk_jsonl_honors_the_path_filter() {
 }
 
 #[tokio::test]
+async fn an_oversized_append_revives_an_ended_transcript_only_on_proof_of_life() {
+    for (filler, revives) in [
+        ("{\"type\":\"usage\"}\n", false),
+        ("{\"type\":\"tool_use\"}\n", true),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ended-big.jsonl");
+        std::fs::write(&path, "{\"type\":\"tool_use\"}\n").unwrap();
+        let cursors = Arc::new(Mutex::new(HashMap::new()));
+        let seen = Arc::new(Mutex::new(HashMap::new()));
+        let window = Duration::from_secs(3600);
+        let append = |bytes: &[u8]| {
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap()
+                .write_all(bytes)
+                .unwrap();
+        };
+        walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
+        append(b"{\"type\":\"system\",\"subtype\":\"session_end\"}\n");
+        walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
+        assert_eq!(
+            seen.lock().await.get(&path),
+            Some(&Sight::Ended),
+            "fixture: ended"
+        );
+
+        let span = filler.repeat(70_000);
+        assert!(
+            span.len() as u64 > super::walk::MAX_PENDING_BYTES,
+            "fixture: oversized"
+        );
+        append(span.as_bytes());
+        let events =
+            walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
+        assert_eq!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
+            revives,
+            "an oversized {filler:?} span revives only on proof of life, got {events:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn gated_file_registers_on_oversized_first_append() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("gated-big.jsonl");
@@ -1518,7 +1565,7 @@ async fn released_claim_is_not_revouched_into_a_full_replay() {
     assert_eq!(
         seen.lock().await.get(&path),
         Some(&Sight::Ended),
-        "the claim must be RELEASED (false), not removed — removal is \
+        "the claim must be ENDED (`Sight::Ended`), not removed — removal is \
          exactly what would expose the path to the re-vouch replay below"
     );
 
@@ -1571,7 +1618,7 @@ async fn decoded_terminator_release_is_not_revouched_into_a_full_replay() {
     assert_eq!(
         seen.lock().await.get(&path),
         Some(&Sight::Ended),
-        "the claim must be RELEASED (false), not removed — removal is exactly \
+        "the claim must be ENDED (`Sight::Ended`), not removed — removal is exactly \
          what exposes the path to the re-vouch replay below"
     );
 
