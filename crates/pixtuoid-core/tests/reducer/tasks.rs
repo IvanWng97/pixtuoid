@@ -410,6 +410,119 @@ fn subagent_is_removed_promptly_when_its_parent_task_completes() {
     );
 }
 
+/// A reasonix skill call (`explore`, `research`, …) is an id-less Task whose
+/// child fires no end of its own, so the call returning is the child's end;
+/// codewhale's `agent start` returns at dispatch, its child still running.
+#[test]
+fn an_untracked_task_end_walks_out_children_only_where_they_end_unannounced() {
+    for (source, walks_out) in [("reasonix", true), ("codewhale", false)] {
+        let mut scene = SceneState::uniform(8);
+        let mut r = Reducer::new();
+        let parent = AgentId::from_parts(source, "root");
+        let child = AgentId::from_parts(source, "root:subagent:call_1");
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let session_start = |agent_id, parent_id| AgentEvent::SessionStart {
+            agent_id,
+            source: source.into(),
+            session_id: "s".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id,
+        };
+        let at = |s| t0 + Duration::from_secs(s);
+        r.apply(
+            &mut scene,
+            session_start(parent, None),
+            at(0),
+            Transport::Hook,
+        );
+        act_start(
+            &mut r,
+            &mut scene,
+            parent,
+            None,
+            Some("Agent"),
+            at(1),
+            Transport::Hook,
+        );
+        r.apply(
+            &mut scene,
+            session_start(child, Some(parent)),
+            at(2),
+            Transport::Hook,
+        );
+        act_start(
+            &mut r,
+            &mut scene,
+            child,
+            None,
+            Some("read_file"),
+            at(2),
+            Transport::Hook,
+        );
+        act_end(&mut r, &mut scene, child, None, at(3), Transport::Hook);
+        act_end(&mut r, &mut scene, parent, None, at(4), Transport::Hook);
+        r.tick(
+            &mut scene,
+            at(4) + B1_CASCADE_GRACE + Duration::from_millis(10),
+        );
+        assert_eq!(
+            scene.agents[&child].exiting_at.is_some(),
+            walks_out,
+            "{source}: the child's walk-out on its parent's id-less Task end"
+        );
+        assert!(scene.agents[&parent].exiting_at.is_none(), "{source}");
+    }
+}
+
+/// Two shims a few ms apart can be decoded in either order (#242): a Task's
+/// hook End landing first must not leave its Start opening a call that already
+/// returned, which would read the parent Delegating and swallow its own tools.
+#[test]
+fn a_task_end_decoded_before_its_start_leaves_the_parent_its_own_tools() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_parts("reasonix", "root");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    r.apply(
+        &mut scene,
+        AgentEvent::SessionStart {
+            agent_id: id,
+            source: "reasonix".into(),
+            session_id: "root".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id: None,
+        },
+        t0,
+        Transport::Hook,
+    );
+    let end = t0 + Duration::from_secs(1);
+    act_end(&mut r, &mut scene, id, Some("call_1"), end, Transport::Hook);
+    let start = end + Duration::from_millis(5);
+    act_start(
+        &mut r,
+        &mut scene,
+        id,
+        Some("call_1"),
+        Some("Agent"),
+        start,
+        Transport::Hook,
+    );
+    let own = start + Duration::from_secs(1);
+    act_start(
+        &mut r,
+        &mut scene,
+        id,
+        None,
+        Some("Bash: ls"),
+        own,
+        Transport::Hook,
+    );
+    match &scene.agents[&id].state {
+        ActivityState::Active { detail, .. } => assert_eq!(detail.as_deref(), Some("Bash: ls")),
+        other => panic!("expected Active(Bash: ls), got {other:?}"),
+    }
+}
+
 #[test]
 fn oversized_attach_synthesized_task_start_restores_suppression_and_b1() {
     let mut scene = SceneState::uniform(8);

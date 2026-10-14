@@ -535,17 +535,44 @@ fn permission(events: &[AgentEvent], reached: &[Reach], findings: &mut Vec<(Labe
 
 fn subagent(events: &[AgentEvent], reached: &[Reach], findings: &mut Vec<(Label, String)>) {
     let ids: BTreeSet<_> = events.iter().map(AgentEvent::agent_id).collect();
-    // The child's end is the scene's (`judge_scene`): it walks out on its own
-    // end event, or on the drain of the call that spawned it.
-    let child = events.iter().any(|e| {
-        matches!(e, AgentEvent::SessionStart {
-            agent_id,
-            parent_id: Some(parent),
-            ..
-        } if parent != agent_id && ids.contains(parent))
-    });
-    if !child {
+    let children: BTreeSet<(AgentId, AgentId)> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::SessionStart {
+                agent_id,
+                parent_id: Some(parent),
+                ..
+            } if parent != agent_id && ids.contains(parent) => Some((*agent_id, *parent)),
+            _ => None,
+        })
+        .collect();
+    let tasks: BTreeSet<(AgentId, &str)> = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::ActivityStart {
+                agent_id,
+                tool_use_id: Some(t),
+                detail: Some(d),
+                ..
+            } if d.is_task() => Some((*agent_id, t.as_str())),
+            _ => None,
+        })
+        .collect();
+    let ended = |child: AgentId, parent: AgentId| {
+        events.iter().any(|e| match e {
+            AgentEvent::SessionEnd { agent_id, .. } => *agent_id == child,
+            // The reducer's b1 cascade walks a drained Task's subtree out.
+            AgentEvent::ActivityEnd {
+                agent_id,
+                tool_use_id: Some(t),
+            } => *agent_id == parent && tasks.contains(&(parent, t.as_str())),
+            _ => false,
+        })
+    };
+    if children.is_empty() {
         findings.push((Label::Fail, "no session started as another's child".into()));
+    } else if !children.iter().all(|&(child, parent)| ended(child, parent)) {
+        findings.push((Label::Fail, "the child session never ended".into()));
     }
     if !reached.contains(&Reach::Delegating) {
         findings.push((Label::Fail, "the parent never went Delegating".into()));
@@ -712,6 +739,8 @@ mod tests {
     const GK_SCENE: &str = "agents=[gk\u{b7}proj@0:active(read_file)]\nagents=[] daemons=[]\n";
     const GK_DELEGATE_SCENE: &str = "agents=[gk\u{b7}proj@0:active(Delegating), \
                                      Read the note@1:active(read_file)]\nagents=[] daemons=[]\n";
+    const RX_DELEGATE_SCENE: &str = "agents=[rx\u{b7}proj@0:active(Delegating), \
+                                     rx\u{b7}proj@1:active(read_file)]\nagents=[] daemons=[]\n";
 
     #[test]
     fn a_recorded_dsh_permission_run_passes() {
@@ -849,7 +878,33 @@ mod tests {
     }
 
     #[test]
-    fn a_child_that_names_no_parent_fails() {
+    fn a_child_that_names_no_parent_or_never_ends_fails() {
+        // The lines that end the child: its own end, and its parent's drain of
+        // the Task that spawned it. Any one alone ends it.
+        let dsh: &[fn(&Value) -> bool] = &[
+            |v| v["type"] == "session_end" && v.get("parentSession").is_some(),
+            |v| v["type"] == "tool_result" && v.get("parentSession").is_none(),
+        ];
+        let reasonix: &[fn(&Value) -> bool] = &[|v| v["event"] == "SubagentStop"];
+        let never = "child session never ended";
+        for (source, scene, ends) in [
+            ("dsh", DS_DELEGATE_SCENE, dsh),
+            ("reasonix", RX_DELEGATE_SCENE, reasonix),
+        ] {
+            for keep in 0..ends.len() {
+                let d = recorded(source, Shape::Subagent, scene);
+                edit_hooks(d.path(), |v| {
+                    let dropped = ends.iter().enumerate().any(|(i, e)| i != keep && e(&v));
+                    (!dropped).then_some(v)
+                });
+                let v = verify(d.path()).expect("verify");
+                assert!(!has(&v, Label::Fail, never), "{source}: {:?}", v.findings());
+            }
+            let d = recorded(source, Shape::Subagent, scene);
+            edit_hooks(d.path(), |v| (!ends.iter().any(|e| e(&v))).then_some(v));
+            let v = verify(d.path()).expect("verify");
+            assert!(has(&v, Label::Fail, never), "{source}: {:?}", v.findings());
+        }
         let d = recorded("dsh", Shape::Subagent, DS_DELEGATE_SCENE);
         edit_hooks(d.path(), |mut v| {
             if let Some(o) = v.as_object_mut() {

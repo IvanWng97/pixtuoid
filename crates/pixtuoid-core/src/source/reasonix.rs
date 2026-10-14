@@ -162,23 +162,6 @@ pub(crate) const UPSTREAM: &[crate::source::upstream::Watch] = {
             finding: Finding::Review("a parent spawning through it may no longer read Delegating"),
             siblings: None,
         },
-        Watch {
-            id: "reasonix.call_id",
-            ours: || vec![CALL_ID],
-            docs: &[REPO.doc(
-                "internal/ext/hook/hook.go",
-                r"type Payload struct\b",
-                "the hook `Payload`",
-            )],
-            read: Read::Each {
-                pattern: r#"json:"{name}\b"#,
-            },
-            when: When::Vanishes,
-            finding: Finding::Breaking(
-                "no drain walks a foreground task's child out: it lingers to its parent's end",
-            ),
-            siblings: None,
-        },
     ]
 };
 

@@ -5,7 +5,9 @@ use std::time::{Duration, SystemTime};
 use crate::AgentId;
 use crate::source::decoder::label_prefix_for;
 use crate::source::{AgentEvent, Transport};
-use crate::state::correlation::{Correlation, ToolEventKind, elapsed_at_least, elapsed_past};
+use crate::state::correlation::{
+    ChildEnd, Correlation, ToolEventKind, elapsed_at_least, elapsed_past,
+};
 use crate::state::{ActivityState, AgentSlot, SceneState, ToolKind, fsm, scope};
 
 #[doc(hidden)]
@@ -166,7 +168,9 @@ struct TaskTracking {
 #[derive(Debug, Default)]
 pub struct Reducer {
     corr: Correlation,
-    /// Parents whose last Task drained, awaiting the deferred b1 cascade
+    /// Parents whose last Task drained, or whose id-less Task ended on a
+    /// [`child_ends_unannounced`](crate::source::registry::SourceCaps::child_ends_unannounced)
+    /// source, awaiting the deferred b1 cascade
     /// ([`B1_CASCADE_GRACE`]) — fired only if `active_tasks` is STILL empty at
     /// fire time, which is how a Task insert inside the grace defuses it
     /// (#151).
@@ -257,6 +261,7 @@ impl Reducer {
                     cwd: &cwd,
                 },
                 parent_id,
+                from,
                 now,
             ),
             // The tracker owns every Task-dispatch Start, replays included.
@@ -385,6 +390,19 @@ impl Reducer {
             if !(*recorded == ToolEventKind::Start && kind == ToolEventKind::End) {
                 return Preprocessed::Drop;
             }
+        }
+
+        // Per-connection hook delivery can decode a call's End before its Start
+        // (#242); that Start would open a call that already returned.
+        if from == Transport::Hook
+            && let Some((ToolEventKind::Start, tuid)) = event_tool_use_id(event)
+            && self
+                .corr
+                .recent_hook_tool_uses
+                .get(&(id, tuid.to_string()))
+                .is_some_and(|(_, kind)| *kind == ToolEventKind::End)
+        {
+            return Preprocessed::Drop;
         }
 
         // Gated on the slot EXISTING: a synthesis REFUSED for desk exhaustion
@@ -545,6 +563,20 @@ impl Reducer {
         // Idle: nothing would restore Delegating for the rest of the run.
         let delegating_tuid = self.corr.any_active_task(&agent_id);
         if let Some(slot) = scene.agents.get_mut(&agent_id) {
+            let untracked_task = matches!(
+                slot.state,
+                ActivityState::Active {
+                    kind: ToolKind::Task,
+                    tool_use_id: None,
+                    ..
+                }
+            );
+            if untracked_task
+                && crate::source::registry::descriptor_for(&slot.source)
+                    .is_some_and(|d| d.caps().child_ends_unannounced)
+            {
+                self.pending_b1_cascades.insert(agent_id, now);
+            }
             if matches!(slot.state, ActivityState::Active { .. }) || resolves_wait {
                 match delegating_tuid {
                     Some(tuid) => fsm::enter_delegating(slot, Some(tuid), now),
@@ -607,7 +639,8 @@ impl Reducer {
         // Stamped REGARDLESS of slot existence (#244): a Stop-before-Start
         // reorder has none, and for a known slot it outlives the exit-grace GC.
         if as_child {
-            self.corr.child_ledger.entry(agent_id).or_default().ended_at = Some(now);
+            self.corr.child_ledger.entry(agent_id).or_default().ended =
+                Some(ChildEnd::Reported(now));
         }
         scope::cascade_exit(scene, agent_id, scope::StampRoot::Yes, now);
     }
@@ -712,13 +745,12 @@ impl Reducer {
         agent_id: AgentId,
         ctx: IdentityCtx,
         parent_id: Option<AgentId>,
+        from: Transport,
         now: SystemTime,
     ) {
-        if self.late_child_start_refused(scene, agent_id, ctx, parent_id, now) {
-            self.corr.refused_child_starts.insert(agent_id, now);
+        if self.late_child_start_refused(scene, agent_id, ctx, parent_id, from, now) {
             return;
         }
-        self.corr.refused_child_starts.remove(&agent_id);
         let parent_id = self.resolve_parent_link(scene, agent_id, ctx, parent_id);
         if self.enrich_existing_start(scene, agent_id, ctx, parent_id, now) {
             return;
@@ -732,7 +764,7 @@ impl Reducer {
     }
 
     /// Refuse a LATE parented start whose end already passed, on two clocks: the
-    /// #242 tombstone and the #244-w2 child ledger, whose `ended_at` outlives the
+    /// #242 tombstone and the #244-w2 child ledger, whose end outlives the
     /// slot and so covers windows the tombstone can't. Parentless starts are
     /// exempt BY CONSTRUCTION — Reasonix's SessionEnd→SessionStart resurrect
     /// rides the same cwd-keyed parentless id and must keep registering.
@@ -742,9 +774,13 @@ impl Reducer {
         agent_id: AgentId,
         ctx: IdentityCtx,
         parent_id: Option<AgentId>,
+        from: Transport,
         now: SystemTime,
     ) -> bool {
-        if parent_id.is_none() || scene.agents.contains_key(&agent_id) {
+        let Some(parent) = parent_id else {
+            return false;
+        };
+        if scene.agents.contains_key(&agent_id) {
             return false;
         }
         let session_id = ctx.session_id;
@@ -762,7 +798,21 @@ impl Reducer {
         }
         // #244-w2: a child that ended on a KNOWN slot mints no tombstone, so
         // after the exit grace GC a late first-sight would revive a phantom.
-        if self.corr.child_recently_ended(agent_id, now) {
+        // A hook after an end pixtuoid only inferred proves the child alive,
+        // under a parent that still is.
+        let alive = |end| {
+            matches!(end, ChildEnd::Inferred(_))
+                && from == Transport::Hook
+                && scene
+                    .agents
+                    .get(&parent)
+                    .is_some_and(|p| p.exiting_at.is_none())
+        };
+        if self
+            .corr
+            .recent_child_end(agent_id, now)
+            .is_some_and(|end| !alive(end))
+        {
             tracing::warn!(
                 ?agent_id,
                 ?session_id,
@@ -895,8 +945,9 @@ impl Reducer {
         }
         // A tombstoned id's hook SessionEnd already arrived slot-less: this is a
         // straggler from the DEAD session, and a blank Idle ghost is unremovable.
-        if self.corr.hook_session_end_tombstoned(id, now)
-            || self.corr.refused_child_starts.remove(&id).is_some()
+        // An ended child's Identity is refused (#244-w2); this identity-less
+        // fallback is no looser.
+        if self.corr.hook_session_end_tombstoned(id, now) || self.corr.child_recently_ended(id, now)
         {
             return;
         }
@@ -1263,7 +1314,7 @@ impl Reducer {
             // A CHILD whose end wasn't `as_child` starts its ledger GC clock
             // here, arming #244-w2; `get_or_insert` keeps an earlier stamp.
             if let Some(entry) = self.corr.child_ledger.get_mut(&id) {
-                entry.ended_at.get_or_insert(now);
+                entry.ended.get_or_insert(ChildEnd::Inferred(now));
             }
         }
     }

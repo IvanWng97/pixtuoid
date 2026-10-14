@@ -359,47 +359,141 @@ fn ended_child(r: &mut Reducer, scene: &mut SceneState) -> (AgentId, AgentId, Sy
 
 #[test]
 fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
-    let mut scene = SceneState::uniform(4);
-    let mut r = Reducer::new();
-    let (parent, child, stop) = ended_child(&mut r, &mut scene);
+    for transport in [Transport::Jsonl, Transport::Hook] {
+        let mut scene = SceneState::uniform(4);
+        let mut r = Reducer::new();
+        let (parent, child, stop) = ended_child(&mut r, &mut scene);
 
-    let late_start = |r: &mut Reducer, scene: &mut SceneState, at: SystemTime| {
-        r.apply(
-            scene,
-            AgentEvent::SessionStart {
-                agent_id: child,
-                source: "claude-code".into(),
-                session_id: "agent-a0000000000000001".into(),
-                cwd: PathBuf::from("/repo"),
-                parent_id: Some(parent),
-            },
-            at,
-            Transport::Jsonl,
+        let late_start = |r: &mut Reducer, scene: &mut SceneState, at: SystemTime| {
+            r.apply(
+                scene,
+                AgentEvent::SessionStart {
+                    agent_id: child,
+                    source: "claude-code".into(),
+                    session_id: "agent-a0000000000000001".into(),
+                    cwd: PathBuf::from("/repo"),
+                    parent_id: Some(parent),
+                },
+                at,
+                transport,
+            );
+        };
+        late_start(&mut r, &mut scene, stop + Duration::from_secs(30));
+        assert!(
+            !scene.agents.contains_key(&child),
+            "a late parented restart of an ENDED child inside the ledger TTL \
+             must not re-register a phantom (#244-w2, {transport:?})"
         );
-    };
-    late_start(&mut r, &mut scene, stop + Duration::from_secs(30));
-    assert!(
-        !scene.agents.contains_key(&child),
-        "a late parented restart of an ENDED child inside the ledger TTL \
-         must not re-register a phantom (#244-w2)"
-    );
 
-    late_start(
-        &mut r,
-        &mut scene,
-        stop + CHILD_END_LEDGER_TTL + Duration::from_secs(1),
-    );
-    assert!(
-        scene.agents.contains_key(&child),
-        "past CHILD_END_LEDGER_TTL the registration resumes"
-    );
+        late_start(
+            &mut r,
+            &mut scene,
+            stop + CHILD_END_LEDGER_TTL + Duration::from_secs(1),
+        );
+        assert!(
+            scene.agents.contains_key(&child),
+            "past CHILD_END_LEDGER_TTL the registration resumes ({transport:?})"
+        );
+    }
 }
 
+/// An end pixtuoid only inferred (its slot swept after its parent's cascade)
+/// is a guess a later hook from the child disproves: a background child a
+/// sibling's drain walked out, or reasonix's `continue_from` resuming the same
+/// id. A transcript first-sight can be a replay, and a parent that is gone
+/// re-admits nothing.
 #[test]
-fn a_refused_child_start_takes_the_activity_paired_with_it() {
-    // reasonix pairs a parented start with each child event, so a child its
-    // parent's drain walked out arrives as start-then-activity: the activity
-    // must not synthesize it back blank and parentless.
+fn a_hook_start_re_admits_a_child_whose_end_was_only_inferred() {
+    use pixtuoid_core::state::reducer::{B1_CASCADE_GRACE, EXIT_GRACE_WINDOW};
+    let parent = AgentId::from_parts("reasonix", "root");
+    let child = AgentId::from_parts("reasonix", "root:subagent:sa_1");
+    let session_start = |agent_id, parent_id| AgentEvent::SessionStart {
+        agent_id,
+        source: "reasonix".into(),
+        session_id: "s".into(),
+        cwd: PathBuf::from("/repo"),
+        parent_id,
+    };
+    let walked_out = |r: &mut Reducer, scene: &mut SceneState| {
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let at = |s| t0 + Duration::from_secs(s);
+        r.apply(scene, session_start(parent, None), at(0), Transport::Hook);
+        act_start(
+            r,
+            scene,
+            parent,
+            Some("call_1"),
+            Some("Agent"),
+            at(1),
+            Transport::Hook,
+        );
+        r.apply(
+            scene,
+            session_start(child, Some(parent)),
+            at(2),
+            Transport::Hook,
+        );
+        act_end(r, scene, parent, Some("call_1"), at(3), Transport::Hook);
+        let gone = at(3) + B1_CASCADE_GRACE + EXIT_GRACE_WINDOW + Duration::from_secs(1);
+        r.tick(scene, at(3) + B1_CASCADE_GRACE);
+        r.tick(scene, gone);
+        assert!(
+            !scene.agents.contains_key(&child),
+            "the drain walked it out"
+        );
+        gone
+    };
+
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let gone = walked_out(&mut r, &mut scene);
+    let back = gone + Duration::from_secs(1);
+    r.apply(
+        &mut scene,
+        session_start(child, Some(parent)),
+        back,
+        Transport::Hook,
+    );
+    assert_eq!(
+        scene.agents.get(&child).map(|s| s.parent_id),
+        Some(Some(parent)),
+        "a hook proves the walked-out child alive"
+    );
+
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let gone = walked_out(&mut r, &mut scene);
+    let back = gone + Duration::from_secs(1);
+    r.apply(
+        &mut scene,
+        session_start(child, Some(parent)),
+        back,
+        Transport::Jsonl,
+    );
+    assert!(
+        !scene.agents.contains_key(&child),
+        "a first-sight can be a replay"
+    );
+
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let gone = walked_out(&mut r, &mut scene);
+    sess_end(&mut r, &mut scene, parent, false, gone, Transport::Hook);
+    let back = gone + Duration::from_secs(1);
+    r.apply(
+        &mut scene,
+        session_start(child, Some(parent)),
+        back,
+        Transport::Hook,
+    );
+    assert!(!scene.agents.contains_key(&child), "its parent is gone");
+}
+
+/// The identity-less fallback is no looser than the Identity gate (#244-w2):
+/// a hook activity of an ended child, paired with its refused start or a bare
+/// straggler, never synthesizes it back blank and parentless.
+#[test]
+fn inside_the_ledger_window_no_hook_activity_synthesizes_an_ended_child() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let (parent, child, stop) = ended_child(&mut r, &mut scene);
@@ -427,16 +521,21 @@ fn a_refused_child_start_takes_the_activity_paired_with_it() {
             Transport::Hook,
         );
     };
-    straggle(&mut r, &mut scene, at + Duration::from_millis(1));
-    assert!(
-        !scene.agents.contains_key(&child),
-        "the activity paired with a refused start synthesized the ended child"
+    for after in [Duration::from_millis(1), Duration::from_secs(1)] {
+        straggle(&mut r, &mut scene, at + after);
+        assert!(
+            !scene.agents.contains_key(&child),
+            "an activity {after:?} after the refused start synthesized the ended child"
+        );
+    }
+    straggle(
+        &mut r,
+        &mut scene,
+        stop + CHILD_END_LEDGER_TTL + Duration::from_secs(1),
     );
-    // One-shot: a bare straggler after it is #244's, and still registers.
-    straggle(&mut r, &mut scene, at + Duration::from_secs(1));
     assert!(
         scene.agents.contains_key(&child),
-        "the refusal outlived the activity paired with it"
+        "past the ledger window a hook activity registers again"
     );
 }
 
@@ -689,13 +788,15 @@ fn parentless_session_start_enriching_a_parentless_child_slot_adopts_ledger_pare
     r.tick(&mut scene, gone);
     assert!(!scene.agents.contains_key(&child), "child GC'd");
 
+    // Past the gate, inside the relink memory.
+    let late = t0 + Duration::from_secs(2) + CHILD_END_LEDGER_TTL + Duration::from_secs(1);
     act_start(
         &mut r,
         &mut scene,
         child,
         Some("t-straggler"),
         None,
-        gone + Duration::from_secs(10),
+        late,
         Transport::Hook,
     );
     assert_eq!(
@@ -707,7 +808,7 @@ fn parentless_session_start_enriching_a_parentless_child_slot_adopts_ledger_pare
     r.apply(
         &mut scene,
         session_start(child, child_uuid, None),
-        gone + Duration::from_secs(11),
+        late + Duration::from_secs(1),
         Transport::Jsonl,
     );
     assert_eq!(

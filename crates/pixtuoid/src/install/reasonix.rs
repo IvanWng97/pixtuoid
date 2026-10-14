@@ -1,6 +1,6 @@
 //! Reasonix hook install target: a plugin `reasonix plugin install --link` loads in
 //! place from pixtuoid's config dir, through its native `reasonix-plugin.json`
-//! (`docs/PLUGIN_PACKAGES.md` @ v2.35.0). A global plugin's hooks need no
+//! (`docs/PLUGIN_PACKAGES.md` @ v2.39.0). A global plugin's hooks need no
 //! `/hooks trust`, which project-scope hooks do.
 //!
 //! - `match` is OMITTED: empty = every tool. Any other value is an ANCHORED
@@ -9,7 +9,7 @@
 //!   the user's tool call.
 //! - EXEC form (`args` present): a command with neither `args` nor `shellCommand`
 //!   that is not an absolute path resolves inside the plugin root
-//!   (`internal/ext/hook/windows_posix_script.go` @ v2.35.0), so a shell-form
+//!   (`internal/ext/hook/windows_posix_script.go` @ v2.39.0), so a shell-form
 //!   `PIXTUOID_SOURCE=reasonix '<shim>'` would never run.
 //! - No `_pixtuoid` sentinel: a v2 manifest rejects unknown fields.
 
@@ -177,7 +177,7 @@ fn settings_path() -> Result<PathBuf> {
 }
 
 /// Where Reasonix records its installed plugins and whether each is enabled
-/// (`internal/ext/pluginpkg/pluginpkg.go` @ v2.35.0).
+/// (`internal/ext/pluginpkg/pluginpkg.go` @ v2.39.0).
 fn packages_path() -> Result<PathBuf> {
     Ok(home()?.join(PACKAGES))
 }
@@ -190,15 +190,62 @@ fn home() -> Result<PathBuf> {
         .ok_or_else(|| io::home_unset("Reasonix's home", "REASONIX_HOME/APPDATA/HOME/USERPROFILE"))
 }
 
-/// `REASONIX_HOME` (upstream trims but does NOT `~`-expand it, hence `home: None`)
-/// → Windows `%APPDATA%\reasonix` → else `<home>/.reasonix`.
+/// `REASONIX_HOME` → Windows `%APPDATA%\reasonix` → else `<home>/.reasonix`.
 fn reasonix_home() -> Option<PathBuf> {
+    let home = pixtuoid_core::platform::user_home_opt();
     resolve_reasonix_home(
-        pixtuoid_core::platform::path_env("REASONIX_HOME").map(|v| io::expand_tilde(&v, None)),
+        pixtuoid_core::platform::path_env("REASONIX_HOME")
+            .map(|v| expand_dir_value(&v, home.as_deref(), pixtuoid_core::platform::text_env)),
         cfg!(windows),
         user_config_dir(),
-        pixtuoid_core::platform::user_home_opt(),
+        home,
     )
+}
+
+/// Upstream's `expandDirValue` (`internal/contract/config/paths.go:157-178` @
+/// v2.39.0): trimmed, `${VAR}` substituted, then a leading `~` expanded.
+fn expand_dir_value(
+    raw: &Path,
+    home: Option<&Path>,
+    var: impl Fn(&str) -> Option<String>,
+) -> PathBuf {
+    match raw.to_str() {
+        Some(s) => io::expand_tilde(Path::new(&expand_vars(s, var)), home),
+        None => io::expand_tilde(raw, home),
+    }
+}
+
+/// Upstream's `ExpandVars` (`internal/contract/config/expand.go:13-43` @
+/// v2.39.0): `${NAME}` or `${NAME:-default}`, where an unset or empty variable
+/// takes the default, else nothing; any other `$` stays literal.
+fn expand_vars(s: &str, var: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(at) = rest.find("${") {
+        let body = &rest[at + 2..];
+        let Some(end) = body.find('}') else {
+            break;
+        };
+        out.push_str(&rest[..at]);
+        let (name, default) = body[..end]
+            .split_once(":-")
+            .map_or((&body[..end], None), |(name, d)| (name, Some(d)));
+        let mut chars = name.chars();
+        let named = chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if named {
+            let value = var(name).filter(|v| !v.is_empty());
+            out.push_str(value.as_deref().or(default).unwrap_or_default());
+            rest = &body[end + 1..];
+        } else {
+            out.push('$');
+            rest = &rest[at + 1..];
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Pure core for [`reasonix_home`] — everything is injected so BOTH platform arms
@@ -316,7 +363,7 @@ pub(crate) fn uninstall(content: &str) -> Result<MergeOutcome> {
 }
 
 /// `--yes` is the CLI's consent to write, not a trust step; `--replace` makes a
-/// repeat connect re-link (`docs/PLUGIN_PACKAGES.md` @ v2.35.0).
+/// repeat connect re-link (`docs/PLUGIN_PACKAGES.md` @ v2.39.0).
 fn register(config: &Path) -> Result<()> {
     let (plugin, _) = host_plugin::layout(config, &[MANIFEST])?;
     CLI.run(&[
@@ -332,7 +379,7 @@ fn register(config: &Path) -> Result<()> {
 
 /// Reads Reasonix's state first, so a disconnect with nothing registered starts no
 /// CLI. Removing a linked plugin leaves its dir (`docs/PLUGIN_PACKAGES.md`
-/// @ v2.35.0), so this deletes it.
+/// @ v2.39.0), so this deletes it.
 fn unregister(config: &Path) -> Result<Unregistered> {
     let (_, root) = host_plugin::layout(config, &[MANIFEST])?;
     let installed = plugin_entry()?.is_some();
@@ -450,6 +497,35 @@ mod tests {
                     Some("/home/u".into()),
                 ),
                 Some(PathBuf::from("/custom/rx"))
+            );
+        }
+    }
+
+    #[test]
+    fn reasonix_home_env_expands_vars_then_tilde_as_upstream_does() {
+        let home = Path::new("/home/u");
+        let var = |name: &str| match name {
+            "X" => Some("/x".to_owned()),
+            "EMPTY" => Some(String::new()),
+            _ => None,
+        };
+        for (raw, want) in [
+            ("  ~  ", home.to_path_buf()),
+            ("~/rx", home.join("rx")),
+            ("${X}/rx", PathBuf::from("/x/rx")),
+            ("${UNSET:-~/d}/rx", home.join("d").join("rx")),
+            ("${EMPTY:-/e}", PathBuf::from("/e")),
+            ("${UNSET}/rx", PathBuf::from("/rx")),
+            ("${1X}${X}", PathBuf::from("${1X}/x")),
+            ("${X-d}", PathBuf::from("${X-d}")),
+            ("$X/rx", PathBuf::from("$X/rx")),
+            ("${X", PathBuf::from("${X")),
+            ("~user/rx", PathBuf::from("~user/rx")),
+        ] {
+            assert_eq!(
+                expand_dir_value(Path::new(raw), Some(home), var),
+                want,
+                "{raw}"
             );
         }
     }
