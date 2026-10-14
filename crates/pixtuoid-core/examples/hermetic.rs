@@ -7,9 +7,9 @@
 //! what npm's `latest` tag points at, the nightly drift run. `--record` writes a
 //! source's fixtures, and with `latest` moves its pin up to the release recorded.
 //!
-//! Exits 0 when every run passed, 1 on any other verdict (a run's CLI reporting
-//! a release npm did not install included), and anything else when the tier
-//! itself could not run or refused a recording before any CLI ran.
+//! Exits 0 when every run passed, 1 on any other verdict (a recording refused
+//! after its runs included), and anything else when the tier itself could not
+//! run or refused a recording before any CLI ran.
 
 #[cfg(not(unix))]
 fn main() {
@@ -24,7 +24,7 @@ fn main() {
     match run::main() {
         Ok(all_passed) => std::process::exit(i32::from(!all_passed)),
         Err(e) => {
-            eprintln!("hermetic: the tier could not run: {e}");
+            eprintln!("hermetic: {e}");
             std::process::exit(2);
         }
     }
@@ -32,12 +32,11 @@ fn main() {
 
 #[cfg(unix)]
 mod run {
-    use std::cmp::Ordering;
     use std::ffi::OsString;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::path::{Path, PathBuf};
-    use std::process::{Child, Command, Stdio};
+    use std::process::{Child, Command, ExitStatus, Stdio};
     use std::time::{Duration, Instant};
 
     use pixtuoid_core::harness::hermetic::pin;
@@ -113,8 +112,8 @@ mod run {
     }
 
     impl Args {
-        /// A selection that names nothing runnable is an operator's typo, not
-        /// a run where everything was blocked.
+        /// Refuses what no run could honor: a selection that names nothing
+        /// runnable is an operator's typo, not a run where everything was blocked.
         fn check(&self) -> Result<(), String> {
             if self.record && self.versions == Versions::Latest && self.source.is_none() {
                 return Err("--record with latest moves one source's pin: name it".into());
@@ -227,11 +226,11 @@ mod run {
         }
         // Once per source, so every scenario runs, and records, one release.
         let installed = resolve(p, args.versions);
+        // Worked out before any CLI runs, so a refusal writes nothing.
         let registry = match (&installed, args.record) {
             (Ok(v), true) => {
-                let pin = pin::pinned(p.descriptor()).map_err(std::io::Error::other)?;
                 let src = std::fs::read_to_string(pin::registry_path())?;
-                repinned_registry(&src, p.source, &pin, v).map_err(std::io::Error::other)?
+                pin::repinned(&src, p.descriptor(), v).map_err(std::io::Error::other)?
             }
             _ => None,
         };
@@ -282,29 +281,12 @@ mod run {
         Ok(entries)
     }
 
-    /// The registry a recording of `source` at `installed` leaves: `None` while
-    /// the pin stays. Worked out before any CLI runs, so a refusal writes nothing.
-    fn repinned_registry(
-        registry: &str,
-        source: &str,
-        pin: &Version,
-        installed: &Version,
-    ) -> Result<Option<String>, String> {
-        match installed.cmp_precedence(pin) {
-            Ordering::Less => Err(format!(
-                "{source}: {installed} is below its pin {pin}, so nothing is recorded"
-            )),
-            Ordering::Equal => Ok(None),
-            Ordering::Greater => pin::repin(registry, source, installed).map(Some),
-        }
-    }
-
     fn run_dir(runs: &Path, p: &Profile, scenario: &Scenario) -> PathBuf {
         runs.join(p.source).join(scenario.shape.name())
     }
 
     /// Each of `p`'s runs under `runs`, written into its scenario's fixture by
-    /// the recorder: called once every run and the census passed.
+    /// the recorder.
     fn record(ctx: &Ctx, p: &Profile, runs: &Path) -> std::io::Result<()> {
         for scenario in p.scenarios {
             let status = Command::new(&ctx.built.recorder)
@@ -495,13 +477,13 @@ mod run {
         )))
     }
 
-    /// `npm install <pinned>` into `dir`. An install script writes where its
+    /// `npm install <spec>` into `dir`. An install script writes where its
     /// CLI's home variables point: grok's extracts the binary into
     /// `$GROK_HOME/bin` and repoints the `grok` there
     /// (`crates/codegen/xai-grok-pager/npm/grok/bin/postinstall.js:26-27`), so
     /// each points into the install, never at the operator's.
-    fn npm_install(p: &Profile, dir: &Path, pinned: &str) -> Command {
-        let mut c = npm(dir, &["install", pinned]);
+    fn npm_install(p: &Profile, dir: &Path, spec: &str) -> Command {
+        let mut c = npm(dir, &["install", spec]);
         for var in p.home_vars() {
             c.env(var, dir.join("homes").join(var));
         }
@@ -521,33 +503,43 @@ mod run {
                     .args(["view", &spec, "version"])
                     .output()
                     .map_err(|e| format!("npm view {spec}: {e}"))?;
-                npm_release(&spec, out.status.success(), &out.stdout, &out.stderr)
+                npm_release(&spec, out.status, &out.stdout, &out.stderr)
             }
         }
     }
 
-    /// How much of npm's error a report, a public issue in the nightly, carries:
-    /// its code and summary lines, cut.
+    /// How much of npm's output a report, a public issue in the nightly,
+    /// carries: its first `npm error` lines, or a non-release answer, cut.
     const NPM_ERROR_LINES: usize = 2;
     const NPM_ERROR_CHARS: usize = 200;
 
     /// The release `npm view <spec> version` answered, strict, or why there is
-    /// none. An unresolvable tag exits 0 with nothing on stdout.
-    fn npm_release(spec: &str, ok: bool, stdout: &[u8], stderr: &[u8]) -> Result<Version, String> {
-        if !ok {
+    /// none: an absent `latest` tag exits 0 with nothing on stdout
+    /// (npm/cli lib/commands/view.js).
+    fn npm_release(
+        spec: &str,
+        status: ExitStatus,
+        stdout: &[u8],
+        stderr: &[u8],
+    ) -> Result<Version, String> {
+        let cut = |l: &str| l.chars().take(NPM_ERROR_CHARS).collect::<String>();
+        if !status.success() {
             let why: Vec<String> = String::from_utf8_lossy(stderr)
                 .lines()
                 .filter(|l| l.starts_with("npm error"))
                 .take(NPM_ERROR_LINES)
-                .map(|l| l.chars().take(NPM_ERROR_CHARS).collect())
+                .map(|l| format!("{:?}", cut(l)))
                 .collect();
-            return Err(format!("npm view {spec} failed: {}", why.join("; ")));
+            return Err(match why.as_slice() {
+                [] => format!("npm view {spec} exited {status}"),
+                _ => format!("npm view {spec} failed: {}", why.join("; ")),
+            });
         }
         let v = String::from_utf8_lossy(stdout).trim().to_string();
         if v.is_empty() {
             return Err(format!("npm gave no version for {spec}"));
         }
-        Version::parse(&v).map_err(|_| format!("npm view {spec} gave {v:?}, not a release"))
+        Version::parse(&v).map_err(|_| format!("npm view {spec} gave {:?}, not a release", cut(&v)))
     }
 
     /// The CLI at the version this run tests, installed into its own project the
@@ -557,14 +549,14 @@ mod run {
     fn install_cli(tier: &Path, p: &Profile, version: &Version) -> std::io::Result<PathBuf> {
         let Package::Npm(package) = p.package;
         let prefix = tier.join("cli").join(format!("{}-{version}", p.source));
-        let pinned = format!("{package}@{version}");
+        let spec = format!("{package}@{version}");
         install_once(&prefix, |dir| {
             let project = serde_json::json!({
                 "private": true,
-                "allowScripts": { &pinned: true },
+                "allowScripts": { &spec: true },
             });
             std::fs::write(dir.join("package.json"), project.to_string())?;
-            succeed(npm_install(p, dir, &pinned))
+            succeed(npm_install(p, dir, &spec))
         })?;
         Ok(prefix.join("node_modules/.bin"))
     }
@@ -1195,47 +1187,46 @@ mod run {
 
         #[test]
         fn npm_answers_a_release_or_says_why_not() {
+            use std::os::unix::process::ExitStatusExt;
+            let (ok, failed) = (ExitStatus::from_raw(0), ExitStatus::from_raw(1 << 8));
             let spec = "@openai/codex@latest";
             assert_eq!(
-                npm_release(spec, true, b"0.162.1\n", b""),
+                npm_release(spec, ok, b"0.162.1\n", b""),
                 Ok(Version::new(0, 162, 1))
             );
             for bad in [&b"0.162.1\""[..], b"latest", b"", b"  \n"] {
-                assert!(npm_release(spec, true, bad, b"").is_err(), "{bad:?}");
+                assert!(npm_release(spec, ok, bad, b"").is_err(), "{bad:?}");
             }
             assert!(
-                npm_release(spec, true, b"\n", b"").is_err_and(|why| why.contains("no version")),
-                "an unresolvable tag exits 0 with nothing on stdout"
+                npm_release(spec, ok, b"\n", b"").is_err_and(|why| why.contains("no version")),
+                "an absent `latest` exits 0 with nothing on stdout"
             );
-            let stderr = b"npm error code E404\nnpm error 404 No match found for version latest\n\
-                           npm error 404\nnpm error A complete log of this run can be found in: /Users/op/x.log\n";
-            let why = npm_release(spec, false, b"", stderr).expect_err("npm failed");
-            assert!(
-                why.contains("E404") && why.contains("No match found"),
-                "{why}"
+            let long = format!("npm error 404 {}", "x".repeat(NPM_ERROR_CHARS));
+            let stderr = format!(
+                "npm warn config ignoring a setting\nnpm error code E404\n{long}\nnpm error A complete log of this run can be found in: /Users/op/x.log\n"
             );
+            let why = npm_release(spec, failed, b"", stderr.as_bytes()).expect_err("npm failed");
+            assert!(why.contains("E404"), "{why}");
+            assert!(!why.contains("warn"), "npm's errors alone: {why}");
             assert!(
                 !why.contains("/Users/op"),
                 "the code and summary alone: {why}"
             );
-        }
-
-        #[test]
-        fn a_recording_moves_the_pin_only_up() {
-            let registry = "const A: D = D {\n    name: a_cli::SOURCE_NAME,\n    verified_version: \"1.0.0\",\n};\n";
-            let pin = Version::new(1, 0, 0);
-            assert_eq!(repinned_registry(registry, "a-cli", &pin, &pin), Ok(None));
-            assert_eq!(
-                repinned_registry(registry, "a-cli", &pin, &Version::new(1, 1, 0)),
-                Ok(Some(registry.replace("1.0.0", "1.1.0")))
+            let carried = NPM_ERROR_CHARS - "npm error 404 ".len();
+            assert!(
+                why.contains(&"x".repeat(carried)) && !why.contains(&"x".repeat(carried + 1)),
+                "a line is cut at NPM_ERROR_CHARS: {why}"
             );
             assert!(
-                repinned_registry(registry, "a-cli", &pin, &Version::new(0, 9, 0)).is_err(),
-                "a `latest` tag moved back"
+                npm_release(spec, failed, b"", b"\x1b[31mERR!\x1b[0m\n")
+                    .is_err_and(|why| why.contains(&format!("exited {failed}"))),
+                "no npm error line still says why"
             );
+            let answer = "x".repeat(NPM_ERROR_CHARS + 1);
+            let why = npm_release(spec, ok, answer.as_bytes(), b"").expect_err("not a release");
             assert!(
-                repinned_registry(registry, "b-cli", &pin, &Version::new(1, 1, 0)).is_err(),
-                "no row to move, refused before any CLI runs"
+                why.contains(&answer[1..]) && !why.contains(&answer),
+                "a non-release answer is cut at NPM_ERROR_CHARS: {why}"
             );
         }
     }

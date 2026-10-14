@@ -1,9 +1,8 @@
-//! A profiled source's pin, its registry `verified_version`: the release it
-//! names, whether a run reported the release it installed, and the one-line
-//! edit that moves it. `tests/sources/captures.rs`'s
-//! `a_recorded_capture_anchors_its_sources_verified_version` holds the pin to
-//! the highest recorded banner, so a recording above the pin has to move it.
+//! A profiled source's pin, its [`SourceDescriptor::verified_version`]: the
+//! release it names, whether a run reported the release it installed, and the
+//! one-line edit that moves it.
 
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
 use semver::Version;
@@ -55,6 +54,29 @@ pub fn every_run_reported(
     }
 }
 
+/// The registry a recording of `d`'s source at `installed` leaves: `None`
+/// while the pin stays.
+///
+/// # Errors
+///
+/// When `installed` is below the pin, the pin is not a release, or [`repin`]
+/// refuses.
+pub fn repinned(
+    registry: &str,
+    d: &SourceDescriptor,
+    installed: &Version,
+) -> Result<Option<String>, String> {
+    let pin = pinned(d)?;
+    match installed.cmp_precedence(&pin) {
+        Ordering::Less => Err(format!(
+            "{}: {installed} is below its pin {pin}, so nothing is recorded",
+            d.name
+        )),
+        Ordering::Equal => Ok(None),
+        Ordering::Greater => repin(registry, d.name, installed).map(Some),
+    }
+}
+
 const PIN_FIELD: &str = "verified_version: ";
 
 /// `registry` with `source`'s pin, and nothing else, now naming `new`.
@@ -66,7 +88,8 @@ const PIN_FIELD: &str = "verified_version: ";
 ///
 /// # Errors
 ///
-/// When the row's anchor or its pin line is not exactly one line.
+/// When the row's anchor or its pin line is not exactly one line, or the pin
+/// line holds no string literal.
 pub fn repin(registry: &str, source: &str, new: &Version) -> Result<String, String> {
     let anchor = format!("name: {}::SOURCE_NAME,", source.replace('-', "_"));
     let mut lines = Vec::new();
@@ -160,6 +183,27 @@ mod tests {
             "no run, no report"
         );
         assert!(every_run_reported(&v("0.2.0-rc.2"), pre, &ran(&["dsh 0.2.0"])).is_err());
+    }
+
+    #[test]
+    fn a_recording_moves_the_pin_only_up() {
+        let src = std::fs::read_to_string(registry_path()).expect("registry.rs");
+        let d = registry::descriptor_for("codex").expect("codex");
+        let pin = pinned(d).expect("codex's pin");
+        assert_eq!(repinned(&src, d, &pin), Ok(None));
+        let up = Version::new(pin.major, pin.minor, pin.patch + 1);
+        assert!(
+            matches!(repinned(&src, d, &up), Ok(Some(moved)) if moved == repin(&src, d.name, &up).expect("codex's row"))
+        );
+        assert!(repinned("", d, &up).is_err(), "no row to move");
+        let below = Version {
+            pre: semver::Prerelease::new("rc.1").expect("a prerelease"),
+            ..pin.clone()
+        };
+        assert!(
+            repinned(&src, d, &below).is_err(),
+            "a `latest` tag moved back"
+        );
     }
 
     #[test]
