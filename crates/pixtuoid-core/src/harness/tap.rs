@@ -20,7 +20,7 @@ const MAX_ROUNDS: u32 = 40;
 const READY_BOUND: Duration = Duration::from_secs(5);
 const READY_POLL: Duration = Duration::from_millis(10);
 
-/// How long a send waits out a pipe whose every instance is mid-handshake.
+/// How long a send waits for a pipe instance that accepts.
 #[cfg(windows)]
 const PIPE_BUSY_BOUND: Duration = Duration::from_secs(2);
 #[cfg(windows)]
@@ -82,17 +82,22 @@ impl Endpoint {
             use tokio::net::windows::named_pipe::ClientOptions;
             let started = std::time::Instant::now();
             loop {
-                match ClientOptions::new().open(&self.0) {
-                    Ok(c) => break c,
-                    Err(e)
-                        if e.raw_os_error()
-                            == Some(windows_sys::Win32::Foundation::ERROR_PIPE_BUSY as i32)
-                            && started.elapsed() < PIPE_BUSY_BOUND =>
-                    {
-                        tokio::time::sleep(PIPE_BUSY_BACKOFF).await;
+                // Only into an instance whose server already waits to accept: one
+                // opened before that and closed before it accepts is refused with
+                // its payload unread (ERROR_NO_DATA, learn.microsoft.com,
+                // ConnectNamedPipe).
+                let late = started.elapsed() >= PIPE_BUSY_BOUND;
+                if pipe_accepting(&self.0) || late {
+                    match ClientOptions::new().open(&self.0) {
+                        Ok(c) => break c,
+                        Err(e)
+                            if e.raw_os_error()
+                                == Some(windows_sys::Win32::Foundation::ERROR_PIPE_BUSY as i32)
+                                && !late => {}
+                        Err(e) => return Err(e),
                     }
-                    Err(e) => return Err(e),
                 }
+                tokio::time::sleep(PIPE_BUSY_BACKOFF).await;
             }
         };
         #[cfg(not(windows))]
@@ -401,6 +406,33 @@ mod tests {
         let _client = ClientOptions::new().open(at.path()).expect("client");
         server.connect().await.expect("connected");
         assert!(!at.accepting(), "its one instance is taken");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_send_waits_until_its_instance_accepts() {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        let d = private_dir();
+        let at = Endpoint::in_dir(d.path(), "late");
+        let mut server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(at.path())
+            .expect("server");
+        let send = tokio::spawn({
+            let at = at.clone();
+            async move { at.send(LINE.as_bytes()).await }
+        });
+        // An instance that exists but does not accept yet, as the hook server's
+        // next one does until its loop comes round.
+        tokio::time::sleep(PIPE_BUSY_BACKOFF * 5).await;
+        tokio::time::timeout(PIPE_BUSY_BOUND, server.connect())
+            .await
+            .expect("the send connects in time")
+            .expect("its payload is still there to read");
+        send.await.expect("joined").expect("sent");
+        let mut got = String::new();
+        server.read_to_string(&mut got).await.expect("read");
+        assert_eq!(got, LINE);
     }
 
     #[cfg(windows)]
