@@ -1273,7 +1273,7 @@ impl Reducer {
 
     /// Drop the per-slot correlation a departing agent id owns, reclaimed on
     /// BOTH a resurrect-in-place and a slot removal. Death-only teardown
-    /// (`recent_proof_of_life`, `Correlation::note_removed`) deliberately stays at
+    /// (`recent_proof_of_life`, [`Correlation::note_removed`]) deliberately stays at
     /// the sweep site — it must NOT run on a resurrect.
     fn remove_agent_correlation(&mut self, id: &AgentId) {
         self.corr.active_tasks.remove(id);

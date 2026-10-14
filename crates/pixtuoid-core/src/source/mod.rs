@@ -272,7 +272,7 @@ impl AgentEvent {
     /// Whether this event shows its session working now: the creation
     /// polarity's evidence for a slot no start announced. A start carries its
     /// own authority, and an end, a model, usage or title line shows nothing,
-    /// nor does `ProofOfLife`, which vouches a visible slot past the sweeps and
+    /// nor does [`ProofOfLife`](Self::ProofOfLife), which vouches a visible slot past the sweeps and
     /// must never create one.
     pub(crate) fn shows_activity(&self) -> bool {
         match self {

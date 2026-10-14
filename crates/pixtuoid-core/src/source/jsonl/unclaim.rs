@@ -109,11 +109,11 @@ impl Default for ChildEndUnclaims {
 /// WHY). For every pending id matching one of THIS watcher's `seen` paths: walk
 /// the path's pending bytes to EOF FIRST — a pre-stop straggler that re-entered
 /// as a first-sight would resurrect the just-ended child as a ghost — then
-/// END the claim. Two deliberate differences from `emit_session_exit`:
+/// END the claim. Two deliberate differences from [`emit_session_exit`](super::liveness::emit_session_exit):
 ///
 /// * **No `SessionEnd` is emitted** — the reducer already ended the slot from
 ///   the hook `SubagentStop`.
-/// * **`seen` → `Sight::Ended`, not removal.** The path must stay KNOWN: the
+/// * **`seen` → [`Sight::Ended`], not removal.** The path must stay KNOWN: the
 ///   Codex FD probe keeps vouching an in-flight child's still-open rollout, so a
 ///   removed claim would let `revouch_gated_files` reset the cursor to 0 on the
 ///   next scan — a full stale-activity replay plus an instant re-registration

@@ -123,8 +123,8 @@ pub(super) enum Sight {
     /// Registered: appends decode without re-registering.
     Claimed,
     /// Its session ended: a DECODED terminator, an oversized span whose tail
-    /// its `SessionEndChecker` matches, or a child-end un-claim:
-    /// the path stays KNOWN, so `revouch_gated_files` won't replay it however
+    /// its [`SessionEndChecker`] matches, or a child-end un-claim:
+    /// the path stays KNOWN, so [`revouch_gated_files`](liveness::revouch_gated_files) won't replay it however
     /// live the probe says the (still-open) rollout is, and only an append that
     /// shows activity re-registers it.
     Ended,
@@ -324,7 +324,7 @@ impl JsonlWatcher {
     /// Attach the child-end un-claim side-channel (see [`ChildEndUnclaims`]).
     /// The watcher becomes the CONSUMER: on each pass it drains the handle's
     /// ids that match its own claimed transcripts and ends those claims
-    /// (`Sight::Ended`).
+    /// ([`Sight::Ended`]).
     #[doc(hidden)]
     pub fn with_child_end_unclaims(mut self, unclaims: ChildEndUnclaims) -> Self {
         self.child_end_unclaims = Some(unclaims);

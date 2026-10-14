@@ -277,7 +277,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             tail.as_deref().map(decoders.activity_recency),
             Some(super::TailActivity::SidecarOnly)
         );
-        // Judged on the window `scan_pending_tasks` reads, wide enough to hold a
+        // Judged on the window [`scan_pending_tasks`] reads, wide enough to hold a
         // tool result's whole line.
         let revives = sight != Some(Sight::Ended)
             || read_tail(path, TASK_SCAN_BYTES)
