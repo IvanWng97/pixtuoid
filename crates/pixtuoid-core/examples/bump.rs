@@ -93,16 +93,31 @@ fn git(args: &[&str]) -> Result<Vec<u8>, String> {
     }
 }
 
-fn patch(source: &str, out: &Path) -> Result<(), String> {
-    let p = profile(source)?;
-    // A recording can add a file; intent-to-add puts it in the diff.
-    git(&["add", "--intent-to-add", "--all", "--", "."])?;
-    let names = git(&["diff", "--name-only", "--no-renames", "-z"])?;
-    let changed: Vec<PathBuf> = names
-        .split(|&b| b == 0)
+/// The paths in git's `-z` output.
+fn paths(z: &[u8]) -> Vec<PathBuf> {
+    z.split(|&b| b == 0)
         .filter(|n| !n.is_empty())
         .map(|n| PathBuf::from(String::from_utf8_lossy(n).into_owned()))
-        .collect();
+        .collect()
+}
+
+fn patch(source: &str, out: &Path) -> Result<(), String> {
+    let p = profile(source)?;
+    // A recording can add a file; intent-to-add puts it in the diff, where
+    // `--all` would stage a deletion out of it.
+    let untracked = paths(&git(&["ls-files", "--others", "--exclude-standard", "-z"])?);
+    if !untracked.is_empty() {
+        let mut add = vec!["add", "--intent-to-add", "--"];
+        add.extend(untracked.iter().filter_map(|p| p.to_str()));
+        git(&add)?;
+    }
+    let changed = paths(&git(&[
+        "diff",
+        "HEAD",
+        "--name-only",
+        "--no-renames",
+        "-z",
+    ])?);
     if let Some(stray) = changed.iter().find(|path| !bump::admits(p, path)) {
         return Err(format!("{stray:?} changed, outside {source}'s bump"));
     }
@@ -112,6 +127,7 @@ fn patch(source: &str, out: &Path) -> Result<(), String> {
     }
     let diff = git(&[
         "diff",
+        "HEAD",
         "--no-renames",
         "--no-ext-diff",
         "--no-textconv",
