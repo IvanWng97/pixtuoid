@@ -371,6 +371,15 @@ impl Reducer {
             scope::refresh_lineage(scene, id, now);
         }
 
+        if from == Transport::Hook
+            && matches!(
+                event,
+                AgentEvent::ActivityStart { .. } | AgentEvent::ActivityEnd { .. }
+            )
+        {
+            self.resume_parent_waiting_on_delegation(scene, id, now);
+        }
+
         if from == Transport::Hook && self.suppress_subagent_leak(scene, event, id, now) {
             return Preprocessed::Drop;
         }
@@ -988,6 +997,33 @@ impl Reducer {
             },
         );
         true
+    }
+
+    /// A child's own hook activity proves its delegation resumed, so a parent
+    /// Waiting on nothing but its in-flight Tasks returns to Delegating. The
+    /// CLIs that fire a child's approval on the parent's session (reasonix's
+    /// session controller) send the child's later hooks under the child's own
+    /// id, which [`Reducer::suppress_subagent_leak`] never sees. A missing gate
+    /// is no evidence: a wait on the parent's own id-less tool clears it.
+    fn resume_parent_waiting_on_delegation(
+        &mut self,
+        scene: &mut SceneState,
+        id: AgentId,
+        now: SystemTime,
+    ) {
+        let Some(parent) = scene.agents.get(&id).and_then(|s| s.parent_id) else {
+            return;
+        };
+        let tasks = self.corr.active_tasks.get(&parent);
+        let on_delegation = self
+            .corr
+            .gated_before_waiting
+            .get(&parent)
+            .is_some_and(|g| g.iter().all(|m| tasks.is_some_and(|s| s.contains(&**m))));
+        if on_delegation && let Some(slot) = scene.agents.get_mut(&parent) {
+            fsm::enter_delegating(slot, self.corr.any_active_task(&parent), now);
+            self.corr.gated_before_waiting.remove(&parent);
+        }
     }
 
     /// Hook transport only: with any Task in flight, hook ActivityStart/End for

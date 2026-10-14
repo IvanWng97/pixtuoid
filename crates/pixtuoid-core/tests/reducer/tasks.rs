@@ -1423,6 +1423,73 @@ fn parent_waiting_on_subagent_permission_resolves_when_the_subagent_ends_a_tool(
     );
 }
 
+/// Reasonix fires a child's approval on the parent's session (the session
+/// controller's runner), while the child's later hooks carry its own id: the
+/// first of them proves the delegation resumed. A wait on the parent's own
+/// tool is the parent's, whatever its children do.
+#[test]
+fn a_childs_own_hook_resumes_a_parent_waiting_on_its_delegation() {
+    for (own_tool, tuid) in [(false, Some("call_1")), (true, Some("own_1")), (true, None)] {
+        let mut scene = SceneState::uniform(8);
+        let mut r = Reducer::new();
+        let parent = AgentId::from_parts("reasonix", "root");
+        let child = AgentId::from_parts("reasonix", "root:subagent:sa_1");
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let at = |s| t0 + Duration::from_secs(s);
+        let session_start = |agent_id, parent_id| AgentEvent::SessionStart {
+            agent_id,
+            source: "reasonix".into(),
+            session_id: "s".into(),
+            cwd: PathBuf::from("/repo"),
+            parent_id,
+        };
+        r.apply(
+            &mut scene,
+            session_start(parent, None),
+            at(0),
+            Transport::Hook,
+        );
+        r.apply(
+            &mut scene,
+            session_start(child, Some(parent)),
+            at(1),
+            Transport::Hook,
+        );
+        let detail = if own_tool { "Bash: ls" } else { "Agent" };
+        act_start(
+            &mut r,
+            &mut scene,
+            parent,
+            tuid,
+            Some(detail),
+            at(2),
+            Transport::Hook,
+        );
+        waiting(
+            &mut r,
+            &mut scene,
+            parent,
+            "approval",
+            at(3),
+            Transport::Hook,
+        );
+        act_start(
+            &mut r,
+            &mut scene,
+            child,
+            None,
+            Some("read_file"),
+            at(4),
+            Transport::Hook,
+        );
+        let waits = matches!(scene.agents[&parent].state, ActivityState::Waiting { .. });
+        assert_eq!(waits, own_tool, "own tool {tuid:?}");
+        if !own_tool {
+            assert_delegating(&scene, parent, "the child resumed its delegation");
+        }
+    }
+}
+
 #[test]
 fn task_drain_while_parent_waiting_keeps_waiting() {
     use pixtuoid_core::source::ToolDetail;
