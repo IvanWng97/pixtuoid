@@ -21,7 +21,7 @@ tests/
 │   ├── manager.rs       SourceManager spawn/health
 │   ├── claude/ codex/ codewhale/   per-CLI subagent lifecycle, each with its OWN
 │   │                    single-owner fixtures/hook-payloads.jsonl (NOT scanned)
-│   ├── cursor/ grok/ opencode/  DELEGATING captures — a child is an independent
+│   ├── cursor/ grok/ opencode/ reasonix/  DELEGATING captures — a child is an independent
 │   │                    session (two sprites), so these can't live under the one-AgentId rule
 │   ├── omp/             the bridge-extension rounds (#951) — hook keys FOLD
 │   │                    platform-dependently, so expectations derive through the
@@ -84,4 +84,4 @@ under `sources/fixtures/` would be mis-scanned.
    (its last step).
 3. **Only for unique behavior** (subagent hooks, custom lifecycle): a
    `tests/sources/<cli>/` module registered in `sources/main.rs`. Plain CLIs
-   (antigravity, reasonix) need none.
+   (antigravity) need none.

@@ -508,15 +508,11 @@ mod run {
             )
             .map_err(std::io::Error::other)?;
             env.push(("PATH".into(), path));
+            // No XDG variable: the cleared env leaves each at its default under
+            // this home, where a user's own sits; reasonix refuses to link a
+            // plugin from outside the home
+            // (`internal/ext/installsource/plugin_package.go:480-481` at v2.39.0).
             env.push(("HOME".into(), at("home")?.into()));
-            for (var, rel) in [
-                ("XDG_CONFIG_HOME", "xdg/config"),
-                ("XDG_DATA_HOME", "xdg/data"),
-                ("XDG_STATE_HOME", "xdg/state"),
-                ("XDG_CACHE_HOME", "xdg/cache"),
-            ] {
-                env.push((var.into(), at(rel)?.into()));
-            }
             for var in p.home_vars() {
                 env.push((var.into(), at(&format!("homes/{var}"))?.into()));
             }

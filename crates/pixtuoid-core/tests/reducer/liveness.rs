@@ -1491,8 +1491,6 @@ fn active_subagent_keeps_parent_alive_via_jsonl_events() {
     );
 }
 
-// A Delegating Reasonix slot is hook-silent by construction: its in-process
-// subagents fire no hooks at all.
 #[test]
 fn reasonix_delegating_slot_survives_the_active_timeout() {
     use pixtuoid_core::source::ToolDetail;

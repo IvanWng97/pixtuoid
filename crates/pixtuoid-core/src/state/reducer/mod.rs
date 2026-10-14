@@ -5,7 +5,9 @@ use std::time::{Duration, SystemTime};
 use crate::AgentId;
 use crate::source::decoder::label_prefix_for;
 use crate::source::{AgentEvent, Transport};
-use crate::state::correlation::{Correlation, ToolEventKind, elapsed_at_least, elapsed_past};
+use crate::state::correlation::{
+    ChildEnd, Correlation, ToolEventKind, elapsed_at_least, elapsed_past,
+};
 use crate::state::{ActivityState, AgentSlot, SceneState, ToolKind, fsm, scope};
 
 #[doc(hidden)]
@@ -160,13 +162,26 @@ struct TaskTracking {
     handled_by_task_start: bool,
 }
 
+/// What the child ledger says to a registration ([`Reducer::ledger_gate`]).
+#[derive(Debug, PartialEq, Eq)]
+enum LedgerGate {
+    /// No end inside [`CHILD_END_LEDGER_TTL`].
+    Open,
+    /// An inferred end a hook disproved: register under this live parent.
+    Readmit(AgentId),
+    /// The dead child's late echo.
+    Refused,
+}
+
 /// The event coordinator: folds `AgentEvent`s into `SceneState`, owning the
 /// cross-slot correlation maps, the Active→Idle debounce, and the stale/exit
 /// sweeps.
 #[derive(Debug, Default)]
 pub struct Reducer {
     corr: Correlation,
-    /// Parents whose last Task drained, awaiting the deferred b1 cascade
+    /// Parents whose last Task drained, or whose id-less Task ended on a
+    /// [`child_ends_unannounced`](crate::source::registry::SourceCaps::child_ends_unannounced)
+    /// source, awaiting the deferred b1 cascade
     /// ([`B1_CASCADE_GRACE`]) — fired only if `active_tasks` is STILL empty at
     /// fire time, which is how a Task insert inside the grace defuses it
     /// (#151).
@@ -257,6 +272,7 @@ impl Reducer {
                     cwd: &cwd,
                 },
                 parent_id,
+                from,
                 now,
             ),
             // The tracker owns every Task-dispatch Start, replays included.
@@ -385,6 +401,25 @@ impl Reducer {
             if !(*recorded == ToolEventKind::Start && kind == ToolEventKind::End) {
                 return Preprocessed::Drop;
             }
+        }
+
+        // Per-connection hook delivery can decode a call's End before its Start
+        // (#242); that Start would open a call that already returned.
+        if from == Transport::Hook
+            && let AgentEvent::ActivityStart {
+                tool_use_id: Some(tuid),
+                detail,
+                ..
+            } = event
+            && self
+                .corr
+                .recent_hook_tool_uses
+                .get(&(id, tuid.clone()))
+                .is_some_and(|(_, kind)| *kind == ToolEventKind::End)
+        {
+            // The call did run.
+            self.count_call(scene, id, Some(tuid), detail, now);
+            return Preprocessed::Drop;
         }
 
         // Gated on the slot EXISTING: a synthesis REFUSED for desk exhaustion
@@ -545,6 +580,20 @@ impl Reducer {
         // Idle: nothing would restore Delegating for the rest of the run.
         let delegating_tuid = self.corr.any_active_task(&agent_id);
         if let Some(slot) = scene.agents.get_mut(&agent_id) {
+            let untracked_task = matches!(
+                slot.state,
+                ActivityState::Active {
+                    kind: ToolKind::Task,
+                    tool_use_id: None,
+                    ..
+                }
+            );
+            if untracked_task
+                && crate::source::registry::descriptor_for(&slot.source)
+                    .is_some_and(|d| d.caps().child_ends_unannounced)
+            {
+                self.pending_b1_cascades.insert(agent_id, now);
+            }
             if matches!(slot.state, ActivityState::Active { .. }) || resolves_wait {
                 match delegating_tuid {
                     Some(tuid) => fsm::enter_delegating(slot, Some(tuid), now),
@@ -606,8 +655,11 @@ impl Reducer {
     ) {
         // Stamped REGARDLESS of slot existence (#244): a Stop-before-Start
         // reorder has none, and for a known slot it outlives the exit-grace GC.
-        if as_child {
-            self.corr.child_ledger.entry(agent_id).or_default().ended_at = Some(now);
+        // A child the ledger knows ends by its own word even when its decoder
+        // can't tell `as_child` (opencode's `session.deleted`).
+        if as_child || self.corr.child_ledger.contains_key(&agent_id) {
+            self.corr.child_ledger.entry(agent_id).or_default().ended =
+                Some(ChildEnd::Reported(now));
         }
         scope::cascade_exit(scene, agent_id, scope::StampRoot::Yes, now);
     }
@@ -661,8 +713,8 @@ impl Reducer {
             // just refused would re-register the ended child PARENTLESS one
             // event later. A never-child id is never in the ledger, so the
             // Reasonix parentless resurrect keeps registering.
-            && !self.corr.child_recently_ended(agent_id, now)
-            && self.register_slot(scene, agent_id, ctx, None, now)
+            && let Some(parent) = self.ledger_parent(scene, agent_id, from, now)
+            && self.register_and_link(scene, agent_id, ctx, parent, now)
             && let Some(slot) = scene.agents.get_mut(&agent_id)
         {
             slot.unknown_cwd = false;
@@ -712,25 +764,22 @@ impl Reducer {
         agent_id: AgentId,
         ctx: IdentityCtx,
         parent_id: Option<AgentId>,
+        from: Transport,
         now: SystemTime,
     ) {
-        if self.late_child_start_refused(scene, agent_id, ctx, parent_id, now) {
+        if self.late_child_start_refused(scene, agent_id, ctx, parent_id, from, now) {
             return;
         }
         let parent_id = self.resolve_parent_link(scene, agent_id, ctx, parent_id);
         if self.enrich_existing_start(scene, agent_id, ctx, parent_id, now) {
             return;
         }
-        if self.register_slot(scene, agent_id, ctx, parent_id, now) {
-            // A desk-exhaustion refusal records nothing — nothing registered.
-            if let Some(p) = parent_id {
-                self.corr.link_applied_parent(agent_id, p);
-            }
-        }
+        // A desk-exhaustion refusal records nothing — nothing registered.
+        self.register_and_link(scene, agent_id, ctx, parent_id, now);
     }
 
     /// Refuse a LATE parented start whose end already passed, on two clocks: the
-    /// #242 tombstone and the #244-w2 child ledger, whose `ended_at` outlives the
+    /// #242 tombstone and the #244-w2 child ledger, whose end outlives the
     /// slot and so covers windows the tombstone can't. Parentless starts are
     /// exempt BY CONSTRUCTION — Reasonix's SessionEnd→SessionStart resurrect
     /// rides the same cwd-keyed parentless id and must keep registering.
@@ -740,9 +789,13 @@ impl Reducer {
         agent_id: AgentId,
         ctx: IdentityCtx,
         parent_id: Option<AgentId>,
+        from: Transport,
         now: SystemTime,
     ) -> bool {
-        if parent_id.is_none() || scene.agents.contains_key(&agent_id) {
+        let Some(parent) = parent_id else {
+            return false;
+        };
+        if scene.agents.contains_key(&agent_id) {
             return false;
         }
         let session_id = ctx.session_id;
@@ -760,7 +813,7 @@ impl Reducer {
         }
         // #244-w2: a child that ended on a KNOWN slot mints no tombstone, so
         // after the exit grace GC a late first-sight would revive a phantom.
-        if self.corr.child_recently_ended(agent_id, now) {
+        if self.ledger_gate(scene, agent_id, Some(parent), from, now) == LedgerGate::Refused {
             tracing::warn!(
                 ?agent_id,
                 ?session_id,
@@ -771,6 +824,35 @@ impl Reducer {
             return true;
         }
         false
+    }
+
+    /// The #244-w2 gate every arm that registers an agent shares. Inside
+    /// [`CHILD_END_LEDGER_TTL`] of a child's end a registration is the dead
+    /// child's late echo, unless a hook follows an end pixtuoid only inferred:
+    /// that proves the child alive, under `parent` (else the one the ledger
+    /// remembers) while it is still in the scene.
+    fn ledger_gate(
+        &self,
+        scene: &SceneState,
+        id: AgentId,
+        parent: Option<AgentId>,
+        from: Transport,
+        now: SystemTime,
+    ) -> LedgerGate {
+        let Some(end) = self.corr.recent_child_end(id, now) else {
+            return LedgerGate::Open;
+        };
+        let parent = parent.or_else(|| self.corr.child_ledger.get(&id).and_then(|e| e.parent_id));
+        match parent {
+            Some(p)
+                if matches!(end, ChildEnd::Inferred(_))
+                    && from == Transport::Hook
+                    && scene.agents.get(&p).is_some_and(|s| s.exiting_at.is_none()) =>
+            {
+                LedgerGate::Readmit(p)
+            }
+            _ => LedgerGate::Refused,
+        }
     }
 
     /// Ledger adoption (#246 / #244-w1) then the #240 cycle refusal. A
@@ -896,22 +978,54 @@ impl Reducer {
         if self.corr.hook_session_end_tombstoned(id, now) {
             return;
         }
-        if self.register_slot(
-            scene,
-            id,
-            IdentityCtx {
-                source: "",
-                session_id: "",
-                cwd: std::path::Path::new(""),
-            },
-            None,
-            now,
-        ) && let Some(slot) = scene.agents.get_mut(&id)
+        // The Identity arm's ledger gate: this identity-less fallback is no looser.
+        let Some(parent) = self.ledger_parent(scene, id, Transport::Hook, now) else {
+            return;
+        };
+        let ctx = IdentityCtx {
+            source: "",
+            session_id: "",
+            cwd: std::path::Path::new(""),
+        };
+        if self.register_and_link(scene, id, ctx, parent, now)
+            && let Some(slot) = scene.agents.get_mut(&id)
         {
             // NOT an unknown-cwd ghost: that reap targets startup
             // JSONL-seeding artifacts, and a hook proves this one alive.
             slot.unknown_cwd = false;
         }
+    }
+
+    /// [`Reducer::ledger_gate`] for an arm whose event names no parent: `None`
+    /// refuses, `Some(parent)` registers under it.
+    fn ledger_parent(
+        &self,
+        scene: &SceneState,
+        id: AgentId,
+        from: Transport,
+        now: SystemTime,
+    ) -> Option<Option<AgentId>> {
+        match self.ledger_gate(scene, id, None, from, now) {
+            LedgerGate::Open => Some(None),
+            LedgerGate::Readmit(p) => Some(Some(p)),
+            LedgerGate::Refused => None,
+        }
+    }
+
+    /// [`Reducer::register_slot`], recording the link it applies.
+    fn register_and_link(
+        &mut self,
+        scene: &mut SceneState,
+        id: AgentId,
+        ctx: IdentityCtx,
+        parent: Option<AgentId>,
+        now: SystemTime,
+    ) -> bool {
+        let registered = self.register_slot(scene, id, ctx, parent, now);
+        if registered && let Some(p) = parent {
+            self.corr.link_applied_parent(id, p);
+        }
+        registered
     }
 
     /// The slot-creation half of the `SessionStart` arm, shared with
@@ -1259,7 +1373,7 @@ impl Reducer {
             // A CHILD whose end wasn't `as_child` starts its ledger GC clock
             // here, arming #244-w2; `get_or_insert` keeps an earlier stamp.
             if let Some(entry) = self.corr.child_ledger.get_mut(&id) {
-                entry.ended_at.get_or_insert(now);
+                entry.ended.get_or_insert(ChildEnd::Inferred(now));
             }
         }
     }

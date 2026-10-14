@@ -70,6 +70,7 @@ fn delegating_slot_with_hook_silent_caps_gets_waiting_window() {
         has_exit_signal: true,
         resurrects_on_prompt: true,
         delegations_are_hook_silent: true,
+        child_ends_unannounced: false,
     };
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
@@ -139,6 +140,7 @@ fn generic_tool_displaying_delegating_keeps_the_active_window() {
         has_exit_signal: true,
         resurrects_on_prompt: true,
         delegations_are_hook_silent: true,
+        child_ends_unannounced: false,
     };
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
@@ -392,6 +394,7 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
     use crate::AgentId;
     use crate::source::{AgentEvent, Transport};
     use crate::state::SceneState;
+    use crate::state::correlation::ChildEnd;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 
@@ -429,7 +432,7 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
         .get(&child)
         .expect("child link recorded");
     assert_eq!(entry.parent_id, Some(parent));
-    assert!(entry.ended_at.is_none(), "alive — no gc clock yet");
+    assert!(entry.ended.is_none(), "alive — no gc clock yet");
 
     // Neither end below is `as_child`, so only sweep_exited can stamp the clock.
     r.apply(
@@ -448,8 +451,8 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
         r.corr
             .child_ledger
             .get(&child)
-            .is_some_and(|e| e.ended_at.is_some()),
-        "sweep_exited must stamp ended_at for a child whose end wasn't as_child"
+            .is_some_and(|e| matches!(e.ended, Some(ChildEnd::Inferred(_)))),
+        "sweep_exited must stamp an inferred end for a child whose end wasn't as_child"
     );
 
     r.tick(

@@ -15,8 +15,8 @@ use crate::source::registry;
 
 pub mod verify;
 
-/// The key every profile's CLI is handed for its scripted model: aimock
-/// accepts any, and a real provider must refuse it.
+/// The key a profile hands its CLI for its scripted model: aimock accepts
+/// any, and a real provider must refuse it.
 pub const DUMMY_KEY: &str = "hermetic-dummy-key";
 
 /// The scripted model's `/v1` base, as a profile's env spells it.
@@ -73,7 +73,7 @@ pub struct Scenario {
 }
 
 /// A config file the tier writes into a sandbox home BEFORE `pixtuoid connect`,
-/// which then merges into the same file.
+/// which may merge its own into the same file (codex's `config.toml`).
 #[derive(Debug)]
 pub struct ConfigFile {
     /// The environment variable naming the home the file lives under.
@@ -181,6 +181,10 @@ fn hook_event_name(v: &Value) -> Option<Cow<'_, str>> {
 
 fn type_field(v: &Value) -> Option<Cow<'_, str>> {
     v.get("type")?.as_str().map(Cow::Borrowed)
+}
+
+fn event_field(v: &Value) -> Option<Cow<'_, str>> {
+    v.get("event")?.as_str().map(Cow::Borrowed)
 }
 
 /// The event dsh's plugin forwards as each payload `type` (`dsh_plugin.mjs`).
@@ -609,6 +613,70 @@ wire_api = "responses"
         // A shell call's; the scripted turns read a file and spawn a child.
         not_yet_fields: &[("hook:PreToolUse", "/toolInput/command")],
     },
+    // reasonix's cites are `esengine/DeepSeek-Reasonix` at `v2.39.0`.
+    Profile {
+        source: "reasonix",
+        package: Package::Npm("reasonix"),
+        // A non-read-only tool is denied headless; this allows the one a
+        // blocking spawn needs (`docs/CLI.md:502-503`, `:517-519`).
+        invocation: &["reasonix", "--allowed-tools", "task", "-p", "{prompt}"],
+        // Off already for a non-interactive run, and pinned off against a
+        // changed default (`internal/platform/telemetry/policy.go:44`).
+        env: &[("REASONIX_TELEMETRY", "off")],
+        homes: &["REASONIX_HOME"],
+        system_config: &[],
+        // Instructions stop at the nearest git root
+        // (`internal/state/instruction/resolver.go:80-84`), which the
+        // recorder's `git init` makes the workspace; `./reasonix.toml` is the
+        // workspace's own (`internal/contract/config/paths.go:639-649`).
+        ancestor_config: &[],
+        // A loopback `base_url` runs with no key
+        // (`internal/contract/config/config.go:1651-1684`).
+        config: &[ConfigFile {
+            home: "REASONIX_HOME",
+            path: "config.toml",
+            template: r#"default_model = "aimock"
+
+[[providers]]
+name = "aimock"
+kind = "openai"
+base_url = "http://127.0.0.1:{port}/v1"
+model = "deepseek-v4-flash"
+"#,
+        }],
+        scenarios: &[
+            Scenario {
+                shape: Shape::ToolRun,
+                expects: &[
+                    "SessionStart",
+                    "UserPromptSubmit",
+                    "PreToolUse",
+                    "PostToolUse",
+                    "Stop",
+                    "SessionEnd",
+                ],
+                fixture: "fixtures/reasonix/tool-run-hermetic",
+            },
+            Scenario {
+                shape: Shape::Subagent,
+                expects: &[
+                    "SessionStart",
+                    "UserPromptSubmit",
+                    "PreToolUse",
+                    "SubagentStart",
+                    "PostToolUse",
+                    "SubagentStop",
+                    "Stop",
+                    "SessionEnd",
+                ],
+                fixture: "reasonix/fixtures/subagent-hermetic",
+            },
+        ],
+        not_yet: &["PermissionRequest", "Notification"],
+        event_name: event_field,
+        // A bash call's; the scripted turn reads a file.
+        not_yet_fields: &[("hook:PreToolUse", "/toolArgs/command")],
+    },
 ];
 
 /// Every registered source without a profile, and why.
@@ -616,7 +684,6 @@ pub const NOT_HERMETIC: &[(&str, Absence)] = &[
     // Owner, 2026-10-13: no custom model endpoint, so no upstream detection.
     ("cursor", Absence::NoModelEndpoint),
     ("antigravity", Absence::AwaitingProfile),
-    ("reasonix", Absence::AwaitingProfile),
     ("codewhale", Absence::AwaitingProfile),
     ("openclaw", Absence::AwaitingProfile),
     ("copilot", Absence::AwaitingProfile),
@@ -734,6 +801,7 @@ mod tests {
         for (source, repo) in [
             ("opencode", crate::source::opencode::REPO),
             ("dsh", crate::source::dsh::REPO),
+            ("reasonix", crate::source::reasonix::REPO),
         ] {
             let Release::Npm { package, .. } = repo.release else {
                 panic!("{source}'s watch reads its npm release");
