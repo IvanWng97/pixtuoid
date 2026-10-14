@@ -143,9 +143,9 @@ fn backfill_identity<'a>(slot: &mut AgentSlot, ctx: IdentityCtx<'a>) -> Option<&
     None
 }
 
-/// What a creating or reviving event claims of an id, for [`Reducer::authorizes`].
+/// What a creating or reviving event asks of an id, for [`Reducer::authorizes`].
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Claim {
+enum Attempt {
     /// A `SessionStart`, judged on the parent it names itself, before its
     /// remembered parent is adopted.
     Start { parented: bool },
@@ -155,7 +155,7 @@ enum Claim {
     HookActivity,
 }
 
-/// What [`Reducer::authorizes`] lets a claim do.
+/// What [`Reducer::authorizes`] lets an attempt do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Verdict {
     Create,
@@ -712,7 +712,7 @@ impl Reducer {
             // Identity is hook-only, so the process is alive: a JSONL-seeded
             // unknown-cwd flag must not keep `STALE_UNKNOWN_CWD_TIMEOUT` armed.
             slot.unknown_cwd = false;
-        } else if self.authorizes(scene, agent_id, Claim::Identity, from, now) == Verdict::Create
+        } else if self.authorizes(scene, agent_id, Attempt::Identity, from, now) == Verdict::Create
             && self.register_slot(scene, agent_id, ctx, None, now)
             && let Some(slot) = scene.agents.get_mut(&agent_id)
         {
@@ -768,7 +768,7 @@ impl Reducer {
         now: SystemTime,
     ) {
         let parented = parent_id.is_some();
-        let verdict = self.authorizes(scene, agent_id, Claim::Start { parented }, from, now);
+        let verdict = self.authorizes(scene, agent_id, Attempt::Start { parented }, from, now);
         if let Verdict::Refuse(refusal) = verdict {
             refusal.log_start(agent_id, ctx, parent_id);
             return;
@@ -784,19 +784,19 @@ impl Reducer {
         }
     }
 
-    /// What `claim`, arriving on `from`, may do to `id`'s slot: the ONE
+    /// What `attempt`, arriving on `from`, may do to `id`'s slot: the ONE
     /// creation-polarity decision every registering arm applies. Desk capacity
     /// and parent cycles are structure, not authority, and stay out.
     fn authorizes(
         &self,
         scene: &SceneState,
         id: AgentId,
-        claim: Claim,
+        attempt: Attempt,
         from: Transport,
         now: SystemTime,
     ) -> Verdict {
         let corr = &self.corr;
-        let starts_fresh = claim == Claim::Start { parented: false };
+        let starts_fresh = attempt == Attempt::Start { parented: false };
         // A transcript's first sight proves only that a file exists: codex
         // writes its rollout at exit, after its hook end.
         let revival_owned =
@@ -810,22 +810,22 @@ impl Reducer {
                 && !revival_owned;
             return Verdict::Enrich { revive };
         }
-        let refusal = match claim {
-            Claim::Start { parented: false } if revival_owned => Some(Refusal::HookOwnsRevival),
-            Claim::Start { parented: false } => None,
+        let refusal = match attempt {
+            Attempt::Start { parented: false } if revival_owned => Some(Refusal::HookOwnsRevival),
+            Attempt::Start { parented: false } => None,
             // #242: hook deliveries ride per-connection tasks, so an end can be
             // DECODED ahead of its life's trailing events.
             _ if corr.ended_within_straggler_window(id, now) => Some(Refusal::Straggler),
-            Claim::HookActivity => None,
+            Attempt::HookActivity => None,
             // #244-w2: an Identity carries no parent, so without this an omp
             // batch whose parented Start was just refused would re-register the
             // ended child parentless one event later.
-            Claim::Start { parented: true } | Claim::Identity
+            Attempt::Start { parented: true } | Attempt::Identity
                 if corr.child_recently_ended(id, now) =>
             {
                 Some(Refusal::ChildEnded)
             }
-            Claim::Start { parented: true } | Claim::Identity => None,
+            Attempt::Start { parented: true } | Attempt::Identity => None,
         };
         refusal.map_or(Verdict::Create, Verdict::Refuse)
     }
@@ -937,7 +937,7 @@ impl Reducer {
     ) {
         // A blank Idle ghost of a DEAD session is unremovable.
         if !event.shows_activity()
-            || self.authorizes(scene, id, Claim::HookActivity, Transport::Hook, now)
+            || self.authorizes(scene, id, Attempt::HookActivity, Transport::Hook, now)
                 != Verdict::Create
         {
             return;

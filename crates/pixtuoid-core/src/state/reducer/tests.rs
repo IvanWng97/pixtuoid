@@ -259,10 +259,10 @@ fn gated_before_waiting_evicted_on_apply_path_sweep() {
     );
 }
 
-/// Every claim against every end it can meet, on both sides of each window.
+/// Every attempt against every end it can meet, on both sides of each window.
 #[test]
 fn authorizes_decides_each_claim_by_the_end_it_meets() {
-    use super::{Claim, Refusal, Verdict};
+    use super::{Attempt, Refusal, Verdict};
     use crate::AgentId;
     use crate::source::{AgentEvent, Transport};
     use crate::state::SceneState;
@@ -274,21 +274,21 @@ fn authorizes_decides_each_claim_by_the_end_it_meets() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let ms = Duration::from_millis(1);
     let (root, child) = (
-        Claim::Start { parented: false },
-        Claim::Start { parented: true },
+        Attempt::Start { parented: false },
+        Attempt::Start { parented: true },
     );
     let (hook, jsonl) = (Transport::Hook, Transport::Jsonl);
     use Verdict::{Create, Refuse};
 
-    // No slot: the claim meets only the recorded end.
+    // No slot: the attempt meets only the recorded end.
     for (end, rows) in [
         (
             None,
             vec![
                 (root, jsonl, t0, Create),
                 (child, jsonl, t0, Create),
-                (Claim::Identity, hook, t0, Create),
-                (Claim::HookActivity, hook, t0, Create),
+                (Attempt::Identity, hook, t0, Create),
+                (Attempt::HookActivity, hook, t0, Create),
             ],
         ),
         (
@@ -309,19 +309,19 @@ fn authorizes_decides_each_claim_by_the_end_it_meets() {
                     Refuse(Refusal::Straggler),
                 ),
                 (
-                    Claim::Identity,
+                    Attempt::Identity,
                     hook,
                     t0 + STRAGGLER_TTL - ms,
                     Refuse(Refusal::Straggler),
                 ),
                 (
-                    Claim::HookActivity,
+                    Attempt::HookActivity,
                     hook,
                     t0 + STRAGGLER_TTL - ms,
                     Refuse(Refusal::Straggler),
                 ),
-                (Claim::HookActivity, hook, t0 + STRAGGLER_TTL, Create),
-                (Claim::Identity, hook, t0 + STRAGGLER_TTL, Create),
+                (Attempt::HookActivity, hook, t0 + STRAGGLER_TTL, Create),
+                (Attempt::Identity, hook, t0 + STRAGGLER_TTL, Create),
             ],
         ),
         (
@@ -329,7 +329,7 @@ fn authorizes_decides_each_claim_by_the_end_it_meets() {
             vec![
                 (root, jsonl, t0 + STRAGGLER_TTL - ms, Create),
                 (
-                    Claim::HookActivity,
+                    Attempt::HookActivity,
                     hook,
                     t0 + STRAGGLER_TTL - ms,
                     Refuse(Refusal::Straggler),
@@ -341,12 +341,12 @@ fn authorizes_decides_each_claim_by_the_end_it_meets() {
                     Refuse(Refusal::Straggler),
                 ),
                 (
-                    Claim::Identity,
+                    Attempt::Identity,
                     hook,
                     t0 + STRAGGLER_TTL - ms,
                     Refuse(Refusal::Straggler),
                 ),
-                (Claim::HookActivity, hook, t0 + STRAGGLER_TTL, Create),
+                (Attempt::HookActivity, hook, t0 + STRAGGLER_TTL, Create),
                 (
                     child,
                     jsonl,
@@ -354,7 +354,7 @@ fn authorizes_decides_each_claim_by_the_end_it_meets() {
                     Refuse(Refusal::ChildEnded),
                 ),
                 (
-                    Claim::Identity,
+                    Attempt::Identity,
                     hook,
                     t0 + CHILD_END_GATE_TTL - ms,
                     Refuse(Refusal::ChildEnded),
@@ -368,9 +368,9 @@ fn authorizes_decides_each_claim_by_the_end_it_meets() {
         if let Some(as_child) = end {
             r.corr.note_end(id, Transport::Hook, as_child, t0);
         }
-        for (claim, from, now, want) in rows {
+        for (attempt, from, now, want) in rows {
             assert_eq!(
-                r.authorizes(&scene, id, claim, from, now),
+                r.authorizes(&scene, id, attempt, from, now),
                 want,
                 "end {end:?}, {from:?} at +{:?}",
                 now.duration_since(t0)
@@ -413,9 +413,9 @@ fn authorizes_decides_each_claim_by_the_end_it_meets() {
         if let Some(from) = ended_by {
             r.apply(&mut scene, end.clone(), t0, from);
         }
-        for (claim, from, want) in rows {
+        for (attempt, from, want) in rows {
             assert_eq!(
-                r.authorizes(&scene, id, claim, from, t0 + ms),
+                r.authorizes(&scene, id, attempt, from, t0 + ms),
                 want,
                 "ended by {ended_by:?}, {from:?}"
             );
