@@ -214,9 +214,9 @@ json-schemas:
     check-jsonschema --check-metaschema "${schemas[@]}"
     echo "${#schemas[@]} JSON Schemas validated"
 
-# Offline link + anchor check (lychee) over the repo's OWN markdown: every
-# relative cross-link between the nested AGENTS.md guides + docs/ must
-# resolve, and `#anchor` fragments must exist. Directory-walk mode respects
+# Offline link + anchor check (lychee) over every committed markdown file,
+# dot-dirs included (lychee skips .claude and .github by default): every
+# relative link must resolve, and `#anchor` fragments must exist. Directory-walk mode respects
 # .gitignore (vendored node_modules etc. auto-skipped); `--offline` = no network,
 # so it's deterministic + flake-free. External-URL decay is deliberately NOT
 # gated here (it's flaky on the PR path).
@@ -225,7 +225,7 @@ json-schemas:
 links:
     # Source CSS uses Vite package specifiers; its module graph belongs to the
     # site build, while this gate owns documentation links and anchors.
-    lychee --offline --include-fragments --extensions md .
+    lychee --offline --include-fragments --extensions md --hidden .
 
 # Clippy across the workspace, warnings denied.
 [group('rust')]
@@ -341,7 +341,7 @@ bench-pacing:
 
 # Local only, never CI: a shared runner's wall clock is too noisy for a frame
 # budget. `--live` runs in this terminal, the only run a real parser sees.
-[doc('The fluency gate: the release binary through a transition into a storm (or dusk); fail when frames shown past their interval pass 10 ms a second')]
+[doc('The fluency gate: the release binary through a transition into a storm (or dusk); fail when frames shown past their interval pass HITCH_RATE_MS_PER_S in scripts/pace-check.py')]
 [group('rust')]
 pace-check *args:
     cargo build --release -p pixtuoid --bins --example pacing
@@ -1211,8 +1211,8 @@ wasm-check-selftest:
 
 # The pixel comparator is the primitive under `gen-check` and the smoke job; an
 # always-green comparator reports success for any render at all. Its own recipe
-# because it needs only Pillow, while `gen-check` needs the toolchain its header
-# lists: a developer who cannot run that gate should still be able to run this.
+# because it needs only Pillow, while `gen-check` needs every generator's
+# toolchain: a developer who cannot run that gate should still be able to run this.
 [doc('Self-test the pixel comparator that gen-check and smoke ride on')]
 [group('meta')]
 compare-selftest:
