@@ -751,7 +751,7 @@ live-sources *ids:
 hermetic *args:
     cargo build --release -q -p pixtuoid -p pixtuoid-hook
     cargo build --release -q -p pixtuoid-core --example hermetic --example capture_fixture
-    target/release/examples/hermetic "$@"
+    cargo run --release -q -p pixtuoid-core --example hermetic -- "$@"
 
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug
