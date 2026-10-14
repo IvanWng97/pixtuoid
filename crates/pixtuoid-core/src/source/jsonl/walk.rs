@@ -260,9 +260,9 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
                     },
                 ))
                 .await;
-            // Un-claim AFTER the terminator, so a later append re-registers. Leaving
-            // the claim pinned the path "registered" until a watcher restart.
-            seen.lock().await.remove(path);
+            // Released AFTER the terminator, as a decoded end releases below: a
+            // pinned claim kept the path "registered" until a watcher restart.
+            seen.lock().await.insert(path.to_path_buf(), false);
             return;
         }
         // #204: register even on an oversized first sight, or a >1 MB transcript
@@ -346,24 +346,10 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     {
         (first_sight_cwd, head_label) = extract_head_fields(&head, extract, decoders.head_label);
     }
-    if !matches!(
-        (decoders.activity_recency)(new_bytes),
-        super::TailActivity::SidecarOnly
-    ) {
-        emit_first_sight(
-            path,
-            source,
-            decoders,
-            seen,
-            tx,
-            first_sight_cwd,
-            head_label,
-        )
-        .await;
-    }
 
     let path_agent_id = AgentId::from_parts(source, &decoders.id_derive.id_for(path));
-    let mut session_ended = false;
+    let ends_this_agent = |ev: &AgentEvent| matches!(ev, AgentEvent::SessionEnd { agent_id, .. } if *agent_id == path_agent_id);
+    let mut decoded = Vec::new();
     for line in new_bytes.split(|b| *b == b'\n') {
         if line.is_empty() {
             continue;
@@ -383,19 +369,37 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             }
         };
         match decode_line(&transcript_path_str, source, v) {
-            Ok(events) => {
-                for ev in events {
-                    let ends_this_agent = matches!(
-                        &ev,
-                        AgentEvent::SessionEnd { agent_id, .. } if *agent_id == path_agent_id
-                    );
-                    if tx.send((Transport::Jsonl, ev)).await.is_err() {
-                        return;
-                    }
-                    session_ended |= ends_this_agent;
-                }
-            }
+            Ok(events) => decoded.extend(events),
             Err(e) => warn!(path = ?path, error = %e, "decode error"),
+        }
+    }
+
+    // An ENDED transcript re-registers only on bytes that decode to more than
+    // its own end: a trailer flushed after the end line (grok's
+    // `hook_execution{stop}`) decodes to nothing and proves no revival.
+    let ended = seen.lock().await.get(path) == Some(&false);
+    if (!ended || decoded.iter().any(|ev| !ends_this_agent(ev)))
+        && !matches!(
+            (decoders.activity_recency)(new_bytes),
+            super::TailActivity::SidecarOnly
+        )
+    {
+        emit_first_sight(
+            path,
+            source,
+            decoders,
+            seen,
+            tx,
+            first_sight_cwd,
+            head_label,
+        )
+        .await;
+    }
+
+    let session_ended = decoded.iter().any(ends_this_agent);
+    for ev in decoded {
+        if tx.send((Transport::Jsonl, ev)).await.is_err() {
+            return;
         }
     }
     if session_ended {

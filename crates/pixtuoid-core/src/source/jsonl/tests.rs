@@ -359,6 +359,13 @@ fn t_decode_lifecycle(
             as_child: false,
         }]);
     }
+    if v.get("type").and_then(|x| x.as_str()) == Some("tool_use") {
+        return Ok(vec![AgentEvent::ActivityStart {
+            agent_id: AgentId::from_parts(s, t),
+            tool_use_id: None,
+            detail: None,
+        }]);
+    }
     Ok(vec![])
 }
 fn t_label(_p: &Path, _s: &str, _c: &Path) -> String {
@@ -1129,17 +1136,69 @@ async fn session_end_unclaims_seen_so_a_later_append_re_registers() {
         .open(&path)
         .await
         .unwrap();
-    tokio::io::AsyncWriteExt::write_all(&mut f, b"{\"type\":\"assistant\"}\n")
+    tokio::io::AsyncWriteExt::write_all(&mut f, b"{\"type\":\"tool_use\"}\n")
         .await
         .unwrap();
     tokio::io::AsyncWriteExt::flush(&mut f).await.unwrap();
     drop(f);
     let events = walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
     assert!(
+        matches!(
+            events.as_slice(),
+            [
+                (_, AgentEvent::SessionStart { .. }),
+                ..,
+                (_, AgentEvent::ActivityStart { .. })
+            ]
+        ),
+        "a post-end append that decodes to activity must re-register the agent \
+         ahead of that activity, got {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_post_end_trailer_that_decodes_to_nothing_never_re_registers() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ended.jsonl");
+    tokio::fs::write(&path, "{\"type\":\"tool_use\"}\n")
+        .await
+        .unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let window = Duration::from_secs(3600);
+    let append = |line: &[u8]| {
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(line)
+            .unwrap();
+    };
+    walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
+    append(b"{\"type\":\"system\",\"subtype\":\"session_end\"}\n");
+    walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
+    assert_eq!(seen.lock().await.get(&path), Some(&false), "fixture: ended");
+
+    // grok flushes `hook_execution{stop}` after its end line; it decodes to nothing.
+    append(b"{\"type\":\"system\",\"subtype\":\"hook_trailer\"}\n");
+    let events = walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
+    assert!(
+        events.is_empty(),
+        "a trailer that decodes to nothing must not resurrect the ended session, got {events:?}"
+    );
+    assert_eq!(
+        seen.lock().await.get(&path),
+        Some(&false),
+        "the claim stays released, so a real revival still re-registers"
+    );
+
+    append(b"{\"type\":\"tool_use\"}\n");
+    let events = walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
+    assert!(
         events
             .iter()
             .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. })),
-        "a post-end append must re-register the agent, got {events:?}"
+        "activity after the trailer is the revival, got {events:?}"
     );
 }
 
@@ -1398,9 +1457,9 @@ async fn child_end_unclaim_drains_stragglers_then_releases_without_session_end()
         .append(true)
         .open(&path)
         .unwrap()
-        .write_all(b"{\"type\":\"assistant\"}\n")
+        .write_all(b"{\"type\":\"tool_use\"}\n")
         .unwrap();
-    let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+    let events = walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
     assert!(
         events.iter().any(|(_, e)| matches!(
             e,
@@ -1644,7 +1703,7 @@ async fn child_end_unclaim_releases_only_the_matched_ids_own_path() {
 }
 
 #[tokio::test]
-async fn oversized_ended_skip_unclaims_seen_so_a_later_append_re_registers() {
+async fn oversized_ended_skip_releases_seen_so_a_later_append_re_registers() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("big-resumed.jsonl");
     let initial = "{\"type\":\"assistant\",\"cwd\":\"/repo\"}\n";
@@ -1673,8 +1732,8 @@ async fn oversized_ended_skip_unclaims_seen_so_a_later_append_re_registers() {
         "the buried terminator must emit SessionEnd, got {events:?}"
     );
     assert!(
-        !seen.lock().await.contains_key(&path),
-        "the oversized-ended skip must un-claim `seen`"
+        seen.lock().await.get(&path) == Some(&false),
+        "the oversized-ended skip must release `seen`"
     );
 
     let mut f = tokio::fs::OpenOptions::new()
@@ -1682,12 +1741,12 @@ async fn oversized_ended_skip_unclaims_seen_so_a_later_append_re_registers() {
         .open(&path)
         .await
         .unwrap();
-    tokio::io::AsyncWriteExt::write_all(&mut f, b"{\"type\":\"assistant\"}\n")
+    tokio::io::AsyncWriteExt::write_all(&mut f, b"{\"type\":\"tool_use\"}\n")
         .await
         .unwrap();
     tokio::io::AsyncWriteExt::flush(&mut f).await.unwrap();
     drop(f);
-    let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+    let events = walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
     assert!(
         events
             .iter()
@@ -2788,9 +2847,9 @@ async fn child_end_unclaim_parks_truncated_transcript_before_release() {
         .append(true)
         .open(&path)
         .unwrap()
-        .write_all(b"{\"type\":\"assistant\"}\n")
+        .write_all(b"{\"type\":\"tool_use\"}\n")
         .unwrap();
-    let events = walk_once(&path, window, t_ended, &cursors, &seen).await;
+    let events = walk_once_with(&path, window, t_decode_lifecycle, t_ended, &cursors, &seen).await;
     assert!(
         events.iter().any(|(_, e)| matches!(
             e,
