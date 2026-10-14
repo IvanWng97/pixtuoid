@@ -156,8 +156,6 @@ struct FileDiff<'a> {
     path: PathBuf,
     removed: Vec<&'a str>,
     added: Vec<&'a str>,
-    created: bool,
-    deleted: bool,
 }
 
 const DEV_NULL: &str = "/dev/null";
@@ -200,7 +198,6 @@ fn files(patch: &str) -> Result<Vec<FileDiff<'_>>, String> {
             return Err(format!("{names:?} carries no text change"));
         };
         let path = match (old, new) {
-            (DEV_NULL, DEV_NULL) => return Err(format!("{names:?} names no file")),
             (DEV_NULL, b) if created => b.strip_prefix("b/"),
             (a, DEV_NULL) if deleted => a.strip_prefix("a/"),
             (a, b) if !created && !deleted && a.strip_prefix("a/") == b.strip_prefix("b/") => {
@@ -230,8 +227,6 @@ fn files(patch: &str) -> Result<Vec<FileDiff<'_>>, String> {
             path: PathBuf::from(path),
             removed,
             added,
-            created,
-            deleted,
         });
     }
     Ok(out)
@@ -268,7 +263,7 @@ pub fn admit(
             return Err(format!("{:?} is outside {}'s bump", f.path, p.source));
         }
         if f.path == registry_path {
-            if f.created || f.deleted || f.removed != [was] || f.added != [now] {
+            if f.removed != [was] || f.added != [now] {
                 return Err(format!(
                     "the registry's change is not {}'s pin moving to {version}",
                     p.source
@@ -446,6 +441,8 @@ mod tests {
         let sources = relative(&sources_root());
         let fixture = sources.join(p.scenarios[0].fixture);
         let name = fixture.file_name().expect("a name").to_string_lossy();
+        assert!(registry_relative().is_relative());
+        assert_eq!(repo_root().join(registry_relative()), pin::registry_path());
         assert!(admits(p, &registry_relative()));
         assert!(admits(p, &fixture.join("provenance.json")));
         let snap = format!("sources__conformance__codex__{name}.snap");
@@ -465,6 +462,24 @@ mod tests {
             p,
             &relative(&sources_root().join("conformance.rs"))
         ));
+    }
+
+    #[test]
+    fn every_profile_admits_a_conformance_snapshot_insta_wrote() {
+        let root = repo_root();
+        let snapshots: Vec<PathBuf> = std::fs::read_dir(sources_root().join("snapshots"))
+            .expect("the snapshots")
+            .map(|e| relative(&e.expect("an entry").path()))
+            .collect();
+        for p in PROFILES {
+            assert!(
+                snapshots
+                    .iter()
+                    .any(|s| admits(p, s) && root.join(s).is_file()),
+                "{}: no committed snapshot carries the name `admits` derives",
+                p.source
+            );
+        }
     }
 
     /// The patch `git diff --no-renames` writes for codex's repin plus `extra`.
@@ -497,11 +512,14 @@ mod tests {
         let up = above(codex());
         let f = fixture_file("hook-payloads.jsonl");
         let created = fixture_file("new.jsonl");
+        let gone = fixture_file("old.jsonl");
         let extra = format!(
             "diff --git a/{f} b/{f}\nindex 3333333..4444444 100644\n--- a/{f}\n+++ b/{f}\n\
              @@ -1 +1 @@\n-{{}}\n+{{\"a\":1}}\n\
              diff --git a/{created} b/{created}\nnew file mode 100644\nindex 0000000..5555555\n\
-             --- /dev/null\n+++ b/{created}\n@@ -0,0 +1 @@\n+{{}}\n"
+             --- /dev/null\n+++ b/{created}\n@@ -0,0 +1 @@\n+{{}}\n\
+             diff --git a/{gone} b/{gone}\ndeleted file mode 100644\nindex 6666666..0000000\n\
+             --- a/{gone}\n+++ /dev/null\n@@ -1 +0,0 @@\n-{{}}\n"
         );
         let paths = admit(&registry(), codex(), &up, &patch(&up, &extra)).expect("admitted");
         assert_eq!(
@@ -509,7 +527,8 @@ mod tests {
             [
                 registry_relative(),
                 PathBuf::from(&f),
-                PathBuf::from(&created)
+                PathBuf::from(&created),
+                PathBuf::from(&gone)
             ]
         );
     }
@@ -530,6 +549,10 @@ mod tests {
             format!("diff --git a/{f} b/{f}\nnew file mode 100755\n--- /dev/null\n+++ b/{f}\n@@ -0,0 +1 @@\n+a\n"),
             format!("diff --git a/{f} b/{f}\nindex 3333333..4444444 100644\nBinary files a/{f} and b/{f} differ\n"),
             format!("diff --git a/{f} b/{f}\n--- a/{g}\n+++ b/{g}\n@@ -1 +1 @@\n-a\n+b\n"),
+            format!("diff --git a/{f} b/{f}\n--- a/{f}\n+++ b/{g}\n@@ -1 +1 @@\n-a\n+b\n"),
+            format!("diff --git a/{f} b/{f}\n--- /dev/null\n+++ b/{f}\n@@ -0,0 +1 @@\n+a\n"),
+            format!("diff --git a/{f} b/{f}\n--- a/{f}\n+++ /dev/null\n@@ -1 +0,0 @@\n-a\n"),
+            format!("diff --git a/{f} b/{f}\nnew file mode 100644\n--- a/{f}\n+++ b/{f}\n@@ -1 +1 @@\n-a\n+b\n"),
             format!("diff --git a/{f} b/{f}\n--- a/{f}\n+++ b/{f}\n@@ -1 +1 @@\n-a\n*b\n"),
             "diff --git a/justfile b/justfile\n--- a/justfile\n+++ b/justfile\n@@ -1 +1 @@\n-a\n+b\n"
                 .to_string(),
@@ -588,6 +611,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_bumps_fixture_files_are_its_fixtures_left_on_disk() {
+        let p = codex();
+        let kept = fixture_file(PROVENANCE);
+        let paths = [
+            registry_relative(),
+            PathBuf::from(&kept),
+            PathBuf::from(fixture_file("deleted.jsonl")),
+        ];
+        assert_eq!(fixture_files(p, &paths), [repo_root().join(&kept)]);
+    }
+
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("pixtuoid-bump-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -634,6 +669,10 @@ mod tests {
         let rewritten: String = lines.iter().map(|l| format!("{l}\n")).collect();
         std::fs::write(&payloads, rewritten).expect("write");
         assert!(recorded(p, &files).is_err(), "a subtree no decoder reads");
+
+        let json = dir.join("notes.txt");
+        std::fs::write(&json, "{}\n").expect("write");
+        assert!(recorded(p, &[json]).is_err(), "JSON lines outside a .jsonl");
 
         let stray = dir.join("build.rs");
         std::fs::write(&stray, "fn main() {}").expect("write");
