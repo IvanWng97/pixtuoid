@@ -452,7 +452,7 @@ fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
 /// turn gap, so the link rides the longer relink budget. (Pruning at the gate's
 /// TTL is what made a multi-turn child idle >90s come back an orphan.)
 #[test]
-fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
+fn child_lifecycle_is_stamped_on_sweep_and_pruned_by_gc() {
     use crate::AgentId;
     use crate::source::{AgentEvent, Transport};
     use crate::state::SceneState;
@@ -484,16 +484,12 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
         Transport::Hook,
     );
     assert!(
-        !r.corr.child_ledger.contains_key(&parent),
-        "a root registration must not enter the child ledger"
+        !r.corr.lifecycles.contains_key(&parent),
+        "a root registration records no lifecycle"
     );
-    let entry = r
-        .corr
-        .child_ledger
-        .get(&child)
-        .expect("child link recorded");
+    let entry = r.corr.lifecycles.get(&child).expect("child link recorded");
     assert_eq!(entry.parent_id, Some(parent));
-    assert!(entry.ended_at.is_none(), "alive — no gc clock yet");
+    assert!(entry.child_ended_at.is_none(), "alive — no gc clock yet");
 
     // Neither end below is `as_child`, so only sweep_exited can stamp the clock.
     r.apply(
@@ -510,10 +506,10 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
     assert!(!scene.agents.contains_key(&child), "child swept");
     assert!(
         r.corr
-            .child_ledger
+            .lifecycles
             .get(&child)
-            .is_some_and(|e| e.ended_at.is_some()),
-        "sweep_exited must stamp ended_at for a child whose end wasn't as_child"
+            .is_some_and(|e| e.child_ended_at.is_some()),
+        "sweep_exited must stamp child_ended_at for a child whose end wasn't as_child"
     );
 
     r.tick(
@@ -521,7 +517,7 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
         swept + super::CHILD_END_LEDGER_TTL + Duration::from_secs(1),
     );
     assert_eq!(
-        r.corr.child_ledger.get(&child).and_then(|e| e.parent_id),
+        r.corr.lifecycles.get(&child).and_then(|e| e.parent_id),
         Some(parent),
         "the parent link must outlive the end GATE it does not share a purpose with"
     );
@@ -531,7 +527,7 @@ fn child_ledger_is_stamped_on_sweep_and_pruned_by_gc() {
         swept + super::CHILD_END_RELINK_TTL + Duration::from_secs(1),
     );
     assert!(
-        !r.corr.child_ledger.contains_key(&child),
+        !r.corr.lifecycles.contains_key(&child),
         "gc must prune an ended entry past CHILD_END_RELINK_TTL"
     );
 }
@@ -552,13 +548,11 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
     /// state proves nothing about a slow leak.
     const MAX_CORR_ENTRIES: usize = 1024;
     const ITERS: u64 = 3_000;
-    const MAP_NAMES: [&str; 9] = [
+    const MAP_NAMES: [&str; 7] = [
         "recent_hook_tool_uses",
-        "recent_hook_session_ends",
-        "hook_ended",
         "active_tasks",
         "recent_task_drains",
-        "child_ledger",
+        "lifecycles",
         "recent_proof_of_life",
         "gated_before_waiting",
         "counted_calls",
@@ -673,11 +667,9 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
 
         let lens = [
             r.corr.recent_hook_tool_uses.len(),
-            r.corr.recent_hook_session_ends.len(),
-            r.corr.hook_ended.len(),
             r.corr.active_tasks.len(),
             r.corr.recent_task_drains.len(),
-            r.corr.child_ledger.len(),
+            r.corr.lifecycles.len(),
             r.corr.recent_proof_of_life.len(),
             r.corr.gated_before_waiting.len(),
             r.corr
