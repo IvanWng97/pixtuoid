@@ -489,7 +489,7 @@ wire_api = "responses"
         // update-check switches (`:27`, `:183`).
         env: &[
             ("KIMI_MODEL_NAME", "kimi-k2"),
-            ("KIMI_MODEL_BASE_URL", "http://127.0.0.1:{port}/v1"),
+            ("KIMI_MODEL_BASE_URL", AIMOCK_V1),
             ("KIMI_MODEL_API_KEY", "{key}"),
             ("KIMI_DISABLE_TELEMETRY", "1"),
             ("KIMI_CODE_NO_AUTO_UPDATE", "1"),
