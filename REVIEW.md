@@ -8,7 +8,8 @@ diff touches, first; these rules add to generic defect hunting.
 The org's [shared review](https://github.com/pixtuoid/.github/blob/main/.github/workflows/claude-review.yml)
 runs a correctness and a design lens, each over this file but the other's
 section, so [Correctness](#correctness) and [Design](#design) keep those
-headings, and both apply each [area rule](#area-rules) the diff matches.
+headings, and both apply each [high-risk change](#high-risk-changes) the diff
+matches.
 
 ## Common
 
@@ -164,14 +165,15 @@ invariant-breaking sequence against:
 6. **Sourced practice**: [AGENTS.md](AGENTS.md#conventions)'s fetched-claims
    rule; a claim with no fetched source, or one that contradicts it, breaches it.
 
-## Area rules
+## High-risk changes
 
-Each row the diff matches adds its lens to the review; the first column
-decides, and Paths (globs, `*` crossing `/`) are where it usually fires. A lens
-that needs the head built or run, or an upstream fetched, is what a
+Each row is a kind of change the review once let through (its incident in the
+row), so a diff it matches gets the row's check too; the first column decides,
+and Paths (globs, `*` crossing `/`) are where it usually fires. A check that
+needs the head built or run, or an upstream fetched, is what a
 [local review](.claude/skills/local-review/SKILL.md) adds.
 
-| Diff touches… | Paths | The review also must… |
+| A change to… | Paths | The review also must… |
 |---|---|---|
 | Generated art / clips |  | Extract frames and READ them; census the money shot. A PR's media diff is the smoke job's `gen-check-diffs` overlays. |
 | Reducer / liveness / sweeps | `crates/pixtuoid-core/src/state/*`, `crates/pixtuoid-core/src/source/jsonl/liveness.rs`, `crates/pixtuoid-core/src/source/exit_watch.rs`, `crates/pixtuoid-core/src/source/daemon.rs` | Trace the downstream interaction graph (rebind, sweeps, TTLs, cascade, dedup, polarity) and the provenance of every newly keyed signal. |

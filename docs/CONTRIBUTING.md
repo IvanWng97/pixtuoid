@@ -187,7 +187,7 @@ step is the session's to keep.
 Every [`.mergify.yml`](../.mergify.yml) `queue_conditions` check green at the
 final head; every finding's review thread resolved by its disposition; zero
 open confirmed blocking finding. The CI review applies all of
-[`REVIEW.md`](../REVIEW.md), its area rules included, on every push; a
+[`REVIEW.md`](../REVIEW.md), its high-risk changes included, on every push; a
 local review ([`local-review`](../.claude/skills/local-review/SKILL.md)) is
 the author's call for a large or wide change, and its findings take
 dispositions like the bot's. A refuted blocking finding clears without a push: once its thread is
@@ -221,7 +221,7 @@ change, and bigger than the PR: split it off into #N; a redesign that brings
 the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
 and not FIXED in place
 — in place fits a small defect inside code this change already touches,
-adding no new area rule — so it is fixed in #N; a defect in another session's
+adding no new high-risk-change row — so it is fixed in #N; a defect in another session's
 tree cites that session's PR). A
 disposition is the reply that resolves the thread, STARTING with its state:
 `FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …` ·
