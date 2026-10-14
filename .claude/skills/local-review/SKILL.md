@@ -21,8 +21,8 @@ contract; fill briefs from them, never a paraphrase here.
 ## Diff scope
 
 1. **Isolate** the head in a detached worktree at its sha (two sessions on
-   one tree race on HEAD). Note `path` and the `head` sha; `base` is
-   `origin/main`.
+   one tree race on HEAD). Note `path` and the `head` sha; `base` is the
+   branch the PR targets, `origin/main` unless stacked.
 2. **Run the CI review's orchestration here**, so both runners judge alike.
    Take the review contract and the `correctness-reviewer`, `design-reviewer`
    and `verifier` prompts and models verbatim from the shared workflow
@@ -32,8 +32,9 @@ contract; fill briefs from them, never a paraphrase here.
    yet; the scope is `<base>...<head>`; and a reviewer may fetch the docs a
    best-practice question needs, which CI can't. Spawn the two reviewers in
    parallel, then one verifier per candidate. Run each must-run item the
-   change touches as its own lens, with Bash, `model: sonnet` when it is
-   mechanical, reporting each exit code as observed, never through a pipe.
+   change touches as its own lens (the dispatch once pushed), with Bash,
+   `model: sonnet` when it is mechanical, reporting each exit code as
+   observed, never through a pipe.
    Give every brief the change's claims, from the PR body or, before it
    exists, the spec: a lazily filled brief turns every lens generic.
 3. **Collect and verify.** A one-word or placeholder return is a STUB, not a
@@ -42,10 +43,9 @@ contract; fill briefs from them, never a paraphrase here.
    first — and REFUTE one that REVIEW.md's Do not flag covers, or deliberate
    design, with its mechanism.
 4. **Fold** accepted findings into ONE commit.
-5. **Disposition** each finding. Before the PR exists, an accepted one's is
-   the fold, and the PR body lists every other one with its disposition. On
-   an open PR, the bots open their threads; open each local finding the same
-   way, then reply and resolve:
+5. **Disposition** each finding in a review thread once the PR is open. The
+   bots open theirs; open each local finding the same way, then reply and
+   resolve:
 
    ```sh
    pr=<N>; head=$(gh pr view $pr --json headRefOid -q .headRefOid)

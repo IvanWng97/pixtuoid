@@ -135,9 +135,9 @@ the per-crate/per-package Trusted Publishers, each naming environment
 
 Non-trivial work (a new feature, config key, flag, seam or module, a
 documented sharp edge, or 3+ *counted files*: changed files outside tests,
-fixtures, snapshots, lockfiles, `.md` and binary assets; not a typo, a docs
-fix, a mechanical move or a one-file fix with its pinning test) runs as an
-**arc**: design → build → gate → wrap.
+fixtures, snapshots, lockfiles, `.md`, binary assets and what a `just gen*`
+recipe regenerates; not a typo, a docs fix, a mechanical move or a one-file
+fix with its pinning test) runs as an **arc**: design → build → gate → wrap.
 
 1. **Pick** — an issue (`gh issue list`) or backlog item.
 2. **Grill the design** — decide the open questions one at a time, each with a
