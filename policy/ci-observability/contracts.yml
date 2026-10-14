@@ -484,11 +484,13 @@
       and (.merge_bot_account // "" | length > 0)
       and ((["check-success = ci-gate", "check-success = GitGuardian Security Checks",
              {or: ["check-success = claude-review / claude-review", "check-skipped = claude-review / claude-review"]},
+             {or: ["check-success = focused-reviews", "check-skipped = focused-reviews"]},
              "#review-threads-unresolved = 0"] - .queue_conditions) == [])
       and .merge_conditions == ["check-success = ci-gate"])
   break:
     - .queue_rules[0].queue_conditions |= map(select(type != "object"))
     - .queue_rules[0].queue_conditions |= map(select(. != "#review-threads-unresolved = 0"))
+    - '.queue_rules[0].queue_conditions |= map(select(. != {"or": ["check-success = focused-reviews", "check-skipped = focused-reviews"]}))'
     - .queue_rules[0].branch_protection_injection_mode = "queue"
     - del(.queue_rules[0].merge_bot_account)
     - .queue_rules[0].merge_conditions = []
@@ -497,10 +499,12 @@
   file: .github/workflows/focused-reviews.yml
   why: >-
     The check runs the PR's own script to read the PR's comments, so it runs
-    under pull_request, never pull_request_target (which hands PR code the
-    base's write token), with a read-only token, no secret and no persisted
-    credential; a fork's or a bot's PR skips it. Branch protection and
-    .mergify.yml name the check, so its name holds.
+    under pull_request, never pull_request_target, whose base context can hand
+    untrusted code "write privileges or secrets"
+    (https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows),
+    with a read-only token, no secret and no persisted credential; a fork's, a
+    bot's or a release PR skips it. .mergify.yml names it, and branch
+    protection will, so its name holds.
   assert: |
     (.on | keys) == ["pull_request"]
     and .permissions == {}
@@ -508,7 +512,7 @@
     and .jobs["focused-reviews"].permissions == {"contents": "read", "pull-requests": "read"}
     and (tostring | test("secrets\\.") | not)
     and ([.jobs[].steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with["persist-credentials"]] | all(. == false))
-    and (.jobs["focused-reviews"].if | test("head\\.repo\\.full_name == github\\.repository") and test("user\\.type != 'Bot'"))
+    and (.jobs["focused-reviews"].if | test("head\\.repo\\.full_name == github\\.repository") and test("user\\.type != 'Bot'") and test("!startsWith\\(github\\.head_ref, 'release-plz-'\\)"))
   break:
     - '.on = {"pull_request_target": {"types": ["opened"]}}'
     - '.permissions = {"contents": "write"}'
@@ -516,4 +520,7 @@
     - '.jobs["focused-reviews"].permissions["pull-requests"] = "write"'
     - '.jobs["focused-reviews"].steps[0].with["persist-credentials"] = true'
     - '.jobs["focused-reviews"].steps += [{"env": {"T": "${{ secrets.X }}"}, "run": "true"}]'
-    - '.jobs["focused-reviews"].if = "github.event.pull_request.user.type != ''Bot''"'
+    - '.jobs["focused-reviews"].if = "github.event.pull_request.user.type != ''Bot'' && !startsWith(github.head_ref, ''release-plz-'')"'
+    - '.jobs["focused-reviews"].if = "github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.head_ref, ''release-plz-'')"'
+    - '.jobs["focused-reviews"].if = "github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != ''Bot''"'
+    - '.jobs["focused-reviews"].if |= sub("!startsWith"; "startsWith")'

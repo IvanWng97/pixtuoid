@@ -82,11 +82,11 @@ modules nor examples).
 
 - **Siblings** — a guard/cap/validation added to some of a sibling set
   (per-source decoders, install targets, platform arms, twin call sites) or to
-  one caller of a shared fn: `rg` and verify the full set and every call site.
-  A guard protects an OUTCOME: every caller of the fn it flows through, and
-  every ordering when it is timing-dependent (boot-then-write vs
-  write-then-boot), is guarded, guarded elsewhere, or exempt with its reason
-  (`emit_first_sight`'s second caller left the first-sight gate dead).
+  one caller of a shared fn: `rg` and verify the full set and every call site,
+  and, since a guard protects an OUTCOME, every ordering when it is
+  timing-dependent (boot-then-write vs write-then-boot); each is guarded,
+  guarded elsewhere, or exempt with its reason (`emit_first_sight`'s second
+  caller left the first-sight gate dead).
 - **Wire format** — a decoder or drift watch vs the recorded upstream
   shape; every name a decoder reads owes a drift watch, a breadcrumb, or an
   adjudicated `EXEMPT` row (`drift_watch`'s census); `just drift-watch`
@@ -167,13 +167,11 @@ invariant-breaking sequence against:
 ## Focused reviews
 
 The automatic review is the floor, and its summary names each row the diff
-matches; each matching row adds one focused review: its lens alone, run
+matches; each matching row adds one focused review, its lens alone, run
 locally because it needs the head tree read, built or run, or an upstream
-fetched, so the floor is never re-run. The first column decides. A diff
-touching a row's Paths (globs, `*` crossing `/`) owes that row a record, its
-review's or `does not match: <why>`, which the `focused-reviews` check
-requires ([the merge gate](docs/CONTRIBUTING.md#the-merge-gate)); a row with
-no Paths is the author's call.
+fetched. The first column decides, and a matching row is
+[recorded](docs/CONTRIBUTING.md#the-merge-gate); the `focused-reviews` check
+sees only the Paths (globs, `*` crossing `/`).
 
 | Diff touches… | Paths | The added lens must… |
 |---|---|---|
@@ -190,4 +188,4 @@ no Paths is the author's call.
 | A refactor: a `refactor` PR, or a move or dedup across modules |  | Adversarial toward revert, per consolidation: one reason-to-change per call site; name the conversions that moved semantics — a batch hides exactly one (#461). No test leaves `cargo nextest list` at head unless the PR body names it. |
 | Geometry, sky, lighting or other domain math | `crates/pixtuoid-scene/src/sky/*`, `crates/pixtuoid-scene/src/celestial.rs`, `crates/pixtuoid-scene/src/lighting/*`, `crates/pixtuoid-scene/src/layout/*` | Enumerate the domain invariants and re-derive each across the parameter space, edges included (#471, #1049, #1053). |
 | A crate edge, new dependency or widened public API (a version bump of an existing dependency doesn't match) | `Cargo.toml`, `crates/*/Cargo.toml`, `api/*` | Justify every crate `cargo tree -e normal` adds at head, transitive ones included; every new workspace edge follows [AGENTS.md](AGENTS.md#layout)'s crate DAG; every item made `pub` has a consumer outside its crate. |
-| CI, the merge gate or release tooling (a Dependabot `uses:` pin bump doesn't match) | `.github/workflows/*`, `.github/actions/*`, `.github/dependabot.yml`, `.mergify.yml`, `policy/*`, `release-plz.toml`, `justfile`, `scripts/focused-reviews.py` | Name every check, contract or row the diff loosens; trace each trigger (fork, bot actor, cancelled or superseded run) to a gate that fails closed. |
+| CI, the merge gate or release tooling (a Dependabot `uses:` pin bump doesn't match) | `.github/workflows/*`, `.github/actions/*`, `.github/dependabot.yml`, `.mergify.yml`, `policy/*`, `release-plz.toml`, `justfile`, `scripts/focused-reviews.py`, `REVIEW.md` | Name every check, contract or row the diff loosens; trace each trigger (fork, bot actor, cancelled or superseded run) to a gate that fails closed. |

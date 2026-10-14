@@ -12,9 +12,11 @@ permissions: {}
 jobs:
   focused-reviews:
     name: focused-reviews
-    # A fork's or a bot's PR has no session to record; a job skipped by its
-    # condition reports success to branch protection.
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot'
+    # A fork's or a bot's PR has no session to record, and a release PR's
+    # version bump matches no row; a job skipped by its condition reports
+    # success to branch protection
+    # (https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks).
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot' && !startsWith(github.head_ref, 'release-plz-')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -24,9 +26,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - run: python3 scripts/focused-reviews.py --selftest
       - env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: python3 scripts/focused-reviews.py "$GITHUB_REPOSITORY" "$PR" "$HEAD"
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/focused-reviews.py "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA"

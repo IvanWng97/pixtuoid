@@ -214,12 +214,10 @@ json-schemas:
     check-jsonschema --check-metaschema "${schemas[@]}"
     echo "${#schemas[@]} JSON Schemas validated"
 
-# Offline link + anchor check (lychee) over every committed markdown file,
-# dot-dirs included (lychee skips .claude and .github by default): every
-# relative link must resolve, and `#anchor` fragments must exist. Directory-walk mode respects
-# .gitignore (vendored node_modules etc. auto-skipped); `--offline` = no network,
-# so it's deterministic + flake-free. External-URL decay is deliberately NOT
-# gated here (it's flaky on the PR path).
+# Link + anchor check (lychee) over the tree's markdown, hidden dirs included
+# (lychee skips them by default) and .gitignore respected: every relative link
+# must resolve and every `#anchor` exist. `--offline`, so external-URL decay is
+# not gated (it's flaky on the PR path).
 [doc('Offline link + anchor check (lychee) over the repo markdown — no network, .gitignore-aware')]
 [group('rust')]
 links:
@@ -307,6 +305,7 @@ lint:
     run tuidrive just tuidrive-selftest   & pids+=($!)
     run e2escrub just e2e-scrub-selftest  & pids+=($!)
     run starhist just star-history-selftest & pids+=($!)
+    run focused just focused-reviews-selftest & pids+=($!)
     run bmcbtn  just bmc-button-selftest  & pids+=($!)
     run fixpii  just fixture-pii          & pids+=($!)
     run piiself just fixture-pii-selftest & pids+=($!)
@@ -796,7 +795,7 @@ site-demos:
 site-dev: site-demos
     npm --prefix site run dev
 
-# Agent-facing dev-server lifecycle (Astro 7 `--background`): the daemon has no
+# Agent-facing dev-server lifecycle (Astro's `--background`): the daemon has no
 # stdin/TTY tie, so it survives the launching shell — the foreground `astro dev`
 # quits on stdin EOF, which killed agent-driven servers between commands.
 # Readiness = the DEV-ONLY /_astro/status health endpoint (preview 404s it);
@@ -1255,6 +1254,13 @@ e2e-scrub-selftest:
 [group('meta')]
 star-history-selftest:
     python3 scripts/star-history.py --selftest
+
+# The merge gate's focused-reviews matcher, against the real REVIEW.md and tree:
+# a path a row names that moves reds here.
+[doc("Self-test the focused-reviews check")]
+[group('meta')]
+focused-reviews-selftest:
+    python3 -I scripts/focused-reviews.py --selftest
 
 # The README's Buy Me a Coffee button: count parsing, pack sprites, layout.
 [doc("Self-test the README Buy Me a Coffee button renderer")]

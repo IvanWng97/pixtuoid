@@ -6,8 +6,9 @@ decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
 
 Before you start, read [`AGENTS.md`](../AGENTS.md) at the repo root (and the
 nested `crates/*/AGENTS.md` for the crate you touch). It holds the load-bearing
-architecture invariants and conventions, and why much that looks like a bug
-is deliberate.
+architecture invariants and conventions. Many things that look like bugs are
+documented, intentional design: read the whole item, its doc comment and the
+comments on the lines it governs, before changing it.
 
 ## Build & test
 
@@ -152,18 +153,18 @@ design → build → gate → wrap.
 5. **Mock gate** (taste/visual work only) — ratify the AFTER visual before code
    (`beautify-decoration` skill).
 6. **Build** — TDD: failing test → minimal impl → commit.
-7. **Self-review** — before EVERY push, a review fold's included:
-   [`REVIEW.md`](../REVIEW.md#every-changed-file)'s Every changed file, the
-   comment audit too, over everything the PR adds, not only the lines a
-   finding names; the cleanup rides the same PR. Not the merge gate.
+7. **Self-review** — a standards+spec pass before EVERY push, a review
+   fold's included: [`REVIEW.md`](../REVIEW.md#every-changed-file)'s Every
+   changed file, the comment audit too, over everything the PR adds, not only
+   the lines a finding names; the cleanup rides the same PR. Not the merge gate.
 8. **Merge gate** — [the gate](#the-merge-gate).
 9. **Wrap** — retro; a durable lesson becomes a mechanism (a test, a gate) or
    a line on the narrowest rule it amends — never an agent's private memory,
    which nobody reviews and nothing executes.
 
-Checks hold only the merge gate (`ci-gate`, `claude-review`,
-`focused-reviews`, resolved threads) and step 6's tests (the review's test
-teeth); every other step is the session's to keep.
+Checks hold only the merge gate ([`.mergify.yml`](../.mergify.yml)'s
+`queue_conditions`) and step 6's tests (the review's test teeth); every other
+step is the session's to keep.
 
 ### Parallel sessions
 
@@ -182,22 +183,26 @@ teeth); every other step is the session's to keep.
 
 ### The merge gate
 
-Green `ci-gate` and `focused-reviews`; the required `claude-review /
-claude-review` check green at the final head; every finding's review thread
-resolved by its disposition; zero open confirmed blocking finding.
-`focused-reviews` holds each [focused review](../REVIEW.md#focused-reviews)
-whose Paths the PR touches to a maintainer's comment at the current head
-opening `<!-- focused-review:<row>:<head sha> -->` (`<row>` as
+Every [`.mergify.yml`](../.mergify.yml) `queue_conditions` check green at the
+final head; every finding's review thread resolved by its disposition; zero
+open confirmed blocking finding; each [focused
+review](../REVIEW.md#focused-reviews) the diff matches, or whose Paths it
+touches, recorded at the current head as a maintainer's comment opening
+`<!-- focused-review:<row>:<head sha> -->` (`<row>` as
 [`scripts/focused-reviews.py`](../scripts/focused-reviews.py)'s `row_id`
-derives it), then the review or `does not match: <why>`. Each push needs its
-own records, and a re-run judges the change since the head the last record
-names; post them, then `gh run rerun <id>` the check. The
+derives it), then the review or `does not match: <why>`. `focused-reviews`
+holds the rows whose Paths the PR touches; the rest are the author's to
+match. Each push needs its own records: the lens re-run judges the PR's own
+change since the head the last record names (the whole PR after a rebase),
+so a merge of `main` adds nothing to judge and its record restates the last
+verdict; after posting, `gh run rerun <id>` the check. The
 [`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
 reviews. A refuted blocking finding clears without a push: once its thread is
 resolved with the disposition, re-run the review (`gh run rerun <id> --failed`).
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
-entry is a command because no queue condition can confirm a finding. The queue tests up to `batch_size` PRs together on a draft PR
+entry is a command because no queue condition can confirm a finding. The
+queue tests up to `batch_size` PRs together on a draft PR
 (`mergify/merge-queue/…`) running the full tier, then merges the PRs
 themselves; it never updates a PR's own branch
 ([batches](https://docs.mergify.com/merge-queue/batches/): "the original PRs

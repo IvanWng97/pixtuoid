@@ -17,7 +17,8 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SECTION = "## Focused reviews"
-# GitHub's `author_association` values for people who can push here.
+# The repo's owner, its org's members and invited collaborators, as GitHub's
+# CommentAuthorAssociation enum describes each (GraphQL schema introspection).
 MAINTAINERS = {"OWNER", "MEMBER", "COLLABORATOR"}
 MARKER = re.compile(r"<!-- focused-review:([a-z0-9-]+):([0-9a-f]{40}) -->")
 
@@ -31,7 +32,10 @@ def row_id(first_cell: str) -> str:
 
 def rows(review: str) -> dict[str, list[str]]:
     """Each row's id and its Paths globs, after the table's header and rule."""
-    section = review.split(f"\n{SECTION}\n", 1)[1].split("\n## ", 1)[0]
+    parts = review.split(f"\n{SECTION}\n", 1)
+    if len(parts) != 2:
+        raise ValueError(f"REVIEW.md has no {SECTION!r} section")
+    section = parts[1].split("\n## ", 1)[0]
     table = [line for line in section.splitlines() if line.startswith("|")][2:]
     out: dict[str, list[str]] = {}
     for line in table:
@@ -41,6 +45,11 @@ def rows(review: str) -> dict[str, list[str]]:
             raise ValueError(f"two rows are {rid!r}")
         out[rid] = re.findall(r"`([^`]+)`", cells[1])
     return out
+
+
+def changed(pr_files: list[list]) -> list[str]:
+    """Every path a PR's files touch, a rename's old path included."""
+    return [name for names in pr_files for name in names if name]
 
 
 def matched(table: dict[str, list[str]], files: list[str]) -> list[str]:
@@ -66,7 +75,7 @@ def gh_lines(path: str, jq: str) -> list[dict]:
     out = subprocess.run(
         ["gh", "api", "--paginate", path, "--jq", jq],
         check=True,
-        capture_output=True,
+        stdout=subprocess.PIPE,
         text=True,
     ).stdout
     return [json.loads(line) for line in out.splitlines() if line]
@@ -74,12 +83,7 @@ def gh_lines(path: str, jq: str) -> list[dict]:
 
 def main(repo: str, pr: str, head: str) -> int:
     table = rows((ROOT / "REVIEW.md").read_text())
-    files = [
-        name
-        for f in gh_lines(f"repos/{repo}/pulls/{pr}/files", ".[] | [.filename, .previous_filename]")
-        for name in f
-        if name
-    ]
+    files = changed(gh_lines(f"repos/{repo}/pulls/{pr}/files", ".[] | [.filename, .previous_filename]"))
     comments = gh_lines(
         f"repos/{repo}/issues/{pr}/comments",
         ".[] | {association: .author_association, body: .body}",
@@ -116,6 +120,13 @@ def selftest() -> None:
     assert matched(table, [".github/workflows/ci.yml"]) == ["ci-the-merge-gate-or-release-tooling"]
     assert matched(table, ["crates/pixtuoid-core/src/state/reducer/mod.rs"]) == ["reducer-liveness-sweeps"]
     assert matched(table, ["README.md"]) == []
+    moved_out = changed([["crates/hook-shim/src/main.rs", "crates/pixtuoid-hook/src/main.rs"], ["README.md", None]])
+    assert matched(table, moved_out) == ["the-shim"], "a rename out of a row's Paths matches"
+    try:
+        rows("# REVIEW\n")
+        raise AssertionError("a REVIEW.md without the section must not parse")
+    except ValueError:
+        pass
     twin = f"\n{SECTION}\n\n| a | b | c |\n|---|---|---|\n| The shim | `x` | y |\n| The shim: again | `z` | w |\n"
     try:
         rows(twin)
@@ -125,10 +136,9 @@ def selftest() -> None:
 
     sha, old = "a" * 40, "b" * 40
     due = ["the-shim", "ci-the-merge-gate-or-release-tooling"]
-    rec = lambda row, at, who="OWNER", lead="": {  # noqa: E731
-        "association": who,
-        "body": f"{lead}<!-- focused-review:{row}:{at} -->\nApproved.",
-    }
+    def rec(row: str, at: str, who: str = "OWNER", lead: str = "") -> dict:
+        return {"association": who, "body": f"{lead}<!-- focused-review:{row}:{at} -->\nApproved."}
+
     assert owed(due, [rec("the-shim", sha), rec("ci-the-merge-gate-or-release-tooling", sha)], sha) == []
     assert owed(due, [rec("the-shim", old)], sha) == due, "a record judges its own head"
     assert owed(due, [rec("the-shim", sha, who="NONE")], sha) == due, "a maintainer's alone"

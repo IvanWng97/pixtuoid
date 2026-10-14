@@ -70,8 +70,8 @@ pub(crate) struct FocusPaths<'a> {
     /// Codex's sessions root (rollout tree) for the fd probe.
     pub codex_sessions_root: Option<&'a Path>,
     /// grok's home root (`active_sessions.json`'s parent). No CLI override exists
-    /// — `focus_slot` resolves it from `grok_home()`; the field exists so tests
-    /// inject it like the other two.
+    /// — `focus_slot` resolves it from `grok_home()`; the field exists so a test
+    /// can inject it as it can the other roots.
     pub grok_root: Option<&'a Path>,
     /// omp's sessions roots — the primary plus every profile's — for the fd
     /// probe. Like `grok_root` there is no CLI override — `focus_slot`

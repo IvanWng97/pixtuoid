@@ -1,7 +1,7 @@
 ---
 name: add-theme
 version: 2.0.0
-description: "Add a new color theme to pixtuoid (a full `Theme` palette, rendered into the office). Use when the user says 'add a <name> theme', 'new color scheme', or 'port <palette> to pixtuoid'. Orchestrates the Rust registration PLUS the two steps agents miss — the site manifest bridge test and the committed-media regen."
+description: "Add a new color theme to pixtuoid (a full `Theme` palette, rendered into the office). Use when the user says 'add a <name> theme', 'new color scheme', or 'port <palette> to pixtuoid'. Orchestrates the Rust registration PLUS the two steps agents miss — the site manifest bridge test and the media review."
 metadata:
   scope: "pixtuoid repo only"
 ---

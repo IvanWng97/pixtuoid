@@ -70,7 +70,7 @@ contract; fill briefs from them, never a paraphrase here.
 6. **Record** each row's run as
    [the gate](../../../docs/CONTRIBUTING.md#the-merge-gate) defines, naming
    the head the lens judged, then `gh run rerun` the `focused-reviews` check;
-   each push needs the lens run again, scoped as the gate says.
+   each push needs a record again, its lens re-run scoped as the gate says.
 7. **Before merge**, judge against the gate.
 
 ## Whole-codebase scope

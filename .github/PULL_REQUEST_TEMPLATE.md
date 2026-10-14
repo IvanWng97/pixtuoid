@@ -1,7 +1,7 @@
 <!--
 Thanks for contributing to pixtuoid! Before you open this PR:
 - Read AGENTS.md (root) — architecture invariants & conventions are load-bearing.
-- Push: the pre-push hook runs `just preflight` (lint + clippy); CI runs the tests. `just preflight full` runs CI's Rust recipes locally.
+- Push: the pre-push hook runs `just preflight`; CI runs the tests.
 - From a fork: the automatic review skips it, and a maintainer reviews it by hand.
 Delete sections that don't apply.
 -->
