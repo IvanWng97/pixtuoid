@@ -51,7 +51,7 @@ mod recorder {
 
     /// A hermetic run's overrides: where the capture goes, and what the harvest
     /// and the CLI may see.
-    #[derive(Debug, Default, PartialEq)]
+    #[derive(Debug, Default, Clone, PartialEq)]
     struct Options {
         /// Write the RAW capture here: not stripped, no provenance, no PII scan.
         /// The strip blanks what the decoder under test does not read, which is
@@ -87,9 +87,22 @@ mod recorder {
         /// Why this host may not run what these options ask: a raw `--out`
         /// capture is any host's, the committed corpus [`CORPUS_REFUSAL`]'s.
         fn corpus_refusal(&self) -> Option<&'static str> {
-            CORPUS_REFUSAL.filter(|_| {
-                self.prepare_root.is_none() && (self.promote.is_some() || self.out.is_none())
-            })
+            CORPUS_REFUSAL.filter(|_| self.promote.is_some() || self.out.is_none())
+        }
+
+        /// `--prepare-root` runs no CLI, so it takes `--within` and nothing else:
+        /// any other option asks for a run or a write this mode never makes.
+        fn prepare_root_alone(&self, positionals: &[String]) -> Result<(), String> {
+            let alone = Options {
+                prepare_root: self.prepare_root.clone(),
+                within: self.within.clone(),
+                ..Options::default()
+            };
+            if *self == alone && positionals.is_empty() {
+                Ok(())
+            } else {
+                Err(format!("{PREPARE_ROOT} takes {WITHIN} and nothing else"))
+            }
         }
     }
 
@@ -116,12 +129,26 @@ mod recorder {
                 WORKSPACE => {
                     let ws = PathBuf::from(take(&mut args, WORKSPACE)?);
                     if capture_base(&ws).is_none() {
-                        let like = capture_workspace()
-                            .map_or_else(|e| e.to_string(), |cw| cw.display().to_string());
-                        return Err(format!(
-                            "{WORKSPACE} {} must end as {like} does: the recorder clears its parent",
-                            ws.display()
-                        ));
+                        // The two components `capture_base` checks, not the root.
+                        let tail = capture_workspace().map(|cw| {
+                            let n = cw.components().count();
+                            cw.components()
+                                .skip(n.saturating_sub(2))
+                                .collect::<PathBuf>()
+                        });
+                        return Err(match tail {
+                            Ok(tail) => format!(
+                                "{WORKSPACE} {} must be absolute and end in {}: the recorder \
+                                 clears its parent",
+                                ws.display(),
+                                tail.display()
+                            ),
+                            Err(e) => format!(
+                                "{WORKSPACE} {} can't be judged: the capture workspace does not \
+                                 resolve: {e}",
+                                ws.display()
+                            ),
+                        });
                     }
                     options.workspace = Some(ws);
                 }
@@ -181,6 +208,16 @@ mod recorder {
                 std::process::exit(2);
             }
         };
+        if let Some(source) = options.prepare_root.as_deref() {
+            if let Err(why) = options.prepare_root_alone(&args) {
+                eprintln!("{why}");
+                std::process::exit(2);
+            }
+            return prepare_root(
+                resolved_source_root(source).as_deref(),
+                options.within.as_deref(),
+            );
+        }
         if let Some(why) = options.corpus_refusal() {
             eprintln!("{why}");
             std::process::exit(2);
@@ -188,19 +225,14 @@ mod recorder {
         if let Some(run) = options.promote.as_deref() {
             return promote(run, &sources_root(), &identity_needles(git_config));
         }
-        if let Some(source) = options.prepare_root.as_deref() {
-            return prepare_root(
-                resolved_source_root(source).as_deref(),
-                options.within.as_deref(),
-            );
-        }
         if args.len() < 3 {
             eprintln!(
                 "usage: capture_fixture [{OUT} <dir>] [{TEE} <socket|pipe>] [{WITHIN} <dir>] [{ENV} K=V]... \
                  [{CLI_VERSION} <version>] [{WORKSPACE} <dir>] <source-id> <scenario> <cmd...>   \
                  ('{{prompt}}' expands)\n       \
                  capture_fixture --strip-corpus   (strip every committed capture in place)\n       \
-                 capture_fixture {PROMOTE} <run>   (write a hermetic run into its fixture)"
+                 capture_fixture {PROMOTE} <run>   (write a hermetic run into its fixture)\n       \
+                 capture_fixture {WITHIN} <dir> {PREPARE_ROOT} <source-id>   (create its root; no CLI)"
             );
             std::process::exit(2);
         }
@@ -1093,9 +1125,44 @@ mod recorder {
                 parse_options(args(&root.join("proj"))).is_err(),
                 "its parent is the operator's"
             );
+            let relative = Path::new("pixtuoid-capture").join("proj");
+            assert!(
+                parse_options(args(&relative)).is_err_and(|why| why.contains("absolute")),
+                "a relative path with the right tail is refused for being relative"
+            );
             let ws = root.join("pixtuoid-capture").join("proj");
             let (o, _) = parse_options(args(&ws)).expect("a capture workspace");
             assert_eq!(o.workspace, Some(ws));
+        }
+
+        #[test]
+        fn prepare_root_takes_within_and_nothing_else() {
+            let alone = Options {
+                within: Some(PathBuf::from("sandbox")),
+                prepare_root: Some("codex".into()),
+                ..Options::default()
+            };
+            assert_eq!(alone.prepare_root_alone(&[]), Ok(()));
+            assert!(
+                alone.prepare_root_alone(&["codex".into()]).is_err(),
+                "a positional"
+            );
+            let promote = Options {
+                promote: Some(PathBuf::from("run")),
+                ..alone.clone()
+            };
+            assert!(
+                promote.prepare_root_alone(&[]).is_err(),
+                "a promote it would skip"
+            );
+            let out = Options {
+                out: Some(PathBuf::from("raw")),
+                ..alone
+            };
+            assert!(
+                out.prepare_root_alone(&[]).is_err(),
+                "a capture it never makes"
+            );
         }
 
         #[test]
