@@ -426,8 +426,8 @@ fn started_in(
         ));
     }
     let want = canonical(workspace);
-    // Every cwd each agent's events name, an empty one included.
-    let named = |agent: &AgentId| -> Vec<&Path> {
+    // Every cwd an event keyed on `agent` names, wherever it sits in the run.
+    let named = |agent: &AgentId| -> Vec<PathBuf> {
         events
             .iter()
             .filter_map(|e| match e {
@@ -441,6 +441,8 @@ fn started_in(
                 } if agent_id == agent => Some(cwd.as_path()),
                 _ => None,
             })
+            .filter(|c| !c.as_os_str().is_empty())
+            .map(canonical)
             .collect()
     };
     let mut cwds: Vec<PathBuf> = Vec::new();
@@ -460,17 +462,13 @@ fn started_in(
             cwds.push(canonical(cwd));
             continue;
         }
-        // A child's registration may carry no cwd when its own later event
-        // names it (grok's spawn line, back-filled by the child's prompt hook).
-        let later: Vec<PathBuf> = named(agent_id)
-            .into_iter()
-            .filter(|c| !c.as_os_str().is_empty())
-            .map(canonical)
-            .collect();
-        if later.is_empty() {
+        // A child's registration may carry no cwd when another event keyed on
+        // it names one (grok's spawn line, whose `subagent_start` does).
+        let own = named(agent_id);
+        if own.is_empty() {
             findings.push((Label::Fail, "a child's cwd was never named".into()));
         }
-        cwds.extend(later);
+        cwds.extend(own);
     }
     if !started {
         findings.push((Label::Fail, "no SessionStart decoded".into()));
@@ -478,7 +476,7 @@ fn started_in(
         findings.push((
             Label::Fail,
             format!(
-                "SessionStart cwd {} is not the workspace {}",
+                "cwd {} is not the workspace {}",
                 bad.display(),
                 want.display()
             ),
@@ -969,7 +967,7 @@ mod tests {
             Verdict::new(f)
         };
         let root = start("p", "/w", None);
-        // grok's spawn line registers the child before anything names its cwd.
+        // grok's spawn line registers the child with no cwd.
         let child = start("c", "", Some("p"));
         let v = judged(&[root.clone(), child.clone(), backfill("c", "/w")]);
         assert_eq!(v.label(), Label::Pass, "{:?}", v.findings());
