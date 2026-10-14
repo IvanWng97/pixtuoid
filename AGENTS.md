@@ -77,10 +77,9 @@ Non-trivial work runs as [an arc](docs/CONTRIBUTING.md#the-arc-loop): read
 each step there before taking it, never from recall. Merging is
 `@mergifyio queue`, which a session comments itself once
 [the merge gate](docs/CONTRIBUTING.md#the-merge-gate) holds, and a release PR
-merges by hand. The CI review applies REVIEW.md on every push; the
-`local-review` skill runs it locally first when a change touches 5+ non-test
-code files or the owner asks, and a change's must-run items run before it
-queues.
+merges by hand. The CI review applies REVIEW.md on every push;
+[arc step 7](docs/CONTRIBUTING.md#the-arc-loop) says when the `local-review`
+skill runs it first.
 
 **At most 6 open PRs across the sessions** (bots' and outside contributors'
 aside), the owner's cap: the runners take
@@ -150,7 +149,7 @@ taller-cell terminals; bundled base character sprites max at 8×12 px (their
 - Never add `--no-verify`/hook-skipping flags.
 - No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — the owner reviews every doc change directly, so propose the diff rather than adding a generator or a cap. A session pushes its own PR branches freely; never force-push or push to `main`.
 - No stale `Closes #N` on a re-scope (fires from commit body or PR text, even conditional).
-- No merging past the review gate, and no reviewer finding accepted before its premise is checked against the item it names.
+- No merging past the review gate (PR #23 merged unreviewed with a path traversal), and no reviewer finding accepted before its premise is checked against the item it names.
 
 ## Where to look
 

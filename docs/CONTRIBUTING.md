@@ -134,9 +134,10 @@ the per-crate/per-package Trusted Publishers, each naming environment
 ## The arc loop
 
 Non-trivial work (a new feature, config key, flag, seam or module, a
-documented sharp edge, or 3+ source files; not a typo, a docs fix, a
-mechanical move or a one-file fix with its pinning test) runs as an **arc**:
-design → build → gate → wrap.
+documented sharp edge, or 3+ *counted files*: changed files outside tests,
+fixtures, snapshots, lockfiles, `.md` and binary assets; not a typo, a docs
+fix, a mechanical move or a one-file fix with its pinning test) runs as an
+**arc**: design → build → gate → wrap.
 
 1. **Pick** — an issue (`gh issue list`) or backlog item.
 2. **Grill the design** — decide the open questions one at a time, each with a
@@ -153,12 +154,10 @@ design → build → gate → wrap.
 5. **Mock gate** (taste/visual work only) — ratify the AFTER visual before code
    (`beautify-decoration` skill).
 6. **Build** — TDD: failing test → minimal impl → commit.
-7. **Local review** — before the push, when the change touches 5+ non-test
-   code files (`.rs .ts .py .sh .yml .toml .js`, not tests, fixtures,
-   snapshots, `Cargo.lock` or `.md`) or the owner asks: the `local-review` skill
-   runs [`REVIEW.md`](../REVIEW.md) with the reviewers CI runs; the cleanup
-   rides the same PR. Each [must-run](../REVIEW.md#must-run) item the change
-   touches runs whatever its size.
+7. **Local review** — before the push, when the change touches 5+ counted
+   files or the owner asks: the `local-review` skill runs
+   [`REVIEW.md`](../REVIEW.md) with the reviewers CI runs; the cleanup rides
+   the same PR.
 8. **Merge gate** — [the gate](#the-merge-gate).
 9. **Wrap** — retro; a durable lesson becomes a mechanism (a test, a gate) or
    a line on the narrowest rule it amends — never an agent's private memory,

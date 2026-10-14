@@ -1,7 +1,7 @@
 ---
 name: local-review
 version: 4.0.0
-description: "Run pixtuoid's review locally at either scope — a DIFF review (REVIEW.md with the CI review's own reviewers, plus the must-run items the read-only CI review can't run) or a whole-codebase AUDIT (subsystem × factor fan-out). Use before pushing a change that touches 5+ non-test code files, when the owner asks, for a must-run item, on 'is this ready to merge', or on 'whole-codebase review' / pre-release / periodic audit."
+description: "Run pixtuoid's review locally at either scope — a DIFF review (REVIEW.md with the CI review's own reviewers, plus the must-run items the read-only CI review can't run) or a whole-codebase AUDIT (subsystem × factor fan-out). Use when CONTRIBUTING's arc step 7 calls for a local review, when the owner asks, for a must-run item, on 'is this ready to merge', or on 'whole-codebase review' / pre-release / periodic audit."
 metadata:
   scope: "pixtuoid repo only"
 ---
@@ -13,38 +13,39 @@ contract; fill briefs from them, never a paraphrase here.
 
 ## When to run
 
-- **Diff scope**: before the push of a change that touches 5+ non-test code
-  files, or when the owner asks
-  ([step 7](../../../docs/CONTRIBUTING.md#the-arc-loop)); and each
-  [must-run](../../../REVIEW.md#must-run) item a change touches, whatever its
-  size.
+- **Diff scope**: when [arc step 7](../../../docs/CONTRIBUTING.md#the-arc-loop)
+  calls for it, and for each [must-run](../../../REVIEW.md#must-run) item a
+  change touches.
 - **Whole-codebase scope**: "audit the repo", a pre-release or periodic sweep.
 
 ## Diff scope
 
 1. **Isolate** the head in a detached worktree at its sha (two sessions on
-   one tree race on HEAD). Note `path`, `base` and `head` sha.
+   one tree race on HEAD). Note `path` and the `head` sha; `base` is
+   `origin/main`.
 2. **Run the CI review's orchestration here**, so both runners judge alike.
    Take the review contract and the `correctness-reviewer`, `design-reviewer`
    and `verifier` prompts and models verbatim from the shared workflow
    (`gh api repos/pixtuoid/.github/contents/.github/workflows/claude-review.yml --jq .content | base64 -d`),
    with three overrides: their GitHub tools become local read-only ones
-   (`git diff <base>..<head>`, the worktree's files), since no PR may exist
-   yet; the scope is `<base>..<head>`; and a reviewer may fetch the docs a
+   (`git diff <base>...<head>`, the worktree's files), since no PR may exist
+   yet; the scope is `<base>...<head>`; and a reviewer may fetch the docs a
    best-practice question needs, which CI can't. Spawn the two reviewers in
    parallel, then one verifier per candidate. Run each must-run item the
    change touches as its own lens, with Bash, `model: sonnet` when it is
    mechanical, reporting each exit code as observed, never through a pipe.
-   Give every brief the change's claims from the PR body: a lazily filled
-   brief turns every lens generic.
+   Give every brief the change's claims, from the PR body or, before it
+   exists, the spec: a lazily filled brief turns every lens generic.
 3. **Collect and verify.** A one-word or placeholder return is a STUB, not a
    review: re-run that lens alone. Verify every kept finding's premise
    yourself before coding a fix — read the comments on the item it names
    first — and REFUTE one that REVIEW.md's Do not flag covers, or deliberate
    design, with its mechanism.
 4. **Fold** accepted findings into ONE commit.
-5. **Disposition** each finding in a review thread. The bots open theirs; open
-   each local finding the same way, then reply and resolve:
+5. **Disposition** each finding. Before the PR exists, an accepted one's is
+   the fold, and the PR body lists every other one with its disposition. On
+   an open PR, the bots open their threads; open each local finding the same
+   way, then reply and resolve:
 
    ```sh
    pr=<N>; head=$(gh pr view $pr --json headRefOid -q .headRefOid)

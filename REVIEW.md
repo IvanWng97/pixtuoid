@@ -77,7 +77,8 @@ examples).
 - **A refactor**: a `refactor` PR, or a move or dedup across modules —
   adversarial toward revert, per consolidation: one reason-to-change per call
   site; name the conversions that moved semantics, since a batch hides exactly
-  one (#461). No `#[test]` the diff removes or renames leaves unless the PR
+  one (#461). No test leaves the suite (a `#[test]` removed or renamed, a
+  `mod` dropped, a new `cfg` gate, a `[[test]]` target removed) unless the PR
   body names it.
 - **CI, the merge gate or release tooling** (`.github/workflows/`,
   `.github/actions/`, `.github/dependabot.yml`, `.mergify.yml`, `policy/`,
@@ -101,6 +102,9 @@ examples).
 - **Env** — a set-but-empty var reads as unset (`platform::path_env`).
 - **Char-safe truncation** — user-visible text cuts on char/grapheme
   boundaries, never bytes.
+- **Terminal egress** strips Cc controls and Cf bidi overrides (Trojan Source).
+- **Denylists** enumerate the platform's documented set, never memory; an
+  allowlist is preferred.
 
 #### Security
 
@@ -126,13 +130,10 @@ invariant-breaking sequence against:
    CI, outside mutation testing), and each guard is PINNED.
 3. Untrusted input (hook payloads, transcripts, JSONL, paths, pack data):
    sanitized where it enters, never at each use site; bounded, validated,
-   skipped without panicking. Terminal egress strips Cc controls and Cf bidi
-   overrides (Trojan Source).
+   skipped without panicking.
 4. Credentials and subprocesses: no secret in a command or log, no untrusted
    code in a secret-bearing process, no argument spliced into a shell as code
    (justfile, script, workflow step: #1126).
-5. A denylist enumerates the platform's documented set, never memory; an
-   allowlist is preferred.
 
 ### Design
 
@@ -201,9 +202,9 @@ a comment wrong.
 ## Must-run
 
 The review reads; these need the change run, so the author runs each one the
-change touches and writes its result into the PR body. A result holds for the
-head it ran at: a later push that changes what it checked runs it again, a
-merge of `main` or a comment-only change does not. The
+change touches before the PR queues and writes its result into the PR body. A
+result holds for the head it ran at: a later push that changes what it checked
+runs it again, a merge of `main` or a comment-only change does not. The
 [`local-review`](.claude/skills/local-review/SKILL.md) skill runs them.
 
 - **Render and look**: generated art and clips (extract frames and READ them;
