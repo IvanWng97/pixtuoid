@@ -515,7 +515,7 @@ mod run {
 
     /// The release `npm view <spec> version` answered, strict, or why there is
     /// none: an absent `latest` tag exits 0 with nothing on stdout
-    /// (https://github.com/npm/cli/blob/83ea1a1c19648a6b4f5e52a498d8a6aaaf60e52b/lib/commands/view.js#L190).
+    /// (<https://github.com/npm/cli/blob/83ea1a1c19648a6b4f5e52a498d8a6aaaf60e52b/lib/commands/view.js#L190>).
     fn npm_release(
         spec: &str,
         status: ExitStatus,
