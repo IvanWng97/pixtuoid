@@ -214,18 +214,16 @@ json-schemas:
     check-jsonschema --check-metaschema "${schemas[@]}"
     echo "${#schemas[@]} JSON Schemas validated"
 
-# Offline link + anchor check (lychee) over the repo's OWN markdown: every
-# relative cross-link between the nested AGENTS.md guides + docs/ must
-# resolve, and `#anchor` fragments must exist. Directory-walk mode respects
-# .gitignore (vendored node_modules etc. auto-skipped); `--offline` = no network,
-# so it's deterministic + flake-free. External-URL decay is deliberately NOT
-# gated here (it's flaky on the PR path).
+# Link + anchor check (lychee) over the tree's markdown, hidden dirs included
+# (lychee skips them by default) and .gitignore respected: every relative link
+# must resolve and every `#anchor` exist. `--offline`, so external-URL decay is
+# not gated (it's flaky on the PR path).
 [doc('Offline link + anchor check (lychee) over the repo markdown — no network, .gitignore-aware')]
 [group('rust')]
 links:
     # Source CSS uses Vite package specifiers; its module graph belongs to the
     # site build, while this gate owns documentation links and anchors.
-    lychee --offline --include-fragments --extensions md .
+    lychee --offline --include-fragments --extensions md --hidden .
 
 # Clippy across the workspace, warnings denied.
 [group('rust')]
@@ -341,7 +339,7 @@ bench-pacing:
 
 # Local only, never CI: a shared runner's wall clock is too noisy for a frame
 # budget. `--live` runs in this terminal, the only run a real parser sees.
-[doc('The fluency gate: the release binary through a transition into a storm (or dusk); fail when frames shown past their interval pass 10 ms a second')]
+[doc('The fluency gate: the release binary through a transition into a storm (or dusk); fail when frames shown past their interval pass HITCH_RATE_MS_PER_S in scripts/pace-check.py')]
 [group('rust')]
 pace-check *args:
     cargo build --release -p pixtuoid --bins --example pacing
@@ -796,7 +794,7 @@ site-demos:
 site-dev: site-demos
     npm --prefix site run dev
 
-# Agent-facing dev-server lifecycle (Astro 7 `--background`): the daemon has no
+# Agent-facing dev-server lifecycle (Astro's `--background`): the daemon has no
 # stdin/TTY tie, so it survives the launching shell — the foreground `astro dev`
 # quits on stdin EOF, which killed agent-driven servers between commands.
 # Readiness = the DEV-ONLY /_astro/status health endpoint (preview 404s it);
@@ -1211,8 +1209,8 @@ wasm-check-selftest:
 
 # The pixel comparator is the primitive under `gen-check` and the smoke job; an
 # always-green comparator reports success for any render at all. Its own recipe
-# because it needs only Pillow, while `gen-check` needs the toolchain its header
-# lists: a developer who cannot run that gate should still be able to run this.
+# because it needs only Pillow, while `gen-check` needs every generator's
+# toolchain: a developer who cannot run that gate should still be able to run this.
 [doc('Self-test the pixel comparator that gen-check and smoke ride on')]
 [group('meta')]
 compare-selftest:
