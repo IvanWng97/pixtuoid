@@ -38,8 +38,8 @@ mod recorder {
     use pixtuoid_core::harness::tap::{Endpoint, Tap};
     use pixtuoid_core::harness::{
         CAPTURE_NOTE, CAPTURE_RECORD, CORPUS_REFUSAL, CaptureRecord, HOOK_PAYLOADS, PROVENANCE,
-        capture_base, capture_workspace, capture_workspace_tail, jsonl_files_under, version_answer,
-        version_probe,
+        capture_base, capture_workspace, capture_workspace_tail, jsonl_files_under,
+        required_version_probe, version_answer,
     };
 
     /// Where a driver names the CLI it drives, a command or the path to its
@@ -664,7 +664,7 @@ mod recorder {
 
     /// The CLI's own name, as its registry row asks it its version.
     fn registered_cli(descriptor: &registry::SourceDescriptor) -> std::io::Result<String> {
-        version_probe(descriptor)?
+        required_version_probe(descriptor)?
             .first()
             .map(|cli| (*cli).to_owned())
             .ok_or_else(|| {

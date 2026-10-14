@@ -38,7 +38,7 @@ mod run {
     use pixtuoid_core::harness::tap::Endpoint;
     use pixtuoid_core::harness::{
         CAPTURE_RECORD, CORPUS_REFUSAL, CaptureRecord, capture_workspace, recorder_flag,
-        version_answer, version_probe,
+        required_version_probe, version_answer,
     };
     use semver::Version;
 
@@ -51,8 +51,7 @@ mod run {
     /// How long the headless scene runs on after the recorder returns, to
     /// decode the last payloads and log any breadcrumb they provoke.
     const SCENE_SETTLE: Duration = Duration::from_secs(4);
-    /// Where the recorder's stdout and stderr go; a failed recorder's last line
-    /// there names why.
+    /// Where the recorder's stdout and stderr go.
     const RECORDER_LOG: &str = "recorder.log";
     /// Where aimock's stdout and stderr go.
     const AIMOCK_LOG: &str = "aimock.log";
@@ -103,8 +102,9 @@ mod run {
     };
 
     /// npm, which Windows installs as a batch file, spawned as one despite what
-    /// [`Launch`] says of them: its arguments here are npm names, which hold no
-    /// character `cmd.exe` escapes (docs.npmjs.com, package.json `name`).
+    /// [`Launch`] says of them: its arguments here are subcommands, flags and
+    /// `<name>@<exact version>` specs, none holding a character `cmd.exe`
+    /// escapes (docs.npmjs.com: package.json `name`, semver).
     const NPM: &str = if cfg!(windows) { "npm.cmd" } else { "npm" };
 
     /// Whether `name` is on `list`, as `windows` compares variable names: there
@@ -1140,7 +1140,7 @@ mod run {
     /// The CLI's `--version`, asked of it alone in the sandbox the run uses:
     /// the recorder cannot repeat a launch through an interpreter.
     fn cli_version(sandbox: &Sandbox, p: &Profile, launch: &Launch) -> std::io::Result<String> {
-        let probe = version_probe(p.descriptor())?;
+        let probe = required_version_probe(p.descriptor())?;
         let out = sandbox
             .command(&launch.program)
             .args(&launch.args)

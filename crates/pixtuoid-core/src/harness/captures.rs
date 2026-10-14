@@ -85,7 +85,7 @@ pub fn capture_base(ws: &Path) -> Option<&Path> {
 /// # Errors
 ///
 /// If the row has no version probe.
-pub fn version_probe(
+pub fn required_version_probe(
     descriptor: &crate::source::registry::SourceDescriptor,
 ) -> std::io::Result<&'static [&'static str]> {
     descriptor
