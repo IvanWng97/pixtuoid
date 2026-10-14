@@ -167,9 +167,9 @@ invariant-breaking sequence against:
 
 ## High-risk changes
 
-Each row is a kind of change the review once let through (its incident in the
-row), so a diff it matches gets the row's check too; the first column decides,
-and Paths (globs, `*` crossing `/`) are where it usually fires. A check that
+Each row is a kind of change that gets a check beyond the rest of this file;
+the first column decides, and Paths (globs, `*` crossing `/`) are where it
+usually fires. A check that
 needs the head built or run, or an upstream fetched, is what a
 [local review](.claude/skills/local-review/SKILL.md) adds.
 
