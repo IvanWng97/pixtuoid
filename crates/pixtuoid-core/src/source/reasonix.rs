@@ -269,13 +269,29 @@ pub(crate) fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 },
             ])
         }
-        "PostToolUse" => Ok(vec![
-            register(),
-            AgentEvent::ActivityEnd {
+        "PostToolUse" => {
+            let mut events = vec![register()];
+            // It names its call's tool, on a failure too
+            // (`internal/ext/hook/runner.go:166-192`), and a skill call's return
+            // is its child's end: re-stating the Task makes this End close one,
+            // whatever the parent started since.
+            if obj
+                .get("toolName")
+                .and_then(|s| s.as_str())
+                .is_some_and(|t| SUBAGENT_TOOLS.contains(&t))
+            {
+                events.push(AgentEvent::ActivityStart {
+                    agent_id,
+                    tool_use_id: None,
+                    detail: Some(ToolDetail::Task),
+                });
+            }
+            events.push(AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id: None,
-            },
-        ]),
+            });
+            Ok(events)
+        }
         // Deliberately Identity-LESS: an end doesn't prove a session worth
         // registering, so an unknown id here rides the reducer's fallback.
         "Stop" => Ok(vec![AgentEvent::ActivityEnd {
@@ -594,6 +610,35 @@ mod tests {
                 "{event} must decode to ActivityEnd with no tool id"
             );
         }
+    }
+
+    #[test]
+    fn a_skill_calls_return_restates_its_task_before_the_end() {
+        let post = |tool| {
+            decode_all(
+                json!({"event": "PostToolUse", "sessionId": "s", "cwd": "/r", "toolName": tool}),
+            )
+        };
+        assert!(
+            matches!(
+                post("explore").as_slice(),
+                [
+                    _,
+                    AgentEvent::ActivityStart { tool_use_id: None, detail: Some(d), .. },
+                    AgentEvent::ActivityEnd { tool_use_id: None, .. },
+                ] if d.is_task()
+            ),
+            "{:?}",
+            post("explore")
+        );
+        assert!(
+            matches!(
+                post("read_file").as_slice(),
+                [_, AgentEvent::ActivityEnd { .. }]
+            ),
+            "{:?}",
+            post("read_file")
+        );
     }
 
     #[test]

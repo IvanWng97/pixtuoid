@@ -117,8 +117,9 @@ pub(crate) struct SourceCaps {
     /// the Waiting-class stale window instead of sweeping mid-delegation.
     pub(crate) delegations_are_hook_silent: bool,
     /// Do this source's subagents end unannounced, with no end event naming
-    /// the child? When true, the return of the id-less Task that spawned them
-    /// is their only end, so it arms the b1 cascade a tracked Task's drain does.
+    /// the child? When true, an id-less Task's end is the only sign its
+    /// children returned, so it arms the b1 cascade a tracked Task's drain
+    /// does, over the parent's whole subtree.
     pub(crate) child_ends_unannounced: bool,
 }
 

@@ -397,13 +397,10 @@ fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
     }
 }
 
-/// An end pixtuoid only inferred (its slot swept after its parent's cascade)
-/// is a guess a later hook from the child disproves: a background child a
-/// sibling's drain walked out, or reasonix's `continue_from` resuming the same
-/// id. A transcript first-sight can be a replay, and a parent that is gone
-/// re-admits nothing.
-#[test]
-fn a_hook_start_re_admits_a_child_whose_end_was_only_inferred() {
+/// A reasonix child its parent's Task drain walked out (b1) and the sweep
+/// removed, so its ledger end is only inferred. Returns the parent, the child
+/// and the time it was gone.
+fn walked_out_child(r: &mut Reducer, scene: &mut SceneState) -> (AgentId, AgentId, SystemTime) {
     use pixtuoid_core::state::reducer::{B1_CASCADE_GRACE, EXIT_GRACE_WINDOW};
     let parent = AgentId::from_parts("reasonix", "root");
     let child = AgentId::from_parts("reasonix", "root:subagent:sa_1");
@@ -414,39 +411,54 @@ fn a_hook_start_re_admits_a_child_whose_end_was_only_inferred() {
         cwd: PathBuf::from("/repo"),
         parent_id,
     };
-    let walked_out = |r: &mut Reducer, scene: &mut SceneState| {
-        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        let at = |s| t0 + Duration::from_secs(s);
-        r.apply(scene, session_start(parent, None), at(0), Transport::Hook);
-        act_start(
-            r,
-            scene,
-            parent,
-            Some("call_1"),
-            Some("Agent"),
-            at(1),
-            Transport::Hook,
-        );
-        r.apply(
-            scene,
-            session_start(child, Some(parent)),
-            at(2),
-            Transport::Hook,
-        );
-        act_end(r, scene, parent, Some("call_1"), at(3), Transport::Hook);
-        let gone = at(3) + B1_CASCADE_GRACE + EXIT_GRACE_WINDOW + Duration::from_secs(1);
-        r.tick(scene, at(3) + B1_CASCADE_GRACE);
-        r.tick(scene, gone);
-        assert!(
-            !scene.agents.contains_key(&child),
-            "the drain walked it out"
-        );
-        gone
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let at = |s| t0 + Duration::from_secs(s);
+    r.apply(scene, session_start(parent, None), at(0), Transport::Hook);
+    act_start(
+        r,
+        scene,
+        parent,
+        Some("call_1"),
+        Some("Agent"),
+        at(1),
+        Transport::Hook,
+    );
+    r.apply(
+        scene,
+        session_start(child, Some(parent)),
+        at(2),
+        Transport::Hook,
+    );
+    act_end(r, scene, parent, Some("call_1"), at(3), Transport::Hook);
+    let gone = at(3) + B1_CASCADE_GRACE + EXIT_GRACE_WINDOW + Duration::from_secs(1);
+    r.tick(scene, at(3) + B1_CASCADE_GRACE);
+    r.tick(scene, gone);
+    assert!(
+        !scene.agents.contains_key(&child),
+        "the drain walked it out"
+    );
+    (parent, child, gone)
+}
+
+/// An end pixtuoid only inferred (its slot swept after its parent's cascade)
+/// is a guess a later hook from the child disproves: a background child a
+/// sibling's drain walked out, or reasonix's `continue_from` resuming the same
+/// id. A transcript first-sight can be a replay, and a parent that is gone
+/// re-admits nothing.
+#[test]
+fn a_hook_start_re_admits_a_child_whose_end_was_only_inferred() {
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
+    let session_start = |agent_id, parent_id| AgentEvent::SessionStart {
+        agent_id,
+        source: "reasonix".into(),
+        session_id: "s".into(),
+        cwd: PathBuf::from("/repo"),
+        parent_id,
     };
 
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
-    let gone = walked_out(&mut r, &mut scene);
+    let (parent, child, gone) = walked_out_child(&mut r, &mut scene);
     let back = gone + Duration::from_secs(1);
     r.apply(
         &mut scene,
@@ -462,7 +474,7 @@ fn a_hook_start_re_admits_a_child_whose_end_was_only_inferred() {
 
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
-    let gone = walked_out(&mut r, &mut scene);
+    let (parent, child, gone) = walked_out_child(&mut r, &mut scene);
     let back = gone + Duration::from_secs(1);
     r.apply(
         &mut scene,
@@ -475,18 +487,111 @@ fn a_hook_start_re_admits_a_child_whose_end_was_only_inferred() {
         "a first-sight can be a replay"
     );
 
+    // Its parent exiting, then removed.
+    for after in [
+        Duration::from_secs(1),
+        EXIT_GRACE_WINDOW + Duration::from_secs(1),
+    ] {
+        let mut scene = SceneState::uniform(4);
+        let mut r = Reducer::new();
+        let (parent, child, gone) = walked_out_child(&mut r, &mut scene);
+        sess_end(&mut r, &mut scene, parent, false, gone, Transport::Hook);
+        let back = gone + after;
+        r.tick(&mut scene, back);
+        r.apply(
+            &mut scene,
+            session_start(child, Some(parent)),
+            back,
+            Transport::Hook,
+        );
+        assert!(
+            !scene.agents.contains_key(&child),
+            "its parent is gone ({after:?})"
+        );
+    }
+}
+
+/// A hook that leads with Identity (dsh, opencode), or with a bare activity,
+/// brings back a child whose end was only inferred as a start does, under the
+/// parent the ledger remembers.
+#[test]
+fn an_identity_or_bare_activity_re_admits_an_inferred_child_under_its_parent() {
+    for led_by_identity in [true, false] {
+        let mut scene = SceneState::uniform(4);
+        let mut r = Reducer::new();
+        let (parent, child, gone) = walked_out_child(&mut r, &mut scene);
+        let back = gone + Duration::from_secs(1);
+        if led_by_identity {
+            r.apply(
+                &mut scene,
+                AgentEvent::Identity {
+                    agent_id: child,
+                    source: "reasonix".into(),
+                    session_id: "s".into(),
+                    cwd: Some(PathBuf::from("/repo")),
+                    pid: None,
+                },
+                back,
+                Transport::Hook,
+            );
+        } else {
+            act_start(
+                &mut r,
+                &mut scene,
+                child,
+                None,
+                Some("read_file"),
+                back,
+                Transport::Hook,
+            );
+        }
+        assert_eq!(
+            scene.agents.get(&child).map(|s| s.parent_id),
+            Some(Some(parent)),
+            "led by identity: {led_by_identity}"
+        );
+    }
+}
+
+/// A child's own SessionEnd is its CLI's word whether or not the decoder can
+/// say `as_child` (opencode's `session.deleted`): its late echo stays refused.
+#[test]
+fn a_known_childs_own_end_is_reported_without_as_child() {
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
-    let gone = walked_out(&mut r, &mut scene);
-    sess_end(&mut r, &mut scene, parent, false, gone, Transport::Hook);
-    let back = gone + Duration::from_secs(1);
+    let parent = AgentId::from_parts("opencode", "parent");
+    let child = AgentId::from_parts("opencode", "child");
+    let session_start = |agent_id, parent_id| AgentEvent::SessionStart {
+        agent_id,
+        source: "opencode".into(),
+        session_id: "s".into(),
+        cwd: PathBuf::from("/repo"),
+        parent_id,
+    };
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    r.apply(&mut scene, session_start(parent, None), t0, Transport::Hook);
+    let born = t0 + Duration::from_secs(1);
     r.apply(
         &mut scene,
         session_start(child, Some(parent)),
-        back,
+        born,
         Transport::Hook,
     );
-    assert!(!scene.agents.contains_key(&child), "its parent is gone");
+    let end = t0 + Duration::from_secs(2);
+    sess_end(&mut r, &mut scene, child, false, end, Transport::Hook);
+    let gone = end + EXIT_GRACE_WINDOW + Duration::from_secs(1);
+    r.tick(&mut scene, gone);
+    r.apply(
+        &mut scene,
+        session_start(child, Some(parent)),
+        gone,
+        Transport::Hook,
+    );
+    assert!(
+        !scene.agents.contains_key(&child),
+        "the ended child's echo registered"
+    );
 }
 
 /// The identity-less fallback is no looser than the Identity gate (#244-w2):

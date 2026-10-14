@@ -412,10 +412,15 @@ fn subagent_is_removed_promptly_when_its_parent_task_completes() {
 
 /// A reasonix skill call (`explore`, `research`, …) is an id-less Task whose
 /// child fires no end of its own, so the call returning is the child's end;
-/// codewhale's `agent start` returns at dispatch, its child still running.
+/// codewhale's `agent start` returns at dispatch, its child still running, and
+/// the parent's own tool ending is no delegation's.
 #[test]
 fn an_untracked_task_end_walks_out_children_only_where_they_end_unannounced() {
-    for (source, walks_out) in [("reasonix", true), ("codewhale", false)] {
+    for (source, parent_tool, walks_out) in [
+        ("reasonix", "Agent", true),
+        ("codewhale", "Agent", false),
+        ("reasonix", "Bash: ls", false),
+    ] {
         let mut scene = SceneState::uniform(8);
         let mut r = Reducer::new();
         let parent = AgentId::from_parts(source, "root");
@@ -440,7 +445,7 @@ fn an_untracked_task_end_walks_out_children_only_where_they_end_unannounced() {
             &mut scene,
             parent,
             None,
-            Some("Agent"),
+            Some(parent_tool),
             at(1),
             Transport::Hook,
         );
@@ -468,10 +473,98 @@ fn an_untracked_task_end_walks_out_children_only_where_they_end_unannounced() {
         assert_eq!(
             scene.agents[&child].exiting_at.is_some(),
             walks_out,
-            "{source}: the child's walk-out on its parent's id-less Task end"
+            "{source}: the child's walk-out on its parent's id-less {parent_tool} end"
         );
         assert!(scene.agents[&parent].exiting_at.is_none(), "{source}");
     }
+}
+
+/// Two reasonix skill calls overlap. The first return walks out the other's
+/// live child too; that child comes back on its next hook, and the other
+/// call's return must still walk it out, though the parent went Idle between.
+#[test]
+fn overlapping_skill_calls_each_walk_their_child_out_on_return() {
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
+    fn feed(r: &mut Reducer, scene: &mut SceneState, v: serde_json::Value, t: SystemTime) {
+        for ev in decode_hook_payload(v).expect("reasonix payload decodes") {
+            r.apply(scene, ev, t, Transport::Hook);
+        }
+    }
+    let hook = |event: &str, session: &str, tool: &str| {
+        json!({
+            "event": event, "sessionId": session, "cwd": "/repo",
+            "toolName": tool, "_pixtuoid_source": "reasonix",
+        })
+    };
+    let mut scene = SceneState::uniform(8);
+    let mut r = Reducer::new();
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let at = |ms| t0 + Duration::from_millis(ms);
+    let late_child = AgentId::from_parts("reasonix", "root:subagent:call_b");
+
+    feed(&mut r, &mut scene, hook("SessionStart", "root", ""), at(0));
+    feed(
+        &mut r,
+        &mut scene,
+        hook("PreToolUse", "root", "explore"),
+        at(100),
+    );
+    feed(
+        &mut r,
+        &mut scene,
+        hook("PreToolUse", "root", "research"),
+        at(200),
+    );
+    feed(
+        &mut r,
+        &mut scene,
+        hook("PreToolUse", "root:subagent:call_a", "read_file"),
+        at(300),
+    );
+    feed(
+        &mut r,
+        &mut scene,
+        hook("PreToolUse", "root:subagent:call_b", "read_file"),
+        at(400),
+    );
+    let first_return = at(1_000);
+    feed(
+        &mut r,
+        &mut scene,
+        hook("PostToolUse", "root", "explore"),
+        first_return,
+    );
+    let gone = first_return + B1_CASCADE_GRACE + EXIT_GRACE_WINDOW + Duration::from_secs(1);
+    r.tick(&mut scene, first_return + B1_CASCADE_GRACE);
+    r.tick(&mut scene, gone);
+    assert!(
+        !scene.agents.contains_key(&late_child),
+        "the first return walked it out"
+    );
+
+    let back = gone + Duration::from_secs(1);
+    feed(
+        &mut r,
+        &mut scene,
+        hook("PreToolUse", "root:subagent:call_b", "read_file"),
+        back,
+    );
+    assert!(
+        scene.agents.contains_key(&late_child),
+        "its next hook brought it back"
+    );
+    let second_return = back + Duration::from_secs(1);
+    feed(
+        &mut r,
+        &mut scene,
+        hook("PostToolUse", "root", "research"),
+        second_return,
+    );
+    r.tick(&mut scene, second_return + B1_CASCADE_GRACE);
+    assert!(
+        scene.agents[&late_child].exiting_at.is_some(),
+        "the second return walks its own child out"
+    );
 }
 
 /// Two shims a few ms apart can be decoded in either order (#242): a Task's
@@ -479,6 +572,60 @@ fn an_untracked_task_end_walks_out_children_only_where_they_end_unannounced() {
 /// returned, which would read the parent Delegating and swallow its own tools.
 #[test]
 fn a_task_end_decoded_before_its_start_leaves_the_parent_its_own_tools() {
+    // Past the window the End's record is gone and the Start opens the call.
+    for (after_end, dropped) in [
+        (HOOK_WINS_WINDOW / 10, true),
+        (HOOK_WINS_WINDOW + Duration::from_millis(1), false),
+    ] {
+        let mut scene = SceneState::uniform(4);
+        let mut r = Reducer::new();
+        let id = AgentId::from_parts("reasonix", "root");
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        r.apply(
+            &mut scene,
+            AgentEvent::SessionStart {
+                agent_id: id,
+                source: "reasonix".into(),
+                session_id: "root".into(),
+                cwd: PathBuf::from("/repo"),
+                parent_id: None,
+            },
+            t0,
+            Transport::Hook,
+        );
+        let end = t0 + Duration::from_secs(1);
+        act_end(&mut r, &mut scene, id, Some("call_1"), end, Transport::Hook);
+        let start = end + after_end;
+        act_start(
+            &mut r,
+            &mut scene,
+            id,
+            Some("call_1"),
+            Some("Agent"),
+            start,
+            Transport::Hook,
+        );
+        let own = start + Duration::from_secs(1);
+        act_start(
+            &mut r,
+            &mut scene,
+            id,
+            None,
+            Some("Bash: ls"),
+            own,
+            Transport::Hook,
+        );
+        let shown = match &scene.agents[&id].state {
+            ActivityState::Active { detail, .. } => detail.as_deref().map(str::to_owned),
+            other => panic!("expected Active, got {other:?}"),
+        };
+        let want = if dropped { "Bash: ls" } else { "Delegating" };
+        assert_eq!(shown.as_deref(), Some(want), "{after_end:?} after the End");
+    }
+}
+
+#[test]
+fn a_call_whose_start_lands_after_its_end_still_counts() {
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
     let id = AgentId::from_parts("reasonix", "root");
@@ -497,30 +644,17 @@ fn a_task_end_decoded_before_its_start_leaves_the_parent_its_own_tools() {
     );
     let end = t0 + Duration::from_secs(1);
     act_end(&mut r, &mut scene, id, Some("call_1"), end, Transport::Hook);
-    let start = end + Duration::from_millis(5);
+    let start = end + HOOK_WINS_WINDOW / 10;
     act_start(
         &mut r,
         &mut scene,
         id,
         Some("call_1"),
-        Some("Agent"),
+        Some("Bash: ls"),
         start,
         Transport::Hook,
     );
-    let own = start + Duration::from_secs(1);
-    act_start(
-        &mut r,
-        &mut scene,
-        id,
-        None,
-        Some("Bash: ls"),
-        own,
-        Transport::Hook,
-    );
-    match &scene.agents[&id].state {
-        ActivityState::Active { detail, .. } => assert_eq!(detail.as_deref(), Some("Bash: ls")),
-        other => panic!("expected Active(Bash: ls), got {other:?}"),
-    }
+    assert_eq!(scene.agents[&id].tool_call_count, 1);
 }
 
 #[test]

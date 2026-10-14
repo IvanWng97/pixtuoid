@@ -32,7 +32,8 @@ pub const HOOK_SESSION_END_TOMBSTONE_TTL: Duration = Duration::from_secs(5);
 /// re-registration of that child after it ended (#244). Sized past the
 /// watcher's poll backstop (`DEFAULT_POLL_INTERVAL`), the worst case for a late transcript
 /// first-sight; a parented Start inside the window is the dead child's late
-/// echo, unless a hook brings it after an [`ChildEnd::Inferred`] end.
+/// echo, unless [`late_child_start_refused`](crate::state::reducer::Reducer::late_child_start_refused)
+/// re-admits it.
 /// Parentless Starts are deliberately NOT gated — a Codex resurrect-on-prompt
 /// is a legitimate same-id new life and re-links via the ledger (#246).
 #[doc(hidden)]
@@ -46,7 +47,7 @@ pub const CHILD_END_LEDGER_TTL: Duration = Duration::from_secs(90);
 /// which is unbounded. Sharing one clock meant a child idle past
 /// [`CHILD_END_LEDGER_TTL`] came back an ORPHAN, the exact phantom #246 exists
 /// to eliminate. The gate is
-/// unaffected: [`Correlation::child_recently_ended`] applies its OWN
+/// unaffected: [`Correlation::recent_child_end`] applies its OWN
 /// freshness check, so a retained-but-stale entry gates nothing.
 #[doc(hidden)]
 pub const CHILD_END_RELINK_TTL: Duration = Duration::from_secs(300);
@@ -241,10 +242,6 @@ impl Correlation {
             .filter(|end| is_fresh(now, end.at(), CHILD_END_LEDGER_TTL))
     }
 
-    pub(super) fn child_recently_ended(&self, id: AgentId, now: SystemTime) -> bool {
-        self.recent_child_end(id, now).is_some()
-    }
-
     /// Record an APPLIED child→parent link, REVIVING the ledger entry: clearing
     /// `ended` marks this life alive so [`Correlation::gc`] can't prune the
     /// memory while the child still lives. The ONE home of that coupled write —
@@ -371,9 +368,10 @@ mod tests {
             },
         );
         let just_inside = t0() + CHILD_END_LEDGER_TTL - Duration::from_millis(1);
-        assert!(corr.child_recently_ended(id, just_inside));
+        assert!(corr.recent_child_end(id, just_inside).is_some());
         assert!(
-            !corr.child_recently_ended(id, t0() + CHILD_END_LEDGER_TTL),
+            corr.recent_child_end(id, t0() + CHILD_END_LEDGER_TTL)
+                .is_none(),
             "freshness is strict: elapsed == TTL is expired"
         );
     }
@@ -395,7 +393,8 @@ mod tests {
         assert_eq!(entry.parent_id, Some(parent));
         assert_eq!(entry.ended, None, "a re-link must clear the end (revive)");
         assert!(
-            !corr.child_recently_ended(child, t0() + Duration::from_secs(1)),
+            corr.recent_child_end(child, t0() + Duration::from_secs(1))
+                .is_none(),
             "a revived entry is no longer 'recently ended'"
         );
     }
@@ -507,7 +506,7 @@ mod tests {
         let after_gate = t0() + CHILD_END_LEDGER_TTL + Duration::from_secs(1);
         corr.gc(after_gate);
         assert!(
-            !corr.child_recently_ended(child, after_gate),
+            corr.recent_child_end(child, after_gate).is_none(),
             "the end gate must have lapsed"
         );
         assert_eq!(
