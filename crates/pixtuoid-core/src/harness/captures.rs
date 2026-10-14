@@ -65,21 +65,36 @@ pub fn capture_workspace_tail() -> PathBuf {
 }
 
 /// The directory a capture workspace sits in, which a recorder clears and
-/// recreates, and the workspace's own name inside it.
+/// recreates.
 const CAPTURE_BASE: &str = "pixtuoid-capture";
+/// The workspace's own name inside [`CAPTURE_BASE`].
 const CAPTURE_PROJ: &str = "proj";
 
 /// The base a recorder may clear for the workspace `ws`: only that of an
-/// absolute path ending in [`capture_workspace_tail`], so no path an operator
-/// names can make it clear a directory of theirs.
+/// absolute path ending in [`capture_workspace_tail`], so a path an operator
+/// names can clear only a directory named as [`capture_workspace`]'s base is.
 pub fn capture_base(ws: &Path) -> Option<&Path> {
     (ws.is_absolute() && ws.ends_with(capture_workspace_tail()))
         .then(|| ws.parent())
         .flatten()
 }
 
+/// The command `descriptor`'s CLI answers its version to: a capture anchors
+/// that version, so a row without one can't be recorded.
+///
+/// # Errors
+///
+/// If the row has no version probe.
+pub fn version_probe(
+    descriptor: &crate::source::registry::SourceDescriptor,
+) -> std::io::Result<&'static [&'static str]> {
+    descriptor
+        .version_probe
+        .ok_or_else(|| std::io::Error::other(format!("{} has no version probe", descriptor.name)))
+}
+
 /// Why this host may not write the committed corpus, which pins Unix
-/// realpaths and cwds; `None` on Unix.
+/// realpaths and cwds.
 pub const CORPUS_REFUSAL: Option<&str> = if cfg!(unix) {
     None
 } else {
@@ -317,7 +332,8 @@ mod tests {
         use std::os::unix::process::ExitStatusExt;
         #[cfg(windows)]
         use std::os::windows::process::ExitStatusExt;
-        // Unix's raw status is a wait status: exit code 1 sits in its second byte.
+        // A Unix raw status is a wait(2) word, exit code in its high byte; a
+        // Windows one is the exit code itself.
         std::process::ExitStatus::from_raw(if cfg!(unix) { 1 << 8 } else { 1 })
     }
 

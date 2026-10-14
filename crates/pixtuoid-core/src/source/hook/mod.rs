@@ -52,7 +52,7 @@ impl std::fmt::Display for SocketBusy {
         write!(
             f,
             "another pixtuoid instance is listening on {} — close it first, or run this one \
-             with PIXTUOID_SOCKET pointing at a different path",
+             with {SOCKET_ENV} pointing at a different path",
             self.path.display()
         )
     }
@@ -616,7 +616,7 @@ mod tests {
     /// anything that stops the drain parks the await forever and the test fails
     /// by HANGING instead of asserting.
     #[tokio::test]
-    async fn handle_conn_ceiling_leaves_headroom_over_the_shim_line_cap() {
+    async fn max_conn_bytes_leaves_headroom_over_the_shim_line_cap() {
         let (mut client, server) = tokio::io::duplex(64 * 1024);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
         let task = tokio::spawn(handle_conn(server.take(MAX_CONN_BYTES), tx, None, None));

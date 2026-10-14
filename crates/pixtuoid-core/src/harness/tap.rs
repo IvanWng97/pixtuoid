@@ -1,5 +1,5 @@
 //! The recorder's listener: the shim's endpoint under the daemon's own guards
-//! (`source::hook`), each payload kept as received and teed to a headless
+//! ([`crate::source::hook`]), each payload kept as received and teed to a headless
 //! pixtuoid, on Unix and Windows alike.
 
 use std::path::{Path, PathBuf};
@@ -197,7 +197,8 @@ impl Tap {
             .len()
     }
 
-    /// Wait until no payload has arrived for `QUIET_ROUNDS` × `SETTLE`.
+    /// Wait until no payload has arrived for `QUIET_ROUNDS` × `SETTLE`, at most
+    /// `MAX_ROUNDS` × `SETTLE` in all.
     pub fn settle(&self) {
         let (mut prev, mut quiet, mut round) = (usize::MAX, 0, 0);
         while quiet < QUIET_ROUNDS && round < MAX_ROUNDS {
@@ -210,7 +211,7 @@ impl Tap {
     }
 
     /// Every payload so far.
-    pub fn take(&self) -> Vec<String> {
+    pub fn payloads(&self) -> Vec<String> {
         self.lines
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -266,10 +267,6 @@ mod tests {
     const PATIENCE: Duration = Duration::from_secs(5);
     const POLL: Duration = Duration::from_millis(10);
 
-    fn private_dir() -> tempfile::TempDir {
-        tempfile::tempdir().expect("tempdir")
-    }
-
     /// `bytes` to `at` on a runtime that ends with the call: a Windows pipe
     /// client's handle closes only while its runtime runs, and a test that then
     /// blocks in `settle` would hold it open past the tap's budget.
@@ -284,7 +281,7 @@ mod tests {
 
     #[test]
     fn a_payload_is_kept_and_teed() {
-        let d = private_dir();
+        let d = tempfile::tempdir().expect("tempdir");
         let tee_at = Endpoint::in_dir(d.path(), "tee");
         let tee = Tap::bind(&tee_at, None).expect("tee");
         let at = Endpoint::in_dir(d.path(), "tap");
@@ -292,13 +289,13 @@ mod tests {
         deliver(&at, LINE);
         tap.settle();
         tee.settle();
-        assert_eq!(tap.take(), [LINE]);
-        assert_eq!(tee.take(), [LINE]);
+        assert_eq!(tap.payloads(), [LINE]);
+        assert_eq!(tee.payloads(), [LINE]);
     }
 
     #[test]
     fn accepting_turns_true_on_bind_and_takes_no_instance() {
-        let d = private_dir();
+        let d = tempfile::tempdir().expect("tempdir");
         let at = Endpoint::in_dir(d.path(), "tap");
         assert!(!at.accepting(), "nothing listens yet");
         let tap = Tap::bind(&at, None).expect("tap");
@@ -309,12 +306,12 @@ mod tests {
         );
         deliver(&at, LINE);
         tap.settle();
-        assert_eq!(tap.take(), [LINE]);
+        assert_eq!(tap.payloads(), [LINE]);
     }
 
     #[test]
     fn a_second_tap_on_one_endpoint_is_refused_as_in_use() {
-        let d = private_dir();
+        let d = tempfile::tempdir().expect("tempdir");
         let at = Endpoint::in_dir(d.path(), "tap");
         let _first = Tap::bind(&at, None).expect("first");
         let second = Tap::bind(&at, None).expect_err("a live listener holds it");
@@ -324,7 +321,7 @@ mod tests {
     #[test]
     fn a_payload_is_cut_at_the_listeners_byte_cap() {
         let cap = usize::try_from(crate::source::hook::MAX_CONN_BYTES).expect("fits");
-        let d = private_dir();
+        let d = tempfile::tempdir().expect("tempdir");
         let at = Endpoint::in_dir(d.path(), "tap");
         let tap = Tap::bind(&at, None).expect("tap");
         // The tap closes once it holds the cap, so the write past it may break.
@@ -335,14 +332,14 @@ mod tests {
             .block_on(at.send("x".repeat(cap + 1).as_bytes()));
         tap.settle();
         assert_eq!(
-            tap.take().iter().map(String::len).collect::<Vec<_>>(),
+            tap.payloads().iter().map(String::len).collect::<Vec<_>>(),
             [cap]
         );
     }
 
     #[test]
     fn a_listener_that_stops_is_reported_with_its_reason() {
-        let d = private_dir();
+        let d = tempfile::tempdir().expect("tempdir");
         let live = Tap::bind(&Endpoint::in_dir(d.path(), "tap"), None).expect("tap");
         assert_eq!(live.stopped(), None, "a live listener");
         let gone = Tap::watching(
@@ -361,12 +358,12 @@ mod tests {
 
     #[test]
     fn a_tee_with_no_listener_costs_the_recording_nothing() {
-        let d = private_dir();
+        let d = tempfile::tempdir().expect("tempdir");
         let at = Endpoint::in_dir(d.path(), "tap");
         let tap = Tap::bind(&at, Some(Endpoint::in_dir(d.path(), "absent"))).expect("tap");
         deliver(&at, LINE);
         tap.settle();
-        assert_eq!(tap.take(), [LINE]);
+        assert_eq!(tap.payloads(), [LINE]);
     }
 
     /// The hook server always pre-creates its next instance, so only a server
@@ -375,7 +372,7 @@ mod tests {
     #[tokio::test]
     async fn accepting_reads_a_single_instance_server() {
         use tokio::net::windows::named_pipe::{ClientOptions, ServerOptions};
-        let d = private_dir();
+        let d = tempfile::tempdir().expect("tempdir");
         let at = Endpoint::in_dir(d.path(), "single");
         let server = ServerOptions::new()
             .first_pipe_instance(true)
@@ -393,7 +390,7 @@ mod tests {
     async fn a_send_waits_out_a_pipe_whose_one_instance_is_taken() {
         use tokio::net::windows::named_pipe::{ClientOptions, ServerOptions};
         const INSTANCES: usize = 2;
-        let d = private_dir();
+        let d = tempfile::tempdir().expect("tempdir");
         let at = Endpoint::in_dir(d.path(), "busy");
         let first = ServerOptions::new()
             .first_pipe_instance(true)

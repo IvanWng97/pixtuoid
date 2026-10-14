@@ -38,7 +38,7 @@ mod run {
     use pixtuoid_core::harness::tap::Endpoint;
     use pixtuoid_core::harness::{
         CAPTURE_RECORD, CORPUS_REFUSAL, CaptureRecord, capture_workspace, recorder_flag,
-        version_answer,
+        version_answer, version_probe,
     };
     use semver::Version;
 
@@ -51,11 +51,18 @@ mod run {
     /// How long the headless scene runs on after the recorder returns, to
     /// decode the last payloads and log any breadcrumb they provoke.
     const SCENE_SETTLE: Duration = Duration::from_secs(4);
+    /// Where the recorder's stdout and stderr go; a failed recorder's last line
+    /// there names why.
+    const RECORDER_LOG: &str = "recorder.log";
+    /// Where aimock's stdout and stderr go.
+    const AIMOCK_LOG: &str = "aimock.log";
+    /// The scripted model's npm package.
+    const AIMOCK_PACKAGE: &str = "@copilotkit/aimock";
     /// The variables a CLI may inherit from the host, with each platform's own
     /// in [`PLATFORM_INHERITED`]: everything else is cleared, so an operator's
     /// provider keys can never reach a CLI whose base-URL wiring slipped and bill
     /// a real provider.
-    const INHERITED: &[&str] = &["PATH"];
+    const INHERITED_EVERYWHERE: &[&str] = &["PATH"];
     const PLATFORM_INHERITED: PerOs<&[&str]> = PerOs {
         unix: &[
             "LANG", "LC_ALL", "TERM", "TMPDIR", "SHELL", "USER", "LOGNAME",
@@ -95,10 +102,9 @@ mod run {
         windows: &["USERPROFILE", "APPDATA", "LOCALAPPDATA"],
     };
 
-    /// npm, which Windows installs as a batch file: std runs one with its
-    /// arguments escaped "according to `cmd.exe` rules", refusing at spawn one it
-    /// cannot (std::process, "Batch file special handling"), and an npm name has
-    /// no character that needs it (docs.npmjs.com, package.json `name`).
+    /// npm, which Windows installs as a batch file, spawned as one despite what
+    /// [`Launch`] says of them: its arguments here are npm names, which hold no
+    /// character `cmd.exe` escapes (docs.npmjs.com, package.json `name`).
     const NPM: &str = if cfg!(windows) { "npm.cmd" } else { "npm" };
 
     /// Whether `name` is on `list`, as `windows` compares variable names: there
@@ -115,14 +121,15 @@ mod run {
 
     /// Every variable a CLI inherits on this platform.
     fn inherited() -> impl Iterator<Item = &'static str> {
-        INHERITED
+        INHERITED_EVERYWHERE
             .iter()
             .chain(PLATFORM_INHERITED.here().iter())
             .copied()
     }
 
     /// `program` with the host env cleared to what [`inherited`],
-    /// [`TOOL_INHERITED`] and npm's `npm_config_*` settings keep.
+    /// [`TOOL_INHERITED`], [`PLATFORM_TOOL_INHERITED`] and npm's `npm_config_*`
+    /// settings keep.
     fn tool(program: impl AsRef<OsStr>) -> Command {
         let mut c = Command::new(program);
         c.env_clear().stdin(Stdio::null());
@@ -246,7 +253,7 @@ mod run {
         std::fs::create_dir_all(&runs)?;
         let built = Built::find()?;
         let ctx = Ctx {
-            shims: shim_dir(&tier, &built.shim)?,
+            shim_dir: warmed_shim_dir(&tier, &built.shim)?,
             built,
             aimock: Aimock::install(&tier)?,
             tier,
@@ -256,7 +263,7 @@ mod run {
         for p in PROFILES {
             entries.extend(run_source(&ctx, &args, p, &runs)?);
         }
-        let report = report(args.versions, &host_tools(), &entries);
+        let report = report(args.versions, &host_tool_versions(), &entries);
         std::fs::write(runs.join(REPORT), &report)?;
         println!("\n{report}");
         Ok(entries.iter().all(|e| e.verdict.label() == Label::Pass))
@@ -389,8 +396,8 @@ mod run {
         windows: &["git", "pwsh"],
     };
 
-    /// Each of [`HOST_TOOLS`]' `--version`, or why it has none.
-    fn host_tools() -> Vec<String> {
+    /// Each of [`HOST_TOOLS`]' `--version`, or that it has none.
+    fn host_tool_versions() -> Vec<String> {
         HOST_TOOLS
             .here()
             .iter()
@@ -482,11 +489,12 @@ mod run {
         }
     }
 
-    /// The tier's one shim, which every sandbox's PATH names: Unix links the
+    /// The directory holding the tier's one shim, which every sandbox's PATH
+    /// names: Unix links the
     /// built one, and Windows, where a symlink needs privilege, copies it once.
     /// It runs once here, at no endpoint, so no run's first hook is a cold
     /// exec of a new file: a CLI lost its first payload behind one.
-    fn shim_dir(tier: &Path, shim: &Path) -> std::io::Result<PathBuf> {
+    fn warmed_shim_dir(tier: &Path, shim: &Path) -> std::io::Result<PathBuf> {
         let dir = tier.join("bin");
         match std::fs::remove_dir_all(&dir) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
@@ -523,7 +531,7 @@ mod run {
             let src = hermetic::scripts_dir().join("aimock");
             let lock: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(src.join("package-lock.json"))?)?;
-            let version = lock["packages"]["node_modules/@copilotkit/aimock"]["version"]
+            let version = lock["packages"][format!("node_modules/{AIMOCK_PACKAGE}")]["version"]
                 .as_str()
                 .ok_or_else(|| std::io::Error::other("the aimock lockfile pins no aimock"))?
                 .to_string();
@@ -537,7 +545,7 @@ mod run {
             let modules = dir.join("node_modules");
             Ok(Self {
                 launch: Launch::of(
-                    &modules.join("@copilotkit/aimock"),
+                    &modules.join(AIMOCK_PACKAGE),
                     &modules.join(".bin"),
                     "llmock",
                 )?,
@@ -547,7 +555,7 @@ mod run {
     }
 
     /// Marks a finished install; written only after npm succeeds.
-    const INSTALLED: &str = ".hermetic-installed";
+    const INSTALL_DONE: &str = ".hermetic-installed";
 
     /// `install` into a fresh `dir` unless an earlier one finished there: an
     /// interrupted install, or one whose scripts npm blocked, leaves a binary
@@ -556,7 +564,7 @@ mod run {
         dir: &Path,
         install: impl FnOnce(&Path) -> std::io::Result<()>,
     ) -> std::io::Result<()> {
-        if dir.join(INSTALLED).is_file() {
+        if dir.join(INSTALL_DONE).is_file() {
             return Ok(());
         }
         match std::fs::remove_dir_all(dir) {
@@ -565,7 +573,7 @@ mod run {
         }
         std::fs::create_dir_all(dir)?;
         install(dir)?;
-        std::fs::write(dir.join(INSTALLED), "")
+        std::fs::write(dir.join(INSTALL_DONE), "")
     }
 
     fn npm(dir: &Path, args: &[&str]) -> Command {
@@ -692,7 +700,7 @@ mod run {
     /// says not to rely on it (std::process, "Batch file special handling"):
     /// a CLI's free-text prompt is one. And std's `kill` is `TerminateProcess`,
     /// which ends only "the specified process" (learn.microsoft.com), so
-    /// aimock's node would outlive a killed shim.
+    /// aimock's node would outlive a killed npm shim.
     #[derive(Debug, PartialEq, Eq)]
     struct Launch {
         program: PathBuf,
@@ -704,7 +712,7 @@ mod run {
     impl Launch {
         /// `name` from the package at `package` npm linked into `bin`: on Unix
         /// the link itself, which the kernel runs by its shebang; on Windows
-        /// what npm's shim there runs (`Launch::from_bin_field`).
+        /// what npm's shim there runs ([`Self::from_bin_field`]).
         fn of(package: &Path, bin: &Path, name: &str) -> std::io::Result<Self> {
             if cfg!(windows) {
                 Self::from_bin_field(package, bin, name)
@@ -767,7 +775,7 @@ mod run {
     }
 
     /// cmd-shim's own `shebangExpr` (`lib/index.js:24` @v9.0.2).
-    const SHEBANG: &str =
+    const SHEBANG_EXPR: &str =
         r"^#!\s*(?:/usr/bin/env\s+(?:-S\s+)?((?:[^ \t=]+=[^ \t=]+\s+)*))?([^ \t]+)(.*)$";
 
     /// A `#!` line as cmd-shim reads it: `/usr/bin/env`, an optional `-S`,
@@ -781,7 +789,7 @@ mod run {
 
     impl Shebang {
         fn parse(line: &str) -> std::io::Result<Option<Self>> {
-            let expr = regex::Regex::new(SHEBANG).map_err(std::io::Error::other)?;
+            let expr = regex::Regex::new(SHEBANG_EXPR).map_err(std::io::Error::other)?;
             Ok(expr.captures(line).map(|c| Self {
                 program: c[2].to_owned(),
                 args: c[3].split_whitespace().map(str::to_owned).collect(),
@@ -820,7 +828,7 @@ mod run {
     ];
 
     impl Sandbox {
-        fn new(p: &Profile, shims: &Path, cli_bin: &Path, port: u16) -> std::io::Result<Self> {
+        fn new(p: &Profile, shim_dir: &Path, cli_bin: &Path, port: u16) -> std::io::Result<Self> {
             let dir = tempfile::tempdir()?;
             let at = |rel: &str| -> std::io::Result<PathBuf> {
                 let d = dir.path().join(rel);
@@ -833,7 +841,7 @@ mod run {
                 .collect();
             let host_path = std::env::var_os("PATH").unwrap_or_default();
             let path = std::env::join_paths(
-                [shims.to_path_buf(), cli_bin.to_path_buf()]
+                [shim_dir.to_path_buf(), cli_bin.to_path_buf()]
                     .into_iter()
                     .chain(std::env::split_paths(&host_path)),
             )
@@ -926,8 +934,8 @@ mod run {
     struct Ctx {
         tier: PathBuf,
         built: Built,
-        /// The tier's one shim, on every sandbox's PATH.
-        shims: PathBuf,
+        /// The directory holding the tier's one shim, on every sandbox's PATH.
+        shim_dir: PathBuf,
         aimock: Aimock,
     }
 
@@ -941,7 +949,7 @@ mod run {
         let Ctx {
             tier,
             built,
-            shims,
+            shim_dir,
             aimock,
         } = ctx;
         let workspace = capture_workspace()?;
@@ -958,7 +966,7 @@ mod run {
         }
         let cli = install_cli(tier, p, version)?;
         let port = free_port()?;
-        let sandbox = Sandbox::new(p, shims, &cli.bin, port)?;
+        let sandbox = Sandbox::new(p, shim_dir, &cli.bin, port)?;
 
         let connect = sandbox
             .command(&built.pixtuoid)
@@ -984,8 +992,8 @@ mod run {
             model
                 .args(["-p", &port.to_string(), "-f"])
                 .arg(&script)
-                .stdout(log(dir, "aimock.log")?)
-                .stderr(log(dir, "aimock.log")?)
+                .stdout(log(dir, AIMOCK_LOG)?)
+                .stderr(log(dir, AIMOCK_LOG)?)
                 .spawn()?,
         );
         wait_until(|| http_get(port, "/v1/models").is_ok(), "aimock")?;
@@ -1030,8 +1038,8 @@ mod run {
                 p,
                 scenario,
             ))
-            .stdout(log(dir, "recorder.log")?)
-            .stderr(log(dir, "recorder.log")?)
+            .stdout(log(dir, RECORDER_LOG)?)
+            .stderr(log(dir, RECORDER_LOG)?)
             .status()?;
         std::thread::sleep(SCENE_SETTLE);
         drop(scene);
@@ -1055,15 +1063,15 @@ mod run {
         let capture: CaptureRecord = match std::fs::read_to_string(dir.join(CAPTURE_RECORD)) {
             Ok(text) if recorder.success() => serde_json::from_str(&text)?,
             read => {
-                let log = std::fs::read_to_string(dir.join("recorder.log")).unwrap_or_default();
+                let log = std::fs::read_to_string(dir.join(RECORDER_LOG)).unwrap_or_default();
                 let last = log
                     .lines()
                     .rev()
                     .find(|l| !l.trim().is_empty())
                     .unwrap_or_default();
-                let record = if read.is_ok() { "after" } else { "with no" };
+                let relation = if read.is_ok() { "after" } else { "with no" };
                 return Err(std::io::Error::other(format!(
-                    "the recorder exited {recorder} {record} {CAPTURE_RECORD}: {last}"
+                    "the recorder exited {recorder} {relation} {CAPTURE_RECORD}: {last}"
                 )));
             }
         };
@@ -1132,10 +1140,7 @@ mod run {
     /// The CLI's `--version`, asked of it alone in the sandbox the run uses:
     /// the recorder cannot repeat a launch through an interpreter.
     fn cli_version(sandbox: &Sandbox, p: &Profile, launch: &Launch) -> std::io::Result<String> {
-        let probe = p
-            .descriptor()
-            .version_probe
-            .ok_or_else(|| std::io::Error::other(format!("{} has no version probe", p.source)))?;
+        let probe = version_probe(p.descriptor())?;
         let out = sandbox
             .command(&launch.program)
             .args(&launch.args)
@@ -1144,8 +1149,10 @@ mod run {
             .output()?;
         version_answer(&out).ok_or_else(|| {
             std::io::Error::other(format!(
-                "{:?} --version answered nothing (exit {})",
-                launch.program, out.status
+                "{:?} {:?} answered nothing (exit {})",
+                launch.program,
+                &probe[1..],
+                out.status
             ))
         })
     }
@@ -1555,8 +1562,8 @@ mod run {
                 .expect("a shim");
             std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755))
                 .expect("executable");
-            let shims = shim_dir(&d.path().join("tier"), &shim).expect("placed");
-            let placed = shims.join("pixtuoid-hook");
+            let dir = warmed_shim_dir(&d.path().join("tier"), &shim).expect("placed");
+            let placed = dir.join("pixtuoid-hook");
             assert_eq!(std::fs::read_link(&placed).ok(), Some(shim), "not a copy");
             assert_eq!(
                 std::fs::read_to_string(&ran).ok().as_deref(),

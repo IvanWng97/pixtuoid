@@ -88,7 +88,7 @@ impl SecurityDescriptor {
     /// renders one read back off an object.
     #[cfg(test)]
     pub(crate) fn dacl(&self) -> String {
-        tests_support::dacl_string(self.psd)
+        test_support::dacl_of(self.psd)
     }
 }
 
@@ -104,7 +104,7 @@ impl Drop for SecurityDescriptor {
 }
 
 #[cfg(test)]
-pub(crate) mod tests_support {
+pub(crate) mod test_support {
     use windows_sys::Win32::Foundation::{HANDLE, LocalFree};
     use windows_sys::Win32::Security::Authorization::{
         ConvertSecurityDescriptorToStringSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1,
@@ -113,7 +113,7 @@ pub(crate) mod tests_support {
     use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
 
     /// The DACL the kernel holds for `handle`, as SDDL.
-    pub(crate) fn dacl_sddl(handle: HANDLE, kind: SE_OBJECT_TYPE) -> String {
+    pub(crate) fn held_dacl(handle: HANDLE, kind: SE_OBJECT_TYPE) -> String {
         let mut psd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
         // SAFETY: a live handle; every out-pointer this call doesn't fill is
         // null, as documented optional, and `psd` is a live out-pointer.
@@ -130,13 +130,13 @@ pub(crate) mod tests_support {
             )
         };
         assert_eq!(rc, 0, "GetSecurityInfo");
-        let sddl = dacl_string(psd);
+        let sddl = dacl_of(psd);
         // SAFETY: LocalAlloc'd by GetSecurityInfo, freed once here.
         unsafe { LocalFree(psd) };
         sddl
     }
 
-    pub(super) fn dacl_string(psd: PSECURITY_DESCRIPTOR) -> String {
+    pub(super) fn dacl_of(psd: PSECURITY_DESCRIPTOR) -> String {
         let mut text: windows_sys::core::PWSTR = std::ptr::null_mut();
         // SAFETY: `psd` is a live descriptor; both out-pointers are live.
         let ok = unsafe {

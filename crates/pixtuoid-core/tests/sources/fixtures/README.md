@@ -89,7 +89,7 @@ beside them to be diffed, not trusted, and since only `*.jsonl` and
 nothing. Diff the pair, then `mv` the `.new` over the old one or delete it.
 
 **A capture is recorded only on Unix.** The corpus pins Unix realpaths and cwds,
-so on Windows the recorder writes a hermetic run's raw `--out` capture alone and
+so on Windows the recorder writes only a raw `--out` capture and
 refuses to record or promote. Windows wire evidence therefore cannot be
 re-recorded on demand — which is why `copilot/tool-run`, the one fixture
 carrying a real Windows `cwd`, stays `unknown` rather than being replaced.

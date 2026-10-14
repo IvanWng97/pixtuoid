@@ -39,6 +39,7 @@ mod recorder {
     use pixtuoid_core::harness::{
         CAPTURE_NOTE, CAPTURE_RECORD, CORPUS_REFUSAL, CaptureRecord, HOOK_PAYLOADS, PROVENANCE,
         capture_base, capture_workspace, capture_workspace_tail, jsonl_files_under, version_answer,
+        version_probe,
     };
 
     /// Where a driver names the CLI it drives, a command or the path to its
@@ -78,8 +79,7 @@ mod recorder {
         /// ProgramData only in an environment the sandbox's no longer holds.
         workspace: Option<PathBuf>,
         /// Run no CLI: create this source's transcript root inside `within`, as
-        /// a user who ran the CLI before has it, so a pixtuoid started first
-        /// watches it from boot rather than from its next poll.
+        /// a user who ran the CLI before has it.
         prepare_root: Option<String>,
     }
 
@@ -264,7 +264,7 @@ mod recorder {
         let status = run_cli(
             &cmd,
             &workspace,
-            Run {
+            CliWiring {
                 endpoint: &endpoint,
                 scratch: sandbox.path(),
             },
@@ -272,7 +272,7 @@ mod recorder {
             &options.env,
         )?;
         tap.settle();
-        let payloads = tap.take();
+        let payloads = tap.payloads();
         let incomplete = tap.stopped().map(|why| {
             std::io::Error::other(format!(
                 "the tap stopped accepting, so this capture is incomplete: {why}"
@@ -617,7 +617,7 @@ mod recorder {
     }
 
     /// Where one run's shim connects, and its private scratch directory.
-    struct Run<'a> {
+    struct CliWiring<'a> {
         endpoint: &'a Endpoint,
         scratch: &'a Path,
     }
@@ -625,18 +625,18 @@ mod recorder {
     fn run_cli(
         cmd: &[String],
         ws: &Path,
-        run: Run<'_>,
+        wiring: CliWiring<'_>,
         verified: &str,
         env: &[(String, String)],
     ) -> std::io::Result<std::process::ExitStatus> {
         let mut c = std::process::Command::new(&cmd[0]);
         c.args(&cmd[1..])
             .current_dir(ws)
-            .env(Endpoint::ENV, run.endpoint.path());
+            .env(Endpoint::ENV, wiring.endpoint.path());
         // A driver's transcript goes in this run's private scratch: a fixed
         // shared-temp name is symlink-followable and two concurrent captures interleave.
-        c.env("TUIDRIVE_LOG", run.scratch.join("tuidrive.log"));
-        c.env(CLI_ENV, named_cli(run.scratch))
+        c.env("TUIDRIVE_LOG", wiring.scratch.join("tuidrive.log"));
+        c.env(CLI_ENV, named_cli(wiring.scratch))
             .env(VERSION_ENV, verified);
         for k in agent_env_names(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok())) {
             c.env_remove(k);
@@ -664,12 +664,11 @@ mod recorder {
 
     /// The CLI's own name, as its registry row asks it its version.
     fn registered_cli(descriptor: &registry::SourceDescriptor) -> std::io::Result<String> {
-        descriptor
-            .version_probe
-            .and_then(|probe| probe.first())
+        version_probe(descriptor)?
+            .first()
             .map(|cli| (*cli).to_owned())
             .ok_or_else(|| {
-                std::io::Error::other(format!("{} has no version probe", descriptor.name))
+                std::io::Error::other(format!("{}'s version probe names no CLI", descriptor.name))
             })
     }
 
@@ -1121,7 +1120,7 @@ mod recorder {
                 why.contains(&format!("end in {}:", tail.display())),
                 "names the tail it checks, never a root any absolute one may have: {why}"
             );
-            let ws = root.join("pixtuoid-capture").join("proj");
+            let ws = root.join(&tail);
             let (o, _) = parse_options(args(&ws)).expect("a capture workspace");
             assert_eq!(o.workspace, Some(ws));
         }
@@ -1553,11 +1552,11 @@ mod recorder {
                     ("CLAUDE_CODE_PROBE", Some("0")),
                 ],
                 || {
-                    let run = Run {
+                    let wiring = CliWiring {
                         endpoint: &endpoint,
                         scratch: sandbox.path(),
                     };
-                    run_cli(&cmd, ws.path(), run, "1.0.0", &env).expect("runs")
+                    run_cli(&cmd, ws.path(), wiring, "1.0.0", &env).expect("runs")
                 },
             );
             assert!(ran.success());

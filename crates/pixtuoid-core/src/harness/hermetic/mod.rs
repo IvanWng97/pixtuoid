@@ -23,14 +23,14 @@ pub const DUMMY_KEY: &str = "hermetic-dummy-key";
 /// The scripted model's `/v1` base, as a profile's env spells it.
 const AIMOCK_V1: &str = "http://127.0.0.1:{port}/v1";
 
-/// What a Unix `system_config` path spells the operator's user name as.
+/// What a Unix [`Profile::system_config`] path spells the operator's user name as.
 pub const USER_PLACEHOLDER: &str = "{user}";
 /// What a script spells [`CAPTURE_NOTE`](crate::harness::CAPTURE_NOTE) as.
 pub(crate) const NOTE_PLACEHOLDER: &str = "{note}";
 /// What a script spells the workspace the recorder runs the CLI in as.
 pub(crate) const WORKSPACE_PLACEHOLDER: &str = "{workspace}";
 /// What a script spells the platform's shell tool as, a profile's
-/// `script_vars` naming it.
+/// [`Profile::script_vars`] naming it.
 pub(crate) const SHELL_TOOL_PLACEHOLDER: &str = "{shell_tool}";
 
 /// A fact that differs between Unix and Windows. Both arms are plain data, so

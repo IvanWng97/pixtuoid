@@ -129,7 +129,7 @@ mod tests {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Security::Authorization::SE_KERNEL_OBJECT;
 
-    use crate::win32::tests_support::dacl_sddl;
+    use crate::win32::test_support::held_dacl;
 
     /// No API reads `PIPE_REJECT_REMOTE_CLIENTS` back off a pipe — neither
     /// [`GetNamedPipeInfo`](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-getnamedpipeinfo)
@@ -160,7 +160,7 @@ mod tests {
     async fn the_hook_pipe_is_owner_only() {
         let name = format!(r"\\.\pipe\pixtuoid-sd-{}", std::process::id());
         let listener = Listener::bind(Path::new(&name)).await.expect("bind");
-        let sddl = dacl_sddl(listener.server.as_raw_handle(), SE_KERNEL_OBJECT);
+        let sddl = held_dacl(listener.server.as_raw_handle(), SE_KERNEL_OBJECT);
         let (flags, aces) = sddl.split_once('(').expect("an ACE");
         assert!(flags.starts_with("D:") && flags.contains('P'), "{sddl}");
         assert_eq!(aces.matches('(').count(), 0, "one ACE: {sddl}");

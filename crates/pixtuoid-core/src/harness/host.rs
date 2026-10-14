@@ -22,10 +22,13 @@ pub(crate) enum KnownFolder {
 
 #[cfg(any(windows, test))]
 impl KnownFolder {
-    /// Every known folder a `system_config` row may name.
+    /// Every known folder a
+    /// [`system_config`](crate::harness::hermetic::Profile::system_config) row
+    /// may name.
     pub(crate) const ALL: [Self; 2] = [Self::ProgramData, Self::Profile];
 
-    /// How a `system_config` row spells it.
+    /// How a [`system_config`](crate::harness::hermetic::Profile::system_config)
+    /// row spells it.
     pub(crate) const fn placeholder(self) -> &'static str {
         match self {
             Self::ProgramData => "{FOLDERID_ProgramData}",
@@ -323,7 +326,7 @@ mod tests {
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
             .open(&dir)
             .expect("open the directory");
-        let held = crate::win32::tests_support::dacl_sddl(handle.as_raw_handle(), SE_FILE_OBJECT);
+        let held = crate::win32::test_support::held_dacl(handle.as_raw_handle(), SE_FILE_OBJECT);
         let meant = crate::win32::SecurityDescriptor::from_sddl(PRIVATE_DIR)
             .expect("sddl")
             .dacl();
