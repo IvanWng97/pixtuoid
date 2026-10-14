@@ -838,7 +838,7 @@ async fn walk_jsonl_honors_the_path_filter() {
 }
 
 #[tokio::test]
-async fn an_oversized_append_revives_an_ended_transcript_only_on_proof_of_life() {
+async fn an_oversized_append_revives_an_ended_transcript_only_on_activity() {
     // The last row's final line is longer than the activity tail's window.
     let long_tool = format!(
         "{{\"type\":\"tool_use\",\"pad\":\"{}\"}}\n",
