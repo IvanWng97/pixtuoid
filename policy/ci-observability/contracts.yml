@@ -283,8 +283,8 @@
             | select((has("if") or has("continue-on-error")) | not)]
            | length == 1)
       and $jobs.tier.outputs.full == "${{ steps.tier.outputs.full }}"
-      and all($jobs[] | select(.needs == "tier" or (.needs | arrays | index("tier"))) | select(has("uses"));
-              .with.full == $expected)
+      and all($jobs[] | select(has("uses") and (.with | has("full")?));
+              .with.full == $expected and ([.needs] | flatten | index("tier")))
   break:
     - (.jobs[] | select(.name == "ci-gate-full") | .if) = "${{ always() }}"
     - (.jobs[] | select(.name == "ci-gate-full") | .needs) = ["tier"]
@@ -294,6 +294,7 @@
     - .jobs.tier.outputs.full = "true"
     - .jobs.builds.with.full = false
     - .jobs.hermetic.with.full = "${{ true }}"
+    - '.jobs.extra = {"uses": "./.github/workflows/ci-extra.yml", "with": {"full": false}}'
 
 # ── Publishing
 
