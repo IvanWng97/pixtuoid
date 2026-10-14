@@ -26,7 +26,7 @@ Delete sections that don't apply.
 ## How I tested it
 
 <!--
-- CI's light tier (runs on push); the REVIEW.md focused reviews that apply
+- CI's light tier and review (run on push); a local review for a large change
 - Live: ./target/release/pixtuoid run --headless --projects-root ~/.claude/projects
 -->
 

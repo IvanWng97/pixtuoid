@@ -76,16 +76,17 @@ cargo run --profile release-local --example snapshot -- /tmp/snap.png   # the sa
 Non-trivial work runs as [an arc](docs/CONTRIBUTING.md#the-arc-loop): read
 each step there before taking it, never from recall. Merging is
 `@mergifyio queue`, which a session comments itself once
-[the merge gate](docs/CONTRIBUTING.md#the-merge-gate) holds; the
-`local-review` skill runs its focused reviews, and a release PR merges by hand.
+[the merge gate](docs/CONTRIBUTING.md#the-merge-gate) holds, and a release PR
+merges by hand. The CI review applies REVIEW.md on every push; the
+`local-review` skill runs it locally on demand, for a large or wide change.
 
 **At most 6 open PRs across the sessions** (bots' and outside contributors'
 aside), the owner's cap: the runners take
 [20 jobs at once](https://docs.github.com/en/actions/reference/limits) and one
 light-tier push needs more, so each open PR past the first lengthens the wait
 of every push. A PR
-opens, never as a draft, once its branch is ready to merge; its focused reviews
-run on it, since their records and dispositions live there. The pre-push hook runs
+opens, never as a draft, once its branch is ready to merge; a local review runs
+on it, since its dispositions live there. The pre-push hook runs
 preflight and CI the rest, so neither is rerun by hand. Until a slot frees, the branch stays pushed
 with no PR. A PR
 that stops being ready closes with its branch kept and never force-pushed,

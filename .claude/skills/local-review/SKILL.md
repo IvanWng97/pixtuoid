@@ -1,7 +1,7 @@
 ---
 name: local-review
 version: 3.1.0
-description: "Run pixtuoid's review locally at either scope — a DIFF review (one lens per matching REVIEW.md focused review; the correctness and design lenses are the automatic CI review's, never re-run locally) or a whole-codebase AUDIT (subsystem × factor fan-out). Use when a diff touches a focused review's row, on 'is this ready to merge', or on 'whole-codebase review' / pre-release / periodic audit."
+description: "Run pixtuoid's review locally at either scope — a DIFF review (on demand, for a large or wide change: one lens per matching REVIEW.md focused review; the correctness and design lenses are the automatic CI review's, never re-run locally) or a whole-codebase AUDIT (subsystem × factor fan-out). Use on a large or wide change before its push, on 'is this ready to merge', or on 'whole-codebase review' / pre-release / periodic audit."
 metadata:
   scope: "pixtuoid repo only"
 ---
@@ -13,7 +13,8 @@ contract; fill briefs from them, never a paraphrase here.
 
 ## When to run
 
-- **Diff scope**: the diff matches a REVIEW.md
+- **Diff scope**, on demand: a change large or wide enough that a CI review
+  round is the expensive way to learn its findings, one lens per matching
   [focused review](../../../REVIEW.md#focused-reviews). The correctness and
   design lenses are the automatic review's; never re-run them here.
 - **Whole-codebase scope**: "audit the repo", a pre-release or periodic sweep.
@@ -67,11 +68,8 @@ contract; fill briefs from them, never a paraphrase here.
      -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
    ```
 
-6. **Record** each row's run as
-   [the gate](../../../docs/CONTRIBUTING.md#the-merge-gate) defines, naming
-   the head the lens judged, then `gh run rerun` the `focused-reviews` check;
-   each push needs a record again, its lens re-run scoped as the gate says.
-7. **Before merge**, judge against the gate.
+6. **Before merge**, judge against
+   [the gate](../../../docs/CONTRIBUTING.md#the-merge-gate).
 
 ## Whole-codebase scope
 
@@ -95,7 +93,7 @@ the owner keeps becomes a FOLLOW-UP PR.
 | Thought | Reality |
 |---------|---------|
 | "CI is green, that's enough" | CI can't see design, blast radius, drift, or a deliberate-looking real bug. |
-| "The bots will render it" | A bot reads the diff and the base tree; a focused review is yours. |
+| "The bots will render it" | A bot reads the diff and the base tree; building, running or rendering a row's lens is yours. |
 | "I'll note the finding and move on" | Every finding needs a terminal state. |
 | "The diff looks clean, we're done" (audit) | Drift, debt accretion and erosion accumulate between PRs; only the audit sees them. |
 | "The finder found it, report it" (audit) | A separate skeptic tries to REFUTE each survivor first. |

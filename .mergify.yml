@@ -42,10 +42,6 @@ queue_rules:
       - or:
           - check-success = claude-review / claude-review
           - check-skipped = claude-review / claude-review
-      # Skipped on a fork's or a bot's PR, as the review is.
-      - or:
-          - check-success = focused-reviews
-          - check-skipped = focused-reviews
       - "#review-threads-unresolved = 0"
     # The queue's draft PR, where ci-gate is the full tier.
     merge_conditions:

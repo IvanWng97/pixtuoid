@@ -153,10 +153,11 @@ design → build → gate → wrap.
 5. **Mock gate** (taste/visual work only) — ratify the AFTER visual before code
    (`beautify-decoration` skill).
 6. **Build** — TDD: failing test → minimal impl → commit.
-7. **Self-review** — a standards+spec pass before EVERY push, a review
-   fold's included: [`REVIEW.md`](../REVIEW.md#every-changed-file)'s Every
-   changed file, the comment audit too, over everything the PR adds, not only
-   the lines a finding names; the cleanup rides the same PR. Not the merge gate.
+7. **Self-review** — on demand, before the push of a large or wide change: a
+   standards+spec pass through the `local-review` skill,
+   [`REVIEW.md`](../REVIEW.md#every-changed-file)'s Every changed file and its
+   comment audit included, over everything the PR adds; the cleanup rides the
+   same PR. The CI review applies the same rules on every push.
 8. **Merge gate** — [the gate](#the-merge-gate).
 9. **Wrap** — retro; a durable lesson becomes a mechanism (a test, a gate) or
    a line on the narrowest rule it amends — never an agent's private memory,
@@ -185,19 +186,11 @@ step is the session's to keep.
 
 Every [`.mergify.yml`](../.mergify.yml) `queue_conditions` check green at the
 final head; every finding's review thread resolved by its disposition; zero
-open confirmed blocking finding; each [focused
-review](../REVIEW.md#focused-reviews) the diff matches, or whose Paths it
-touches, recorded at the current head as a maintainer's comment opening
-`<!-- focused-review:<row>:<head sha> -->` (`<row>` as
-[`scripts/focused-reviews.py`](../scripts/focused-reviews.py)'s `row_id`
-derives it), then the review or `does not match: <why>`. `focused-reviews`
-holds the rows whose Paths the PR touches; the rest are the author's to
-match. Each push needs its own records: the lens re-run judges the PR's own
-change since the head the last record names (the whole PR after a rebase),
-so a merge of `main` adds nothing to judge and its record restates the last
-verdict; after posting, `gh run rerun <id>` the check. The
-[`local-review`](../.claude/skills/local-review/SKILL.md) skill runs those
-reviews. A refuted blocking finding clears without a push: once its thread is
+open confirmed blocking finding. The CI review applies all of
+[`REVIEW.md`](../REVIEW.md), its focused reviews included, on every push; a
+local review ([`local-review`](../.claude/skills/local-review/SKILL.md)) is
+the author's call for a large or wide change, and its findings take
+dispositions like the bot's. A refuted blocking finding clears without a push: once its thread is
 resolved with the disposition, re-run the review (`gh run rerun <id> --failed`).
 
 Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.yml)):
@@ -228,7 +221,7 @@ change, and bigger than the PR: split it off into #N; a redesign that brings
 the finding into scope ends FIXED) · FOLLOW-UP → #N (real and PRE-EXISTING,
 and not FIXED in place
 — in place fits a small defect inside code this change already touches,
-adding no focused review — so it is fixed in #N; a defect in another session's
+adding no new focused-review row — so it is fixed in #N; a defect in another session's
 tree cites that session's PR). A
 disposition is the reply that resolves the thread, STARTING with its state:
 `FIXED: …` · `REFUTED: … — <mechanism>` · `RE-SCOPED → #N: …` ·

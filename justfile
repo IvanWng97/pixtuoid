@@ -305,7 +305,6 @@ lint:
     run tuidrive just tuidrive-selftest   & pids+=($!)
     run e2escrub just e2e-scrub-selftest  & pids+=($!)
     run starhist just star-history-selftest & pids+=($!)
-    run focused just focused-reviews-selftest & pids+=($!)
     run bmcbtn  just bmc-button-selftest  & pids+=($!)
     run fixpii  just fixture-pii          & pids+=($!)
     run piiself just fixture-pii-selftest & pids+=($!)
@@ -1254,13 +1253,6 @@ e2e-scrub-selftest:
 [group('meta')]
 star-history-selftest:
     python3 scripts/star-history.py --selftest
-
-# The merge gate's focused-reviews matcher, against the real REVIEW.md and tree:
-# a path a row names that moves reds here.
-[doc("Self-test the focused-reviews check")]
-[group('meta')]
-focused-reviews-selftest:
-    python3 -I scripts/focused-reviews.py --selftest
 
 # The README's Buy Me a Coffee button: count parsing, pack sprites, layout.
 [doc("Self-test the README Buy Me a Coffee button renderer")]
