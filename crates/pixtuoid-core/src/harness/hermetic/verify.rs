@@ -5,16 +5,17 @@
 //! nothing here compares bytes or goldens: only shapes, events and the fields
 //! a decoder reads.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
 use super::{MANIFEST, Manifest, Profile, SCENE_LOG, Scenario, Shape, profile};
-use crate::AgentEvent;
 use crate::harness::captures::jsonl_files_under;
 use crate::harness::reads::{blank_of, child_pointer, is_hook_envelope, is_shim_stamp, strips};
 use crate::harness::{Drive, Driven, HOOK_PAYLOADS, PROVENANCE, Reach, captures};
+use crate::{AgentEvent, AgentId};
 
 /// The tracing target every drift breadcrumb rides (`source::drift::TARGET`).
 const BREADCRUMB_TARGET: &str = crate::source::drift::TARGET;
@@ -108,7 +109,7 @@ pub fn verify_source(p: &Profile, dirs: &[PathBuf]) -> std::io::Result<Verdict> 
                 if is_hook_envelope(&file)
                     && let Some(event) = (p.event_name)(&line)
                 {
-                    fired.insert(event.to_owned());
+                    fired.insert(event.into_owned());
                 }
                 carried.add(p, &file, &line, true);
             }
@@ -269,7 +270,7 @@ pub(crate) fn committed_reads(p: &Profile) -> std::io::Result<Fields> {
 /// line.
 fn kind_of(p: &Profile, file: &Path, line: &Value) -> String {
     if is_hook_envelope(file) {
-        format!("{HOOK}{}", (p.event_name)(line).unwrap_or("?"))
+        format!("{HOOK}{}", (p.event_name)(line).as_deref().unwrap_or("?"))
     } else {
         format!("{TX}{}", line["type"].as_str().unwrap_or("?"))
     }
@@ -335,7 +336,9 @@ fn judge(
         findings.push((
             Label::Blocked,
             format!(
-                "the CLI did not complete a turn (exit {:?}, {} model requests)",
+                "the CLI did not complete a turn against the scripted model (exit {:?}, {} \
+                 model requests): it could not run, or its model calls went elsewhere \
+                 through a home the sandbox did not redirect",
                 manifest.capture.exit_code, manifest.requests
             ),
         ));
@@ -346,7 +349,7 @@ fn judge(
     let observed: BTreeSet<String> = payloads
         .iter()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter_map(|v| (p.event_name)(&v).map(str::to_owned))
+        .filter_map(|v| (p.event_name)(&v).map(Cow::into_owned))
         .collect();
     for want in scenario.expects {
         if !observed.contains(*want) {
@@ -425,20 +428,57 @@ fn started_in(
         ));
     }
     let want = canonical(workspace);
-    let cwds: Vec<PathBuf> = events
-        .iter()
-        .filter_map(|e| match e {
-            AgentEvent::SessionStart { cwd, .. } => Some(canonical(cwd)),
-            _ => None,
-        })
-        .collect();
-    if cwds.is_empty() {
+    // Every cwd an event keyed on `agent` names, wherever it sits in the run.
+    let named = |agent: &AgentId| -> Vec<PathBuf> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::SessionStart { agent_id, cwd, .. } if agent_id == agent => {
+                    Some(cwd.as_path())
+                }
+                AgentEvent::Identity {
+                    agent_id,
+                    cwd: Some(cwd),
+                    ..
+                } if agent_id == agent => Some(cwd.as_path()),
+                _ => None,
+            })
+            .filter(|c| !c.as_os_str().is_empty())
+            .map(canonical)
+            .collect()
+    };
+    let mut cwds: Vec<PathBuf> = Vec::new();
+    let mut started = false;
+    for e in events {
+        let AgentEvent::SessionStart {
+            agent_id,
+            cwd,
+            parent_id,
+            ..
+        } = e
+        else {
+            continue;
+        };
+        started = true;
+        if parent_id.is_none() || !cwd.as_os_str().is_empty() {
+            cwds.push(canonical(cwd));
+            continue;
+        }
+        // A child's registration may carry no cwd when another event keyed on
+        // it names one (grok's spawn line, whose `subagent_start` does).
+        let own = named(agent_id);
+        if own.is_empty() {
+            findings.push((Label::Fail, "a child's cwd was never named".into()));
+        }
+        cwds.extend(own);
+    }
+    if !started {
         findings.push((Label::Fail, "no SessionStart decoded".into()));
     } else if let Some(bad) = cwds.iter().find(|c| **c != want) {
         findings.push((
             Label::Fail,
             format!(
-                "SessionStart cwd {} is not the workspace {}",
+                "cwd {} is not the workspace {}",
                 bad.display(),
                 want.display()
             ),
@@ -677,6 +717,9 @@ mod tests {
         "agents=[ds\u{b7}proj@0:waiting(bash: escalate)]\nagents=[] daemons=[]\n";
     const DS_DELEGATE_SCENE: &str = "agents=[ds\u{b7}proj@0:active(Delegating), \
                                      ds\u{b7}proj@1:active(read)]\nagents=[] daemons=[]\n";
+    const GK_SCENE: &str = "agents=[gk\u{b7}proj@0:active(read_file)]\nagents=[] daemons=[]\n";
+    const GK_DELEGATE_SCENE: &str = "agents=[gk\u{b7}proj@0:active(Delegating), \
+                                     Read the note@1:active(read_file)]\nagents=[] daemons=[]\n";
 
     #[test]
     fn a_recorded_dsh_permission_run_passes() {
@@ -847,6 +890,24 @@ mod tests {
     }
 
     #[test]
+    fn a_recorded_grok_run_passes_each_scenario() {
+        for (shape, scene) in [
+            (Shape::ToolRun, GK_SCENE),
+            (Shape::Subagent, GK_DELEGATE_SCENE),
+        ] {
+            let d = recorded("grok", shape, scene);
+            let v = verify(d.path()).expect("verify");
+            assert_eq!(
+                v.label(),
+                Label::Pass,
+                "{}: {:?}",
+                shape.name(),
+                v.findings()
+            );
+        }
+    }
+
+    #[test]
     fn a_recorded_claude_code_tool_run_passes() {
         let d = run_from("claude-code", "tool-run-recorded", CC_SCENE);
         let v = verify(d.path()).expect("verify");
@@ -877,6 +938,53 @@ mod tests {
             m.capture.workspace = PathBuf::from("/elsewhere")
         });
         let v = verify(d.path()).expect("verify");
+        assert!(
+            has(&v, Label::Fail, "is not the workspace"),
+            "{:?}",
+            v.findings()
+        );
+    }
+
+    #[test]
+    fn only_a_childs_registration_may_name_no_cwd_and_its_own_event_must() {
+        let id = |id: &str| crate::AgentId::from_parts("grok", id);
+        let start = |agent: &str, cwd: &str, parent: Option<&str>| AgentEvent::SessionStart {
+            agent_id: id(agent),
+            source: "grok".into(),
+            session_id: agent.into(),
+            cwd: cwd.into(),
+            parent_id: parent.map(id),
+        };
+        let backfill = |agent: &str, cwd: &str| AgentEvent::Identity {
+            agent_id: id(agent),
+            source: "grok".into(),
+            session_id: agent.into(),
+            cwd: Some(cwd.into()),
+            pid: None,
+        };
+        let ws = Path::new("/w");
+        let judged = |events: &[AgentEvent]| {
+            let mut f = Vec::new();
+            started_in(events, ws, 2, &mut f);
+            Verdict::new(f)
+        };
+        let root = start("p", "/w", None);
+        // grok's spawn line registers the child with no cwd.
+        let child = start("c", "", Some("p"));
+        let v = judged(&[root.clone(), child.clone(), backfill("c", "/w")]);
+        assert_eq!(v.label(), Label::Pass, "{:?}", v.findings());
+        // The root naming the workspace does not stand in for the child.
+        let v = judged(&[root.clone(), child.clone()]);
+        assert!(has(&v, Label::Fail, "never named"), "{:?}", v.findings());
+        // A back-filled cwd is held to the workspace too.
+        let v = judged(&[root, child, backfill("c", "/elsewhere")]);
+        assert!(
+            has(&v, Label::Fail, "is not the workspace"),
+            "{:?}",
+            v.findings()
+        );
+        // A root that loses its cwd is no child awaiting one.
+        let v = judged(&[start("p", "", None), start("c", "/w", Some("p"))]);
         assert!(
             has(&v, Label::Fail, "is not the workspace"),
             "{:?}",

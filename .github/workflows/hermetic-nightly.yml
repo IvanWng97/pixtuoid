@@ -16,9 +16,14 @@ jobs:
   # Runs no CLI, so nothing it saves came from one; every `run`, here and in
   # CI, restores main's last save.
   build:
-    name: hermetic build
-    runs-on: macos-latest
-    timeout-minutes: 30
+    name: hermetic build (${{ matrix.runner }})
+    # One leg per `hermetic.yml` run OS: rust-cache keys a save by rustc's host.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     cache-mode: write
     permissions:
       contents: read
@@ -49,9 +54,10 @@ jobs:
     permissions:
       issues: write
     steps:
+      # Each failed leg's runs, in a directory named after its artifact.
       - uses: actions/download-artifact@v8
         with:
-          name: ${{ needs.drift.outputs.runs }}
+          pattern: ${{ needs.drift.outputs.runs-stem }}*
 
       - name: Open or update tracking issue
         env:
@@ -61,15 +67,25 @@ jobs:
           set -euo pipefail
           gh label create hermetic --color FBCA04 \
             --description "A hermetic run's verdict on an agent CLI's latest release" 2>/dev/null || true
-          # The orchestrator owns the title, as the report's H1, and it carries
-          # the disposition: retitle on the dedup path too. No report.md means
-          # the tier itself could not run: red, with no verdict to file.
-          title=$(head -1 report.md | sed 's/^# //')
+          # The orchestrator owns the title, as each failed leg's report H1
+          # naming its OS, and they carry the disposition: retitle on the dedup
+          # path too. A leg whose runs hold no report.md could not run: red,
+          # once the others are filed.
+          reports=(*/report.md)
+          title=$(for r in "${reports[@]}"; do head -1 "$r" | sed 's/^# //'; done | awk 'NR > 1 { printf "; " } { printf "%s", $0 }')
           num=$(gh issue list --label hermetic --state open \
             --json number --jq '.[0].number // empty')
           if [ -n "$num" ]; then
             gh issue edit "$num" --title "$title"
-            gh issue comment "$num" --body-file report.md
+            filed=0
           else
-            gh issue create --title "$title" --label hermetic --body-file report.md
+            url=$(gh issue create --title "$title" --label hermetic --body-file "${reports[0]}")
+            num=${url##*/}
+            filed=1
           fi
+          for r in "${reports[@]:filed}"; do
+            gh issue comment "$num" --body-file "$r"
+          done
+          for d in */; do
+            [ -f "${d}report.md" ] || { echo "::error::${d%/} holds no report.md"; exit 1; }
+          done

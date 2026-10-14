@@ -10,13 +10,16 @@ use crate::state::{ActivityState, AgentSlot, SceneState, ToolKind, fsm, scope};
 
 #[doc(hidden)]
 pub use crate::state::correlation::{
-    CHILD_END_LEDGER_TTL, CHILD_END_RELINK_TTL, HOOK_SESSION_END_TOMBSTONE_TTL, HOOK_WINS_WINDOW,
-    PROOF_OF_LIFE_TTL,
+    CHILD_END_GATE_TTL, CHILD_END_RELINK_TTL, HOOK_WINS_WINDOW, PROOF_OF_LIFE_TTL, STRAGGLER_TTL,
 };
 
 /// How long to keep an exiting agent's slot alive after `SessionEnd` so the
 /// walkout-to-door animation has time to play before the slot is removed.
 pub const EXIT_GRACE_WINDOW: Duration = Duration::from_millis(4500);
+
+// A hook end's clock runs from the end, so it must outlast the walkout it
+// spans, or an exiting slot's end would expire before its slot does.
+const _: () = assert!(EXIT_GRACE_WINDOW.as_nanos() < STRAGGLER_TTL.as_nanos());
 
 /// Defers a drained parent's b1 cascade (#151): one FSEvents coalescing hop,
 /// deliberately NOT the `DEFAULT_POLL_INTERVAL` backstop.
@@ -140,6 +143,67 @@ fn backfill_identity<'a>(slot: &mut AgentSlot, ctx: IdentityCtx<'a>) -> Option<&
     None
 }
 
+/// What a creating or reviving event asks of an id, for [`Reducer::authorizes`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Attempt {
+    /// A `SessionStart`, judged on the parent it names itself, before its
+    /// remembered parent is adopted.
+    Start { parented: bool },
+    /// A hook `Identity` (#221), which names no parent.
+    Identity,
+    /// A hook tool or permission event that shows activity, synthesizing a slot.
+    HookActivity,
+}
+
+/// What [`Reducer::authorizes`] lets an attempt do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Verdict {
+    Create,
+    /// Fold into the id's slot, and resurrect it in place when `revive`.
+    Enrich {
+        revive: bool,
+    },
+    /// Neither: the id has no slot and may not get one.
+    Refuse(Refusal),
+}
+
+/// Why [`Reducer::authorizes`] refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Refusal {
+    /// An event of a life that ended within the straggler window (#242).
+    Straggler,
+    /// A parented re-registration of a child that already ended (#244).
+    ChildEnded,
+    /// A transcript sight of a top-level life a hook ended.
+    HookOwnsRevival,
+}
+
+impl Refusal {
+    fn log_start(self, agent_id: AgentId, ctx: IdentityCtx, proposed_parent: Option<AgentId>) {
+        let session_id = ctx.session_id;
+        match self {
+            Self::Straggler => tracing::warn!(
+                ?agent_id,
+                ?session_id,
+                ?proposed_parent,
+                "skipped child SessionStart — its SessionEnd already passed \
+                 (a late or reordered start, #242)"
+            ),
+            Self::ChildEnded => tracing::warn!(
+                ?agent_id,
+                ?session_id,
+                ?proposed_parent,
+                "skipped child SessionStart — the child already ended (#244)"
+            ),
+            Self::HookOwnsRevival => tracing::debug!(
+                ?agent_id,
+                ?session_id,
+                "skipped a transcript's first sight — a hook ended this session"
+            ),
+        }
+    }
+}
+
 /// Verdict of [`Reducer::preprocess`]. `#[must_use]` because every `Drop` arm
 /// exists to STOP the event reaching the dispatch match — silently ignoring one
 /// re-opens the leak or the double-apply the pre-pass was added to close.
@@ -257,6 +321,7 @@ impl Reducer {
                     cwd: &cwd,
                 },
                 parent_id,
+                from,
                 now,
             ),
             // The tracker owns every Task-dispatch Start, replays included.
@@ -286,7 +351,7 @@ impl Reducer {
                 Self::apply_rename(scene, agent_id, &label, now);
             }
             AgentEvent::SessionEnd { agent_id, as_child } => {
-                self.apply_session_end(scene, agent_id, as_child, now);
+                self.apply_session_end(scene, agent_id, as_child, from, now);
             }
             AgentEvent::ProofOfLife { agent_id } => {
                 self.apply_proof_of_life(scene, agent_id, now);
@@ -352,11 +417,6 @@ impl Reducer {
         self.expire_pending_idles(scene, now);
 
         if from == Transport::Hook {
-            // A SessionEnd for an UNKNOWN id tombstones it: the session ended
-            // while invisible, and a straggler must not resurrect it below.
-            if matches!(event, AgentEvent::SessionEnd { .. }) && !scene.agents.contains_key(&id) {
-                self.corr.recent_hook_session_ends.insert(id, now);
-            }
             self.synthesize_hook_registration(scene, event, id, now);
         }
 
@@ -602,13 +662,10 @@ impl Reducer {
         scene: &mut SceneState,
         agent_id: AgentId,
         as_child: bool,
+        from: Transport,
         now: SystemTime,
     ) {
-        // Stamped REGARDLESS of slot existence (#244): a Stop-before-Start
-        // reorder has none, and for a known slot it outlives the exit-grace GC.
-        if as_child {
-            self.corr.child_ledger.entry(agent_id).or_default().ended_at = Some(now);
-        }
+        self.corr.note_end(agent_id, from, as_child, now);
         scope::cascade_exit(scene, agent_id, scope::StampRoot::Yes, now);
     }
 
@@ -655,13 +712,7 @@ impl Reducer {
             // Identity is hook-only, so the process is alive: a JSONL-seeded
             // unknown-cwd flag must not keep `STALE_UNKNOWN_CWD_TIMEOUT` armed.
             slot.unknown_cwd = false;
-        } else if !self.corr.hook_session_end_tombstoned(agent_id, now)
-            // The child ledger too (#244-w2): an Identity carries no parent, so
-            // without this an omp session batch whose parented Start the ledger
-            // just refused would re-register the ended child PARENTLESS one
-            // event later. A never-child id is never in the ledger, so the
-            // Reasonix parentless resurrect keeps registering.
-            && !self.corr.child_recently_ended(agent_id, now)
+        } else if self.authorizes(scene, agent_id, Attempt::Identity, from, now) == Verdict::Create
             && self.register_slot(scene, agent_id, ctx, None, now)
             && let Some(slot) = scene.agents.get_mut(&agent_id)
         {
@@ -704,24 +755,28 @@ impl Reducer {
         }
     }
 
-    /// The `SessionStart` arm. Two refusal gates run BEFORE ledger adoption, so
-    /// a parentless revival still passes and gets re-linked (#246).
+    /// The `SessionStart` arm. The authority decision runs on the start's own
+    /// parent, BEFORE its remembered parent is adopted, so a parentless revival
+    /// still passes and gets re-linked (#246).
     fn apply_session_start(
         &mut self,
         scene: &mut SceneState,
         agent_id: AgentId,
         ctx: IdentityCtx,
         parent_id: Option<AgentId>,
+        from: Transport,
         now: SystemTime,
     ) {
-        if self.late_child_start_refused(scene, agent_id, ctx, parent_id, now) {
+        let parented = parent_id.is_some();
+        let verdict = self.authorizes(scene, agent_id, Attempt::Start { parented }, from, now);
+        if let Verdict::Refuse(refusal) = verdict {
+            refusal.log_start(agent_id, ctx, parent_id);
             return;
         }
         let parent_id = self.resolve_parent_link(scene, agent_id, ctx, parent_id);
-        if self.enrich_existing_start(scene, agent_id, ctx, parent_id, now) {
-            return;
-        }
-        if self.register_slot(scene, agent_id, ctx, parent_id, now) {
+        if let Verdict::Enrich { revive } = verdict {
+            self.enrich_existing_start(scene, agent_id, ctx, parent_id, revive, now);
+        } else if self.register_slot(scene, agent_id, ctx, parent_id, now) {
             // A desk-exhaustion refusal records nothing — nothing registered.
             if let Some(p) = parent_id {
                 self.corr.link_applied_parent(agent_id, p);
@@ -729,55 +784,58 @@ impl Reducer {
         }
     }
 
-    /// Refuse a LATE parented start whose end already passed, on two clocks: the
-    /// #242 tombstone and the #244-w2 child ledger, whose `ended_at` outlives the
-    /// slot and so covers windows the tombstone can't. Parentless starts are
-    /// exempt BY CONSTRUCTION — Reasonix's SessionEnd→SessionStart resurrect
-    /// rides the same cwd-keyed parentless id and must keep registering.
-    fn late_child_start_refused(
+    /// What `attempt`, arriving on `from`, may do to `id`'s slot: the ONE
+    /// creation-polarity decision every registering arm applies. Desk capacity
+    /// and parent cycles are structure, not authority, and stay out.
+    fn authorizes(
         &self,
         scene: &SceneState,
-        agent_id: AgentId,
-        ctx: IdentityCtx,
-        parent_id: Option<AgentId>,
+        id: AgentId,
+        attempt: Attempt,
+        from: Transport,
         now: SystemTime,
-    ) -> bool {
-        if parent_id.is_none() || scene.agents.contains_key(&agent_id) {
-            return false;
+    ) -> Verdict {
+        let corr = &self.corr;
+        let starts_fresh = attempt == Attempt::Start { parented: false };
+        // A transcript's first sight proves only that a file exists: codex
+        // writes its rollout at exit, after its hook end.
+        let revival_owned =
+            starts_fresh && from != Transport::Hook && corr.hook_owns_revival(id, now);
+        if let Some(slot) = scene.agents.get(&id) {
+            // Only an exiting ROOT revives, so a late duplicate can't un-exit a
+            // cascaded subagent.
+            let revive = starts_fresh
+                && slot.exiting_at.is_some()
+                && slot.parent_id.is_none()
+                && !revival_owned;
+            return Verdict::Enrich { revive };
         }
-        let session_id = ctx.session_id;
-        // #242: hook deliveries ride per-connection tasks, so a subagent's
-        // SubagentStop can be DECODED first. TRANSPORT-AGNOSTIC; NOT consumed.
-        if self.corr.hook_session_end_tombstoned(agent_id, now) {
-            tracing::warn!(
-                ?agent_id,
-                ?session_id,
-                proposed_parent = ?parent_id,
-                "skipped child SessionStart — its hook SessionEnd already passed \
-                 (a late or reordered start, #242)"
-            );
-            return true;
-        }
-        // #244-w2: a child that ended on a KNOWN slot mints no tombstone, so
-        // after the exit grace GC a late first-sight would revive a phantom.
-        if self.corr.child_recently_ended(agent_id, now) {
-            tracing::warn!(
-                ?agent_id,
-                ?session_id,
-                proposed_parent = ?parent_id,
-                "skipped child SessionStart — the child already ended \
-                 (child ledger, #244)"
-            );
-            return true;
-        }
-        false
+        let refusal = match attempt {
+            Attempt::Start { parented: false } if revival_owned => Some(Refusal::HookOwnsRevival),
+            Attempt::Start { parented: false } => None,
+            // #242: hook deliveries ride per-connection tasks, so an end can be
+            // DECODED ahead of its life's trailing events.
+            _ if corr.ended_within_straggler_window(id, now) => Some(Refusal::Straggler),
+            Attempt::HookActivity => None,
+            // #244-w2: an Identity carries no parent, so without this an omp
+            // batch whose parented Start was just refused would re-register the
+            // ended child parentless one event later.
+            Attempt::Start { parented: true } | Attempt::Identity
+                if corr.child_recently_ended(id, now) =>
+            {
+                Some(Refusal::ChildEnded)
+            }
+            Attempt::Start { parented: true } | Attempt::Identity => None,
+        };
+        refusal.map_or(Verdict::Create, Verdict::Refuse)
     }
 
-    /// Ledger adoption (#246 / #244-w1) then the #240 cycle refusal. A
-    /// PARENTLESS start for an id whose ledger remembers an applied parent is a
-    /// same-id new life of a known CHILD; adopting re-joins it to the scope tree,
-    /// and a poisoned ledger still degrades to parentless. This is the ONE seam
-    /// where `parent_id` is set or enriched, so a cycle can never EXIST.
+    /// Adoption of the remembered parent (#246 / #244-w1) then the #240 cycle
+    /// refusal. A PARENTLESS start for an id whose lifecycle remembers an
+    /// applied parent is a same-id new life of a known CHILD; adopting re-joins
+    /// it to the scope tree, and a poisoned memory still degrades to
+    /// parentless. This is the ONE seam where `parent_id` is set or enriched,
+    /// so a cycle can never EXIST.
     fn resolve_parent_link(
         &self,
         scene: &SceneState,
@@ -787,12 +845,7 @@ impl Reducer {
     ) -> Option<AgentId> {
         // Revivals are deliberately NOT blocked the way parented
         // re-registrations are: a linked slot rides the parent cascade.
-        let parent_id = parent_id.or_else(|| {
-            self.corr
-                .child_ledger
-                .get(&agent_id)
-                .and_then(|e| e.parent_id)
-        });
+        let parent_id = parent_id.or_else(|| self.corr.remembered_parent(agent_id));
         // Gated on the link APPLYING, so a duplicate's bad parent stays quiet.
         let link_would_apply = scene
             .agents
@@ -818,21 +871,22 @@ impl Reducer {
         })
     }
 
-    /// Fold a duplicate or late `SessionStart` into an EXISTING slot; returns
-    /// whether one existed. A pending parent link is applied ONCE — never
-    /// re-parented — and revives the ledger entry (#244/#246). A duplicate is
-    /// genuine liveness (Codex/Reasonix re-emit one per `UserPromptSubmit`), and
-    /// an EXITING root resurrects, root-gated BOTH sides or a live root resets.
+    /// Fold a duplicate or late `SessionStart` into an EXISTING slot. A
+    /// pending parent link is applied ONCE — never re-parented — and revives its
+    /// lifecycle (#244/#246). A duplicate is genuine liveness (Codex/Reasonix
+    /// re-emit one per `UserPromptSubmit`), and an exiting root resurrects when
+    /// `revive` and no parent was adopted, or a live root resets.
     fn enrich_existing_start(
         &mut self,
         scene: &mut SceneState,
         agent_id: AgentId,
         ctx: IdentityCtx,
         parent_id: Option<AgentId>,
+        revive: bool,
         now: SystemTime,
-    ) -> bool {
+    ) {
         let Some(slot) = scene.agents.get_mut(&agent_id) else {
-            return false;
+            return;
         };
         if slot.parent_id.is_none()
             && let Some(p) = parent_id
@@ -858,7 +912,8 @@ impl Reducer {
             ));
         }
         slot.last_event_at = now;
-        if slot.exiting_at.is_some() && slot.parent_id.is_none() && parent_id.is_none() {
+        // An adopted parent makes it a child, which rides its parent's cascade.
+        if revive && parent_id.is_none() {
             // Route through fsm so an in-flight Active span folds into
             // `active_ms` — a direct `state = Idle` here silently dropped it.
             fsm::resurrect_in_place(slot, now);
@@ -866,13 +921,12 @@ impl Reducer {
             // `recent_proof_of_life` deliberately SURVIVES a resurrect.
             self.remove_agent_correlation(&agent_id);
         }
-        true
     }
 
     /// A hook event is PROOF OF LIFE, so a tool/permission event whose id has no
     /// slot registers one — that session's transcript was gated at first sight.
     /// JSONL must NOT synthesize: a transcript line can be a historical replay.
-    /// Only `ActivityStart`/`ActivityEnd`/`Waiting` qualify. Since #221 decoders
+    /// Only an event that [`AgentEvent::shows_activity`] qualifies. Since #221 decoders
     /// attach an `Identity` ahead, leaving this the identity-less fallback.
     fn synthesize_hook_registration(
         &mut self,
@@ -881,19 +935,11 @@ impl Reducer {
         id: AgentId,
         now: SystemTime,
     ) {
-        if scene.agents.contains_key(&id)
-            || !matches!(
-                event,
-                AgentEvent::ActivityStart { .. }
-                    | AgentEvent::ActivityEnd { .. }
-                    | AgentEvent::Waiting { .. }
-            )
+        // A blank Idle ghost of a DEAD session is unremovable.
+        if !event.shows_activity()
+            || self.authorizes(scene, id, Attempt::HookActivity, Transport::Hook, now)
+                != Verdict::Create
         {
-            return;
-        }
-        // A tombstoned id's hook SessionEnd already arrived slot-less: this is a
-        // straggler from the DEAD session, and a blank Idle ghost is unremovable.
-        if self.corr.hook_session_end_tombstoned(id, now) {
             return;
         }
         if self.register_slot(
@@ -1227,7 +1273,7 @@ impl Reducer {
 
     /// Drop the per-slot correlation a departing agent id owns, reclaimed on
     /// BOTH a resurrect-in-place and a slot removal. Death-only teardown
-    /// (`recent_proof_of_life`, the `child_ledger` stamp) deliberately stays at
+    /// (`recent_proof_of_life`, [`Correlation::note_removed`]) deliberately stays at
     /// the sweep site — it must NOT run on a resurrect.
     fn remove_agent_correlation(&mut self, id: &AgentId) {
         self.corr.active_tasks.remove(id);
@@ -1256,11 +1302,7 @@ impl Reducer {
             self.remove_agent_correlation(&id);
             // Evict with the slot, else a same-id ghost inherits the vouch.
             self.corr.recent_proof_of_life.remove(&id);
-            // A CHILD whose end wasn't `as_child` starts its ledger GC clock
-            // here, arming #244-w2; `get_or_insert` keeps an earlier stamp.
-            if let Some(entry) = self.corr.child_ledger.get_mut(&id) {
-                entry.ended_at.get_or_insert(now);
-            }
+            self.corr.note_removed(id, now);
         }
     }
 }
