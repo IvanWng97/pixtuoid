@@ -72,9 +72,9 @@ mod run {
             "TEMP",
         ],
     };
-    /// What npm and aimock inherit beyond [`INHERITED`]: npm's own config, cache
-    /// and network settings. A CLI's install scripts and the npm-installed aimock
-    /// are untrusted code, so no provider key reaches them either.
+    /// What npm and aimock inherit beyond [`inherited`]: network settings, with
+    /// npm's home in [`PLATFORM_TOOL_INHERITED`]. A CLI's install scripts and the
+    /// npm-installed aimock are untrusted code, so no provider key reaches them.
     const TOOL_INHERITED: &[&str] = &[
         "HTTP_PROXY",
         "HTTPS_PROXY",
@@ -1434,28 +1434,44 @@ mod run {
                     ("npm_config_cache", Some("/npm-cache")),
                 ],
                 || {
-                    let c = tool("anything");
-                    let envs: Vec<(String, Option<String>)> = c
-                        .get_envs()
-                        .map(|(k, v)| {
-                            (
-                                k.to_string_lossy().into_owned(),
-                                v.map(|v| v.to_string_lossy().into_owned()),
-                            )
-                        })
-                        .collect();
-                    assert!(
-                        !envs
-                            .iter()
-                            .any(|(k, _)| k.eq_ignore_ascii_case("ANTHROPIC_API_KEY")),
-                        "{envs:?}"
-                    );
-                    assert!(
-                        envs.iter()
-                            .any(|(k, v)| k.eq_ignore_ascii_case("npm_config_cache")
-                                && v.as_deref() == Some("/npm-cache")),
-                        "{envs:?}"
-                    );
+                    // A real child: `get_envs` shows no variable the child would inherit.
+                    let runs = |argv: &[&str]| {
+                        tool(argv[0])
+                            .args(&argv[1..])
+                            .status()
+                            .expect("the shell runs")
+                            .success()
+                    };
+                    #[cfg(unix)]
+                    assert!(runs(&[
+                        "sh",
+                        "-c",
+                        r#"test -z "$ANTHROPIC_API_KEY" && test "$npm_config_cache" = /npm-cache"#,
+                    ]));
+                    #[cfg(windows)]
+                    {
+                        let key = [
+                            "cmd",
+                            "/c",
+                            "if",
+                            "defined",
+                            "ANTHROPIC_API_KEY",
+                            "exit",
+                            "1",
+                        ];
+                        assert!(runs(&key), "a provider key reached the child");
+                        let npm = [
+                            "cmd",
+                            "/c",
+                            "if",
+                            "not",
+                            "defined",
+                            "npm_config_cache",
+                            "exit",
+                            "1",
+                        ];
+                        assert!(runs(&npm), "npm's config missed the child");
+                    }
                 },
             );
         }

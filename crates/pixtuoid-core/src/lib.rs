@@ -50,8 +50,6 @@ pub mod harness;
 /// Agent identity: the `AgentId` session key and its path/parts derivations.
 pub mod id;
 pub mod platform;
-#[cfg(windows)]
-pub(crate) mod security_descriptor;
 /// The source/decoder seam — the `Source` trait, per-CLI transcript/hook
 /// decoders, listeners, and the `SourceManager`.
 pub mod source;
@@ -61,6 +59,8 @@ pub mod sprite;
 /// The reducer and `SceneState` — the event coordinator turning `AgentEvent`s
 /// into per-agent slot state.
 pub mod state;
+#[cfg(windows)]
+pub(crate) mod win32;
 // `WalkableMask` is an ALIAS for `Grid<bool>` whose obstacle ops are an
 // inherent `impl Grid<bool>`, and the orphan rule pins that impl to the crate
 // owning `Grid` — so the mask vocabulary stays here even though its producers

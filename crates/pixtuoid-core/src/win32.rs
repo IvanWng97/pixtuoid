@@ -1,12 +1,33 @@
-//! A Windows security descriptor built from SDDL, for each object created
-//! under it: the hook's pipe, the capture rig's private directory.
+//! What the crate's Windows code shares: wide strings, and a security
+//! descriptor built from SDDL for each object created under it (the hook's
+//! pipe, the capture rig's private directory).
+
+use std::ffi::{OsStr, OsString};
 
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
-use windows_sys::core::PCWSTR;
+
+/// `s` as the NUL-terminated wide string a Win32 call takes.
+pub(crate) fn nul_terminated(s: &OsStr) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    s.encode_wide().chain(Some(0)).collect()
+}
+
+/// The wide string a Win32 call wrote at `p`, up to its NUL.
+///
+/// # Safety
+///
+/// `p` points to a live NUL-terminated UTF-16 string.
+pub(crate) unsafe fn wide_at(p: *const u16) -> OsString {
+    use std::os::windows::ffi::OsStringExt;
+    // SAFETY: the caller's contract: every unit up to the NUL is readable.
+    let units =
+        unsafe { std::slice::from_raw_parts(p, (0..).take_while(|&i| *p.add(i) != 0).count()) };
+    OsString::from_wide(units)
+}
 
 /// Held alive for as long as a create call may borrow its attributes.
 pub(crate) struct SecurityDescriptor {
@@ -29,14 +50,15 @@ impl std::fmt::Debug for SecurityDescriptor {
 unsafe impl Send for SecurityDescriptor {}
 
 impl SecurityDescriptor {
-    /// The descriptor `sddl` spells, a NUL-terminated wide string (`w!`).
-    pub(crate) fn from_sddl(sddl: PCWSTR) -> std::io::Result<Self> {
+    /// The descriptor `sddl` spells.
+    pub(crate) fn from_sddl(sddl: &str) -> std::io::Result<Self> {
+        let wide = nul_terminated(OsStr::new(sddl));
         let mut psd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
-        // SAFETY: `sddl` is a valid NUL-terminated UTF-16 string, psd is a live
+        // SAFETY: `wide` is NUL-terminated and outlives the call, psd is a live
         // out-pointer, and the size out-param is documented optional (null allowed).
         let ok = unsafe {
             ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                sddl,
+                wide.as_ptr(),
                 SDDL_REVISION_1,
                 &mut psd,
                 std::ptr::null_mut(),
@@ -130,9 +152,9 @@ pub(crate) mod tests_support {
             "ConvertSecurityDescriptorToStringSecurityDescriptorW"
         );
         // SAFETY: `text` is the NUL-terminated string the conversion allocated.
-        let sddl = String::from_utf16_lossy(unsafe {
-            std::slice::from_raw_parts(text, (0..).take_while(|&i| *text.add(i) != 0).count())
-        });
+        let sddl = unsafe { super::wide_at(text) }
+            .to_string_lossy()
+            .into_owned();
         // SAFETY: LocalAlloc'd by the conversion, freed once here.
         unsafe { LocalFree(text.cast()) };
         sddl

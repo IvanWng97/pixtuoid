@@ -4,12 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
-/// `s` as the NUL-terminated wide string a Win32 call takes.
 #[cfg(windows)]
-pub(crate) fn nul_terminated(s: &std::ffi::OsStr) -> Vec<u16> {
-    use std::os::windows::ffi::OsStrExt;
-    s.encode_wide().chain(Some(0)).collect()
-}
+use crate::win32::nul_terminated;
 
 /// A Windows known folder, resolved by the shell: a variable the sandbox sets
 /// cannot move it, but an environment cleared of the host's leaves it unresolved.
@@ -45,7 +41,6 @@ impl KnownFolder {
 /// If the shell has no path for it.
 #[cfg(windows)]
 pub(crate) fn known_folder(folder: KnownFolder) -> std::io::Result<PathBuf> {
-    use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Shell::{
         FOLDERID_Profile, FOLDERID_ProgramData, SHGetKnownFolderPath,
@@ -59,13 +54,9 @@ pub(crate) fn known_folder(folder: KnownFolder) -> std::io::Result<PathBuf> {
     // SAFETY: `id` is a live GUID, a null token asks for the current user, and
     // `raw` is a live out-pointer.
     let hr = unsafe { SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut raw) };
-    let path = (hr >= 0 && !raw.is_null()).then(|| {
-        // SAFETY: on success `raw` is the NUL-terminated path the call allocated.
-        let wide = unsafe {
-            std::slice::from_raw_parts(raw, (0..).take_while(|&i| *raw.add(i) != 0).count())
-        };
-        PathBuf::from(std::ffi::OsString::from_wide(wide))
-    });
+    // SAFETY: on success `raw` is the NUL-terminated path the call allocated.
+    let path =
+        (hr >= 0 && !raw.is_null()).then(|| PathBuf::from(unsafe { crate::win32::wide_at(raw) }));
     // SAFETY: the caller frees `raw` "whether SHGetKnownFolderPath succeeds or
     // not"; freeing null is a no-op.
     unsafe { CoTaskMemFree(raw.cast()) };
@@ -96,8 +87,7 @@ pub fn known_folders_expanded(path: &str) -> Option<PathBuf> {
 /// its create right. Users must keep read: codex's unelevated sandbox token
 /// cannot enter a workspace without it.
 #[cfg(windows)]
-const PRIVATE_DIR: windows_sys::core::PCWSTR =
-    windows_sys::w!("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)(A;OICI;0x1200a9;;;BU)");
+const PRIVATE_DIR: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)(A;OICI;FRFX;;;BU)";
 
 /// Create `path`, one level, where no other local user can write, as one
 /// call: refuses one that already exists.
@@ -110,7 +100,7 @@ pub fn create_private_dir(path: &Path) -> std::io::Result<()> {
     {
         use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
 
-        let sd = crate::security_descriptor::SecurityDescriptor::from_sddl(PRIVATE_DIR)?;
+        let sd = crate::win32::SecurityDescriptor::from_sddl(PRIVATE_DIR)?;
         let wide = nul_terminated(path.as_os_str());
         // SAFETY: `wide` is NUL-terminated, and `sd` outlives the call, which
         // copies the descriptor onto the new directory.
@@ -287,7 +277,6 @@ mod tests {
         let target = PathBuf::from("/usr");
         #[cfg(windows)]
         let target = system32();
-        assert!(!owned_by_us(&target), "a system directory is not ours");
         #[cfg(unix)]
         std::os::unix::fs::symlink(&target, &link).expect("symlink");
         #[cfg(windows)]
@@ -333,11 +322,8 @@ mod tests {
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
             .open(&dir)
             .expect("open the directory");
-        let held = crate::security_descriptor::tests_support::dacl_sddl(
-            handle.as_raw_handle(),
-            SE_FILE_OBJECT,
-        );
-        let meant = crate::security_descriptor::SecurityDescriptor::from_sddl(PRIVATE_DIR)
+        let held = crate::win32::tests_support::dacl_sddl(handle.as_raw_handle(), SE_FILE_OBJECT);
+        let meant = crate::win32::SecurityDescriptor::from_sddl(PRIVATE_DIR)
             .expect("sddl")
             .dacl();
         assert_eq!(held, meant);

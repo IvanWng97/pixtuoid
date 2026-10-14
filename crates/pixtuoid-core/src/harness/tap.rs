@@ -106,7 +106,7 @@ impl Endpoint {
 fn pipe_accepting(name: &Path) -> bool {
     /// Long enough to find a free instance, short enough to poll with.
     const WAIT_MS: u32 = 1;
-    let wide = super::host::nul_terminated(name.as_os_str());
+    let wide = crate::win32::nul_terminated(name.as_os_str());
     // SAFETY: `wide` is NUL-terminated and outlives the call, which only reads it.
     unsafe { windows_sys::Win32::System::Pipes::WaitNamedPipeW(wide.as_ptr(), WAIT_MS) != 0 }
 }
@@ -115,6 +115,8 @@ fn pipe_accepting(name: &Path) -> bool {
 #[derive(Debug)]
 pub struct Tap {
     lines: Arc<Mutex<Vec<String>>>,
+    /// Why the listener stopped accepting, once it has: every later payload is lost.
+    stopped: Arc<Mutex<Option<String>>>,
 }
 
 impl Tap {
@@ -131,6 +133,8 @@ impl Tap {
     pub fn bind(at: &Endpoint, tee: Option<Endpoint>) -> std::io::Result<Self> {
         let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&lines);
+        let stopped: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let why = Arc::clone(&stopped);
         let ready = at.clone();
         let at = at.path().to_path_buf();
         let (bound_tx, bound_rx) = std::sync::mpsc::channel();
@@ -160,9 +164,14 @@ impl Tap {
                 };
                 let _ = bound_tx.send(Ok(()));
                 let tee = Arc::new(tee);
-                let _ = listener
+                if let Err(e) = listener
                     .serve_raw(move |conn| keep(conn, Arc::clone(&sink), Arc::clone(&tee)))
-                    .await;
+                    .await
+                {
+                    *why.lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                        Some(format!("{e:#}"));
+                }
             });
         });
         bound_rx.recv().map_err(std::io::Error::other)??;
@@ -176,7 +185,7 @@ impl Tap {
             }
             std::thread::sleep(READY_POLL);
         }
-        Ok(Self { lines })
+        Ok(Self { lines, stopped })
     }
 
     fn len(&self) -> usize {
@@ -199,11 +208,25 @@ impl Tap {
     }
 
     /// Every payload so far.
-    pub fn take(&self) -> Vec<String> {
-        self.lines
+    ///
+    /// # Errors
+    ///
+    /// If the listener stopped accepting, which loses every payload after.
+    pub fn take(&self) -> std::io::Result<Vec<String>> {
+        let stopped = self
+            .stopped
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(why) = stopped.as_ref() {
+            return Err(std::io::Error::other(format!(
+                "the tap stopped accepting: {why}"
+            )));
+        }
+        Ok(self
+            .lines
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+            .clone())
     }
 }
 
@@ -267,8 +290,8 @@ mod tests {
         deliver(&at, LINE);
         tap.settle();
         tee.settle();
-        assert_eq!(tap.take(), [LINE]);
-        assert_eq!(tee.take(), [LINE]);
+        assert_eq!(tap.take().expect("accepting"), [LINE]);
+        assert_eq!(tee.take().expect("accepting"), [LINE]);
     }
 
     #[test]
@@ -284,7 +307,7 @@ mod tests {
         );
         deliver(&at, LINE);
         tap.settle();
-        assert_eq!(tap.take(), [LINE]);
+        assert_eq!(tap.take().expect("accepting"), [LINE]);
     }
 
     #[test]
@@ -303,7 +326,7 @@ mod tests {
         let tap = Tap::bind(&at, Some(Endpoint::in_dir(d.path(), "absent"))).expect("tap");
         deliver(&at, LINE);
         tap.settle();
-        assert_eq!(tap.take(), [LINE]);
+        assert_eq!(tap.take().expect("accepting"), [LINE]);
     }
 
     /// The hook server always pre-creates its next instance, so only a server

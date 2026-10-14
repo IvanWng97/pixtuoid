@@ -159,8 +159,8 @@ mod recorder {
         }
         if args.len() < 3 {
             eprintln!(
-                "usage: capture_fixture [{OUT} <dir>] [{TEE} <socket>] [{WITHIN} <dir>] [{ENV} K=V]... \
-                 <source-id> <scenario> <cmd...>   \
+                "usage: capture_fixture [{OUT} <dir>] [{TEE} <socket|pipe>] [{WITHIN} <dir>] [{ENV} K=V]... \
+                 [{CLI_VERSION} <version>] [{WORKSPACE} <dir>] <source-id> <scenario> <cmd...>   \
                  ('{{prompt}}' expands)\n       \
                  capture_fixture --strip-corpus   (strip every committed capture in place)\n       \
                  capture_fixture {PROMOTE} <run>   (write a hermetic run into its fixture)"
@@ -217,7 +217,7 @@ mod recorder {
             &options.env,
         )?;
         tap.settle();
-        let payloads = tap.take();
+        let payloads = tap.take()?;
 
         std::fs::create_dir_all(&dest)?;
         let mut wrote: Vec<PathBuf> = Vec::new();

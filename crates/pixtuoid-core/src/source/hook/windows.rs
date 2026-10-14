@@ -7,9 +7,8 @@ use tokio::net::windows::named_pipe::{NamedPipeServer, PipeMode, ServerOptions};
 use tokio::sync::Semaphore;
 use tracing::warn;
 use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
-use windows_sys::core::PCWSTR;
 
-use crate::security_descriptor::SecurityDescriptor;
+use crate::win32::SecurityDescriptor;
 
 use super::{CONN_TIMEOUT, MAX_CONCURRENT_CONNS};
 
@@ -20,7 +19,7 @@ const IN_BUFFER_SIZE: u32 = 1 << 20;
 
 /// Owner-only, the named-pipe equivalent of the Unix socket's umask-0700,
 /// closing the default DACL's Everyone-READ.
-const OWNER_ONLY: PCWSTR = windows_sys::w!("D:P(A;;GA;;;OW)");
+const OWNER_ONLY: &str = "D:P(A;;GA;;;OW)";
 
 /// A hook pipe instance under `sd`. `first` claims `first_pipe_instance`: ONLY
 /// the initial bind may, so a taken name surfaces as the typed `SocketBusy`.
@@ -130,7 +129,7 @@ mod tests {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Security::Authorization::SE_KERNEL_OBJECT;
 
-    use crate::security_descriptor::tests_support::dacl_sddl;
+    use crate::win32::tests_support::dacl_sddl;
 
     /// No API reads `PIPE_REJECT_REMOTE_CLIENTS` back off a pipe — neither
     /// [`GetNamedPipeInfo`](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-getnamedpipeinfo)
