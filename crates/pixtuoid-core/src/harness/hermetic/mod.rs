@@ -97,7 +97,7 @@ pub struct Profile {
     /// `{key}` expand.
     pub env: &'static [(&'static str, &'static str)],
     /// Homes the registry row does not name, each pointed into the sandbox.
-    pub homes: &'static [&'static str],
+    pub(crate) homes: &'static [&'static str],
     /// Fixed system paths the CLI reads policy or config from, which no home
     /// redirects: a run on a machine that has one is not hermetic.
     /// [`USER_PLACEHOLDER`] is the operator's user name. A macOS managed-preferences domain whose
@@ -489,7 +489,7 @@ wire_api = "responses"
         // update-check switches (`:27`, `:183`).
         env: &[
             ("KIMI_MODEL_NAME", "kimi-k2"),
-            ("KIMI_MODEL_BASE_URL", "http://127.0.0.1:{port}/v1"),
+            ("KIMI_MODEL_BASE_URL", AIMOCK_V1),
             ("KIMI_MODEL_API_KEY", "{key}"),
             ("KIMI_DISABLE_TELEMETRY", "1"),
             ("KIMI_CODE_NO_AUTO_UPDATE", "1"),
