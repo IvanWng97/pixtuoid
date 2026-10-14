@@ -710,12 +710,14 @@ mod run {
                 Ok(d)
             };
             let bin = at("bin")?;
+            // The built shim itself, warm across runs: a fresh copy's first run
+            // is a cold exec, and a CLI's first hook went missing behind one.
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&built.shim, bin.join("pixtuoid-hook"))?;
             // A copy: a Windows symlink needs privilege, and a hard link cannot
             // cross from the build's volume to the temp one.
-            std::fs::copy(
-                &built.shim,
-                bin.join(format!("pixtuoid-hook{}", std::env::consts::EXE_SUFFIX)),
-            )?;
+            #[cfg(windows)]
+            std::fs::copy(&built.shim, bin.join("pixtuoid-hook.exe"))?;
             let mut env: Vec<(String, OsString)> = inherited()
                 .filter(|k| *k != "PATH")
                 .filter_map(|k| std::env::var_os(k).map(|v| (k.to_string(), v)))
@@ -1405,6 +1407,14 @@ mod run {
                     let home = sandbox.var(var).expect("set");
                     assert!(home.starts_with(sandbox.dir.path()), "{var} escapes");
                 }
+                #[cfg(unix)]
+                assert!(
+                    std::fs::symlink_metadata(sandbox.dir.path().join("bin/pixtuoid-hook"))
+                        .expect("the shim")
+                        .file_type()
+                        .is_symlink(),
+                    "the shim is the built one, not a cold copy"
+                );
             }
         }
 
