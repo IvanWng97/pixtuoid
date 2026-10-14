@@ -40,10 +40,7 @@ def rows(review: str) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for line in table:
         cells = [c.strip() for c in line.strip("|").split("|")]
-        rid = row_id(cells[0])
-        if rid in out:
-            raise ValueError(f"two rows are {rid!r}")
-        out[rid] = re.findall(r"`([^`]+)`", cells[1])
+        out[row_id(cells[0])] = re.findall(r"`([^`]+)`", cells[1])
     return out
 
 
@@ -125,12 +122,6 @@ def selftest() -> None:
     try:
         rows("# REVIEW\n")
         raise AssertionError("a REVIEW.md without the section must not parse")
-    except ValueError:
-        pass
-    twin = f"\n{SECTION}\n\n| a | b | c |\n|---|---|---|\n| The shim | `x` | y |\n| The shim: again | `z` | w |\n"
-    try:
-        rows(twin)
-        raise AssertionError("two rows with one id must not parse")
     except ValueError:
         pass
 

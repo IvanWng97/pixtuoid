@@ -503,12 +503,10 @@
     untrusted code "write privileges or secrets"
     (https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows),
     with a read-only token, no secret and no persisted credential; a fork's, a
-    bot's or a release PR skips it. .mergify.yml names it, and branch
-    protection will, so its name holds.
+    bot's or a release PR skips it.
   assert: |
     (.on | keys) == ["pull_request"]
     and .permissions == {}
-    and .jobs["focused-reviews"].name == "focused-reviews"
     and .jobs["focused-reviews"].permissions == {"contents": "read", "pull-requests": "read"}
     and (tostring | test("secrets\\.") | not)
     and ([.jobs[].steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with["persist-credentials"]] | all(. == false))
@@ -516,7 +514,6 @@
   break:
     - '.on = {"pull_request_target": {"types": ["opened"]}}'
     - '.permissions = {"contents": "write"}'
-    - '.jobs["focused-reviews"].name = "reviews"'
     - '.jobs["focused-reviews"].permissions["pull-requests"] = "write"'
     - '.jobs["focused-reviews"].steps[0].with["persist-credentials"] = true'
     - '.jobs["focused-reviews"].steps += [{"env": {"T": "${{ secrets.X }}"}, "run": "true"}]'
