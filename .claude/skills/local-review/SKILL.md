@@ -1,7 +1,7 @@
 ---
 name: local-review
 version: 3.1.0
-description: "Run pixtuoid's review locally at either scope — a DIFF review (on demand, for a large or wide change: one lens per matching REVIEW.md focused review; the correctness and design lenses are the automatic CI review's, never re-run locally) or a whole-codebase AUDIT (subsystem × factor fan-out). Use on a large or wide change before its push, on 'is this ready to merge', or on 'whole-codebase review' / pre-release / periodic audit."
+description: "Run pixtuoid's review locally at either scope — a DIFF review (on demand, for a large or wide change: one lens per matching REVIEW.md area rule; the correctness and design lenses are the automatic CI review's, never re-run locally) or a whole-codebase AUDIT (subsystem × factor fan-out). Use on a large or wide change before its push, on 'is this ready to merge', or on 'whole-codebase review' / pre-release / periodic audit."
 metadata:
   scope: "pixtuoid repo only"
 ---
@@ -15,7 +15,7 @@ contract; fill briefs from them, never a paraphrase here.
 
 - **Diff scope**, on demand: a change large or wide enough that a CI review
   round is the expensive way to learn its findings, one lens per matching
-  [focused review](../../../REVIEW.md#focused-reviews). The correctness and
+  [area rule](../../../REVIEW.md#area-rules). The correctness and
   design lenses are the automatic review's; never re-run them here.
 - **Whole-codebase scope**: "audit the repo", a pre-release or periodic sweep.
 
@@ -23,7 +23,7 @@ contract; fill briefs from them, never a paraphrase here.
 
 1. **Isolate** the branch in a worktree (two sessions on one tree race on
    HEAD). Note `path`, `branch`, `base` and `head` sha.
-2. **Dispatch** one lens per matching focused review, in parallel, in the
+2. **Dispatch** one lens per matching area rule, in parallel, in the
    background: `model: sonnet` for a lens that reads evidence or runs a
    mechanical check (test lists, mutations, renders, a walk), `opus` only for
    a design gate. Each briefed:
