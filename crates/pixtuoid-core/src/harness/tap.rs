@@ -324,4 +324,37 @@ mod tests {
         server.connect().await.expect("connected");
         assert!(!at.accepting(), "its one instance is taken");
     }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_send_waits_out_a_pipe_whose_one_instance_is_taken() {
+        use tokio::net::windows::named_pipe::{ClientOptions, ServerOptions};
+        let d = private_dir();
+        let at = Endpoint::in_dir(d.path(), "busy");
+        let mut server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .max_instances(1)
+            .create(at.path())
+            .expect("server");
+        let holder = ClientOptions::new().open(at.path()).expect("holder");
+        server.connect().await.expect("held");
+        let send = tokio::spawn({
+            let at = at.clone();
+            async move { at.send(LINE.as_bytes()).await }
+        });
+        tokio::time::sleep(PIPE_BUSY_BACKOFF * 5).await;
+        drop(holder);
+        server.disconnect().expect("freed");
+        let (connected, sent) = tokio::join!(
+            tokio::time::timeout(PIPE_BUSY_BOUND, server.connect()),
+            send
+        );
+        connected
+            .expect("the send connects once the pipe frees")
+            .expect("connected");
+        sent.expect("joined").expect("sent");
+        let mut got = String::new();
+        server.read_to_string(&mut got).await.expect("read");
+        assert_eq!(got, LINE);
+    }
 }

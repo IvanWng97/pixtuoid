@@ -378,5 +378,9 @@ mod tests {
         assert_eq!(deleted, ERROR_SUCCESS);
         assert!(!registry_key_exists(&key));
         assert!(!registry_key_exists(r"HKXX\Software"), "an unknown hive");
+        assert!(
+            registry_key_exists(r"HKLM\SAM\SAM"),
+            "SYSTEM's alone: unreadable here, so counted"
+        );
     }
 }

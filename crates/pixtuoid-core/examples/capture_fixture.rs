@@ -79,6 +79,17 @@ mod recorder {
         workspace: Option<PathBuf>,
     }
 
+    impl Options {
+        /// Why this host may not run what these options ask: the committed
+        /// corpus pins Unix realpaths and cwds, so only a Unix host writes into
+        /// it; a raw `--out` capture is any host's.
+        fn corpus_refusal(&self) -> Option<&'static str> {
+            (!cfg!(unix) && (self.promote.is_some() || self.out.is_none())).then_some(
+                "recording writes the committed corpus, which pins Unix paths: record on macOS or Linux",
+            )
+        }
+    }
+
     /// Leading option pairs, each a [`pixtuoid_core::harness::recorder_flag`]
     /// and its value, then the positionals.
     fn parse_options(mut args: Vec<String>) -> Result<(Options, Vec<String>), String> {
@@ -142,12 +153,8 @@ mod recorder {
                 std::process::exit(2);
             }
         };
-        // The committed corpus pins Unix realpaths and cwds, so only a Unix
-        // host writes into it; a raw `--out` capture is any host's.
-        if !cfg!(unix) && (options.promote.is_some() || options.out.is_none()) {
-            eprintln!(
-                "recording writes the committed corpus, which pins Unix paths: record on macOS or Linux"
-            );
+        if let Some(why) = options.corpus_refusal() {
+            eprintln!("{why}");
             std::process::exit(2);
         }
         if let Some(run) = options.promote.as_deref() {
@@ -1011,6 +1018,22 @@ mod recorder {
             let file = d.path().join("a-file");
             std::fs::write(&file, "").expect("write");
             assert!(init_repo(&file).is_err(), "a failed step fails it");
+        }
+
+        #[test]
+        fn only_a_unix_host_writes_the_corpus() {
+            let raw = Options {
+                out: Some(PathBuf::from("raw")),
+                ..Options::default()
+            };
+            assert_eq!(raw.corpus_refusal(), None, "a raw capture is any host's");
+            let promote = Options {
+                promote: Some(PathBuf::from("run")),
+                ..raw
+            };
+            for corpus in [Options::default(), promote] {
+                assert_eq!(corpus.corpus_refusal().is_some(), !cfg!(unix), "{corpus:?}");
+            }
         }
 
         #[test]
