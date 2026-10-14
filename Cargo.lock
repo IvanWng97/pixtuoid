@@ -3237,6 +3237,7 @@ dependencies = [
  "palette",
  "pixtuoid-core",
  "proptest",
+ "regex",
  "rustix 1.1.5",
  "semver",
  "serde",
