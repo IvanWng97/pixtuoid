@@ -7,3 +7,4 @@
 # Run scripts via the venv:
 #   .venv/bin/python3 scripts/crop-snapshot.py /tmp/snap.png
 Pillow==12.3.0
+fonttools==4.66.1

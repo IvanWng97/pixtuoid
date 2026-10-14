@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Generate the scene's two pixel faces from pinned open bitmap fonts, and
+"""Generate the scene's two pixel faces from pinned open fonts, and
 write their licenses beside them: crates/pixtuoid-scene/fonts/world.bin, the
 text drawn into the office's art, and screen.bin, the floating window's own
-text, from Fusion Pixel 12px.
+text, from Fusion Pixel 12px. Noto Emoji supplies supplementary glyphs.
 
-Usage: python3 scripts/gen-fonts.py   (just gen-fonts)
+Usage: Python 3.14 with requirements-dev.txt, scripts/gen-fonts.py (just gen-fonts).
 
 Fusion Pixel 8px is the one open pixel font whose CJK fits a terminal cell's
-art (an 8x8 box); it has no Cyrillic or Greek, which draw as tofu. A glyph is
+art (an 8x8 box); it has no Cyrillic or Greek, which draw as tofu. Its glyphs are
 baseline-aligned into its face's line box, which `text.rs` and `grid.rs`
 paint, and one whose ink leaves the box or the cells `unicode-width` gives it
 is dropped, not cropped.
 
 The format, which `cutaway::text` and `cutaway::grid` read: one byte, the rows
-per glyph; a u16 LE glyph count n; n u16 LE code points, ascending; then n
+per glyph; a u16 LE glyph count n; n u32 LE code points, ascending; then n
 glyphs, a row at a time from the top, the high bit the leftmost pixel: a byte
 a row in world.bin, a u16 LE in screen.bin, whose glyphs are wider than a byte.
 A symbol Fusion Pixel draws only full-width fails the width check and is drawn
@@ -27,6 +27,9 @@ import unicodedata
 import urllib.request
 import zipfile
 from pathlib import Path
+
+from fontTools.ttLib import TTFont
+from PIL import Image, ImageFont, features
 
 ROOT = Path(__file__).resolve().parent.parent
 FONTS = ROOT / "crates/pixtuoid-scene/fonts"
@@ -54,6 +57,17 @@ SCREEN_SHA256 = "d75f5262f108757edb0f47ee8e3d2dfdfbecfd94558faf5ffb0c06dc5866fb3
 SCREEN_MEMBERS = tuple(m.replace("8px", "12px") for m in FUSION_MEMBERS)
 # Its sources join the 8px's: the OFL and the shared ones are the same text.
 SCREEN_LICENSES = {"LICENSES/": "LICENSES-Fusion-Pixel/"}
+NOTO_ROOT = (
+    "https://raw.githubusercontent.com/google/fonts/"
+    "b979dba422e445492b0eb9951ac52ee0b4d648c3/ofl/notoemoji/"
+)
+NOTO_SHA256 = "de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551"
+NOTO_LICENSE_SHA256 = "500bb1ccf43df7bbb522112f9133a52b16e1c35e809632f5d8609b179152de5b"
+# Pillow's wheel pins this rasterizer; a system build can otherwise change glyph bits.
+FREETYPE_VERSION = "2.14.3"
+# Unicode 16 widened the trigrams; older width data drops existing screen glyphs.
+UNICODE_VERSION = "16.0.0"
+BMP_MAX = 0xFFFF
 # `grid.rs`'s SCREEN_LINE_H and SCREEN_CELL_W, and Fusion Pixel 12px's ascent.
 SCREEN_LINE_H = 12
 SCREEN_CELL_W = 6
@@ -159,7 +173,7 @@ def write(path, rows_per_glyph, picked, row_bytes):
     out = bytearray([rows_per_glyph])
     out += len(order).to_bytes(2, "little")
     for cp in order:
-        out += cp.to_bytes(2, "little")
+        out += cp.to_bytes(4, "little")
     for cp in order:
         for row in picked[cp]:
             out += row.to_bytes(row_bytes, "little")
@@ -180,8 +194,50 @@ def unzip(url, sha256, members, licenses):
     return fonts
 
 
+def emoji_rows(data, line_h, cell_w, row_bytes):
+    with TTFont(io.BytesIO(data)) as font:
+        points = sorted(font.getBestCmap())
+    faces = [
+        ImageFont.truetype(io.BytesIO(data), size, layout_engine=ImageFont.Layout.BASIC)
+        for size in range(line_h, 0, -1)
+    ]
+    picked = {}
+    for cp in points:
+        if cp <= BMP_MAX or not wanted(cp):
+            continue
+        width = cells(cp) * cell_w
+        for face in faces:
+            mask = face.getmask(chr(cp), mode="1")
+            image = Image.frombytes("L", mask.size, bytes(mask))
+            box = image.getbbox()
+            if box is None:
+                continue
+            ink = image.crop(box)
+            if ink.width > width or ink.height > line_h:
+                continue
+            xoff, yoff = (width - ink.width) // 2, (line_h - ink.height) // 2
+            rows = [0] * line_h
+            for y in range(ink.height):
+                for x in range(ink.width):
+                    if ink.getpixel((x, y)):
+                        rows[y + yoff] |= 1 << (row_bytes * 8 - 1 - x - xoff)
+            picked[cp] = rows
+            break
+        else:
+            sys.exit(f"Noto Emoji U+{cp:04X}: no ink fits {width}x{line_h}")
+    return picked
+
+
 def main():
+    if unicodedata.unidata_version != UNICODE_VERSION:
+        sys.exit(f"Use Python 3.14 (Unicode {UNICODE_VERSION})")
+    if features.version("freetype2") != FREETYPE_VERSION:
+        sys.exit(f"Use requirements-dev.txt's Pillow wheel (FreeType {FREETYPE_VERSION})")
     FONTS.mkdir(parents=True, exist_ok=True)
+    noto = fetch(NOTO_ROOT + "NotoEmoji%5Bwght%5D.ttf", NOTO_SHA256)
+    (FONTS / "OFL-Noto-Emoji.txt").write_bytes(
+        fetch(NOTO_ROOT + "OFL.txt", NOTO_LICENSE_SHA256)
+    )
     fusion = unzip(FUSION_URL, FUSION_SHA256, FUSION_MEMBERS, FUSION_LICENSES)
 
     picked = {}
@@ -196,6 +252,7 @@ def main():
                         picked[cp] = rows
                         break
 
+    picked.update(emoji_rows(noto, LINE_H, CELL_W, 1))
     write(OUT, LINE_H, picked, 1)
 
     screen_fonts = unzip(SCREEN_URL, SCREEN_SHA256, SCREEN_MEMBERS, SCREEN_LICENSES)
@@ -212,6 +269,7 @@ def main():
                     if rows is not None:
                         screen[cp] = rows
                         break
+    screen.update(emoji_rows(noto, SCREEN_LINE_H, SCREEN_CELL_W, 2))
     write(SCREEN_OUT, SCREEN_LINE_H, screen, 2)
 
 

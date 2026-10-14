@@ -882,10 +882,11 @@ gen-banner-check:
     python3 scripts/gen-banner.py --check docs/images/banner
 
 # Not in `gen`: it downloads its pinned fonts.
-[doc("Regenerate the scene's Fusion Pixel faces + their licenses (crates/pixtuoid-scene/fonts/) from scripts/gen-fonts.py")]
+[doc("Regenerate the scene's pixel faces + their licenses (crates/pixtuoid-scene/fonts/) from scripts/gen-fonts.py")]
 [group('gen')]
 gen-fonts:
-    python3 scripts/gen-fonts.py
+    test -x .venv/bin/python3 || { echo "needs a Python 3.14 venv with requirements-dev.txt (see scripts/gen-fonts.py)"; exit 1; }
+    .venv/bin/python3 scripts/gen-fonts.py
 
 [doc('Sync README install/features/tools sections from site/src/*.json')]
 [group('gen')]

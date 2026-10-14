@@ -1,7 +1,7 @@
 //! Screen text in pixels: a [`CellGrid`] painted cell by cell in a [`Face`],
 //! for the painters a terminal draws no text for (the floating window).
 //!
-//! Two faces of Fusion Pixel (`scripts/gen-fonts.py`, licenses in
+//! Two faces of Fusion Pixel with Noto Emoji (`scripts/gen-fonts.py`, licenses in
 //! `fonts/`): [`Face::World`], 8px, the cutaway's own (`text.rs`), whose cell
 //! is one layout column of the art, and [`Face::Screen`], 12px, which reads at
 //! a screen's size. A symbol is an [`Icon`]: screen text writes its terminal
@@ -28,7 +28,7 @@ const SCREEN_CAP_TOP: u16 = 2;
 const SCREEN_CAP_H: u16 = 8;
 
 /// The screen face, written by `scripts/gen-fonts.py`: a byte, the
-/// rows per glyph; a u16 LE count n; n u16 LE code points, ascending; n
+/// rows per glyph; a u16 LE count n; n u32 LE code points, ascending; n
 /// glyphs of u16 LE rows.
 #[cfg(feature = "cutaway-assets")]
 static SCREEN: &[u8] = include_bytes!("../../fonts/screen.bin");
@@ -155,12 +155,12 @@ fn screen_font(c: char) -> Option<Bitmap> {
     }
     let (n, rest) = rest.split_first_chunk::<2>()?;
     let n = usize::from(u16::from_le_bytes(*n));
-    let (points, glyphs) = rest.split_at_checked(n * size_of::<u16>())?;
-    let point = u16::try_from(u32::from(c)).ok()?;
+    let (points, glyphs) = rest.split_at_checked(n * size_of::<u32>())?;
+    let point = u32::from(c);
     let i = points
-        .as_chunks::<2>()
+        .as_chunks::<4>()
         .0
-        .binary_search_by_key(&point, |b| u16::from_le_bytes(*b))
+        .binary_search_by_key(&point, |b| u32::from_le_bytes(*b))
         .ok()?;
     let stride = usize::from(SCREEN_LINE_H) * size_of::<u16>();
     let glyph = glyphs.get(i * stride..(i + 1) * stride)?;
@@ -540,6 +540,35 @@ mod tests {
             "a CJK glyph spans two cells"
         );
         assert!(wide.iter().all(|&(x, _)| x < 2 * cell.w));
+    }
+
+    #[cfg(feature = "cutaway-assets")]
+    #[test]
+    fn supplementary_glyphs_compose_with_latin_in_both_faces() {
+        for face in [Face::World, Face::Screen] {
+            let cell = face.cell(1);
+            for c in ['🌰', '🧶', '🦷', '🐣', '💫'] {
+                let rows = face.glyph(c).expect("supplementary glyph");
+                assert!(rows.iter().any(|&row| row != 0));
+                assert_ne!(rows, face.tofu(2), "{face:?} {c}");
+                let mut expected: BTreeSet<_> = inked(&painted_in("A", face, cell), FG)
+                    .into_iter()
+                    .map(|(x, y)| (x + 2 * cell.w, y))
+                    .collect();
+                for (y, row) in rows.iter().enumerate() {
+                    for x in 0..2 * cell.w {
+                        if row & (LEFTMOST >> x) != 0 {
+                            expected.insert((x, u16::try_from(y).expect("glyph row")));
+                        }
+                    }
+                }
+                assert_eq!(
+                    inked(&painted_in(&format!("{c}A"), face, cell), FG),
+                    expected,
+                    "{face:?} {c}"
+                );
+            }
+        }
     }
 
     /// Each icon's screen art is a screen cell wide less the gap per cell its
