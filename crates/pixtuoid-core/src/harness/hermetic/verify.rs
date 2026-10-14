@@ -425,19 +425,21 @@ fn started_in(
         ));
     }
     let want = canonical(workspace);
-    let starts: Vec<&Path> = events
+    let starts: Vec<(&Path, bool)> = events
         .iter()
         .filter_map(|e| match e {
-            AgentEvent::SessionStart { cwd, .. } => Some(cwd.as_path()),
+            AgentEvent::SessionStart { cwd, parent_id, .. } => {
+                Some((cwd.as_path(), parent_id.is_some()))
+            }
             _ => None,
         })
         .collect();
-    // An empty one is a line that carries no cwd, which a later event back-fills
+    // A child's registration may carry no cwd, which a later event back-fills
     // (grok's spawn line).
     let cwds: Vec<PathBuf> = starts
         .iter()
-        .filter(|c| !c.as_os_str().is_empty())
-        .map(|c| canonical(c))
+        .filter(|(cwd, child)| !(*child && cwd.as_os_str().is_empty()))
+        .map(|(cwd, _)| canonical(cwd))
         .collect();
     if starts.is_empty() {
         findings.push((Label::Fail, "no SessionStart decoded".into()));
@@ -915,25 +917,35 @@ mod tests {
     }
 
     #[test]
-    fn a_session_start_naming_no_cwd_is_judged_by_the_ones_that_do() {
-        let start = |id: &str, cwd: &str| AgentEvent::SessionStart {
+    fn only_a_childs_registration_may_name_no_cwd() {
+        let start = |id: &str, cwd: &str, parent: Option<&str>| AgentEvent::SessionStart {
             agent_id: crate::AgentId::from_parts("grok", id),
             source: "grok".into(),
             session_id: id.into(),
             cwd: cwd.into(),
-            parent_id: None,
+            parent_id: parent.map(|p| crate::AgentId::from_parts("grok", p)),
         };
         let ws = Path::new("/w");
         let mut f = Vec::new();
         // grok's spawn line registers the child before anything names its cwd.
-        started_in(&[start("p", "/w"), start("c", "")], ws, 2, &mut f);
+        let child = start("c", "", Some("p"));
+        started_in(&[start("p", "/w", None), child.clone()], ws, 2, &mut f);
         assert!(f.is_empty(), "{f:?}");
-        started_in(&[start("p", ""), start("c", "")], ws, 2, &mut f);
+        // A root that loses its cwd is no child awaiting one.
+        started_in(
+            &[start("p", "", None), start("c", "/w", Some("p"))],
+            ws,
+            2,
+            &mut f,
+        );
+        let judged = |f: &[(Label, String)]| Verdict::new(f.to_vec());
         assert!(
-            f.iter()
-                .any(|(l, m)| *l == Label::Fail && m.contains("named a cwd")),
+            has(&judged(&f), Label::Fail, "is not the workspace"),
             "{f:?}"
         );
+        f.clear();
+        started_in(&[child], ws, 1, &mut f);
+        assert!(has(&judged(&f), Label::Fail, "named a cwd"), "{f:?}");
     }
 
     #[test]
