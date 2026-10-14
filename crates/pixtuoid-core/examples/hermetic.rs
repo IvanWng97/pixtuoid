@@ -990,6 +990,15 @@ mod run {
         );
         wait_until(|| http_get(port, "/v1/models").is_ok(), "aimock")?;
 
+        // A root absent at boot is watched only from the next poll, so a short
+        // run would reach pixtuoid by hook alone.
+        let mut prepare = sandbox.command(&built.recorder);
+        prepare
+            .arg(recorder_flag::WITHIN)
+            .arg(sandbox.dir.path())
+            .args([recorder_flag::PREPARE_ROOT, p.source]);
+        succeed(prepare)?;
+
         let scene = Reaped(
             sandbox
                 .command(&built.pixtuoid)

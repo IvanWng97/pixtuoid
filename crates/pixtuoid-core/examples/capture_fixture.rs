@@ -33,7 +33,7 @@ mod recorder {
     use pixtuoid_core::harness::hermetic::{self, MANIFEST, Manifest};
     use pixtuoid_core::harness::host::{create_private_dir, owned_by_us};
     use pixtuoid_core::harness::recorder_flag::{
-        CLI_VERSION, ENV, OUT, PROMOTE, TEE, WITHIN, WORKSPACE,
+        CLI_VERSION, ENV, OUT, PREPARE_ROOT, PROMOTE, TEE, WITHIN, WORKSPACE,
     };
     use pixtuoid_core::harness::tap::{Endpoint, Tap};
     use pixtuoid_core::harness::{
@@ -77,13 +77,19 @@ mod recorder {
         /// The workspace as the caller resolved it: Windows resolves its known
         /// ProgramData only in an environment the sandbox's no longer holds.
         workspace: Option<PathBuf>,
+        /// Run no CLI: create this source's transcript root inside `within`, as
+        /// a user who ran the CLI before has it, so a pixtuoid started first
+        /// watches it from boot rather than from its next poll.
+        prepare_root: Option<String>,
     }
 
     impl Options {
         /// Why this host may not run what these options ask: a raw `--out`
         /// capture is any host's, the committed corpus [`CORPUS_REFUSAL`]'s.
         fn corpus_refusal(&self) -> Option<&'static str> {
-            CORPUS_REFUSAL.filter(|_| self.promote.is_some() || self.out.is_none())
+            CORPUS_REFUSAL.filter(|_| {
+                self.prepare_root.is_none() && (self.promote.is_some() || self.out.is_none())
+            })
         }
     }
 
@@ -106,6 +112,7 @@ mod recorder {
                 WITHIN => options.within = Some(PathBuf::from(take(&mut args, WITHIN)?)),
                 PROMOTE => options.promote = Some(PathBuf::from(take(&mut args, PROMOTE)?)),
                 CLI_VERSION => options.cli_version = Some(take(&mut args, CLI_VERSION)?),
+                PREPARE_ROOT => options.prepare_root = Some(take(&mut args, PREPARE_ROOT)?),
                 WORKSPACE => {
                     let ws = PathBuf::from(take(&mut args, WORKSPACE)?);
                     if capture_base(&ws).is_none() {
@@ -147,6 +154,21 @@ mod recorder {
         })
     }
 
+    /// Create `root` when it lies inside `within`: an operator's own root would
+    /// read to pixtuoid's auto-detect as an installed CLI. A source with no
+    /// transcript root has nothing to create.
+    fn prepare_root(root: Option<&Path>, within: Option<&Path>) -> std::io::Result<()> {
+        let Some(root) = root else {
+            return Ok(());
+        };
+        let within = within
+            .ok_or_else(|| std::io::Error::other(format!("{PREPARE_ROOT} needs {WITHIN}")))?;
+        if let Some(why) = harvest_root_refusal(Some(root), within) {
+            return Err(std::io::Error::other(why));
+        }
+        std::fs::create_dir_all(root)
+    }
+
     pub(crate) fn main() -> std::io::Result<()> {
         let args: Vec<String> = std::env::args().skip(1).collect();
         if args.first().map(String::as_str) == Some("--strip-corpus") {
@@ -165,6 +187,12 @@ mod recorder {
         }
         if let Some(run) = options.promote.as_deref() {
             return promote(run, &sources_root(), &identity_needles(git_config));
+        }
+        if let Some(source) = options.prepare_root.as_deref() {
+            return prepare_root(
+                resolved_source_root(source).as_deref(),
+                options.within.as_deref(),
+            );
         }
         if args.len() < 3 {
             eprintln!(
@@ -1132,6 +1160,27 @@ mod recorder {
             assert!(
                 parse_options(args(&["--out"])).is_err(),
                 "a flag without its path"
+            );
+        }
+
+        #[test]
+        fn a_root_is_prepared_only_inside_the_sandbox() {
+            let sandbox = tempfile::tempdir().expect("tempdir");
+            let elsewhere = tempfile::tempdir().expect("tempdir");
+            let inside = sandbox.path().join("homes/GROK_HOME/sessions");
+            prepare_root(Some(&inside), Some(sandbox.path())).expect("inside");
+            assert!(inside.is_dir());
+
+            let outside = elsewhere.path().join("sessions");
+            assert!(prepare_root(Some(&outside), Some(sandbox.path())).is_err());
+            assert!(
+                prepare_root(Some(&outside), None).is_err(),
+                "no sandbox named"
+            );
+            assert!(!outside.exists(), "a refusal creates nothing");
+            assert!(
+                prepare_root(None, None).is_ok(),
+                "a hook-only source has no root"
             );
         }
 

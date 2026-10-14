@@ -120,6 +120,8 @@ pub mod recorder_flag {
     pub const CLI_VERSION: &str = "--cli-version";
     /// `Options::workspace`.
     pub const WORKSPACE: &str = "--workspace";
+    /// `Options::prepare_root`.
+    pub const PREPARE_ROOT: &str = "--prepare-root";
 }
 
 /// What only the recorder knows about a raw (`--out`) capture.
