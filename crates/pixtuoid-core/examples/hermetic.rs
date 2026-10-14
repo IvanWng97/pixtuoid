@@ -39,6 +39,7 @@ mod run {
     use std::process::{Child, Command, ExitStatus, Stdio};
     use std::time::{Duration, Instant};
 
+    use pixtuoid_core::harness::hermetic::bump::{self, Moved};
     use pixtuoid_core::harness::hermetic::pin;
     use pixtuoid_core::harness::hermetic::verify::{self, Label, Verdict};
     use pixtuoid_core::harness::hermetic::{
@@ -202,19 +203,27 @@ mod run {
             tier,
         };
 
-        let mut entries = Vec::new();
+        let (mut entries, mut moved) = (Vec::new(), Vec::new());
         for p in PROFILES {
-            entries.extend(run_source(&ctx, &args, p, &runs)?);
+            let (ran, now) = run_source(&ctx, &args, p, &runs)?;
+            entries.extend(ran);
+            moved.extend(now);
         }
         let report = report(args.versions, &entries);
         std::fs::write(runs.join(REPORT), &report)?;
+        std::fs::write(runs.join(bump::MOVED), serde_json::to_string(&moved)?)?;
         println!("\n{report}");
         Ok(entries.iter().all(|e| e.verdict.label() == Label::Pass))
     }
 
-    /// `p`'s selected runs, then, once every scenario ran, its census and the
-    /// recording `args` asks for.
-    fn run_source(ctx: &Ctx, args: &Args, p: &Profile, runs: &Path) -> std::io::Result<Vec<Entry>> {
+    /// `p`'s selected runs, then, once every scenario ran, its census, the
+    /// recording `args` asks for, and the release it moved to.
+    fn run_source(
+        ctx: &Ctx,
+        args: &Args,
+        p: &Profile,
+        runs: &Path,
+    ) -> std::io::Result<(Vec<Entry>, Option<Moved>)> {
         let selected: Vec<&Scenario> = p
             .scenarios
             .iter()
@@ -222,7 +231,7 @@ mod run {
             .collect();
         let mut entries = Vec::new();
         if selected.is_empty() {
-            return Ok(entries);
+            return Ok((entries, None));
         }
         // Once per source, so every scenario runs, and records, one release.
         let installed = resolve(p, args.versions);
@@ -256,29 +265,39 @@ mod run {
             entries.push(Entry::new(key, banner, verdict));
         }
         if !judges_source(&judged, p.scenarios.len()) {
-            return Ok(entries);
+            return Ok((entries, None));
         }
         let key = format!("{} (every scenario)", p.source);
         println!("== {key}");
         let verdict = verify::verify_source(p, &judged)?;
         passed &= verdict.label() == Label::Pass;
         entries.push(Entry::new(key, None, verdict));
-        if let (Ok(installed), true, true) = (&installed, args.record, passed) {
+        let mut moved = None;
+        if let (Ok(installed), true) = (&installed, passed) {
             match pin::every_run_reported(installed, p.descriptor().version_hyphen, &banners) {
                 Ok(()) => {
-                    record(ctx, p, runs)?;
-                    if let Some(text) = registry {
-                        std::fs::write(pin::registry_path(), text)?;
+                    if args.record {
+                        record(ctx, p, runs)?;
+                        if let Some(text) = registry {
+                            std::fs::write(pin::registry_path(), text)?;
+                        }
+                    }
+                    if pin::moves(p.descriptor(), installed) == Ok(true) {
+                        moved = Some(Moved {
+                            source: p.source.to_string(),
+                            version: installed.to_string(),
+                        });
                     }
                 }
-                Err(why) => entries.push(Entry::new(
+                Err(why) if args.record => entries.push(Entry::new(
                     format!("{} (recording)", p.source),
                     None,
                     Verdict::new(vec![(Label::Fail, why)]),
                 )),
+                Err(_) => {}
             }
         }
-        Ok(entries)
+        Ok((entries, moved))
     }
 
     fn run_dir(runs: &Path, p: &Profile, scenario: &Scenario) -> PathBuf {

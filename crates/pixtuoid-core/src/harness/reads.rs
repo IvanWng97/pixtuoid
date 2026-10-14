@@ -181,7 +181,7 @@ pub(crate) fn is_hook_envelope(file: &Path) -> bool {
         .is_some_and(|n| n.starts_with(crate::harness::HOOK_PAYLOADS))
 }
 
-fn drive_for(source: &str, file: &Path) -> Option<Drive> {
+pub(crate) fn drive_for(source: &str, file: &Path) -> Option<Drive> {
     if is_hook_envelope(file) {
         Some(Drive::hooks())
     } else {
