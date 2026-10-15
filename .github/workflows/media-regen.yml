@@ -7,7 +7,14 @@ name: media regen
 on:
   push:
     branches: [main]
-    paths: ["crates/**", "Cargo.lock", "scripts/gen-media.py", "scripts/media.json"]
+    paths:
+      - "crates/**"
+      - Cargo.lock
+      - scripts/gen-media.py
+      - scripts/media.json
+      # themes-composite's `over` file, and the Pillow pin its PNGs come from.
+      - site/src/themes.json
+      - requirements-dev.txt
   workflow_dispatch:
 
 permissions: {}
