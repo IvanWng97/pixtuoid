@@ -366,19 +366,25 @@ mod tests {
         }
     }
 
+    fn nightly() -> String {
+        std::fs::read_to_string(repo_root().join(".github/workflows/hermetic-nightly.yml"))
+            .expect("hermetic-nightly.yml")
+    }
+
+    #[test]
+    fn the_nightly_names_each_patch_where_check_reads_it() {
+        let yml = nightly();
+        for (at, count, sites) in [
+            ("$SOURCE", 2, "the bump leg's write and publish's apply"),
+            ("${{ matrix.source }}", 1, "the bump leg's upload"),
+        ] {
+            assert_eq!(yml.matches(&patch_name(at)).count(), count, "{sites}");
+        }
+    }
+
     #[test]
     fn the_nightly_finds_taken_releases_by_the_title_bumps_open_with() {
-        let yml =
-            std::fs::read_to_string(repo_root().join(".github/workflows/hermetic-nightly.yml"))
-                .expect("hermetic-nightly.yml");
-        assert!(yml.contains(&format!("in:title \"{TITLE_PREFIX}\"")));
-        for (at, sites) in [("$SOURCE", 2), ("${{ matrix.source }}", 1)] {
-            assert_eq!(
-                yml.matches(&patch_name(at)).count(),
-                sites,
-                "the patch {at} names"
-            );
-        }
+        assert!(nightly().contains(&format!("in:title \"{TITLE_PREFIX}\"")));
         assert!(
             Proposal::new("codex", &v("1.0.0"))
                 .title
