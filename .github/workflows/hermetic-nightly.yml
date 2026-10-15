@@ -21,6 +21,8 @@ jobs:
       matrix:
         runner: [macos-latest, windows-latest]
     runs-on: ${{ matrix.runner }}
+    # It only warms a cache, and setup-cargo-just saves from main alone.
+    if: ${{ github.ref == 'refs/heads/main' }}
     timeout-minutes: 45
     cache-mode: write
     permissions:
