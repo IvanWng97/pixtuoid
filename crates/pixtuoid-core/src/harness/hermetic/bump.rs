@@ -1,7 +1,7 @@
 //! A pin bump as the nightly proposes it: which moved releases become bot PRs,
-//! and what a bump leg's patch may hold before publish applies it. The patch is
-//! untrusted, since the leg ran a just-published CLI: it may carry data a
-//! decoder reads, never code a same-repo PR's CI would run.
+//! and what the tree a bump leg's patch leaves may hold before publish applies
+//! it. The patch is untrusted, since the leg ran a just-published CLI: it may
+//! carry data a decoder reads, never code a same-repo PR's CI would run.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -9,8 +9,8 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::{PROFILES, PROVENANCE_AIMOCK, Profile, pin, profile};
-use crate::harness::{PROVENANCE, reads, sources_root};
+use super::{PROFILES, Profile, pin};
+use crate::harness::sources_root;
 
 /// The nightly's drift legs, as `hermetic.yml`'s matrix names them: a release
 /// is proposed only once it moved on every one.
@@ -32,13 +32,16 @@ pub fn patch_name(source: &str) -> String {
 /// A source whose `latest` passed every scenario, every run reporting it, above
 /// its pin.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Moved {
     /// The registered source id.
     pub source: String,
     /// The release it moved to.
     pub version: String,
 }
+
+/// Every bump PR's title opens with it, which is how plan finds the releases
+/// taken.
+pub(crate) const TITLE_PREFIX: &str = "chore(hermetic): pin";
 
 /// A bot PR the nightly opens, or one a patch was admitted for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,7 +63,7 @@ impl Proposal {
             source: source.to_string(),
             version: version.to_string(),
             branch: format!("bot/bump-{source}"),
-            title: format!("chore(hermetic): pin {source} at {version}"),
+            title: format!("{TITLE_PREFIX} {source} at {version}"),
         }
     }
 }
@@ -72,8 +75,8 @@ impl Proposal {
 ///
 /// # Errors
 ///
-/// When a leg's rows are not rows, name an unprofiled source or one source
-/// twice, or hold a release that is not one or is below its pin.
+/// When a leg's rows are not rows, or the one release every leg moved a source
+/// to is not a release or is below its pin.
 pub fn plan(drift: &Map<String, Value>, taken: &[String]) -> Result<Vec<Proposal>, String> {
     let mut moved = Vec::new();
     for os in OSES {
@@ -81,14 +84,6 @@ pub fn plan(drift: &Map<String, Value>, taken: &[String]) -> Result<Vec<Proposal
             None | Some("") => Vec::new(),
             Some(json) => serde_json::from_str(json).map_err(|e| format!("{os}: {e}"))?,
         };
-        for (i, row) in rows.iter().enumerate() {
-            if profile(&row.source).is_none() {
-                return Err(format!("{os}: {:?} has no profile", row.source));
-            }
-            if rows[..i].iter().any(|r| r.source == row.source) {
-                return Err(format!("{os}: {:?} moved twice", row.source));
-            }
-        }
         moved.push(rows);
     }
     let mut proposals = Vec::new();
@@ -159,194 +154,94 @@ pub fn admits(p: &Profile, path: &Path) -> bool {
         })
 }
 
-/// One file's part of a patch: its path, and the lines its hunks remove and add.
-#[derive(Debug)]
-struct FileDiff<'a> {
-    path: PathBuf,
-    removed: Vec<&'a str>,
-    added: Vec<&'a str>,
+/// One path `git diff HEAD --raw --no-renames -z` reports changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change {
+    /// Relative to the repository.
+    pub path: PathBuf,
+    old_mode: String,
+    new_mode: String,
+    status: String,
 }
 
-const DEV_NULL: &str = "/dev/null";
-
-/// The files of a `git diff --no-renames` patch, admitting only an edit, a
-/// creation or a deletion of a regular, non-executable text file: no rename,
-/// copy, mode, link or binary, which `git apply` would otherwise honor.
-fn files(patch: &str) -> Result<Vec<FileDiff<'_>>, String> {
+/// The changes in git's `--raw -z` output.
+///
+/// # Errors
+///
+/// When a record is not in git's shape.
+pub fn changes(raw: &[u8]) -> Result<Vec<Change>, String> {
+    let text = std::str::from_utf8(raw).map_err(|e| e.to_string())?;
+    let mut fields = text.split('\0').filter(|f| !f.is_empty());
     let mut out = Vec::new();
-    let mut lines = patch.lines().peekable();
-    while let Some(line) = lines.next() {
-        let Some(names) = line.strip_prefix("diff --git ") else {
-            return Err(format!("{line:?} opens no file"));
+    while let Some(record) = fields.next() {
+        let path = fields
+            .next()
+            .ok_or_else(|| format!("{record:?} names no path"))?;
+        let meta: Vec<&str> = record.trim_start_matches(':').split(' ').collect();
+        let [old_mode, new_mode, _, _, status] = meta[..] else {
+            return Err(format!("{record:?} is not a raw record"));
         };
-        let (mut created, mut deleted, mut old, mut new) = (false, false, None, None);
-        while let Some(&header) = lines.peek() {
-            if header.starts_with("@@") || header.starts_with("diff --git ") {
-                break;
-            }
-            lines.next();
-            match header {
-                "new file mode 100644" => created = true,
-                "deleted file mode 100644" => deleted = true,
-                _ if header.starts_with("index ") => {
-                    let mode = header.split(' ').nth(2);
-                    if mode.is_some_and(|m| m != "100644") {
-                        return Err(format!("{header:?}: a bump writes mode 100644 only"));
-                    }
-                }
-                _ if header.starts_with("--- ") => old = Some(&header[4..]),
-                _ if header.starts_with("+++ ") => new = Some(&header[4..]),
-                _ => {
-                    return Err(format!(
-                        "{header:?}: a bump changes no mode, link, name or binary"
-                    ));
-                }
-            }
-        }
-        let (Some(old), Some(new)) = (old, new) else {
-            return Err(format!("{names:?} carries no text change"));
-        };
-        let path = match (old, new) {
-            (DEV_NULL, b) if created => b.strip_prefix("b/"),
-            (a, DEV_NULL) if deleted => a.strip_prefix("a/"),
-            (a, b) if !created && !deleted && a.strip_prefix("a/") == b.strip_prefix("b/") => {
-                a.strip_prefix("a/")
-            }
-            _ => None,
-        }
-        .filter(|p| {
-            // publish hands the paths to create-pull-request comma-joined.
-            *names == format!("a/{p} b/{p}") && !p.starts_with('"') && !p.contains(['\t', ','])
-        })
-        .ok_or_else(|| format!("{names:?}: its `---`/`+++` lines name another file"))?;
-        let (mut removed, mut added) = (Vec::new(), Vec::new());
-        while let Some(&body) = lines.peek() {
-            if body.starts_with("diff --git ") {
-                break;
-            }
-            lines.next();
-            match body.as_bytes().first() {
-                Some(b'-') => removed.push(&body[1..]),
-                Some(b'+') => added.push(&body[1..]),
-                Some(b' ' | b'\\' | b'@') => {}
-                _ => return Err(format!("{body:?} is no hunk line")),
-            }
-        }
-        out.push(FileDiff {
+        out.push(Change {
             path: PathBuf::from(path),
-            removed,
-            added,
+            old_mode: old_mode.to_string(),
+            new_mode: new_mode.to_string(),
+            status: status.to_string(),
         });
     }
     Ok(out)
 }
 
-/// The files `patch` changes, once it is a bump of `p` to `version` and nothing
-/// else: every path [`admits`], and the registry edited as
-/// [`pin::repinned`] would, `version` above the pin.
+/// A regular, non-executable file's mode; a path absent on one side has none.
+const REGULAR: &str = "100644";
+const ABSENT: &str = "000000";
+
+/// The paths a bump of `p` to `version` changed, once the tree a patch left
+/// holds nothing else: each change [`admits`], each a regular file created,
+/// edited or deleted, and the registry `after` exactly as
+/// [`pin::repinned`] writes `before`. Git, never a parser of the patch, says
+/// what the patch did.
 ///
 /// # Errors
 ///
-/// What the patch holds that a bump doesn't.
-pub fn admit(
-    registry: &str,
+/// What the tree holds that a bump doesn't.
+pub fn judge(
     p: &Profile,
     version: &Version,
-    patch: &str,
+    before: &str,
+    after: &str,
+    changes: &[Change],
 ) -> Result<Vec<PathBuf>, String> {
-    let Some(expected) = pin::repinned(registry, p.descriptor(), version)? else {
+    let Some(expected) = pin::repinned(before, p.descriptor(), version)? else {
         return Err(format!("{}: {version} is its pin already", p.source));
     };
-    let mut changed = registry
-        .lines()
-        .zip(expected.lines())
-        .filter(|(was, now)| was != now);
-    let (Some((was, now)), None) = (changed.next(), changed.next()) else {
-        return Err(format!("{}: the repin is not one line", p.source));
-    };
-    let files = files(patch)?;
-    let registry_path = registry_relative();
-    let mut repinned = false;
-    for f in &files {
-        if !admits(p, &f.path) {
-            return Err(format!("{:?} is outside {}'s bump", f.path, p.source));
-        }
-        if f.path == registry_path {
-            if f.removed != [was] || f.added != [now] {
-                return Err(format!(
-                    "the registry's change is not {}'s pin moving to {version}",
-                    p.source
-                ));
-            }
-            repinned = true;
-        }
+    if after != expected {
+        return Err(format!(
+            "the registry is not {}'s pin moving to {version}, and nothing else",
+            p.source
+        ));
     }
-    if !repinned {
-        return Err(format!("{}'s pin does not move", p.source));
-    }
-    Ok(files.into_iter().map(|f| f.path).collect())
-}
-
-/// The files `paths` (repository-relative) holds under `p`'s fixtures, as they
-/// are on disk now: a deleted one is gone.
-pub fn fixture_files(p: &Profile, paths: &[PathBuf]) -> Vec<PathBuf> {
-    let root = repo_root();
-    paths
-        .iter()
-        .map(|path| root.join(path))
-        .filter(|f| {
-            f.is_file()
-                && p.scenarios
-                    .iter()
-                    .any(|s| f.starts_with(sources_root().join(s.fixture)))
-        })
-        .collect()
-}
-
-/// Whether the fixture files a bump of `p` left are what the recorder writes:
-/// a provenance it strips, from aimock, and transcripts or hook payloads a
-/// decoder reads, already stripped, so nothing rides in a subtree no decoder
-/// reads.
-///
-/// # Errors
-///
-/// The first file that isn't.
-pub fn recorded(p: &Profile, files: &[PathBuf]) -> Result<(), String> {
-    let mut lines = Vec::new();
-    for file in files {
-        let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if name == PROVENANCE {
-            let text = std::fs::read_to_string(file).map_err(|e| format!("{file:?}: {e}"))?;
-            let record: Value =
-                serde_json::from_str(&text).map_err(|e| format!("{file:?}: {e}"))?;
-            let from_aimock = record[PROVENANCE_AIMOCK]
-                .as_str()
-                .is_some_and(|v| !v.is_empty());
-            if !reads::strips(&record) || !from_aimock {
-                return Err(format!("{file:?} is not a stripped aimock recording's"));
-            }
-        } else if name.ends_with(".jsonl") && reads::drive_for(p.source, file).is_some() {
-            lines.push(file.clone());
-        } else {
+    let regular = |mode: &str| mode == REGULAR || mode == ABSENT;
+    for c in changes {
+        if !admits(p, &c.path) {
+            return Err(format!("{:?} is outside {}'s bump", c.path, p.source));
+        }
+        if !["M", "A", "D"].contains(&c.status.as_str())
+            || !regular(&c.old_mode)
+            || !regular(&c.new_mode)
+        {
             return Err(format!(
-                "{file:?} is no file a recording of {} writes",
-                p.source
+                "{:?} is {} from mode {} to {}: a bump creates, edits or deletes regular files",
+                c.path, c.status, c.old_mode, c.new_mode
             ));
         }
     }
-    let strip = reads::strip_unread(p.source, &lines).map_err(|e| e.to_string())?;
-    if strip.blanked > 0 || !strip.not_json.is_empty() {
-        return Err(format!(
-            "{}'s recording holds what no decoder reads: {} subtrees, unparsed {:?}",
-            p.source, strip.blanked, strip.not_json
-        ));
-    }
-    Ok(())
+    Ok(changes.iter().map(|c| c.path.clone()).collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::harness::hermetic::profile;
 
     fn v(s: &str) -> Version {
         Version::parse(s).expect("a test version")
@@ -389,6 +284,15 @@ mod tests {
         let both = drift(&[("macos", &[("codex", &up)]), ("windows", &[("codex", &up)])]);
         let proposals = plan(&both, &[]).expect("a plan");
         assert_eq!(proposals, [Proposal::new("codex", &v(&up))]);
+        let noisy = drift(&[
+            ("macos", &[("nope", &up), ("codex", &up), ("codex", &up)]),
+            ("windows", &[("codex", &up)]),
+        ]);
+        assert_eq!(
+            plan(&noisy, &[]).as_ref(),
+            Ok(&proposals),
+            "rows no profile reads"
+        );
         let taken = [proposals[0].title.clone()];
         assert_eq!(plan(&both, &taken), Ok(vec![]), "proposed or declined");
     }
@@ -417,8 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn a_plan_refuses_rows_the_tier_cannot_have_written() {
-        let up = above(codex()).to_string();
+    fn a_plan_refuses_rows_that_are_not_releases_above_the_pin() {
         let pin = pin::pinned(codex().descriptor()).expect("a pin");
         let below = Version {
             pre: semver::Prerelease::new("rc.1").expect("a prerelease"),
@@ -432,11 +335,6 @@ mod tests {
         );
         for legs in [
             garbled,
-            drift(&[("macos", &[("nope", &up)]), ("windows", &[("nope", &up)])]),
-            drift(&[
-                ("macos", &[("codex", &up), ("codex", &up)]),
-                ("windows", &[("codex", &up)]),
-            ]),
             drift(&[
                 ("macos", &[("codex", "1.x")]),
                 ("windows", &[("codex", "1.x")]),
@@ -516,201 +414,186 @@ mod tests {
         }
     }
 
-    /// The patch `git diff --no-renames` writes for codex's repin plus `extra`.
-    fn patch(version: &Version, extra: &str) -> String {
-        let src = registry();
-        let moved = pin::repinned(&src, codex().descriptor(), version)
-            .expect("a repin")
-            .expect("a move");
-        let (was, now) = src
-            .lines()
-            .zip(moved.lines())
-            .find(|(a, b)| a != b)
-            .expect("one changed line");
-        let reg = registry_relative();
-        let reg = reg.to_string_lossy();
+    #[test]
+    fn the_nightly_finds_taken_releases_by_the_title_bumps_open_with() {
+        let yml =
+            std::fs::read_to_string(repo_root().join(".github/workflows/hermetic-nightly.yml"))
+                .expect("hermetic-nightly.yml");
+        assert!(yml.contains(&format!("in:title \"{TITLE_PREFIX}\"")));
+        assert!(
+            Proposal::new("codex", &v("1.0.0"))
+                .title
+                .starts_with(TITLE_PREFIX)
+        );
+    }
+
+    /// One change as git's `--raw -z` writes it.
+    fn raw(old: &str, new: &str, status: &str, path: &Path) -> String {
         format!(
-            "diff --git a/{reg} b/{reg}\nindex 1111111..2222222 100644\n--- a/{reg}\n+++ b/{reg}\n\
-             @@ -1,3 +1,3 @@\n context\n-{was}\n+{now}\n context\n{extra}"
+            ":{old} {new} 0000000 0000000 {status}\0{}\0",
+            path.display()
         )
     }
 
-    fn fixture_file(name: &str) -> String {
+    fn fixture_path(name: &str) -> PathBuf {
         relative(&sources_root().join(codex().scenarios[0].fixture).join(name))
-            .to_string_lossy()
-            .into_owned()
     }
 
     #[test]
-    fn a_bump_patch_is_admitted_with_its_paths() {
+    fn changes_are_read_from_gits_raw_records() {
+        let two = raw(REGULAR, REGULAR, "M", Path::new("a b/c.jsonl"))
+            + &raw(ABSENT, REGULAR, "A", Path::new("d"));
+        let read = changes(two.as_bytes()).expect("changes");
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].path, PathBuf::from("a b/c.jsonl"));
+        assert_eq!(read[1].status, "A");
+        assert!(changes(b":100644 M\0x\0").is_err(), "not git's shape");
+        assert!(changes(b":100644 100644 0 0 M\0").is_err(), "no path");
+    }
+
+    #[test]
+    fn a_bump_is_judged_by_the_tree_it_left() {
+        let before = registry();
         let up = above(codex());
-        let f = fixture_file("hook-payloads.jsonl");
-        let created = fixture_file("new.jsonl");
-        let gone = fixture_file("old.jsonl");
-        let extra = format!(
-            "diff --git a/{f} b/{f}\nindex 3333333..4444444 100644\n--- a/{f}\n+++ b/{f}\n\
-             @@ -1 +1 @@\n-{{}}\n+{{\"a\":1}}\n\
-             diff --git a/{created} b/{created}\nnew file mode 100644\nindex 0000000..5555555\n\
-             --- /dev/null\n+++ b/{created}\n@@ -0,0 +1 @@\n+{{}}\n\
-             diff --git a/{gone} b/{gone}\ndeleted file mode 100644\nindex 6666666..0000000\n\
-             --- a/{gone}\n+++ /dev/null\n@@ -1 +0,0 @@\n-{{}}\n"
-        );
-        let paths = admit(&registry(), codex(), &up, &patch(&up, &extra)).expect("admitted");
+        let after = pin::repinned(&before, codex().descriptor(), &up)
+            .expect("a repin")
+            .expect("a move");
+        let payloads = fixture_path("hook-payloads.jsonl");
+        let edits = [
+            raw(REGULAR, REGULAR, "M", &registry_relative()),
+            raw(REGULAR, REGULAR, "M", &payloads),
+            raw(ABSENT, REGULAR, "A", &fixture_path("new.jsonl")),
+            raw(REGULAR, ABSENT, "D", &fixture_path("old.jsonl")),
+        ]
+        .concat();
+        let ok = changes(edits.as_bytes()).expect("changes");
         assert_eq!(
-            paths,
-            [
-                registry_relative(),
-                PathBuf::from(&f),
-                PathBuf::from(&created),
-                PathBuf::from(&gone)
-            ]
+            judge(codex(), &up, &before, &after, &ok).map(|p| p.len()),
+            Ok(4)
         );
-    }
-
-    #[test]
-    fn a_bump_patch_refuses_what_a_recording_never_writes() {
-        let up = above(codex());
-        let f = fixture_file("hook-payloads.jsonl");
-        let g = fixture_file("other.jsonl");
-        let edit = |header: &str| {
-            format!("diff --git a/{f} b/{f}\n{header}--- a/{f}\n+++ b/{f}\n@@ -1 +1 @@\n-a\n+b\n")
-        };
-        for extra in [
-            edit("old mode 100644\nnew mode 100755\n"),
-            edit("index 3333333..4444444 120000\n"),
-            edit("similarity index 90%\n"),
-            format!("diff --git a/{f} b/{g}\nrename from {f}\nrename to {g}\n"),
-            format!("diff --git a/{f} b/{f}\nnew file mode 100755\n--- /dev/null\n+++ b/{f}\n@@ -0,0 +1 @@\n+a\n"),
-            format!("diff --git a/{f} b/{f}\nindex 3333333..4444444 100644\nBinary files a/{f} and b/{f} differ\n"),
-            format!("diff --git a/{f} b/{f}\n--- a/{g}\n+++ b/{g}\n@@ -1 +1 @@\n-a\n+b\n"),
-            format!("diff --git a/{f} b/{f}\n--- a/{f}\n+++ b/{g}\n@@ -1 +1 @@\n-a\n+b\n"),
-            format!("diff --git a/{f} b/{f}\n--- /dev/null\n+++ b/{f}\n@@ -0,0 +1 @@\n+a\n"),
-            format!("diff --git a/{f} b/{f}\n--- a/{f}\n+++ /dev/null\n@@ -1 +0,0 @@\n-a\n"),
-            format!("diff --git a/{f} b/{f}\nnew file mode 100644\n--- a/{f}\n+++ b/{f}\n@@ -1 +1 @@\n-a\n+b\n"),
-            format!("diff --git a/{f} b/{f}\n--- a/{f}\n+++ b/{f}\n@@ -1 +1 @@\n-a\n*b\n"),
-            "diff --git a/justfile b/justfile\n--- a/justfile\n+++ b/justfile\n@@ -1 +1 @@\n-a\n+b\n"
-                .to_string(),
-            format!("diff --git \"a/{f}\" \"b/{f}\"\n--- \"a/{f}\"\n+++ \"b/{f}\"\n@@ -1 +1 @@\n-a\n+b\n"),
-            {
-                let comma = fixture_file("a,b.jsonl");
-                format!("diff --git a/{comma} b/{comma}\n--- a/{comma}\n+++ b/{comma}\n@@ -1 +1 @@\n-a\n+b\n")
-            },
-        ] {
-            assert!(
-                admit(&registry(), codex(), &up, &patch(&up, &extra)).is_err(),
-                "{extra}"
-            );
-        }
-        assert!(
-            admit(
-                &registry(),
-                codex(),
-                &up,
-                &format!("junk\n{}", patch(&up, ""))
-            )
-            .is_err(),
-            "text before the first file"
-        );
-    }
-
-    #[test]
-    fn a_bump_patch_moves_the_pin_exactly_once_and_up() {
-        let src = registry();
-        let up = above(codex());
         let next = Version::new(up.major, up.minor, up.patch + 1);
-        assert!(admit(&src, codex(), &up, &patch(&up, "")).is_ok());
         assert!(
-            admit(&src, codex(), &next, &patch(&up, "")).is_err(),
+            judge(codex(), &next, &before, &after, &ok).is_err(),
             "another release"
         );
         let pin = pin::pinned(codex().descriptor()).expect("a pin");
         assert!(
-            admit(&src, codex(), &pin, &patch(&up, "")).is_err(),
+            judge(codex(), &pin, &before, &before, &ok).is_err(),
             "no move"
         );
-        let f = fixture_file("hook-payloads.jsonl");
-        let fixtures_only =
-            format!("diff --git a/{f} b/{f}\n--- a/{f}\n+++ b/{f}\n@@ -1 +1 @@\n-a\n+b\n");
+        let injected = format!("{after}pub fn injected() {{}}\n");
         assert!(
-            admit(&src, codex(), &up, &fixtures_only).is_err(),
-            "the pin stays"
+            judge(codex(), &up, &before, &injected, &ok).is_err(),
+            "the pin, and code"
         );
-        let reg = registry_relative();
-        let reg = reg.to_string_lossy();
-        let second_line =
-            format!("diff --git a/{reg} b/{reg}\n--- a/{reg}\n+++ b/{reg}\n@@ -1 +1 @@\n-a\n+b\n");
-        assert!(
-            admit(&src, codex(), &up, &patch(&up, &second_line)).is_err(),
-            "another registry line"
-        );
-    }
-
-    #[test]
-    fn a_bumps_fixture_files_are_its_fixtures_left_on_disk() {
-        let p = codex();
-        let kept = fixture_file(PROVENANCE);
-        let paths = [
-            registry_relative(),
-            PathBuf::from(&kept),
-            PathBuf::from(fixture_file("deleted.jsonl")),
-        ];
-        assert_eq!(fixture_files(p, &paths), [repo_root().join(&kept)]);
-    }
-
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("pixtuoid-bump-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("a scratch dir");
-        dir
-    }
-
-    #[test]
-    fn a_recording_is_admitted_only_as_the_recorder_writes_it() {
-        let p = codex();
-        let committed = sources_root().join(p.scenarios[0].fixture);
-        let dir = scratch("recorded");
-        let mut files = Vec::new();
-        for entry in std::fs::read_dir(&committed).expect("codex's fixture") {
-            let from = entry.expect("an entry").path();
-            let to = dir.join(from.file_name().expect("a name"));
-            std::fs::copy(&from, &to).expect("a copy");
-            files.push(to);
+        for bad in [
+            raw(REGULAR, REGULAR, "M", Path::new("justfile")),
+            raw(REGULAR, "100755", "M", &payloads),
+            raw("100755", REGULAR, "M", &payloads),
+            raw(ABSENT, "120000", "A", &fixture_path("link.jsonl")),
+            raw(REGULAR, "120000", "T", &payloads),
+            raw(ABSENT, "160000", "A", &fixture_path("module")),
+        ] {
+            let read = changes(format!("{edits}{bad}").as_bytes()).expect("changes");
+            assert!(
+                judge(codex(), &up, &before, &after, &read).is_err(),
+                "{bad:?}"
+            );
         }
-        assert_eq!(recorded(p, &files), Ok(()), "the committed recording");
+    }
 
-        let provenance = dir.join(PROVENANCE);
-        let text = std::fs::read_to_string(&provenance).expect("provenance");
-        let mut record: Value = serde_json::from_str(&text).expect("json");
-        record
-            .as_object_mut()
-            .expect("an object")
-            .remove(PROVENANCE_AIMOCK);
-        std::fs::write(&provenance, record.to_string()).expect("write");
-        assert!(recorded(p, &files).is_err(), "no aimock");
-        record[PROVENANCE_AIMOCK] = Value::from("1.0.0");
-        record["deidentified"]["method"] = Value::from("none");
-        std::fs::write(&provenance, record.to_string()).expect("write");
-        assert!(recorded(p, &files).is_err(), "exempt from the strip");
-        std::fs::write(&provenance, &text).expect("restore");
+    fn git(dir: &Path, args: &[&str]) -> std::process::Output {
+        std::process::Command::new("git")
+            .current_dir(dir)
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "core.autocrlf=false",
+            ])
+            .args(args)
+            .output()
+            .expect("git")
+    }
 
-        let payloads = dir.join(crate::harness::HOOK_PAYLOADS);
-        let mut lines: Vec<Value> = std::fs::read_to_string(&payloads)
-            .expect("payloads")
-            .lines()
-            .map(|l| serde_json::from_str(l).expect("a json line"))
-            .collect();
-        lines[0]["pixtuoid_bump_payload"] = Value::from("unread");
-        let rewritten: String = lines.iter().map(|l| format!("{l}\n")).collect();
-        std::fs::write(&payloads, rewritten).expect("write");
-        assert!(recorded(p, &files).is_err(), "a subtree no decoder reads");
-
-        let json = dir.join("notes.txt");
-        std::fs::write(&json, "{}\n").expect("write");
-        assert!(recorded(p, &[json]).is_err(), "JSON lines outside a .jsonl");
-
-        let stray = dir.join("build.rs");
-        std::fs::write(&stray, "fn main() {}").expect("write");
-        assert!(recorded(p, &[stray]).is_err(), "no recording writes code");
+    #[test]
+    fn a_patch_smuggling_code_into_the_registry_past_a_fixture_is_refused() {
+        // A plain `---`/`+++` section after a `diff --git` hunk: `git apply`
+        // applies it to its own file; a parser counting to the next
+        // `diff --git` read it as the fixture's lines.
+        let dir =
+            std::env::temp_dir().join(format!("pixtuoid-bump-smuggle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let before = registry();
+        let reg = registry_relative();
+        let payloads = fixture_path("hook-payloads.jsonl");
+        for (path, text) in [(&reg, before.as_str()), (&payloads, "a\n")] {
+            std::fs::create_dir_all(dir.join(path).parent().expect("a parent")).expect("dirs");
+            std::fs::write(dir.join(path), text).expect("write");
+        }
+        assert!(git(&dir, &["init", "-q"]).status.success());
+        assert!(git(&dir, &["add", "."]).status.success());
+        assert!(git(&dir, &["commit", "-qm", "base"]).status.success());
+        let up = above(codex());
+        let after = pin::repinned(&before, codex().descriptor(), &up)
+            .expect("a repin")
+            .expect("a move");
+        let lines: Vec<&str> = before.lines().collect();
+        let at = lines
+            .iter()
+            .zip(after.lines())
+            .position(|(a, b)| *a != b)
+            .expect("the pin line");
+        let (prev, was, next) = (lines[at - 1], lines[at], lines[at + 1]);
+        let now = after.lines().nth(at).expect("the moved pin");
+        let last = lines.len();
+        let tail = before.lines().last().expect("a last line");
+        let (reg, payloads) = (reg.to_string_lossy(), payloads.to_string_lossy());
+        let smuggle = |code: &str| {
+            let appended = if code.is_empty() {
+                String::new()
+            } else {
+                format!("@@ -{last} +{last},2 @@\n {tail}\n+{code}\n")
+            };
+            format!(
+                "diff --git a/{payloads} b/{payloads}\n--- a/{payloads}\n+++ b/{payloads}\n\
+                 @@ -1 +1 @@\n-a\n+b\n\
+                 --- a/{reg}\n+++ b/{reg}\n@@ -{at},3 +{at},3 @@\n {prev}\n-{was}\n+{now}\n {next}\n\
+                 {appended}"
+            )
+        };
+        let judged = |code: &str| {
+            let file = dir.join("bump.patch");
+            std::fs::write(&file, smuggle(code)).expect("write");
+            let applied = git(&dir, &["apply", "bump.patch"]);
+            assert!(
+                applied.status.success(),
+                "{}",
+                String::from_utf8_lossy(&applied.stderr)
+            );
+            std::fs::remove_file(&file).expect("remove");
+            let raw = git(&dir, &["diff", "HEAD", "--raw", "--no-renames", "-z"]).stdout;
+            let after = std::fs::read_to_string(dir.join(reg.as_ref())).expect("read");
+            assert!(git(&dir, &["checkout", "-q", "--", "."]).status.success());
+            judge(
+                codex(),
+                &up,
+                &before,
+                &after,
+                &changes(&raw).expect("changes"),
+            )
+        };
+        assert!(
+            judged("pub fn injected() {}").is_err(),
+            "code beside the pin"
+        );
+        assert_eq!(
+            judged("").map(|p| p.len()),
+            Ok(2),
+            "the same shape, a bump alone"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

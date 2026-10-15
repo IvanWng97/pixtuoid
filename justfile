@@ -759,12 +759,12 @@ hermetic *args: hermetic-build
 
 # The nightly's bump leg: snapshots rewritten for the re-recorded fixtures,
 # then judged as CI judges them.
-[doc('Re-record a source at its latest release, moving its pin, and write the bump as a patch')]
+[doc('Re-record a source at a release, moving its pin, and write the bump as a patch')]
 [group('rust')]
-hermetic-bump source out: (hermetic "--cli" "latest" "--record" source)
+hermetic-bump source release out: (hermetic "--cli" release "--record" source)
     TZ={{ TEST_TZ }} INSTA_UPDATE=always INSTA_FORCE_PASS=1 cargo test -q -p pixtuoid-core --test sources
     TZ={{ TEST_TZ }} cargo test -q -p pixtuoid-core --test sources
-    cargo run --release -q -p pixtuoid-core --example bump -- patch "$1" "$2"
+    cargo run --release -q -p pixtuoid-core --example bump -- patch "$1" "$3"
 
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug

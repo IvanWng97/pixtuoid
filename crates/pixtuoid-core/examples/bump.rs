@@ -6,8 +6,8 @@
 //! - `patch <source> <out>`: the tree's bump of `source` as a patch at `out`;
 //!   nothing is written when the tree is unchanged.
 //! - `check <proposals.json> <patches>`: each proposal's patch in `patches`,
-//!   admitted and its recording checked on the tree, then taken back out; prints
-//!   what publish opens, as JSON.
+//!   applied to the clean tree and judged by what git says it changed, then
+//!   wiped; prints what publish opens, as JSON.
 //!
 //! Exits 0 on success, 1 on a refusal (any patch refused refuses them all), and
 //! 2 on a usage error.
@@ -94,30 +94,29 @@ fn paths(z: &[u8]) -> Vec<PathBuf> {
         .collect()
 }
 
-fn patch(source: &str, out: &Path) -> Result<(), String> {
-    let p = profile(source)?;
-    // A recording can add a file; intent-to-add puts it in the diff, where
-    // `--all` would stage a deletion out of it. An untracked file the bump
-    // doesn't admit (CI's `npm ci` leaves `node_modules`) stays out of it.
+/// What the tree changed against HEAD, once each untracked file `marks` is in
+/// the diff (intent-to-add, where `--all` would stage a deletion out of it).
+fn changes(marks: impl Fn(&Path) -> bool) -> Result<Vec<bump::Change>, String> {
     let untracked: Vec<PathBuf> =
         paths(&git(&["ls-files", "--others", "--exclude-standard", "-z"])?)
             .into_iter()
-            .filter(|path| bump::admits(p, path))
+            .filter(|path| marks(path))
             .collect();
     if !untracked.is_empty() {
         let mut add = vec!["add", "--intent-to-add", "--"];
         add.extend(untracked.iter().filter_map(|p| p.to_str()));
         git(&add)?;
     }
-    let changed = paths(&git(&[
-        "diff",
-        "HEAD",
-        "--name-only",
-        "--no-renames",
-        "-z",
-    ])?);
-    if let Some(stray) = changed.iter().find(|path| !bump::admits(p, path)) {
-        return Err(format!("{stray:?} changed, outside {source}'s bump"));
+    bump::changes(&git(&["diff", "HEAD", "--raw", "--no-renames", "-z"])?)
+}
+
+fn patch(source: &str, out: &Path) -> Result<(), String> {
+    let p = profile(source)?;
+    // An untracked file the bump doesn't admit (CI's `npm ci` leaves
+    // `node_modules`) stays out of the patch.
+    let changed = changes(|path| bump::admits(p, path))?;
+    if let Some(stray) = changed.iter().find(|c| !bump::admits(p, &c.path)) {
+        return Err(format!("{:?} changed, outside {source}'s bump", stray.path));
     }
     if changed.is_empty() {
         println!("{source}: the tree is unchanged, so there is no patch");
@@ -145,6 +144,11 @@ struct Admitted {
 }
 
 fn check(proposals: &Path, patches: &Path) -> Result<(), String> {
+    // Each patch is judged against HEAD and wiped after, so anything else in
+    // the tree would be judged or lost.
+    if !git(&["status", "--porcelain"])?.is_empty() {
+        return Err("check needs a clean tree".into());
+    }
     let registry = std::fs::read_to_string(pin::registry_path()).map_err(|e| e.to_string())?;
     let mut admitted = Vec::new();
     for proposal in read_json::<Vec<Proposal>>(proposals)? {
@@ -156,19 +160,19 @@ fn check(proposals: &Path, patches: &Path) -> Result<(), String> {
         let p = profile(&proposal.source)?;
         let version =
             Version::parse(&proposal.version).map_err(|e| format!("{proposal:?}: {e}"))?;
-        let text = std::fs::read_to_string(&file).map_err(|e| format!("{file:?}: {e}"))?;
-        let paths = bump::admit(&registry, p, &version, &text)?;
         let file = file
             .to_str()
             .ok_or_else(|| format!("{file:?} is not UTF-8"))?;
-        git(&["apply", "--check", file])?;
         git(&["apply", file])?;
-        let recorded = bump::recorded(p, &bump::fixture_files(p, &paths));
-        git(&["apply", "--reverse", file])?;
-        recorded?;
+        let judged = changes(|_| true).and_then(|changed| {
+            let after = std::fs::read_to_string(pin::registry_path()).map_err(|e| e.to_string())?;
+            bump::judge(p, &version, &registry, &after, &changed)
+        });
+        git(&["reset", "-q", "--hard", "HEAD"])?;
+        git(&["clean", "-fdq"])?;
         admitted.push(Admitted {
             proposal,
-            paths: paths
+            paths: judged?
                 .iter()
                 .map(|path| path.to_string_lossy().into_owned())
                 .collect(),

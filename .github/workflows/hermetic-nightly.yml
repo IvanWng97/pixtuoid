@@ -98,9 +98,11 @@ jobs:
       - uses: ./.github/actions/setup-npm
         with:
           directory: crates/pixtuoid-core/tests/sources/hermetic/aimock
+      # The release every drift leg passed, not a `latest` published since.
       - env:
           SOURCE: ${{ matrix.source }}
-        run: just hermetic-bump "$SOURCE" "$RUNNER_TEMP/$SOURCE.patch"
+          RELEASE: ${{ matrix.version }}
+        run: just hermetic-bump "$SOURCE" "$RELEASE" "$RUNNER_TEMP/$SOURCE.patch"
       - uses: actions/upload-artifact@v7
         with:
           name: patch-${{ matrix.source }}
@@ -141,7 +143,7 @@ jobs:
           echo "approved=$approved" >> "$GITHUB_OUTPUT"
 
   # Holds the bot's write token, so it runs nothing from the tree
-  # (`hermetic-publish-runs-no-tree-code`).
+  # (`bot-publish-runs-no-tree-code`).
   publish:
     name: open the bump PR for ${{ matrix.source }}
     needs: check

@@ -4,8 +4,9 @@
 //!
 //! `--cli pinned` (the default) installs each CLI at its registry
 //! `verified_version`, the merge queue's end-to-end gate; `--cli latest` installs
-//! what npm's `latest` tag points at, the nightly drift run. `--record` writes a
-//! source's fixtures, and with `latest` moves its pin up to the release recorded.
+//! what npm's `latest` tag points at, the nightly drift run; `--cli <release>`
+//! installs that release, a bump's planned one. `--record` writes a source's
+//! fixtures, and off the pin moves its pin up to the release recorded.
 //!
 //! Exits 0 when every run passed, 1 on any other verdict (a recording refused
 //! after its runs included), and anything else when the tier itself could not
@@ -151,10 +152,13 @@ mod run {
         c
     }
 
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    #[derive(Clone, PartialEq, Eq, Debug)]
     enum Versions {
         Pinned,
         Latest,
+        /// The release a bump planned, so a newer `latest` published since
+        /// isn't the one recorded.
+        Exact(Version),
     }
 
     #[derive(Debug, PartialEq, Eq)]
@@ -172,8 +176,8 @@ mod run {
             if let Some(why) = CORPUS_REFUSAL.filter(|_| self.record) {
                 return Err(format!("--record: {why}"));
             }
-            if self.record && self.versions == Versions::Latest && self.source.is_none() {
-                return Err("--record with latest moves one source's pin: name it".into());
+            if self.record && self.versions != Versions::Pinned && self.source.is_none() {
+                return Err("--record off the pin moves one source's pin: name it".into());
             }
             if self.record && self.scenario.is_some() {
                 return Err("--record writes a whole source: its census judges every run".into());
@@ -200,6 +204,8 @@ mod run {
         }
     }
 
+    const CLI_USAGE: &str = "--cli takes pinned, latest or a release";
+
     fn parse(mut rest: &[String]) -> Result<Args, String> {
         let (mut versions, mut record) = (Versions::Pinned, false);
         loop {
@@ -208,11 +214,13 @@ mod run {
                     versions = match v.as_str() {
                         "pinned" => Versions::Pinned,
                         "latest" => Versions::Latest,
-                        _ => return Err("--cli takes pinned or latest".into()),
+                        release => Version::parse(release)
+                            .map(Versions::Exact)
+                            .map_err(|_| CLI_USAGE.to_string())?,
                     };
                     rest = tail;
                 }
-                [flag] if flag == "--cli" => return Err("--cli takes pinned or latest".into()),
+                [flag] if flag == "--cli" => return Err(CLI_USAGE.into()),
                 [flag, tail @ ..] if flag == "--record" => {
                     record = true;
                     rest = tail;
@@ -237,7 +245,7 @@ mod run {
             Ok(a) => a,
             Err(e) => {
                 eprintln!(
-                    "{e}\nusage: hermetic [--cli pinned|latest] [--record] [<source> [<scenario>]]"
+                    "{e}\nusage: hermetic [--cli pinned|latest|<release>] [--record] [<source> [<scenario>]]"
                 );
                 std::process::exit(2);
             }
@@ -267,7 +275,7 @@ mod run {
             entries.extend(ran);
             moved.extend(now);
         }
-        let report = report(args.versions, &host_tool_versions(), &entries);
+        let report = report(&args.versions, &host_tool_versions(), &entries);
         std::fs::write(runs.join(REPORT), &report)?;
         std::fs::write(runs.join(bump::MOVED), serde_json::to_string(&moved)?)?;
         println!("\n{report}");
@@ -292,7 +300,7 @@ mod run {
             return Ok((entries, None));
         }
         // Once per source, so every scenario runs, and records, one release.
-        let installed = resolve(p, args.versions);
+        let installed = resolve(p, &args.versions);
         // Worked out before any CLI runs, so a refusal writes nothing.
         let registry = match (&installed, args.record) {
             (Ok(v), true) => {
@@ -433,10 +441,11 @@ mod run {
             .collect()
     }
 
-    fn report(versions: Versions, host: &[String], entries: &[Entry]) -> String {
+    fn report(versions: &Versions, host: &[String], entries: &[Entry]) -> String {
         let which = match versions {
             Versions::Pinned => "verified",
             Versions::Latest => "latest",
+            Versions::Exact(_) => "planned",
         };
         let labels = || entries.iter().map(|e| e.verdict.label());
         let title = match labels().max() {
@@ -631,10 +640,11 @@ mod run {
     }
 
     /// The release `versions` names for `p`.
-    fn resolve(p: &Profile, versions: Versions) -> Result<Version, String> {
+    fn resolve(p: &Profile, versions: &Versions) -> Result<Version, String> {
         let Package::Npm(package) = p.package;
         match versions {
             Versions::Pinned => pin::pinned(p.descriptor()),
+            Versions::Exact(release) => Ok(release.clone()),
             Versions::Latest => {
                 // A bare name reads npm's `tag` config, which an operator's
                 // `.npmrc` can point at another dist-tag
@@ -1326,6 +1336,12 @@ mod run {
             assert!(a.selects("anything", "at-all"));
             assert!(parse(&args(&["--cli"])).is_err());
             assert!(parse(&args(&["--cli", "newest"])).is_err());
+            let a = parse(&args(&["--cli", "1.2.3", "codex"])).expect("parse");
+            assert_eq!(a.versions, Versions::Exact(Version::new(1, 2, 3)));
+            assert!(
+                parse(&args(&["--cli", "1.x"])).is_err(),
+                "a release, never a range"
+            );
             assert!(parse(&args(&["codex", "tool-run", "extra"])).is_err());
         }
 
@@ -1345,7 +1361,7 @@ mod run {
                     Verdict::new(vec![(Label::Blocked, "npm view failed".into())]),
                 )
             };
-            let r = report(Versions::Latest, &host, &[pass, blocked()]);
+            let r = report(&Versions::Latest, &host, &[pass, blocked()]);
             assert_eq!(
                 r.lines().next(),
                 Some(format!("# hermetic, latest CLIs on {os}: Blocked").as_str())
@@ -1353,7 +1369,7 @@ mod run {
             assert!(r.contains("Host: git version 2.55.0"), "{r}");
             assert!(r.contains("## opencode/tool-run: Blocked\n- Blocked: npm view failed"));
             assert!(r.contains("## codex/tool-run (codex-cli 0.155.1): Pass"));
-            let r = report(Versions::Pinned, &host, &[blocked()]);
+            let r = report(&Versions::Pinned, &host, &[blocked()]);
             assert_eq!(
                 r.lines().next(),
                 Some(format!("# hermetic, verified CLIs on {os}: NOTHING RAN").as_str())
@@ -1367,7 +1383,7 @@ mod run {
                     (Label::Script, "1 unmatched".into()),
                 ]),
             );
-            let r = report(Versions::Latest, &host, &[lost, blocked()]);
+            let r = report(&Versions::Latest, &host, &[lost, blocked()]);
             assert_eq!(
                 r.lines().next(),
                 Some(format!("# hermetic, latest CLIs on {os}: Script").as_str())
