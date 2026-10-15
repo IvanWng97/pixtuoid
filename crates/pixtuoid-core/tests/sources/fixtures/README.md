@@ -88,10 +88,10 @@ beside them to be diffed, not trusted, and since only `*.jsonl` and
 `provenance.json` are read, one you do not promote costs a billed turn and changes
 nothing. Diff the pair, then `mv` the `.new` over the old one or delete it.
 
-**A capture can only be recorded on Unix.** The recorder listens on a
-`UnixListener`; the Windows shim speaks a named pipe, so there is no Windows arm
-and `just capture-fixture` exits 2 there. Windows wire evidence therefore cannot
-be re-recorded on demand — which is why `copilot/tool-run`, the one fixture
+**A capture is recorded only on Unix.** The corpus pins Unix realpaths and cwds,
+so on Windows the recorder writes only a raw `--out` capture and
+refuses to record or promote. Windows wire evidence therefore cannot be
+re-recorded on demand — which is why `copilot/tool-run`, the one fixture
 carrying a real Windows `cwd`, stays `unknown` rather than being replaced.
 
 Only ONE edit is allowed after the recorder's own strip: redact PII the strip

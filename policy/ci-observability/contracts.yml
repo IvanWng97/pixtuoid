@@ -105,19 +105,73 @@
 - id: hermetic-nightly-files-the-runs-the-tier-named
   file: .github/workflows/hermetic-nightly.yml
   why: >-
-    The issue is filed from the runs the tier uploaded, under the name its
-    upload chose and its `runs` output hands on. A name rebuilt here can
-    disagree with it and find nothing.
+    The issue is filed from the runs each OS leg uploaded, under the stem the
+    tier's `runs-stem` output hands on, each leg's in its own directory: a name
+    rebuilt here can disagree with it and find nothing, and merged legs would
+    overwrite one report with the other.
   assert: |
-    [.jobs.file.steps[] | select((.uses // "") | startswith("actions/download-artifact")) | .with.name]
-    == ["${{ needs.drift.outputs.runs }}"]
+    [.jobs.file.steps[] | select((.uses // "") | startswith("actions/download-artifact")) | .with]
+    == [{"pattern": "${{ needs.drift.outputs.runs-stem }}*"}]
   break:
     - |
       .jobs.file.steps |= map(
-        if (.uses // "") | startswith("actions/download-artifact") then .with.name = "hermetic-runs-${{ github.run_id }}" else . end)
+        if (.uses // "") | startswith("actions/download-artifact") then .with.pattern = "hermetic-runs-${{ github.run_id }}*" else . end)
     - |
       .jobs.file.steps |= map(
-        if (.uses // "") | startswith("actions/download-artifact") then .with = {"merge-multiple": true} else . end)
+        if (.uses // "") | startswith("actions/download-artifact") then .with["merge-multiple"] = true else . end)
+    - |
+      .jobs.file.steps |= map(
+        if (.uses // "") | startswith("actions/download-artifact") then .with = {"name": "${{ needs.drift.outputs.runs-stem }}"} else . end)
+
+- id: hermetic-caches-restore-only-but-their-one-writer
+  file:
+    - .github/workflows/hermetic.yml
+    - .github/workflows/hermetic-nightly.yml
+  why: >-
+    These workflows run agent CLIs nobody here vets, on runners holding the
+    job's cache token, and a cache saved into main's scope reaches every ref's
+    restore, release builds included. Only `cache-mode` scopes the token, so
+    each workflow defaults to read, and the one job that may write runs no CLI.
+    `run` restores what `build` saved only while both share one rust-cache key:
+    the same shared key, and none of the env rust-cache hashes (Swatinem/rust-cache
+    src/config.ts `envPrefixes`) at workflow or job level; a split key would
+    cold-build every run with nothing red.
+  expected: hermetic
+  assert: |
+    .["cache-mode"] == "read"
+    and ([.jobs | to_entries[] | select((.value["cache-mode"] // "read") | IN("read", "none") | not) | .key]
+         | . == [] or . == ["build"])
+    and (.jobs.build == null
+         or ([.jobs.build.steps[] | .run // empty] == ["just hermetic-build"]
+             and ([.jobs.build.steps[] | .uses // empty | sub("@.*"; "")]
+                  - ["actions/checkout", "./.github/actions/setup-cargo-just"]) == []))
+    and ([.jobs[].steps[]? | select((.uses // "") == "./.github/actions/setup-cargo-just") | .with["shared-key"]]
+         | length > 0 and all(. == $expected))
+    and ([(.env // {}), (.jobs[] | .env // {}) | keys[] | select(test("^(CARGO|CC|CFLAGS|CXX|CMAKE|RUST)"))] == [])
+  break:
+    - del(.["cache-mode"])
+    - '.["cache-mode"] = "write"'
+    - '.jobs.extra = {"runs-on": "macos-latest", "cache-mode": "write-only", "steps": [{"run": "true"}]}'
+    - '.jobs.build = {"runs-on": "macos-latest", "cache-mode": "write", "steps": [{"run": "just hermetic --cli latest"}]}'
+    - '.jobs.build.steps += [{"uses": "anthropics/claude-code-action@v1"}]'
+    - '.env = {"CARGO_TERM_COLOR": "always"}'
+    - '(.jobs[] | select(.steps != null)).env = {"RUST_BACKTRACE": "1"}'
+    - '(.jobs[].steps[]? | select((.uses // "") == "./.github/actions/setup-cargo-just") | .with["shared-key"]) = "other"'
+
+- id: hermetic-build-covers-every-run-os
+  file:
+    - .github/workflows/hermetic.yml
+    - .github/workflows/hermetic-nightly.yml
+  why: >-
+    rust-cache keys a save by OS and arch (Swatinem/rust-cache src/config.ts),
+    so a `run` leg restores only what a `build` leg on its runner saved; a leg
+    `build` lacks cold-builds every run with nothing red.
+  expected: macos-latest windows-latest
+  assert: |
+    [.jobs.run.strategy.matrix.include[]?.runner, .jobs.build.strategy.matrix.runner[]?] | join(" ") == $expected
+  break:
+    - '.jobs.run.strategy.matrix.include += [{"runner": "ubuntu-latest"}]'
+    - '.jobs.build.strategy.matrix.runner += ["ubuntu-latest"]'
 
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml
