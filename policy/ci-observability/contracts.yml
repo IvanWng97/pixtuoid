@@ -44,37 +44,57 @@
     - '.runs.steps += [{"uses": "./.github/actions/setup-cargo-just"}]'
     - '.runs.steps += [{"uses": "Swatinem/rust-cache@v2"}]'
 
-- id: media-regen-bounds-its-token
-  file: .github/workflows/media-regen.yml
+- id: bot-publish-runs-no-tree-code
+  file:
+    - .github/workflows/media-regen.yml
+    - .github/workflows/hermetic-nightly.yml
   why: >-
-    publish holds the App's key and the write token it mints, which stay bounded
-    only while no other job can read them, publish builds and runs nothing from
-    the tree, and the one thing it commits is the README's media.
+    publish holds the bot App's key and the write token it mints, and commits
+    what an earlier job produced: the media a render left, or the patch a leg
+    that ran a just-published CLI wrote. Both stay bounded only while no other
+    job can read the key and publish builds and runs nothing from the tree.
   assert: |
     ([.jobs.publish.steps[] | .run // ""] | join("\n")) as $publish
     | .permissions == {}
-      and .jobs.render.permissions == {"contents": "read"}
       and ([.jobs | to_entries[] | select(.key != "publish") | .value | tostring | test("secrets\\.")] | any | not)
       and .jobs.publish.permissions == {}
       and ([.jobs.publish.steps[] | .uses // empty | sub("@.*"; "")] - ["actions/checkout", "actions/download-artifact", "actions/create-github-app-token", "peter-evans/create-pull-request"]) == []
       and ([.jobs.publish.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with["persist-credentials"]] | all(. == false))
       and ($publish | test("\\b(cargo|just|npm|node|pip|python3?|make|bash|sh)\\b|\\./") | not)
       and ($publish | test("\\bgit\\s+(add|commit|push)\\b") | not)
-      and ([.jobs.publish.steps[] | select((.uses // "") | startswith("peter-evans/create-pull-request@")) | .with["add-paths"]] == ["docs/images"])
-      and ((.on | keys) - ["push", "workflow_dispatch"]) == []
   break:
-    - '.jobs.render.steps += [{"env": {"T": "${{ secrets.MEDIA_APP_KEY }}"}, "run": "true"}]'
-    - '.jobs.render.permissions.contents = "write"'
+    - '.jobs.extra = {"runs-on": "ubuntu-latest", "steps": [{"env": {"T": "${{ secrets.BOT_APP_KEY }}"}, "run": "true"}]}'
+    - '.permissions = {"contents": "write"}'
     - '.jobs.publish.permissions = {"contents": "write"}'
     - '.jobs.publish.steps += [{"run": "cargo build"}]'
-    - '(.jobs.publish.steps[] | select((.uses // "") | startswith("peter-evans/")) | .with["add-paths"]) = "."'
     - '.jobs.publish.steps += [{"run": "git add -A && git commit -m x"}]'
-    - .on.pull_request = {}
-    - '.permissions = {"contents": "write"}'
-    - '.jobs.extra = {"runs-on": "ubuntu-latest", "steps": [{"env": {"T": "${{ secrets.MEDIA_APP_KEY }}"}, "run": "true"}]}'
     - '.jobs.publish.steps += [{"uses": "./.github/actions/setup-cargo-just"}]'
     - '.jobs.publish.steps[0].with["persist-credentials"] = true'
     - '.jobs.publish.steps += [{"run": "bash scripts/x.sh"}]'
+
+- id: media-regen-commits-only-the-readme-media
+  file: .github/workflows/media-regen.yml
+  why: >-
+    Beside `bot-publish-runs-no-tree-code`: render only reads, and the one thing
+    publish commits is the README's media, from main.
+  assert: |
+    .jobs.render.permissions == {"contents": "read"}
+    and ([.jobs.publish.steps[] | select((.uses // "") | startswith("peter-evans/create-pull-request@")) | .with["add-paths"]] == ["docs/images"])
+    and ((.on | keys) - ["push", "workflow_dispatch"]) == []
+  break:
+    - '.jobs.render.permissions.contents = "write"'
+    - '(.jobs.publish.steps[] | select((.uses // "") | startswith("peter-evans/")) | .with["add-paths"]) = "."'
+    - .on.pull_request = {}
+
+- id: hermetic-publish-only-on-main
+  file: .github/workflows/hermetic-nightly.yml
+  why: >-
+    Beside `bot-publish-runs-no-tree-code`: a dispatch on a branch is a
+    pre-merge proof, so only main's nightly opens bump PRs.
+  assert: |
+    .jobs.publish.if | test("github\\.ref == 'refs/heads/main'")
+  break:
+    - '.jobs.publish.if = "${{ true }}"'
 
 - id: drift-watch-files-issues-from-a-job-that-runs-no-tree-code
   file:

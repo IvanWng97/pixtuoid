@@ -66,14 +66,27 @@ pub fn repinned(
     d: &SourceDescriptor,
     installed: &Version,
 ) -> Result<Option<String>, String> {
+    if moves(d, installed)? {
+        repin(registry, d.name, installed).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+/// Whether `installed` is above `d`'s pin.
+///
+/// # Errors
+///
+/// When `installed` is below the pin, or the pin is not a release.
+pub fn moves(d: &SourceDescriptor, installed: &Version) -> Result<bool, String> {
     let pin = pinned(d)?;
     match installed.cmp_precedence(&pin) {
         Ordering::Less => Err(format!(
             "{}: {installed} is below its pin {pin}, so nothing is recorded",
             d.name
         )),
-        Ordering::Equal => Ok(None),
-        Ordering::Greater => repin(registry, d.name, installed).map(Some),
+        Ordering::Equal => Ok(false),
+        Ordering::Greater => Ok(true),
     }
 }
 

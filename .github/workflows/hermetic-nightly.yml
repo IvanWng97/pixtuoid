@@ -44,6 +44,149 @@ jobs:
       full: true
       cli: latest
 
+  # A release that moved on every leg becomes a bot PR. The legs ran the CLIs,
+  # so what they report and record is untrusted; `bump` holds it to a bump.
+  plan:
+    name: plan the pin bumps
+    needs: drift
+    if: ${{ !cancelled() }}
+    runs-on: macos-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      proposals: ${{ steps.plan.outputs.proposals }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          shared-key: hermetic
+      - run: cargo build --release -q -p pixtuoid-core --example bump
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRIFT: ${{ toJSON(needs.drift.outputs) }}
+        run: |
+          gh pr list --state all --limit 200 --search 'in:title "chore(hermetic): pin"' \
+            --json title > "$RUNNER_TEMP/taken.json"
+          printf '%s' "$DRIFT" > "$RUNNER_TEMP/drift.json"
+          proposals=$(target/release/examples/bump plan "$RUNNER_TEMP/taken.json" "$RUNNER_TEMP/drift.json")
+          echo "proposals=$proposals" >> "$GITHUB_OUTPUT"
+
+  bump:
+    name: bump ${{ matrix.source }}
+    needs: plan
+    # A bare `if` is `success()`, which a failed drift leg upstream fails; one
+    # CLI's drift must not hold back another's bump.
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.proposals != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.proposals) }}
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          shared-key: hermetic
+      - uses: ./.github/actions/setup-npm
+        with:
+          directory: crates/pixtuoid-core/tests/sources/hermetic/aimock
+      # The release every drift leg passed, not a `latest` published since.
+      - env:
+          SOURCE: ${{ matrix.source }}
+          RELEASE: ${{ matrix.version }}
+        run: just hermetic-bump "$SOURCE" "$RELEASE" "$RUNNER_TEMP/$SOURCE.patch"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: patch-${{ matrix.source }}
+          path: ${{ runner.temp }}/${{ matrix.source }}.patch
+          retention-days: 1
+          if-no-files-found: ignore
+
+  check:
+    name: check the bump patches
+    needs: [plan, bump]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.proposals != '[]' }}
+    runs-on: macos-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      approved: ${{ steps.check.outputs.approved }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          shared-key: hermetic
+      # Built before any patch is on the runner, outside the workspace.
+      - run: cargo build --release -q -p pixtuoid-core --example bump
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: patch-*
+          path: ${{ runner.temp }}/patches
+          merge-multiple: true
+      - id: check
+        env:
+          PROPOSALS: ${{ needs.plan.outputs.proposals }}
+        run: |
+          printf '%s' "$PROPOSALS" > "$RUNNER_TEMP/proposals.json"
+          approved=$(target/release/examples/bump check "$RUNNER_TEMP/proposals.json" "$RUNNER_TEMP/patches")
+          echo "approved=$approved" >> "$GITHUB_OUTPUT"
+
+  # Holds the bot's write token, so it runs nothing from the tree
+  # (`bot-publish-runs-no-tree-code`).
+  publish:
+    name: open the bump PR for ${{ matrix.source }}
+    needs: check
+    if: ${{ !cancelled() && needs.check.result == 'success' && github.ref == 'refs/heads/main' && needs.check.outputs.approved != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.check.outputs.approved) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: patch-${{ matrix.source }}
+          path: ${{ runner.temp }}
+      - env:
+          SOURCE: ${{ matrix.source }}
+        run: git apply "$RUNNER_TEMP/$SOURCE.patch"
+      # An App token, because a GITHUB_TOKEN PR starts no CI.
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: ${{ matrix.branch }}
+          delete-branch: true
+          add-paths: ${{ join(matrix.paths, ',') }}
+          sign-commits: true
+          commit-message: ${{ matrix.title }}
+          title: ${{ matrix.title }}
+          body: "${{ matrix.source }}'s latest release passed every hermetic scenario on every OS, re-recorded here (`hermetic-nightly.yml`). A session reads the whole diff, fixtures included, then queues it."
+
   file:
     name: file the hermetic report
     needs: drift

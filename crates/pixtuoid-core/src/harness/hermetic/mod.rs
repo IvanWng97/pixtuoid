@@ -13,6 +13,7 @@ use serde_json::Value;
 use crate::harness::CaptureRecord;
 use crate::source::registry;
 
+pub mod bump;
 pub mod pin;
 pub mod verify;
 

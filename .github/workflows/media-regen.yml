@@ -72,8 +72,8 @@ jobs:
       - id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.MEDIA_APP_ID }}
-          private-key: ${{ secrets.MEDIA_APP_KEY }}
+          app-id: ${{ vars.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_KEY }}
           permission-contents: write
           permission-pull-requests: write
       - run: |
