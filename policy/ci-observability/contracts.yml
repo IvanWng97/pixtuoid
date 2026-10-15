@@ -9,6 +9,8 @@
 # key fails its contract instead of slipping past it. Each `break` is a jq edit
 # of the same document that must turn `assert` red, and every run applies them
 # all; a clause is proven able to fire only while some break falsifies it alone.
+# A `covers` string makes every file under .github/ holding it one the contract
+# must list.
 
 # ── Scopes that only look narrow
 
@@ -124,6 +126,7 @@
         if (.uses // "") | startswith("actions/download-artifact") then .with = {"name": "${{ needs.drift.outputs.runs-stem }}"} else . end)
 
 - id: only-main-saves-the-rust-cache
+  covers: Swatinem/rust-cache@
   file:
     - .github/actions/setup-cargo-just/action.yml
     - .github/actions/packaging-build/action.yml
