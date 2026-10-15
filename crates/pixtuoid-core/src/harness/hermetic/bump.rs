@@ -48,14 +48,14 @@ pub struct Proposal {
     /// The release its pin moves to.
     pub version: String,
     /// One per source, so a newer release updates the open PR.
-    pub branch: String,
+    pub(crate) branch: String,
     /// Also the key a declined release is remembered by.
-    pub title: String,
+    pub(crate) title: String,
 }
 
 impl Proposal {
     /// The proposal moving `source` to `version`.
-    pub fn new(source: &str, version: &Version) -> Self {
+    pub(crate) fn new(source: &str, version: &Version) -> Self {
         Self {
             source: source.to_string(),
             version: version.to_string(),
@@ -66,7 +66,7 @@ impl Proposal {
 }
 
 /// The releases to propose, given the drift job's outputs: each profiled source
-/// that moved to one release on every OS in [`OSES`], above its pin, under a
+/// that moved to one release on every OS in `OSES`, above its pin, under a
 /// title no PR has taken (an open one proposes it, a closed one declined it). A
 /// leg that reported nothing moved nothing.
 ///
