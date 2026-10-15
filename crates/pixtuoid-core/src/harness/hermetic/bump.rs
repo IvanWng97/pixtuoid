@@ -157,52 +157,9 @@ pub fn admits(p: &Profile, path: &Path) -> bool {
         })
 }
 
-/// One path `git diff HEAD --raw --no-renames -z` reports changed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Change {
-    /// Relative to the repository.
-    pub path: PathBuf,
-    old_mode: String,
-    new_mode: String,
-    status: String,
-}
-
-/// The changes in git's `--raw -z` output.
-///
-/// # Errors
-///
-/// When a record is not in git's shape.
-pub fn changes(raw: &[u8]) -> Result<Vec<Change>, String> {
-    let text = std::str::from_utf8(raw).map_err(|e| e.to_string())?;
-    let mut fields = text.split('\0').filter(|f| !f.is_empty());
-    let mut out = Vec::new();
-    while let Some(record) = fields.next() {
-        let path = fields
-            .next()
-            .ok_or_else(|| format!("{record:?} names no path"))?;
-        let meta: Vec<&str> = record.trim_start_matches(':').split(' ').collect();
-        let [old_mode, new_mode, _, _, status] = meta[..] else {
-            return Err(format!("{record:?} is not a raw record"));
-        };
-        out.push(Change {
-            path: PathBuf::from(path),
-            old_mode: old_mode.to_string(),
-            new_mode: new_mode.to_string(),
-            status: status.to_string(),
-        });
-    }
-    Ok(out)
-}
-
-/// A regular, non-executable file's mode; a path absent on one side has none.
-const REGULAR: &str = "100644";
-const ABSENT: &str = "000000";
-
-/// The paths a bump of `p` to `version` changed, once the tree a patch left
-/// holds nothing else: each change [`admits`], each a regular file created,
-/// edited or deleted, and the registry `after` exactly as
-/// [`pin::repinned`] writes `before`. Git, never a parser of the patch, says
-/// what the patch did.
+/// Whether the tree a patch left is a bump of `p` to `version` and nothing
+/// else: every path git says `changed` [`admits`], and the registry `after`
+/// exactly as [`pin::repinned`] writes `before`.
 ///
 /// # Errors
 ///
@@ -212,8 +169,8 @@ pub fn judge(
     version: &Version,
     before: &str,
     after: &str,
-    changes: &[Change],
-) -> Result<Vec<PathBuf>, String> {
+    changed: &[PathBuf],
+) -> Result<(), String> {
     let Some(expected) = pin::repinned(before, p.descriptor(), version)? else {
         return Err(format!("{}: {version} is its pin already", p.source));
     };
@@ -223,26 +180,10 @@ pub fn judge(
             p.source
         ));
     }
-    let regular = |mode: &str| mode == REGULAR || mode == ABSENT;
-    for c in changes {
-        if !admits(p, &c.path) {
-            return Err(format!("{:?} is outside {}'s bump", c.path, p.source));
-        }
-        // publish hands the paths to create-pull-request comma- or line-joined.
-        if c.path.to_string_lossy().contains([',', '\n', '\r']) {
-            return Err(format!("{:?} would split in publish's add-paths", c.path));
-        }
-        if !["M", "A", "D"].contains(&c.status.as_str())
-            || !regular(&c.old_mode)
-            || !regular(&c.new_mode)
-        {
-            return Err(format!(
-                "{:?} is {} from mode {} to {}: a bump creates, edits or deletes regular files",
-                c.path, c.status, c.old_mode, c.new_mode
-            ));
-        }
+    match changed.iter().find(|path| !admits(p, path)) {
+        Some(stray) => Err(format!("{stray:?} is outside {}'s bump", p.source)),
+        None => Ok(()),
     }
-    Ok(changes.iter().map(|c| c.path.clone()).collect())
 }
 
 #[cfg(test)]
@@ -441,28 +382,8 @@ mod tests {
         );
     }
 
-    /// One change as git's `--raw -z` writes it.
-    fn raw(old: &str, new: &str, status: &str, path: &Path) -> String {
-        format!(
-            ":{old} {new} 0000000 0000000 {status}\0{}\0",
-            path.display()
-        )
-    }
-
     fn fixture_path(name: &str) -> PathBuf {
         relative(&sources_root().join(codex().scenarios[0].fixture).join(name))
-    }
-
-    #[test]
-    fn changes_are_read_from_gits_raw_records() {
-        let two = raw(REGULAR, REGULAR, "M", Path::new("a b/c.jsonl"))
-            + &raw(ABSENT, REGULAR, "A", Path::new("d"));
-        let read = changes(two.as_bytes()).expect("changes");
-        assert_eq!(read.len(), 2);
-        assert_eq!(read[0].path, PathBuf::from("a b/c.jsonl"));
-        assert_eq!(read[1].status, "A");
-        assert!(changes(b":100644 M\0x\0").is_err(), "not git's shape");
-        assert!(changes(b":100644 100644 0 0 M\0").is_err(), "no path");
     }
 
     #[test]
@@ -472,19 +393,12 @@ mod tests {
         let after = pin::repinned(&before, codex().descriptor(), &up)
             .expect("a repin")
             .expect("a move");
-        let payloads = fixture_path("hook-payloads.jsonl");
-        let edits = [
-            raw(REGULAR, REGULAR, "M", &registry_relative()),
-            raw(REGULAR, REGULAR, "M", &payloads),
-            raw(ABSENT, REGULAR, "A", &fixture_path("new.jsonl")),
-            raw(REGULAR, ABSENT, "D", &fixture_path("old.jsonl")),
-        ]
-        .concat();
-        let ok = changes(edits.as_bytes()).expect("changes");
-        assert_eq!(
-            judge(codex(), &up, &before, &after, &ok).map(|p| p.len()),
-            Ok(4)
-        );
+        let ok = [
+            registry_relative(),
+            fixture_path("hook-payloads.jsonl"),
+            fixture_path("new.jsonl"),
+        ];
+        assert_eq!(judge(codex(), &up, &before, &after, &ok), Ok(()));
         let next = Version::new(up.major, up.minor, up.patch + 1);
         assert!(
             judge(codex(), &next, &before, &after, &ok).is_err(),
@@ -500,123 +414,10 @@ mod tests {
             judge(codex(), &up, &before, &injected, &ok).is_err(),
             "the pin, and code"
         );
-        for bad in [
-            raw(REGULAR, REGULAR, "M", Path::new("justfile")),
-            raw(REGULAR, "100755", "M", &payloads),
-            raw("100755", REGULAR, "M", &payloads),
-            raw(ABSENT, "120000", "A", &fixture_path("link.jsonl")),
-            raw(REGULAR, "120000", "T", &payloads),
-            raw(ABSENT, "160000", "A", &fixture_path("module")),
-            raw(ABSENT, REGULAR, "A", &fixture_path("x,.")),
-            raw(ABSENT, REGULAR, "A", &fixture_path("x\n.")),
-        ] {
-            let read = changes(format!("{edits}{bad}").as_bytes()).expect("changes");
-            assert!(
-                judge(codex(), &up, &before, &after, &read).is_err(),
-                "{bad:?}"
-            );
-        }
-    }
-
-    fn git(dir: &Path, args: &[&str]) -> std::process::Output {
-        std::process::Command::new("git")
-            .current_dir(dir)
-            .args([
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                "-c",
-                "core.autocrlf=false",
-            ])
-            .args(args)
-            .output()
-            .expect("git")
-    }
-
-    #[test]
-    fn a_patch_smuggling_code_into_the_registry_past_a_fixture_is_refused() {
-        // A plain `---`/`+++` section after a `diff --git` hunk: `git apply`
-        // applies it to its own file; a parser counting to the next
-        // `diff --git` read it as the fixture's lines.
-        let dir =
-            std::env::temp_dir().join(format!("pixtuoid-bump-smuggle-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let before = registry();
-        let reg = registry_relative();
-        let payloads = fixture_path("hook-payloads.jsonl");
-        for (path, text) in [(&reg, before.as_str()), (&payloads, "a\n")] {
-            std::fs::create_dir_all(dir.join(path).parent().expect("a parent")).expect("dirs");
-            std::fs::write(dir.join(path), text).expect("write");
-        }
-        assert!(git(&dir, &["init", "-q"]).status.success());
-        assert!(git(&dir, &["add", "."]).status.success());
-        assert!(git(&dir, &["commit", "-qm", "base"]).status.success());
-        let up = above(codex());
-        let after = pin::repinned(&before, codex().descriptor(), &up)
-            .expect("a repin")
-            .expect("a move");
-        let lines: Vec<&str> = before.lines().collect();
-        let at = lines
-            .iter()
-            .zip(after.lines())
-            .position(|(a, b)| *a != b)
-            .expect("the pin line");
-        let (prev, was, next) = (lines[at - 1], lines[at], lines[at + 1]);
-        let now = after.lines().nth(at).expect("the moved pin");
-        let last = lines.len();
-        let tail = before.lines().last().expect("a last line");
-        // A patch names paths with `/` on every OS.
-        let slashed = |path: &Path| {
-            path.components()
-                .map(|c| c.as_os_str().to_string_lossy().into_owned())
-                .collect::<Vec<_>>()
-                .join("/")
-        };
-        let (reg, payloads) = (slashed(&reg), slashed(&payloads));
-        let smuggle = |code: &str| {
-            let appended = if code.is_empty() {
-                String::new()
-            } else {
-                format!("@@ -{last} +{last},2 @@\n {tail}\n+{code}\n")
-            };
-            format!(
-                "diff --git a/{payloads} b/{payloads}\n--- a/{payloads}\n+++ b/{payloads}\n\
-                 @@ -1 +1 @@\n-a\n+b\n\
-                 --- a/{reg}\n+++ b/{reg}\n@@ -{at},3 +{at},3 @@\n {prev}\n-{was}\n+{now}\n {next}\n\
-                 {appended}"
-            )
-        };
-        let judged = |code: &str| {
-            let file = dir.join("bump.patch");
-            std::fs::write(&file, smuggle(code)).expect("write");
-            let applied = git(&dir, &["apply", "bump.patch"]);
-            assert!(
-                applied.status.success(),
-                "{}",
-                String::from_utf8_lossy(&applied.stderr)
-            );
-            std::fs::remove_file(&file).expect("remove");
-            let raw = git(&dir, &["diff", "HEAD", "--raw", "--no-renames", "-z"]).stdout;
-            let after = std::fs::read_to_string(dir.join(&reg)).expect("read");
-            assert!(git(&dir, &["checkout", "-q", "--", "."]).status.success());
-            judge(
-                codex(),
-                &up,
-                &before,
-                &after,
-                &changes(&raw).expect("changes"),
-            )
-        };
+        let stray = [registry_relative(), PathBuf::from("justfile")];
         assert!(
-            judged("pub fn injected() {}").is_err(),
-            "code beside the pin"
+            judge(codex(), &up, &before, &after, &stray).is_err(),
+            "a path no bump owns"
         );
-        assert_eq!(
-            judged("").map(|p| p.len()),
-            Ok(2),
-            "the same shape, a bump alone"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

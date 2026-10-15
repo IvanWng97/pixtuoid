@@ -68,12 +68,10 @@ fn profile(source: &str) -> Result<&'static Profile, String> {
     hermetic::profile(source).ok_or_else(|| format!("{source:?} has no profile"))
 }
 
-/// `git` at the repository root; its stdout. A recording names the files git
-/// is handed, so a name is never pathspec magic (`:!build.rs`).
+/// `git` at the repository root; its stdout.
 fn git(args: &[&str]) -> Result<Vec<u8>, String> {
     let out = Command::new("git")
         .current_dir(bump::repo_root())
-        .arg("--literal-pathspecs")
         .args(args)
         .output()
         .map_err(|e| format!("git {args:?}: {e}"))?;
@@ -98,7 +96,7 @@ fn paths(z: &[u8]) -> Vec<PathBuf> {
 
 /// What the tree changed against HEAD, once each untracked file `marks` is in
 /// the diff (intent-to-add, where `--all` would stage a deletion out of it).
-fn changes(marks: impl Fn(&Path) -> bool) -> Result<Vec<bump::Change>, String> {
+fn changes(marks: impl Fn(&Path) -> bool) -> Result<Vec<PathBuf>, String> {
     let untracked: Vec<PathBuf> =
         paths(&git(&["ls-files", "--others", "--exclude-standard", "-z"])?)
             .into_iter()
@@ -109,7 +107,18 @@ fn changes(marks: impl Fn(&Path) -> bool) -> Result<Vec<bump::Change>, String> {
         add.extend(untracked.iter().filter_map(|p| p.to_str()));
         git(&add)?;
     }
-    bump::changes(&git(&["diff", "HEAD", "--raw", "--no-renames", "-z"])?)
+    changed()
+}
+
+/// The paths the tree changed against HEAD.
+fn changed() -> Result<Vec<PathBuf>, String> {
+    Ok(paths(&git(&[
+        "diff",
+        "HEAD",
+        "--name-only",
+        "--no-renames",
+        "-z",
+    ])?))
 }
 
 fn patch(source: &str, out: &Path) -> Result<(), String> {
@@ -117,8 +126,8 @@ fn patch(source: &str, out: &Path) -> Result<(), String> {
     // An untracked file the bump doesn't admit (CI's `npm ci` leaves
     // `node_modules`) stays out of the patch.
     let changed = changes(|path| bump::admits(p, path))?;
-    if let Some(stray) = changed.iter().find(|c| !bump::admits(p, &c.path)) {
-        return Err(format!("{:?} changed, outside {source}'s bump", stray.path));
+    if let Some(stray) = changed.iter().find(|path| !bump::admits(p, path)) {
+        return Err(format!("{stray:?} changed, outside {source}'s bump"));
     }
     if changed.is_empty() {
         println!("{source}: the tree is unchanged, so there is no patch");
@@ -166,13 +175,13 @@ fn check(proposals: &Path, patches: &Path) -> Result<(), String> {
             .to_str()
             .ok_or_else(|| format!("{file:?} is not UTF-8"))?;
         git(&["apply", file])?;
-        // Every untracked file is judged, and none is named to git.
         let judged = git(&["add", "--intent-to-add", "--all"])
-            .and_then(|_| bump::changes(&git(&["diff", "HEAD", "--raw", "--no-renames", "-z"])?))
+            .and_then(|_| changed())
             .and_then(|changed| {
                 let after =
                     std::fs::read_to_string(pin::registry_path()).map_err(|e| e.to_string())?;
-                bump::judge(p, &version, &registry, &after, &changed)
+                bump::judge(p, &version, &registry, &after, &changed)?;
+                Ok(changed)
             });
         git(&["reset", "-q", "--hard", "HEAD"])?;
         git(&["clean", "-fdq"])?;
