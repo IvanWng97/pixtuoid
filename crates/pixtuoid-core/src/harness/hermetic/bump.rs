@@ -1,7 +1,10 @@
 //! A pin bump as the nightly proposes it: which moved releases become bot PRs,
 //! and what the tree a bump leg's patch leaves may hold before publish applies
 //! it. The patch is untrusted, since the leg ran a just-published CLI: it may
-//! carry data a decoder reads, never code a same-repo PR's CI would run.
+//! carry data a decoder reads, never code a same-repo PR's CI would run. The
+//! threat is a poisoned release, not one crafted against these checks (the
+//! owner's call): a bypass that needs input built for this pipeline is out of
+//! scope.
 
 use std::path::{Component, Path, PathBuf};
 
