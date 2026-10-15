@@ -123,6 +123,26 @@
       .jobs.file.steps |= map(
         if (.uses // "") | startswith("actions/download-artifact") then .with = {"name": "${{ needs.drift.outputs.runs-stem }}"} else . end)
 
+- id: only-main-saves-the-rust-cache
+  file:
+    - .github/actions/setup-cargo-just/action.yml
+    - .github/actions/packaging-build/action.yml
+    - .github/workflows/ci-builds.yml
+    - .github/workflows/ci-lint.yml
+  expected: ${{ github.ref == 'refs/heads/main' }}
+  why: >-
+    Every ref restores main's rust-cache, and the 10 GB quota evicts by last
+    access (docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching),
+    so a step that saves on other refs pushes main's full-tier entries out and
+    they rebuild cold, with nothing red.
+  assert: |
+    [(.jobs[]?.steps[]?, .runs.steps[]?) | select((.uses // "") | startswith("Swatinem/rust-cache@"))] as $caches
+    | ($caches | length > 0) and all($caches[]; .with["save-if"] == $expected)
+  break:
+    - (.jobs[]?.steps[]?, .runs.steps[]?) |= (if (.uses // "") | startswith("Swatinem/rust-cache@") then del(.with["save-if"]) else . end)
+    - (.jobs[]?.steps[]?, .runs.steps[]?) |= (if (.uses // "") | startswith("Swatinem/rust-cache@") then .with["save-if"] = "true" else . end)
+    - (.jobs[]?.steps[]?, .runs.steps[]?) |= (if (.uses // "") | startswith("Swatinem/rust-cache@") then .uses = "actions/cache@v5" else . end)
+
 - id: hermetic-caches-restore-only-but-their-one-writer
   file:
     - .github/workflows/hermetic.yml
