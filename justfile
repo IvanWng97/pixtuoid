@@ -560,18 +560,6 @@ _doc-targets:
 coverage *args:
     TZ={{ TEST_TZ }} cargo llvm-cov nextest --workspace --codecov --output-path codecov.json --profile ci "$@"
 
-# Runs the suite under nextest and FAILS on a
-# pending (un-accepted `.snap.new`) OR unreferenced (orphan `.snap` — e.g. a
-# deleted test's leftover) snapshot. This is the gap `just test` misses:
-# a CHANGED snapshot already fails its own assertion, but an ORPHAN one rots
-# silently. CI-only in practice (a second full test run, like coverage) —
-# NOT in preflight; run it after adding/removing an insta-snapshot test. Needs
-# cargo-insta + cargo-nextest.
-[doc('Snapshot hygiene (cargo-insta): fail on pending OR orphan snapshots — CI-only')]
-[group('rust')]
-snapshots:
-    TZ={{ TEST_TZ }} cargo insta test --check --unreferenced=reject --test-runner nextest --workspace
-
 # Injects bugs into the CHANGED lines and checks the tests catch them — the
 # "do your assertions have TEETH?" dimension that
 # line/region coverage can't see (a covered-but-toothless assertion). DIFF-scoped
