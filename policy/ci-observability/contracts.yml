@@ -326,20 +326,20 @@
 - id: release-builds-restore-no-cache
   file: .github/workflows/release.yml
   why: >-
-    A tag's run restores from main's cache scope, which jobs running
-    third-party npm code write, into the builds whose binaries are attested
-    and published. zizmor flags a rust-cache step here but not one inside
-    setup-cargo-just, whose cache is on by default.
+    A tag's run restores main's caches ("Workflow runs can restore caches
+    created in either the current branch or the default branch",
+    docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching)
+    into the builds whose binaries are attested and published. zizmor's
+    cache-poisoning audit reads only a job's own steps, never a local
+    composite's (zizmorcore/zizmor v1.30.0
+    crates/zizmor/src/audit/cache_poisoning.rs:796-813), and setup-cargo-just
+    restores by default.
   assert: |
-    [.jobs[].steps[]? | (.uses // "")] as $uses
-    | all($uses[]; test("^Swatinem/rust-cache@|^actions/cache@") | not)
-      and all(.jobs[].steps[]? | select((.uses // "") == "./.github/actions/setup-cargo-just");
-              (.with["enable-cache"] // "") == "false")
+    all(.jobs[].steps[]? | select((.uses // "") == "./.github/actions/setup-cargo-just");
+        (.with["enable-cache"] // "") == "false")
   break:
     - '.jobs.build.steps += [{"uses": "./.github/actions/setup-cargo-just"}]'
     - '.jobs.build.steps += [{"uses": "./.github/actions/setup-cargo-just", "with": {"enable-cache": "true"}}]'
-    - '.jobs.check.steps += [{"uses": "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6"}]'
-    - '.jobs.deb.steps += [{"uses": "actions/cache@v5"}]'
 
 - id: release-attests-before-publishing
   file: .github/workflows/release.yml
