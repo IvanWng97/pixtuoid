@@ -225,6 +225,10 @@ pub fn judge(
         if !admits(p, &c.path) {
             return Err(format!("{:?} is outside {}'s bump", c.path, p.source));
         }
+        // publish hands the paths to create-pull-request comma- or line-joined.
+        if c.path.to_string_lossy().contains([',', '\n', '\r']) {
+            return Err(format!("{:?} would split in publish's add-paths", c.path));
+        }
         if !["M", "A", "D"].contains(&c.status.as_str())
             || !regular(&c.old_mode)
             || !regular(&c.new_mode)
@@ -352,6 +356,10 @@ mod tests {
     fn hermetic_yml_reports_moved_rows_from_every_os_plan_reads() {
         let yml = std::fs::read_to_string(repo_root().join(".github/workflows/hermetic.yml"))
             .expect("hermetic.yml");
+        assert!(
+            yml.contains(&format!("runs/{MOVED}")),
+            "the file the tier writes"
+        );
         assert_eq!(
             yml.matches("- { os: ").count(),
             OSES.len(),
@@ -420,6 +428,9 @@ mod tests {
             std::fs::read_to_string(repo_root().join(".github/workflows/hermetic-nightly.yml"))
                 .expect("hermetic-nightly.yml");
         assert!(yml.contains(&format!("in:title \"{TITLE_PREFIX}\"")));
+        for at in ["$SOURCE", "${{ matrix.source }}"] {
+            assert!(yml.contains(&patch_name(at)), "the patch {at} names");
+        }
         assert!(
             Proposal::new("codex", &v("1.0.0"))
                 .title
@@ -493,6 +504,8 @@ mod tests {
             raw(ABSENT, "120000", "A", &fixture_path("link.jsonl")),
             raw(REGULAR, "120000", "T", &payloads),
             raw(ABSENT, "160000", "A", &fixture_path("module")),
+            raw(ABSENT, REGULAR, "A", &fixture_path("x,.")),
+            raw(ABSENT, REGULAR, "A", &fixture_path("x\n.")),
         ] {
             let read = changes(format!("{edits}{bad}").as_bytes()).expect("changes");
             assert!(
@@ -550,7 +563,14 @@ mod tests {
         let now = after.lines().nth(at).expect("the moved pin");
         let last = lines.len();
         let tail = before.lines().last().expect("a last line");
-        let (reg, payloads) = (reg.to_string_lossy(), payloads.to_string_lossy());
+        // A patch names paths with `/` on every OS.
+        let slashed = |path: &Path| {
+            path.components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
+        };
+        let (reg, payloads) = (slashed(&reg), slashed(&payloads));
         let smuggle = |code: &str| {
             let appended = if code.is_empty() {
                 String::new()
@@ -575,7 +595,7 @@ mod tests {
             );
             std::fs::remove_file(&file).expect("remove");
             let raw = git(&dir, &["diff", "HEAD", "--raw", "--no-renames", "-z"]).stdout;
-            let after = std::fs::read_to_string(dir.join(reg.as_ref())).expect("read");
+            let after = std::fs::read_to_string(dir.join(&reg)).expect("read");
             assert!(git(&dir, &["checkout", "-q", "--", "."]).status.success());
             judge(
                 codex(),

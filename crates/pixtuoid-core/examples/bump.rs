@@ -68,10 +68,12 @@ fn profile(source: &str) -> Result<&'static Profile, String> {
     hermetic::profile(source).ok_or_else(|| format!("{source:?} has no profile"))
 }
 
-/// `git` at the repository root; its stdout.
+/// `git` at the repository root; its stdout. A recording names the files git
+/// is handed, so a name is never pathspec magic (`:!build.rs`).
 fn git(args: &[&str]) -> Result<Vec<u8>, String> {
     let out = Command::new("git")
         .current_dir(bump::repo_root())
+        .arg("--literal-pathspecs")
         .args(args)
         .output()
         .map_err(|e| format!("git {args:?}: {e}"))?;
@@ -164,10 +166,14 @@ fn check(proposals: &Path, patches: &Path) -> Result<(), String> {
             .to_str()
             .ok_or_else(|| format!("{file:?} is not UTF-8"))?;
         git(&["apply", file])?;
-        let judged = changes(|_| true).and_then(|changed| {
-            let after = std::fs::read_to_string(pin::registry_path()).map_err(|e| e.to_string())?;
-            bump::judge(p, &version, &registry, &after, &changed)
-        });
+        // Every untracked file is judged, and none is named to git.
+        let judged = git(&["add", "--intent-to-add", "--all"])
+            .and_then(|_| bump::changes(&git(&["diff", "HEAD", "--raw", "--no-renames", "-z"])?))
+            .and_then(|changed| {
+                let after =
+                    std::fs::read_to_string(pin::registry_path()).map_err(|e| e.to_string())?;
+                bump::judge(p, &version, &registry, &after, &changed)
+            });
         git(&["reset", "-q", "--hard", "HEAD"])?;
         git(&["clean", "-fdq"])?;
         admitted.push(Admitted {
