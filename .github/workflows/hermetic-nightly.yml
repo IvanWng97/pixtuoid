@@ -9,15 +9,13 @@ on:
     - cron: "23 7 * * *" # daily 07:23 UTC
   workflow_dispatch:
 permissions: {}
-# `drift` executes third-party CLIs, so only `build` saves a cache.
+# Only `build` saves (`hermetic-caches-restore-only-but-their-one-writer`).
 cache-mode: read
 
 jobs:
-  # Runs no CLI, so nothing it saves came from one; every `run`, here and in
-  # CI, restores main's last save.
   build:
     name: hermetic build (${{ matrix.runner }})
-    # One leg per `hermetic.yml` run OS: rust-cache keys a save by rustc's host.
+    # One leg per run leg (`hermetic-build-covers-every-run-os`).
     strategy:
       fail-fast: false
       matrix:

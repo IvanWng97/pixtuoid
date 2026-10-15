@@ -133,9 +133,9 @@
     restore, release builds included. Only `cache-mode` scopes the token, so
     each workflow defaults to read, and the one job that may write runs no CLI.
     `run` restores what `build` saved only while both share one rust-cache key:
-    the same shared key, and no CARGO/CC/CFLAGS/CXX/CMAKE/RUST env at workflow
-    or job level, which rust-cache hashes (Swatinem/rust-cache src/config.ts
-    `envPrefixes`); a split key would cold-build every run with nothing red.
+    the same shared key, and none of the env rust-cache hashes (Swatinem/rust-cache
+    src/config.ts `envPrefixes`) at workflow or job level; a split key would
+    cold-build every run with nothing red.
   expected: hermetic
   assert: |
     .["cache-mode"] == "read"
@@ -157,6 +157,21 @@
     - '.env = {"CARGO_TERM_COLOR": "always"}'
     - '(.jobs[] | select(.steps != null)).env = {"RUST_BACKTRACE": "1"}'
     - '(.jobs[].steps[]? | select((.uses // "") == "./.github/actions/setup-cargo-just") | .with["shared-key"]) = "other"'
+
+- id: hermetic-build-covers-every-run-os
+  file:
+    - .github/workflows/hermetic.yml
+    - .github/workflows/hermetic-nightly.yml
+  why: >-
+    rust-cache keys a save by OS and arch (Swatinem/rust-cache src/config.ts),
+    so a `run` leg restores only what a `build` leg on its runner saved; a leg
+    `build` lacks cold-builds every run with nothing red.
+  expected: macos-latest windows-latest
+  assert: |
+    [.jobs.run.strategy.matrix.include[]?.runner, .jobs.build.strategy.matrix.runner[]?] | join(" ") == $expected
+  break:
+    - '.jobs.run.strategy.matrix.include += [{"runner": "ubuntu-latest"}]'
+    - '.jobs.build.strategy.matrix.runner += ["ubuntu-latest"]'
 
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml
