@@ -1,0 +1,21 @@
+reviews:
+  # Its default writes into the PR body, the claims REVIEW.md's correctness lens
+  # holds the diff to.
+  high_level_summary: false
+  auto_review:
+    # The Claude review judges every push of every PR, stacked ones included,
+    # but a bot's, which a human reads (CONTRIBUTING's merge gate).
+    base_branches: [".*"]
+    auto_pause_after_reviewed_commits: 0
+    ignore_usernames: ["dependabot[bot]", "pixtuoid-bot[bot]"]
+  pre_merge_checks:
+    # Docstring coverage is a goal AGENTS.md's comment rules reject.
+    docstrings: { mode: "off" }
+chat:
+  # A reply is a disposition, which the next Claude review rechecks, never a
+  # conversation.
+  auto_reply: false
+knowledge_base:
+  # A lesson becomes a mechanism or a rule line, never private memory
+  # (CONTRIBUTING's arc step 9).
+  opt_out: true

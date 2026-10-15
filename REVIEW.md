@@ -186,8 +186,8 @@ invariant-breaking sequence against:
 8. **Sourced practice**: [AGENTS.md](AGENTS.md#conventions)'s fetched-claims
    rule; a claim with no fetched source, or one that contradicts it, breaches it.
 9. **A new dependency or workspace edge**: each crate it adds, transitive ones
-   included, is justified (its `cargo tree -e normal` is a must-run item), and
-   a new workspace edge follows [AGENTS.md](AGENTS.md#layout)'s crate DAG.
+   included, is justified, and a new workspace edge follows
+   [AGENTS.md](AGENTS.md#layout)'s crate DAG.
 
 #### Every changed file
 
