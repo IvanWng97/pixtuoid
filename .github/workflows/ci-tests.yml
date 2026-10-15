@@ -140,31 +140,6 @@ jobs:
           out=$(echo '{}' | ./target/release/pixtuoid-hook 2>&1)
           test -z "$out"
           echo "hook shim exited 0 silently (expected no-op with no socket)"
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.x"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
-      - name: Set up Python virtual environment
-        run: |
-          python3 -m venv .venv
-          .venv/bin/pip install -r requirements-dev.txt
-      # Evidence, not a gate: a look-changing PR doesn't commit media, and
-      # REVIEW.md's Render and look reads the overlays below.
-      - name: README media drift (evidence)
-        continue-on-error: true
-        run: just gen-media-check
-      - name: Upload gen-check diff overlays
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: gen-check-diffs
-          path: target/gen-check-diff/
-          retention-days: 7
-          if-no-files-found: ignore
 
   required:
     name: required-test-jobs

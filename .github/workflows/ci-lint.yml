@@ -209,7 +209,7 @@ jobs:
           .venv/bin/pip install -r requirements-dev.txt
       - name: Generated sprites, icons and banner, README sections, the comparator
         run: just gen-readme-check gen-art-check gen-banner-check gen-icons-check compare-selftest
-      # gen-icons-check's overlays; smoke uploads the media ones as gen-check-diffs.
+      # gen-icons-check's overlays.
       - name: Upload drift overlays
         if: always()
         uses: actions/upload-artifact@v7

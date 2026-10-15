@@ -1017,9 +1017,9 @@ gen-icons-check:
 
 # scripts/gen-media.py's docstring says what `--check` compares. The README's
 # media only: the site's demos are rendered in CI and never committed. On a PR
-# a drift here is evidence for REVIEW.md's Render and look, not a gate
-# (ci-tests.yml's smoke job); main's land through media-regen.yml.
-# Requires the .venv + node; it builds the examples it renders with.
+# a drift here is evidence for REVIEW.md's Render and look, not a gate; main's
+# land through media-regen.yml.
+# Requires the .venv; it builds the examples it renders with.
 [doc("Diff the README's committed media against what gen-media renders")]
 [group('gen')]
 gen-media-check:
@@ -1211,11 +1211,12 @@ wasm-check-selftest:
     just gen-wasm-check >/dev/null
     echo "wasm-check-selftest: OK (reds on a broken measurement, greens on a real one)"
 
-# The pixel comparator is the primitive under `gen-check` and the smoke job; an
-# always-green comparator reports success for any render at all. Its own recipe
-# because it needs only Pillow, while `gen-check` needs every generator's
-# toolchain: a developer who cannot run that gate should still be able to run this.
-[doc('Self-test the pixel comparator that gen-check and smoke ride on')]
+# The pixel comparator is the primitive under `gen-check` and
+# `gen-media-check`; an always-green comparator reports success for any render
+# at all. Its own recipe because it needs only Pillow, while `gen-check` needs
+# every generator's toolchain: a developer who cannot run that gate should still
+# be able to run this.
+[doc('Self-test the pixel comparator that gen-check and gen-media-check ride on')]
 [group('meta')]
 compare-selftest:
     #!/usr/bin/env sh
