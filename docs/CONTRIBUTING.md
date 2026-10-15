@@ -198,7 +198,8 @@ Once the gate holds, comment `@mergifyio queue` ([`.mergify.yml`](../.mergify.ym
 entry is a command because no queue condition can confirm a finding. The
 queue tests up to `batch_size` PRs together on a draft PR
 (`mergify/merge-queue/…`) running the full tier, then merges the PRs
-themselves; it never updates a PR's own branch
+themselves, but merges an up-to-date PR alone at the front on its own CI
+([direct merge](https://docs.mergify.com/merge-queue/direct-merge/)); it never updates a PR's own branch
 ([batches](https://docs.mergify.com/merge-queue/batches/): "the original PRs
 are the ones merged"), so the bots' statuses on the PR's head are the ones its
 `queue_conditions` read. [`media-regen.yml`](../.github/workflows/media-regen.yml)'s
