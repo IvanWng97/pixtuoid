@@ -537,7 +537,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
 const CODEX: SourceDescriptor = SourceDescriptor {
     name: codex::SOURCE_NAME,
     label_prefix: "cx",
-    verified_version: "0.155.1",
+    verified_version: "0.162.1",
     version_probe: Some(&["codex", "--version"]),
     version_hyphen: Hyphen::Prerelease,
     home_env: Some("CODEX_HOME"),
