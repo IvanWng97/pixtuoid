@@ -167,12 +167,12 @@ invariant-breaking sequence against:
    citing a file of X read this run; one not read is marked unverified.
    A defense [Traps](#traps-the-obvious-reading-is-wrong-here) or
    [Security](#security) names, and the documented liveness ladders, stay.
-7. **Words**: list, one by one, every name (`pub(crate)` and modules
-   included) and every comment or doc line the diff adds or changes, then every
-   existing comment and doc, `.github/` and `.claude/` included, that names,
-   counts or describes what the diff renames, moves or changes; judge each on
-   all three, and give the count judged. Each finding cites what the word
-   breaks; non-blocking unless it breaches AGENTS.md.
+7. **Words**: list, one by one, every name the diff adds or changes
+   (`pub(crate)` and modules included), every comment and doc line in a
+   changed file, and every comment and doc elsewhere, `.github/` and `.claude/`
+   included, that names, counts or describes what the diff renames, moves or
+   changes; judge each on all three, and give the count judged. Each finding
+   cites what the word breaks; non-blocking unless it breaches AGENTS.md.
    - **Faithful**: it says what is true at head; a behavior change renames the
      item and rewrites what describes it.
    - **Clear**: a reader without this PR's context reads it right. One concept,
