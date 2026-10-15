@@ -3,61 +3,61 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - ModelInfo:
-    agent_id: 14176494501328645279
+    agent_id: 4013279114513636793
     model: grok-4.6
     effort: ~
 - ActivityStart:
-    agent_id: 14176494501328645279
-    tool_use_id: call_q6wmbz71wa8nEkMt
+    agent_id: 4013279114513636793
+    tool_use_id: call_hIRmV0KxkYY7T8Oo
     detail:
       Generic:
         display: read_file
 - ActivityEnd:
-    agent_id: 14176494501328645279
-    tool_use_id: call_q6wmbz71wa8nEkMt
+    agent_id: 4013279114513636793
+    tool_use_id: call_hIRmV0KxkYY7T8Oo
 - ActivityEnd:
-    agent_id: 14176494501328645279
+    agent_id: 4013279114513636793
     tool_use_id: ~
 - SessionEnd:
-    agent_id: 14176494501328645279
+    agent_id: 4013279114513636793
     as_child: false
 - SessionStart:
-    agent_id: 14176494501328645279
+    agent_id: 4013279114513636793
     source: grok
-    session_id: 01a137fc-d475-7ba2-8d9e-d8d04f69e25c
+    session_id: 01a13fa6-47ef-7b32-a61f-6224130fe45a
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
 - SessionStart:
-    agent_id: 14176494501328645279
+    agent_id: 4013279114513636793
     source: grok
-    session_id: 01a137fc-d475-7ba2-8d9e-d8d04f69e25c
+    session_id: 01a13fa6-47ef-7b32-a61f-6224130fe45a
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
 - Identity:
-    agent_id: 14176494501328645279
+    agent_id: 4013279114513636793
     source: grok
-    session_id: 01a137fc-d475-7ba2-8d9e-d8d04f69e25c
+    session_id: 01a13fa6-47ef-7b32-a61f-6224130fe45a
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 14176494501328645279
-    tool_use_id: call_q6wmbz71wa8nEkMt
+    agent_id: 4013279114513636793
+    tool_use_id: call_hIRmV0KxkYY7T8Oo
     detail:
       Generic:
         display: read_file
 - Identity:
-    agent_id: 14176494501328645279
+    agent_id: 4013279114513636793
     source: grok
-    session_id: 01a137fc-d475-7ba2-8d9e-d8d04f69e25c
+    session_id: 01a13fa6-47ef-7b32-a61f-6224130fe45a
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 14176494501328645279
-    tool_use_id: call_q6wmbz71wa8nEkMt
+    agent_id: 4013279114513636793
+    tool_use_id: call_hIRmV0KxkYY7T8Oo
 - ActivityEnd:
-    agent_id: 14176494501328645279
+    agent_id: 4013279114513636793
     tool_use_id: ~
 - SessionEnd:
-    agent_id: 14176494501328645279
+    agent_id: 4013279114513636793
     as_child: false
 - ActivityEnd:
-    agent_id: 14176494501328645279
+    agent_id: 4013279114513636793
     tool_use_id: ~
