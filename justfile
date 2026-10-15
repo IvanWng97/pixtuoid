@@ -1015,7 +1015,7 @@ gen-icons-check:
 # media only: the site's demos are rendered in CI and never committed. On a PR
 # a drift here is evidence for REVIEW.md's Render and look, not a gate; main's
 # land through media-regen.yml.
-# Requires the .venv + node; it builds the examples it renders with.
+# Requires the .venv; it builds the examples it renders with.
 [doc("Diff the README's committed media against what gen-media renders")]
 [group('gen')]
 gen-media-check:
