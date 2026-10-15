@@ -61,7 +61,7 @@
       and ([.jobs.publish.steps[] | select((.uses // "") | startswith("peter-evans/create-pull-request@")) | .with["add-paths"]] == ["docs/images"])
       and ((.on | keys) - ["push", "workflow_dispatch"]) == []
   break:
-    - '.jobs.render.steps += [{"env": {"T": "${{ secrets.MEDIA_APP_KEY }}"}, "run": "true"}]'
+    - '.jobs.render.steps += [{"env": {"T": "${{ secrets.BOT_APP_KEY }}"}, "run": "true"}]'
     - '.jobs.render.permissions.contents = "write"'
     - '.jobs.publish.permissions = {"contents": "write"}'
     - '.jobs.publish.steps += [{"run": "cargo build"}]'
@@ -69,7 +69,7 @@
     - '.jobs.publish.steps += [{"run": "git add -A && git commit -m x"}]'
     - .on.pull_request = {}
     - '.permissions = {"contents": "write"}'
-    - '.jobs.extra = {"runs-on": "ubuntu-latest", "steps": [{"env": {"T": "${{ secrets.MEDIA_APP_KEY }}"}, "run": "true"}]}'
+    - '.jobs.extra = {"runs-on": "ubuntu-latest", "steps": [{"env": {"T": "${{ secrets.BOT_APP_KEY }}"}, "run": "true"}]}'
     - '.jobs.publish.steps += [{"uses": "./.github/actions/setup-cargo-just"}]'
     - '.jobs.publish.steps[0].with["persist-credentials"] = true'
     - '.jobs.publish.steps += [{"run": "bash scripts/x.sh"}]'
@@ -172,6 +172,31 @@
   break:
     - '.jobs.run.strategy.matrix.include += [{"runner": "ubuntu-latest"}]'
     - '.jobs.build.strategy.matrix.runner += ["ubuntu-latest"]'
+
+- id: hermetic-publish-runs-no-tree-code
+  file: .github/workflows/hermetic-nightly.yml
+  why: >-
+    publish holds the bot's key and the write token it mints, and applies a
+    patch from a leg that ran a just-published CLI. Both stay bounded only while
+    no other job can read the key and publish builds and runs nothing from the
+    tree, on main alone, as `media-regen-bounds-its-token` holds media-regen's.
+  assert: |
+    ([.jobs.publish.steps[] | .run // ""] | join("\n")) as $publish
+    | ([.jobs | to_entries[] | select(.key != "publish") | .value | tostring | test("secrets\\.")] | any | not)
+      and .jobs.publish.permissions == {}
+      and (.jobs.publish.if | test("github\\.ref == 'refs/heads/main'"))
+      and ([.jobs.publish.steps[] | .uses // empty | sub("@.*"; "")] - ["actions/checkout", "actions/download-artifact", "actions/create-github-app-token", "peter-evans/create-pull-request"]) == []
+      and ([.jobs.publish.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with["persist-credentials"]] | all(. == false))
+      and ($publish | test("\\b(cargo|just|npm|node|pip|python3?|make|bash|sh)\\b|\\./") | not)
+      and ($publish | test("\\bgit\\s+(add|commit|push)\\b") | not)
+  break:
+    - '.jobs.bump.steps += [{"env": {"T": "${{ secrets.BOT_APP_KEY }}"}, "run": "true"}]'
+    - '.jobs.publish.permissions = {"contents": "write"}'
+    - '.jobs.publish.if = "${{ true }}"'
+    - '.jobs.publish.steps += [{"uses": "./.github/actions/setup-cargo-just"}]'
+    - '.jobs.publish.steps += [{"run": "just hermetic-build"}]'
+    - '.jobs.publish.steps += [{"run": "git add -A && git commit -m x"}]'
+    - '.jobs.publish.steps[0].with["persist-credentials"] = true'
 
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml

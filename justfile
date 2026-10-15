@@ -750,12 +750,21 @@ live-sources *ids:
 [group('rust')]
 hermetic-build:
     cargo build --release -q -p pixtuoid -p pixtuoid-hook
-    cargo build --release -q -p pixtuoid-core --example hermetic --example capture_fixture
+    cargo build --release -q -p pixtuoid-core --example hermetic --example capture_fixture --example bump
 
 [doc('Run each profiled agent CLI against a scripted model (aimock) and judge what pixtuoid made of it')]
 [group('rust')]
 hermetic *args: hermetic-build
     cargo run --release -q -p pixtuoid-core --example hermetic -- "$@"
+
+# The nightly's bump leg: snapshots rewritten for the re-recorded fixtures,
+# then judged as CI judges them.
+[doc('Re-record a source at its latest release, moving its pin, and write the bump as a patch')]
+[group('rust')]
+hermetic-bump source out: (hermetic "--cli" "latest" "--record" source)
+    TZ={{ TEST_TZ }} INSTA_UPDATE=always INSTA_FORCE_PASS=1 cargo test -q -p pixtuoid-core --test sources
+    TZ={{ TEST_TZ }} cargo test -q -p pixtuoid-core --test sources
+    cargo run --release -q -p pixtuoid-core --example bump -- patch "$1" "$2"
 
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug

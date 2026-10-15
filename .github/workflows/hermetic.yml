@@ -18,6 +18,12 @@ on:
       runs-stem:
         description: 'The stem each OS leg uploads its runs under, as `<runs-stem><os>`, when `just hermetic` exits non-zero'
         value: ${{ jobs.run.outputs.runs-stem }}
+      moved_macos:
+        description: 'The macOS leg''s `bump::MOVED` rows: each source whose latest passed above its pin'
+        value: ${{ jobs.run.outputs.moved_macos }}
+      moved_windows:
+        description: 'The Windows leg''s `bump::MOVED` rows'
+        value: ${{ jobs.run.outputs.moved_windows }}
 
 # `run` executes third-party CLIs, so no job here saves a cache
 # (https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#controlling-cache-access-with-cache-mode).
@@ -49,6 +55,9 @@ jobs:
       RUNS_STEM: hermetic-runs-${{ github.run_id }}-${{ github.run_attempt }}-
     outputs:
       runs-stem: ${{ env.RUNS_STEM }}
+      # Each leg sets only its own, and a matrix combines its legs' outputs.
+      moved_macos: ${{ steps.moved.outputs.moved_macos }}
+      moved_windows: ${{ steps.moved.outputs.moved_windows }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -71,6 +80,11 @@ jobs:
           set +e
           just hermetic --cli "$CLI"
           echo "exit=$?" >> "$GITHUB_OUTPUT"
+      - name: Report the moved releases
+        id: moved
+        env:
+          OS: ${{ matrix.os }}
+        run: echo "moved_${OS}=$(cat target/hermetic/runs/moved.json)" >> "$GITHUB_OUTPUT"
       - if: steps.run.outputs.exit != '0'
         uses: actions/upload-artifact@v7
         with:

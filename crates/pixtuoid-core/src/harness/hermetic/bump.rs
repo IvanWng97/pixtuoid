@@ -7,17 +7,27 @@ use std::path::{Component, Path, PathBuf};
 
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use super::{PROFILES, PROVENANCE_AIMOCK, Profile, pin, profile};
 use crate::harness::{PROVENANCE, reads, sources_root};
 
-/// The nightly's drift legs, as `runner.os` names them: a release is proposed
-/// only once it moved on every one.
-const OSES: &[&str] = &["macOS", "Windows"];
+/// The nightly's drift legs, as `hermetic.yml`'s matrix names them: a release
+/// is proposed only once it moved on every one.
+const OSES: &[&str] = &["macos", "windows"];
 
 /// The file beside a run's reports naming each source that moved.
 pub const MOVED: &str = "moved.json";
+
+/// The `hermetic.yml` output a drift leg on `os` reports its [`MOVED`] rows as.
+fn moved_output(os: &str) -> String {
+    format!("moved_{os}")
+}
+
+/// The file a bump leg writes its patch for `source` to, and check reads it from.
+pub fn patch_name(source: &str) -> String {
+    format!("{source}.patch")
+}
 
 /// A source whose `latest` passed every scenario, every run reporting it, above
 /// its pin.
@@ -55,24 +65,22 @@ impl Proposal {
     }
 }
 
-/// The releases to propose: each profiled source that moved to one release on
-/// every OS in [`OSES`], above its pin, under a title no PR has taken (an open
-/// one proposes it, a closed one declined it).
+/// The releases to propose, given the drift job's outputs: each profiled source
+/// that moved to one release on every OS in [`OSES`], above its pin, under a
+/// title no PR has taken (an open one proposes it, a closed one declined it). A
+/// leg that reported nothing moved nothing.
 ///
 /// # Errors
 ///
-/// When `moved` is not one row list per OS in [`OSES`], names an unprofiled
-/// source or one source twice, or holds a release that is not one or is below
-/// its pin.
-pub fn plan(moved: &[(String, Vec<Moved>)], taken: &[String]) -> Result<Vec<Proposal>, String> {
-    let mut oses: Vec<&str> = moved.iter().map(|(os, _)| os.as_str()).collect();
-    oses.sort_unstable();
-    let mut expected = OSES.to_vec();
-    expected.sort_unstable();
-    if oses != expected {
-        return Err(format!("moved rows for {oses:?}, not {expected:?}"));
-    }
-    for (os, rows) in moved {
+/// When a leg's rows are not rows, name an unprofiled source or one source
+/// twice, or hold a release that is not one or is below its pin.
+pub fn plan(drift: &Map<String, Value>, taken: &[String]) -> Result<Vec<Proposal>, String> {
+    let mut moved = Vec::new();
+    for os in OSES {
+        let rows: Vec<Moved> = match drift.get(&moved_output(os)).and_then(Value::as_str) {
+            None | Some("") => Vec::new(),
+            Some(json) => serde_json::from_str(json).map_err(|e| format!("{os}: {e}"))?,
+        };
         for (i, row) in rows.iter().enumerate() {
             if profile(&row.source).is_none() {
                 return Err(format!("{os}: {:?} has no profile", row.source));
@@ -81,12 +89,13 @@ pub fn plan(moved: &[(String, Vec<Moved>)], taken: &[String]) -> Result<Vec<Prop
                 return Err(format!("{os}: {:?} moved twice", row.source));
             }
         }
+        moved.push(rows);
     }
     let mut proposals = Vec::new();
     for p in PROFILES {
         let versions: Vec<Option<&str>> = moved
             .iter()
-            .map(|(_, rows)| {
+            .map(|rows| {
                 rows.iter()
                     .find(|r| r.source == p.source)
                     .map(|r| r.version.as_str())
@@ -356,25 +365,28 @@ mod tests {
         Version::new(pin.major, pin.minor, pin.patch + 1)
     }
 
-    fn moved(rows: &[(&str, &[(&str, &str)])]) -> Vec<(String, Vec<Moved>)> {
-        rows.iter()
-            .map(|(os, rows)| {
-                let rows = rows
-                    .iter()
-                    .map(|(source, version)| Moved {
-                        source: (*source).to_string(),
-                        version: (*version).to_string(),
-                    })
-                    .collect();
-                ((*os).to_string(), rows)
-            })
-            .collect()
+    /// The drift job's outputs, each leg's rows as `hermetic.yml` reports them.
+    fn drift(legs: &[(&str, &[(&str, &str)])]) -> Map<String, Value> {
+        let mut out = Map::new();
+        out.insert("runs-stem".into(), Value::from("hermetic-runs-1-1-"));
+        for (os, rows) in legs {
+            let rows: Vec<Moved> = rows
+                .iter()
+                .map(|(source, version)| Moved {
+                    source: (*source).to_string(),
+                    version: (*version).to_string(),
+                })
+                .collect();
+            let json = serde_json::to_string(&rows).expect("rows");
+            out.insert(moved_output(os), Value::from(json));
+        }
+        out
     }
 
     #[test]
     fn a_release_moved_on_every_os_is_proposed_once() {
         let up = above(codex()).to_string();
-        let both = moved(&[("macOS", &[("codex", &up)]), ("Windows", &[("codex", &up)])]);
+        let both = drift(&[("macos", &[("codex", &up)]), ("windows", &[("codex", &up)])]);
         let proposals = plan(&both, &[]).expect("a plan");
         assert_eq!(proposals, [Proposal::new("codex", &v(&up))]);
         let taken = [proposals[0].title.clone()];
@@ -386,17 +398,21 @@ mod tests {
         let up = above(codex());
         let next = Version::new(up.major, up.minor, up.patch + 1).to_string();
         let up = up.to_string();
-        for rows in [
-            moved(&[("macOS", &[("codex", &up)]), ("Windows", &[])]),
-            moved(&[
-                ("macOS", &[("codex", &up)]),
-                ("Windows", &[("codex", &next)]),
+        let mut silent = drift(&[("macos", &[("codex", &up)]), ("windows", &[])]);
+        silent.insert(moved_output("windows"), Value::from(""));
+        for legs in [
+            drift(&[("macos", &[("codex", &up)]), ("windows", &[])]),
+            drift(&[("macos", &[("codex", &up)])]),
+            silent,
+            drift(&[
+                ("macos", &[("codex", &up)]),
+                ("windows", &[("codex", &next)]),
             ]),
         ] {
-            assert_eq!(plan(&rows, &[]), Ok(vec![]), "{rows:?}");
+            assert_eq!(plan(&legs, &[]), Ok(vec![]), "{legs:?}");
         }
         let pin = codex().descriptor().verified_version;
-        let at_pin = moved(&[("macOS", &[("codex", pin)]), ("Windows", &[("codex", pin)])]);
+        let at_pin = drift(&[("macos", &[("codex", pin)]), ("windows", &[("codex", pin)])]);
         assert_eq!(plan(&at_pin, &[]), Ok(vec![]));
     }
 
@@ -409,29 +425,47 @@ mod tests {
             ..pin
         }
         .to_string();
-        for rows in [
-            moved(&[("macOS", &[("codex", &up)])]),
-            moved(&[
-                ("macOS", &[("codex", &up)]),
-                ("Windows", &[("codex", &up)]),
-                ("Linux", &[("codex", &up)]),
+        let mut garbled = drift(&[("macos", &[]), ("windows", &[])]);
+        garbled.insert(
+            moved_output("macos"),
+            Value::from("[{\"source\":\"codex\"}]"),
+        );
+        for legs in [
+            garbled,
+            drift(&[("macos", &[("nope", &up)]), ("windows", &[("nope", &up)])]),
+            drift(&[
+                ("macos", &[("codex", &up), ("codex", &up)]),
+                ("windows", &[("codex", &up)]),
             ]),
-            moved(&[("macOS", &[("codex", &up)]), ("macOS", &[("codex", &up)])]),
-            moved(&[("macOS", &[("nope", &up)]), ("Windows", &[("nope", &up)])]),
-            moved(&[
-                ("macOS", &[("codex", &up), ("codex", &up)]),
-                ("Windows", &[("codex", &up)]),
+            drift(&[
+                ("macos", &[("codex", "1.x")]),
+                ("windows", &[("codex", "1.x")]),
             ]),
-            moved(&[
-                ("macOS", &[("codex", "1.x")]),
-                ("Windows", &[("codex", "1.x")]),
-            ]),
-            moved(&[
-                ("macOS", &[("codex", &below)]),
-                ("Windows", &[("codex", &below)]),
+            drift(&[
+                ("macos", &[("codex", &below)]),
+                ("windows", &[("codex", &below)]),
             ]),
         ] {
-            assert!(plan(&rows, &[]).is_err(), "{rows:?}");
+            assert!(plan(&legs, &[]).is_err(), "{legs:?}");
+        }
+    }
+
+    #[test]
+    fn hermetic_yml_reports_moved_rows_from_every_os_plan_reads() {
+        let yml = std::fs::read_to_string(repo_root().join(".github/workflows/hermetic.yml"))
+            .expect("hermetic.yml");
+        assert_eq!(
+            yml.matches("- { os: ").count(),
+            OSES.len(),
+            "one leg per OS"
+        );
+        for os in OSES {
+            assert!(yml.contains(&format!("- {{ os: {os}, ")), "{os}'s leg");
+            assert_eq!(
+                yml.matches(&format!("{}:", moved_output(os))).count(),
+                2,
+                "{os}'s rows, as the job's output and the workflow's"
+            );
         }
     }
 

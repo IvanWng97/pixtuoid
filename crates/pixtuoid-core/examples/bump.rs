@@ -1,33 +1,35 @@
 //! The nightly's pin bumps, one subcommand per job; the rules are
 //! `pixtuoid_core::harness::hermetic::bump`'s.
 //!
-//! - `plan <taken.json> <os>=<moved.json>...`: the proposals, as JSON, given
-//!   the titles `gh pr list --json title` names and each drift leg's moved rows.
+//! - `plan <taken.json> <drift.json>`: the proposals, as JSON, given the titles
+//!   `gh pr list --json title` names and the drift job's outputs.
 //! - `patch <source> <out>`: the tree's bump of `source` as a patch at `out`;
 //!   nothing is written when the tree is unchanged.
-//! - `check <source> <version> <patch>`: applies an admitted patch to the tree
-//!   and prints its proposal with the paths it changed.
+//! - `check <proposals.json> <patches>`: each proposal's patch in `patches`,
+//!   admitted and its recording checked on the tree, then taken back out; prints
+//!   what publish opens, as JSON.
 //!
-//! Exits 0 on success, 1 on a refusal, and 2 on a usage error.
+//! Exits 0 on success, 1 on a refusal (any patch refused refuses them all), and
+//! 2 on a usage error.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use pixtuoid_core::harness::hermetic::bump::{self, Moved, Proposal};
+use pixtuoid_core::harness::hermetic::bump::{self, Proposal};
 use pixtuoid_core::harness::hermetic::{self, Profile, pin};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
-const USAGE: &str = "usage: bump plan <taken.json> <os>=<moved.json>...\n       \
+const USAGE: &str = "usage: bump plan <taken.json> <drift.json>\n       \
                      bump patch <source> <out>\n       \
-                     bump check <source> <version> <patch>";
+                     bump check <proposals.json> <patches>";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let done = match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
-        ["plan", taken, ref moved @ ..] if !moved.is_empty() => plan(Path::new(taken), moved),
+        ["plan", taken, drift] => plan(Path::new(taken), Path::new(drift)),
         ["patch", source, out] => patch(source, Path::new(out)),
-        ["check", source, version, patch] => check(source, version, Path::new(patch)),
+        ["check", proposals, patches] => check(Path::new(proposals), Path::new(patches)),
         _ => {
             eprintln!("{USAGE}");
             std::process::exit(2);
@@ -49,21 +51,12 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
     serde_json::from_str(&text).map_err(|e| format!("{path:?}: {e}"))
 }
 
-fn plan(taken: &Path, moved: &[&str]) -> Result<(), String> {
+fn plan(taken: &Path, drift: &Path) -> Result<(), String> {
     let taken: Vec<String> = read_json::<Vec<Titled>>(taken)?
         .into_iter()
         .map(|t| t.title)
         .collect();
-    let moved = moved
-        .iter()
-        .map(|arg| {
-            let (os, file) = arg
-                .split_once('=')
-                .ok_or_else(|| format!("{arg:?} is not <os>=<moved.json>"))?;
-            Ok((os.to_string(), read_json::<Vec<Moved>>(Path::new(file))?))
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    let proposals = bump::plan(&moved, &taken)?;
+    let proposals = bump::plan(&read_json(drift)?, &taken)?;
     println!(
         "{}",
         serde_json::to_string(&proposals).map_err(|e| e.to_string())?
@@ -146,25 +139,36 @@ struct Admitted {
     paths: Vec<String>,
 }
 
-fn check(source: &str, version: &str, patch: &Path) -> Result<(), String> {
-    let p = profile(source)?;
-    let version = Version::parse(version).map_err(|e| format!("{version:?}: {e}"))?;
-    let text = std::fs::read_to_string(patch).map_err(|e| format!("{patch:?}: {e}"))?;
+fn check(proposals: &Path, patches: &Path) -> Result<(), String> {
     let registry = std::fs::read_to_string(pin::registry_path()).map_err(|e| e.to_string())?;
-    let paths = bump::admit(&registry, p, &version, &text)?;
-    let patch = patch
-        .to_str()
-        .ok_or_else(|| format!("{patch:?} is not UTF-8"))?;
-    git(&["apply", "--check", patch])?;
-    git(&["apply", patch])?;
-    bump::recorded(p, &bump::fixture_files(p, &paths))?;
-    let admitted = Admitted {
-        proposal: Proposal::new(source, &version),
-        paths: paths
-            .iter()
-            .map(|path| path.to_string_lossy().into_owned())
-            .collect(),
-    };
+    let mut admitted = Vec::new();
+    for proposal in read_json::<Vec<Proposal>>(proposals)? {
+        let file = patches.join(bump::patch_name(&proposal.source));
+        if !file.is_file() {
+            eprintln!("{}: no patch, so its bump leg failed", proposal.source);
+            continue;
+        }
+        let p = profile(&proposal.source)?;
+        let version =
+            Version::parse(&proposal.version).map_err(|e| format!("{proposal:?}: {e}"))?;
+        let text = std::fs::read_to_string(&file).map_err(|e| format!("{file:?}: {e}"))?;
+        let paths = bump::admit(&registry, p, &version, &text)?;
+        let file = file
+            .to_str()
+            .ok_or_else(|| format!("{file:?} is not UTF-8"))?;
+        git(&["apply", "--check", file])?;
+        git(&["apply", file])?;
+        let recorded = bump::recorded(p, &bump::fixture_files(p, &paths));
+        git(&["apply", "--reverse", file])?;
+        recorded?;
+        admitted.push(Admitted {
+            proposal,
+            paths: paths
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect(),
+        });
+    }
     println!(
         "{}",
         serde_json::to_string(&admitted).map_err(|e| e.to_string())?

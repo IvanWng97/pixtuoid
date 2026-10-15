@@ -201,9 +201,9 @@ queue tests up to `batch_size` PRs together on a draft PR
 themselves; it never updates a PR's own branch
 ([batches](https://docs.mergify.com/merge-queue/batches/): "the original PRs
 are the ones merged"), so the bots' statuses on the PR's head are the ones its
-`queue_conditions` read. [`media-regen.yml`](../.github/workflows/media-regen.yml)'s
-bot PR (`bot/media-regen`, `docs/images/` only) is queued by a session or the
-owner after reading its images, since no review renders them.
+`queue_conditions` read. A session or the owner queues a bot's PR after reading
+what no review sees: `media-regen.yml`'s images, `hermetic-nightly.yml`'s whole
+diff, fixtures included.
 
 The review skips a fork's or a bot's PR, and its skipped check passes. A
 maintainer reviews a fork's or Dependabot's PR by hand before queueing it; a
