@@ -95,7 +95,7 @@ fn paths(z: &[u8]) -> Vec<PathBuf> {
 }
 
 /// What the tree changed against HEAD, once each untracked file `marks` is in
-/// the diff (intent-to-add, where `--all` would stage a deletion out of it).
+/// the diff (intent-to-add, so an untracked file the bump doesn't admit stays out).
 fn changes(marks: impl Fn(&Path) -> bool) -> Result<Vec<PathBuf>, String> {
     let untracked: Vec<PathBuf> =
         paths(&git(&["ls-files", "--others", "--exclude-standard", "-z"])?)

@@ -372,8 +372,12 @@ mod tests {
             std::fs::read_to_string(repo_root().join(".github/workflows/hermetic-nightly.yml"))
                 .expect("hermetic-nightly.yml");
         assert!(yml.contains(&format!("in:title \"{TITLE_PREFIX}\"")));
-        for at in ["$SOURCE", "${{ matrix.source }}"] {
-            assert!(yml.contains(&patch_name(at)), "the patch {at} names");
+        for (at, sites) in [("$SOURCE", 2), ("${{ matrix.source }}", 1)] {
+            assert_eq!(
+                yml.matches(&patch_name(at)).count(),
+                sites,
+                "the patch {at} names"
+            );
         }
         assert!(
             Proposal::new("codex", &v("1.0.0"))
