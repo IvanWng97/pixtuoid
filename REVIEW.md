@@ -172,7 +172,8 @@ invariant-breaking sequence against:
    changed file, and every comment and doc elsewhere, `.github/` and `.claude/`
    included, that names, counts or describes what the diff renames, moves or
    changes; judge each on all three, and give the count judged. Each finding
-   cites what the word breaks; non-blocking unless it breaches AGENTS.md.
+   cites what the word breaks or the edit that would leave it wrong;
+   non-blocking unless it breaches AGENTS.md.
    - **Faithful**: it says what is true at head; a behavior change renames the
      item and rewrites what describes it.
    - **Clear**: a reader without this PR's context reads it right. One concept,
@@ -190,8 +191,8 @@ invariant-breaking sequence against:
 
 #### Every changed file
 
-A maintenance defect's failure scenario is the edit that would leave a copy or
-a comment wrong.
+A maintenance defect's failure scenario is the edit that would leave a copy
+wrong.
 
 1. **DRY** — every new fn/type/helper/const gets a whole-tree search for an
    existing implementation, weighted by divergence risk; every value a new line

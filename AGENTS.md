@@ -65,7 +65,7 @@ cargo run --profile release-local --example snapshot -- /tmp/snap.png   # the sa
 - Real wire bytes ride ONE pipeline, `pixtuoid_core::harness::Drive` — rules in [`tests/AGENTS.md`](crates/pixtuoid-core/tests/AGENTS.md#the-one-pipeline).
 - Fixtures are RECORDED, never composed (`just hermetic --record` for a scenario a profile records, else `just capture-fixture` — BILLED), and the recorder blanks every subtree no decoder reads (derived by probe, never listed); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just restrip-fixtures` re-strips the committed corpus offline; `just corpus-all` censuses local corpora.
 - Visual verification for sprite work: snapshot example → `scripts/crop-snapshot.py` → READ the PNG; loop in `.claude/skills/beautify-decoration/SKILL.md`.
-- CI is the gate, and a green preflight is NOT a green PR. A PR's pushes run only the light tier; the full tier runs on `main`, and in the merge queue unless Mergify merges an up-to-date PR directly (two-step CI).
+- CI is the gate, and a green preflight is NOT a green PR. A PR's pushes run only the light tier; the full tier runs on `main`, and in the merge queue unless Mergify merges an up-to-date PR alone at the front directly (two-step CI).
 - Advisory (never gates): `just mutants`, `just bench`, `just bench-pacing`, CodSpeed.
 - Fluency gate, local and pre-release (a wall-clock budget, so never CI): `just pace-check`; its runs and verdict in `scripts/pace-check.py`'s header.
 - Hooks: `git config core.hooksPath .githooks` once per clone; `just setup-tools` installs cargo tools (incl. rust-analyzer — without it the agent LSP degrades to grep).
