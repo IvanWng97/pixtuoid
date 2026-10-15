@@ -737,7 +737,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
 const OPENCODE: SourceDescriptor = SourceDescriptor {
     name: opencode::SOURCE_NAME,
     label_prefix: "oc",
-    verified_version: "2.0.27",
+    verified_version: "2.0.29",
     version_probe: Some(&["opencode", "--version"]),
     version_hyphen: Hyphen::Prerelease,
     home_env: None,
