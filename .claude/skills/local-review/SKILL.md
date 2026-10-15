@@ -32,7 +32,7 @@ contract; fill briefs from them, never a paraphrase here.
    yet; the scope is `<base>...<head>`; and a reviewer may fetch the docs a
    best-practice question needs, which CI can't. Spawn the two reviewers in
    parallel, then one verifier per candidate. Run each must-run item the
-   change touches as its own lens (the dispatch once pushed), with Bash,
+   change touches as its own lens, with Bash,
    `model: sonnet` when it is mechanical, reporting each exit code as
    observed, never through a pipe.
    Give every brief the change's claims, from the PR body or, before it

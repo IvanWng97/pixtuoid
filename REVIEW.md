@@ -63,9 +63,6 @@ examples).
   violation, stays silent on the legitimate case, and names the real
   requirement. No test reads ambient state: the local time zone, `HOME`, the
   developer's config, a fixed temp path (#1023, #1048).
-- **Comments and docs say what is true** — every comment in a changed file, a
-  one-line change included, against the code at head; docs naming a moved
-  file/fn/flag/count, searched including `.github/` and `.claude/`.
 - **Reducer, liveness, sweeps** (`crates/pixtuoid-core/src/state/`,
   `source/jsonl/liveness.rs`, `source/exit_watch.rs`, `source/daemon.rs`) —
   trace the downstream interaction graph (rebind, sweeps, TTLs, cascade,
@@ -170,17 +167,22 @@ invariant-breaking sequence against:
    citing a file of X read this run; one not read is marked unverified.
    A defense [Traps](#traps-the-obvious-reading-is-wrong-here) or
    [Security](#security) names, and the documented liveness ladders, stay.
-7. **Naming**: every new or renamed name, `pub(crate)` and modules included,
-   is faithful, clear and concise. Each finding cites what the name breaks;
+7. **Words**: list, one by one, every name the diff adds or changes
+   (`pub(crate)` and modules included), every comment and doc line in a
+   changed file, and every comment and doc elsewhere, `.github/` and `.claude/`
+   included, that names, counts or describes what the diff renames, moves or
+   changes; judge each on all three, and give the count judged. Each finding
+   cites what the word breaks or the edit that would leave it wrong;
    non-blocking unless it breaches AGENTS.md.
-   - **Faithful**: it says what the item is or does at head; a behavior change
-     renames it.
+   - **Faithful**: it says what is true at head; a behavior change renames the
+     item and rewrites what describes it.
    - **Clear**: a reader without this PR's context reads it right. One concept,
      one name across crates and painters (`rg` before coining), and no name
      for two concepts; compass words are [screen-space](crates/pixtuoid-scene/AGENTS.md).
    - **Concise**: the shortest name that stays clear, in the domain's existing
-     word and Rust's [naming guidelines](https://rust-lang.github.io/api-guidelines/naming.html);
-     never a placeholder.
+     word and Rust's [naming guidelines](https://rust-lang.github.io/api-guidelines/naming.html),
+     never a placeholder; a comment earns its place by AGENTS.md's comment
+     rules.
 8. **Sourced practice**: [AGENTS.md](AGENTS.md#conventions)'s fetched-claims
    rule; a claim with no fetched source, or one that contradicts it, breaches it.
 9. **A new dependency or workspace edge**: each crate it adds, transitive ones
@@ -189,12 +191,10 @@ invariant-breaking sequence against:
 
 #### Every changed file
 
-A maintenance defect's failure scenario is the edit that would leave a copy or
-a comment wrong.
+A maintenance defect's failure scenario is the edit that would leave a copy
+wrong.
 
-1. **Comment value**: every comment in a changed file earns its place by
-   AGENTS.md's comment rules (value, rot, vestigial, self-repetition).
-2. **DRY** — every new fn/type/helper/const gets a whole-tree search for an
+1. **DRY** — every new fn/type/helper/const gets a whole-tree search for an
    existing implementation, weighted by divergence risk; every value a new line
    reads is the authority its consumer uses, not a sibling's (#1042, #1155).
    Test fixtures stay inline.
@@ -227,7 +227,3 @@ runs it again, a merge of `main` or a comment-only change does not. The
 - **Fetch** another CLI's upstream that is not on GitHub, for its config's
   resolution axes.
 - **`cargo tree -e normal`** for a new dependency.
-- **Dispatch the full CI tier** on the branch (`gh workflow run ci.yml --ref
-  <branch>`), green, for `cfg(windows)` code, workflows, the hermetic tier or a
-  widened `pub`: hawk, doc-check, windows-test and the Windows hermetic legs run
-  nowhere else before the merge queue.
