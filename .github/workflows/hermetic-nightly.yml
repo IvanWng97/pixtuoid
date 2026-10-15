@@ -77,7 +77,9 @@ jobs:
   bump:
     name: bump ${{ matrix.source }}
     needs: plan
-    if: ${{ needs.plan.outputs.proposals != '[]' }}
+    # A bare `if` is `success()`, which a failed drift leg upstream fails; one
+    # CLI's drift must not hold back another's bump.
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.proposals != '[]' }}
     strategy:
       fail-fast: false
       matrix:
@@ -143,7 +145,7 @@ jobs:
   publish:
     name: open the bump PR for ${{ matrix.source }}
     needs: check
-    if: ${{ github.ref == 'refs/heads/main' && needs.check.outputs.approved != '[]' }}
+    if: ${{ !cancelled() && needs.check.result == 'success' && github.ref == 'refs/heads/main' && needs.check.outputs.approved != '[]' }}
     strategy:
       fail-fast: false
       matrix:
