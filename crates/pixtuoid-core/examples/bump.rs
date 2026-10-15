@@ -97,8 +97,13 @@ fn paths(z: &[u8]) -> Vec<PathBuf> {
 fn patch(source: &str, out: &Path) -> Result<(), String> {
     let p = profile(source)?;
     // A recording can add a file; intent-to-add puts it in the diff, where
-    // `--all` would stage a deletion out of it.
-    let untracked = paths(&git(&["ls-files", "--others", "--exclude-standard", "-z"])?);
+    // `--all` would stage a deletion out of it. An untracked file the bump
+    // doesn't admit (CI's `npm ci` leaves `node_modules`) stays out of it.
+    let untracked: Vec<PathBuf> =
+        paths(&git(&["ls-files", "--others", "--exclude-standard", "-z"])?)
+            .into_iter()
+            .filter(|path| bump::admits(p, path))
+            .collect();
     if !untracked.is_empty() {
         let mut add = vec!["add", "--intent-to-add", "--"];
         add.extend(untracked.iter().filter_map(|p| p.to_str()));
