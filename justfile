@@ -746,11 +746,15 @@ live-sources *ids:
 
 # Two builds: one would unify the examples' `harness` feature into the binary
 # under test.
-[doc('Run each profiled agent CLI against a scripted model (aimock) and judge what pixtuoid made of it')]
+[doc('Build what `just hermetic` runs, and run no CLI')]
 [group('rust')]
-hermetic *args:
+hermetic-build:
     cargo build --release -q -p pixtuoid -p pixtuoid-hook
     cargo build --release -q -p pixtuoid-core --example hermetic --example capture_fixture
+
+[doc('Run each profiled agent CLI against a scripted model (aimock) and judge what pixtuoid made of it')]
+[group('rust')]
+hermetic *args: hermetic-build
     cargo run --release -q -p pixtuoid-core --example hermetic -- "$@"
 
 # Compile the workspace; extra args are forwarded:

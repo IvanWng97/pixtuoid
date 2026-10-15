@@ -19,9 +19,9 @@ on:
         description: 'The stem each OS leg uploads its runs under, as `<runs-stem><os>`, when `just hermetic` exits non-zero'
         value: ${{ jobs.run.outputs.runs-stem }}
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
+# `run` executes third-party CLIs, so no job here saves a cache
+# (https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#controlling-cache-access-with-cache-mode).
+cache-mode: read
 
 jobs:
   run:
@@ -54,6 +54,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-cargo-just
+        with:
+          shared-key: hermetic
       # Node, and the repo's one npm, whose allowScripts policy the tier's CLI
       # installs rely on.
       - uses: ./.github/actions/setup-npm
@@ -63,6 +65,8 @@ jobs:
         id: run
         env:
           CLI: ${{ inputs.cli }}
+          CARGO_TERM_COLOR: always
+          RUST_BACKTRACE: 1
         run: |
           set +e
           just hermetic --cli "$CLI"
