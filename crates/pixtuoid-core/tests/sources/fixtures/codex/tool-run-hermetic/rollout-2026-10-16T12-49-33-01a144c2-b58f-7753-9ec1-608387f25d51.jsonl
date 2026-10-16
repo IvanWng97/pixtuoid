@@ -8,7 +8,8 @@
 {}
 {}
 {}
-{"timestamp":"","ordinal":0,"type":"response_item","payload":{"type":"function_call","id":"","name":"exec_command","arguments":"{\"cmd\":\"cat NOTE.txt\"}","call_id":"","internal_chat_message_metadata_passthrough":{}},"metadata":{}}
+{}
+{"timestamp":"","ordinal":0,"type":"response_item","payload":{"type":"function_call","status":"","id":"","name":"exec_command","arguments":"{\"cmd\":\"cat NOTE.txt\"}","call_id":"","internal_chat_message_metadata_passthrough":{}},"metadata":{}}
 {}
 {}
 {"timestamp":"","ordinal":0,"type":"response_item","payload":{"type":"function_call_output","id":"","call_id":"","output":"","internal_chat_message_metadata_passthrough":{}},"metadata":{}}
